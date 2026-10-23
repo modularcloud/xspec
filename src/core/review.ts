@@ -1331,11 +1331,14 @@ function checkCanonicalReferences(
 /**
  * SPEC 10.1: item `id`s unique within the session; `blockedBy` naming only
  * item `id`s present in the session and containing no cycle; at most one
- * item per kind and scope node — byte-wise over the stored canonical
- * references, which is canonical comparison (SPEC 10.4, module header).
+ * item per kind and scope node, and none whose kind and scope node are
+ * recorded as decomposed (10.5, 10.7) — both byte-wise over the stored
+ * canonical references, which is canonical comparison (SPEC 10.4, module
+ * header).
  */
 function checkSessionInvariants(
   items: readonly ReviewItem[],
+  decompositions: readonly RecordedDecomposition[],
   problems: Problems,
 ): void {
   const byId = new Map<string, ReviewItem>();
@@ -1361,6 +1364,28 @@ function checkSessionInvariants(
       );
     } else {
       byKindAndScope.add(key);
+    }
+  }
+
+  // SPEC 10.1, 10.5, 10.7: a kind and scope node recorded as decomposed is
+  // never added back — its decomposition's items stand in its place — so an
+  // item carrying one violates the session's invariants. One problem per
+  // offending item, in stored item order.
+  const decomposed = new Set(
+    decompositions.map(
+      (decomposition) => `${decomposition.kind} ${decomposition.scope}`,
+    ),
+  );
+  for (const item of items) {
+    if (decomposed.has(`${item.kind} ${item.scope}`)) {
+      problems.add(
+        `item ${JSON.stringify(item.id)} has kind ` +
+          `${JSON.stringify(item.kind)} and scope node ` +
+          `${JSON.stringify(item.scope)}, which the session records as ` +
+          `decomposed — a decomposed kind and scope node is never added ` +
+          `back, its decomposition's items standing in its place ` +
+          `(SPEC 10.1, 10.5, 10.7)`,
+      );
     }
   }
 
@@ -1545,7 +1570,7 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     });
     // The invariants are meaningful only over well-formed items; a
     // malformed item has already made the session corrupt above.
-    checkSessionInvariants(items, problems);
+    checkSessionInvariants(items, decompositions, problems);
   }
   checkCanonicalReferences(items, decompositions, journalLength, problems);
 
