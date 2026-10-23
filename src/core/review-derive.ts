@@ -910,11 +910,14 @@ function currentNodeTexts(
 }
 
 /**
- * SPEC 10.7: the item's baseline text snapshots — the origin before-texts
- * and absent-node fallbacks come from the item's `baseline` state, so each
- * node present in the baseline graph records its texts there, keyed by
- * stored identity. Sessions without a baseline record the entry-moment
- * current texts (their `baseline` state is the current graph's, SPEC 10.2).
+ * SPEC 10.7: the item's baseline text snapshots — absent-node fallbacks,
+ * and a session without a baseline's origin before-texts, come from the
+ * item's baseline state, so each node present in the baseline graph
+ * records its texts there, keyed by stored identity. Sessions without a
+ * baseline record the entry-moment current texts (their `baseline` state
+ * is the current graph's, SPEC 10.2); a baseline session's reads take
+ * origin before-texts from the reconstructed recorded-baseline graph
+ * (src/cli/commands/review-session.ts `originBeforeSide`).
  */
 function baselineTextTable(
   item: GeneratedItem,

@@ -285,9 +285,14 @@ export interface ReviewItem {
   /** Item IDs that must resolve first (SPEC 10.2, 10.3). */
   readonly blockedBy: readonly string[];
   /**
-   * Text snapshots at the item's `baseline` state (SPEC 10.7: an origin
-   * node's before text comes from the item's `baseline` state); entries
-   * exist only for nodes present in that state.
+   * Text snapshots at the item's baseline state (SPEC 10.2, 10.7), taken
+   * when the item enters the session; entries exist only for the item's
+   * nodes present in that state. They keep absent nodes' texts actionable
+   * and, in a session without a baseline (`audit`, `coverage`), whose
+   * baseline state is the current graph at entry, stand for that state —
+   * a baseline session's reads take origin before-texts from the
+   * recorded-baseline graph they reconstruct instead (10.7: whether or not
+   * the node has an entry in `baseline`).
    */
   readonly baselineTexts: RecordedTextTable;
   /**

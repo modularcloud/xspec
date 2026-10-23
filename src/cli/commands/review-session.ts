@@ -63,9 +63,12 @@
 // recorded state containing it (the derivation-time snapshots, else the
 // item's baseline state: its baseline snapshots, and in a baseline session
 // the recorded-baseline graph the read reconstructed), and no text for a
-// node contained in none or for a code-location scope — and, on a
-// `metadata-consistency` item, its scope node's metadata pair
-// (core/review-metadata.ts). The context presented is the item's current
+// node contained in none or for a code-location scope — each origin node's
+// before/after pair of own text — before from the item's baseline state,
+// in a baseline session the recorded-baseline graph the read reconstructed
+// (a node that joined the origin later included), after from the current
+// graph — and, on a `metadata-consistency` item, its scope node's metadata
+// pair (core/review-metadata.ts). The context presented is the item's current
 // context set (SPEC 10.4: computed by the read, never persisted), while
 // `scope`, `origin`, `reason`, and `blockedBy` present as last assigned.
 
@@ -780,25 +783,22 @@ function nodeStateJson(
 
 /**
  * One origin entry (SPEC 10.7): a before/after pair of the node's own text
- * — before from the item's `baseline` state, after from the current graph;
- * the absent side of the pair is presented absent, with no text. The after
- * side's presence is judged by canonical resolution (SPEC 10.4): a
- * dangling reference presents absent even though its presented spelling
- * matches the distinct node that recaptured it. Like every payload node, a
- * currently-present origin node carries its current source range on the
- * entry (SPEC 10.7, 1.7) — the after side is the current graph's, so a
- * currently-absent node (absent after side) carries none.
+ * — before from the item's baseline state (`originBeforeSide`), after from
+ * the current graph; the absent side of the pair is presented absent, with
+ * no text. The after side's presence is judged by canonical resolution
+ * (SPEC 10.4): a dangling reference presents absent even though its
+ * presented spelling matches the distinct node that recaptured it. Like
+ * every payload node, a currently-present origin node carries its current
+ * source range on the entry (SPEC 10.7, 1.7) — the after side is the
+ * current graph's, so a currently-absent node (absent after side) carries
+ * none.
  */
 function originEntryJson(
   view: SessionReadView,
   item: ReviewItem,
   reference: string,
 ): JsonObject {
-  const recordedBaseline = item.baseline.nodes[reference];
-  const before: JsonObject =
-    recordedBaseline !== undefined && recordedBaseline.present
-      ? { present: true, text: item.baselineTexts[reference]?.ownText }
-      : { present: false };
+  const before = originBeforeSide(view, item, reference);
   const { spelling, resolves } = resolveReference(
     view.analysis.journal.journal,
     reference,
@@ -818,6 +818,39 @@ function originEntryJson(
     },
     sourceRange: rangeJson(node.section.range),
   };
+}
+
+/**
+ * SPEC 10.7: an origin entry's before side — the node's own text in the
+ * item's baseline state (10.2), "whether or not the node has an entry in
+ * `baseline`", presented absent, with no text, where that state does not
+ * contain the node. In a baseline session that state is the graph at the
+ * recorded baseline, which the read reconstructed (`baselineGraphTexts`:
+ * the stored reference resolved as of the baseline journal prefix, 6.3),
+ * so a node that joined the item's origin after it entered the session —
+ * at a re-derivation (10.5), gaining no entry in `baseline` (10.2) — has
+ * its baseline text there exactly as a node recorded at entry does, and a
+ * node added since the baseline is absent there. A session without a
+ * baseline (`audit`, `coverage`) generates empty origins (10.6, 10.7); its
+ * items' baseline state, the current graph at entry, survives only in
+ * their `baseline` entries and entry-time text snapshots, which stand for
+ * that state here.
+ */
+function originBeforeSide(
+  view: SessionReadView,
+  item: ReviewItem,
+  reference: string,
+): JsonObject {
+  if (view.generation.baseline !== undefined) {
+    const texts = baselineGraphTexts(view, reference);
+    return texts === undefined
+      ? { present: false }
+      : { present: true, text: texts.ownText };
+  }
+  const recordedBaseline = item.baseline.nodes[reference];
+  return recordedBaseline !== undefined && recordedBaseline.present
+    ? { present: true, text: item.baselineTexts[reference]?.ownText }
+    : { present: false };
 }
 
 /**
