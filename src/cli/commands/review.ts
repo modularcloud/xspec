@@ -42,11 +42,19 @@
 //      already matches), then the session file, once, last (SPEC 10.7,
 //      13.5, 10.1, 13.4).
 //
-// `list` (read) — refresh-on-read, then every session in byte order of
-// name with its name, strategy, and item counts by stored status (no
-// read-time invalidation, SPEC 10.7); corrupt sessions by name as corrupt
-// in place of those fields, each also reported as its 14.21 finding under
-// `findings` (SPEC 14, 12.7); exit 1 iff any is corrupt.
+// `list` (read) — in SPEC 10.7's order: the analysis (configuration errors
+// first, 14.14), then the gate of 13.3, assessment only (a failing
+// workspace's report replaces the listing whole, exit 1, no session read);
+// past it the listing of the session directory and the read of every
+// session in it — a listing or read the environment refuses stopping the
+// command there (14.25, exit 2), nothing written, stale graph data still
+// stale — each corruption met there part of the answer, ending nothing;
+// then the refresh write of 13.3 (a refused write: 14.24, exit 2, the
+// error document alone); and only then the answer: every session in byte
+// order of name with its name, strategy, and item counts by stored status
+// (no read-time invalidation, SPEC 10.7); corrupt sessions by name as
+// corrupt in place of those fields, each also reported as its 14.21
+// finding under `findings` (SPEC 14, 12.7); exit 1 iff any is corrupt.
 //
 // `status`, `next`, `show`, `export` (reads) — the shared open flow of
 // review-session.ts, in SPEC 10.7's order (the name's form being the
@@ -92,7 +100,7 @@ import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
-import { analyzeGraphForRead, prepareGraphForRead } from "../prepare.js";
+import { analyzeGraphForRead } from "../prepare.js";
 import {
   emitFindingsReport,
   findingToJson,
@@ -399,19 +407,43 @@ export async function reviewListCommand(
   invocation: Invocation,
   context: CommandContext,
 ): Promise<ExitCode> {
-  // SPEC 13.3: refresh-on-read binds every `review` subcommand.
-  const prepared = await prepareGraphForRead(invocation, context);
-  if (!prepared.ok) {
-    return prepared.exit;
+  // SPEC 13.3, 14.14, 12.0: refresh-on-read binds every `review`
+  // subcommand. Analyze the current workspace first — a pure read, a
+  // configuration error reported there with its exit-2 precedence.
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return analyzed.exit;
   }
 
-  // SPEC 10.7: every session in byte order of session name; item counts by
-  // stored status — no read-time invalidation — and each corrupt session
-  // (14.21) by name as corrupt in place of those fields. SPEC 14.21, 14,
-  // 12.7: `list` reports each corrupt session as its condition-21 finding
-  // too — the stable code, the session file as the concerned path — in the
-  // document's `findings` member (`[]` when none is corrupt), and the
-  // human form names the code, presenting the same information (12.0).
+  // SPEC 13.3, 10.7: the gate — on a workspace failing `build`'s
+  // validations its report replaces the listing whole, exit 1, no session
+  // read and nothing modified. The assessment decides without writing: its
+  // one refresh write commits only past the session reads below (SPEC
+  // 10.7: "Only past all of them does a subcommand write").
+  const assessed = await assessWorkspaceRead(
+    context.workspace,
+    analyzed.analysis,
+  );
+  if (assessed.kind === "findings") {
+    emitFindingsReport(invocation.json, context.stdout, assessed.findings);
+    return 1;
+  }
+
+  // SPEC 10.7: past the gate, the listing of the session directory and the
+  // read of every session in it, each corruption met there part of the
+  // answer — ending nothing. A listing or kind read the environment
+  // refuses is the read failure of 14.25, thrown by the workspace layer:
+  // the command stops there, exit 2, before any write, so stale graph data
+  // stays stale.
+  //
+  // The answer: every session in byte order of session name; item counts
+  // by stored status — no read-time invalidation — and each corrupt
+  // session (14.21) by name as corrupt in place of those fields. SPEC
+  // 14.21, 14, 12.7: `list` reports each corrupt session as its
+  // condition-21 finding too — the stable code, the session file as the
+  // concerned path — in the document's `findings` member (`[]` when none
+  // is corrupt), and the human form names the code, presenting the same
+  // information (12.0).
   const loaded = await loadAllSessions(context.workspace.root);
   const corruptions: Finding[] = [];
   const entries: JsonObject[] = [];
@@ -438,6 +470,14 @@ export async function reviewListCommand(
   // each corrupt session's finding concerns its own session file, so none
   // collapses.
   const findings = orderFindings(corruptions);
+
+  // SPEC 10.7, 13.3, 14.24, 12.0: only past every session read comes the
+  // refresh write of 13.3 (a no-op when the store already matches), and
+  // `list` answers only then. A write the environment refuses stops the
+  // command at that write — exit 2, the error document alone, nothing of
+  // the answer emitted — the corruptions above ending nothing.
+  await assessed.commit();
+
   if (invocation.json) {
     emitDocument(context.stdout, {
       findings: findings.map(findingToJson),
