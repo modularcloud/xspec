@@ -29,7 +29,12 @@
 // instead (SPEC 13.3, 14.10) — it composes `analyzeWorkspace` and the
 // core predicate itself. `build` regenerates rather than refreshes
 // (SPEC 12.1). `rename`/`move` carry their own precedence rules (SPEC
-// 12.0) and regenerate as `build` does (SPEC 6.4, 6.5).
+// 12.0) and regenerate as `build` does (SPEC 6.4, 6.5). The surfaces of
+// 11.2 (`occurrences`, `view`, `at`) share the gate's assessment
+// (`assessWorkspaceRead`; ./availability.ts): they judge `build`'s
+// validations exactly as this gate does, making every read it makes, but
+// answer from the current sources on the failing side instead of
+// reporting (SPEC 11.2).
 //
 // IMPLEMENTATION (Architecture): this workspace-layer module owns the I/O —
 // the analysis pipeline (./pipeline.ts), the store load and the one write

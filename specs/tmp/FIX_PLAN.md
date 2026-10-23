@@ -4,7 +4,7 @@ Source: the compliance determination at `e049255` (2026-10-22; branch `claude/xs
 
 Findings are cited as A<n>, B<n>, C<n>. Where reviewers reported one gap, it is one task: A1 = B22 (Task 2), A2 = B24 (Task 4), A3 = B28 (Task 8), A4 = B20 (Task 5), A5 = B26 (Tasks 31–33), B5 = C2 (Task 13). VERIFY's suite-windows failure (T7-1), which no reviewer counted, is Task 9.
 
-Goal: every test passes — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head — and the product meets SPEC.md. Tasks 2, 4, 5, 6, and 36 (landed), 7–27, and 34 turn VERIFY's 46 failures green (the index says which task each test waits on; Task 36 was found behind Task 2's arms). Tasks 28–33 and 37 fix SPEC departures no test pins (Task 37 was found beside Task 5); they are in scope all the same, as was Task 3 (landed), which resolves a given baseline whole, its content's validation included, ahead of the gate. Task 1 (landed) recorded the Developer's third accepted residual in AGENTS.md. Task 34 runs after every other task but Task 35, because it is expected to end in a TEST-SPEC problem (its text says why), and Task 35 confirms everything and deletes this file.
+Goal: every test passes — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head — and the product meets SPEC.md. Tasks 2, 4, 5, 6, 7, and 36 (landed), 8–27, and 34 turn VERIFY's 46 failures green (the index says which task each test waits on; Task 36 was found behind Task 2's arms). Tasks 28–33 and 37 fix SPEC departures no test pins (Task 37 was found beside Task 5); they are in scope all the same, as was Task 3 (landed), which resolves a given baseline whole, its content's validation included, ahead of the gate. Task 1 (landed) recorded the Developer's third accepted residual in AGENTS.md. Task 34 runs after every other task but Task 35, because it is expected to end in a TEST-SPEC problem (its text says why), and Task 35 confirms everything and deletes this file.
 
 Not planned:
 - A6 and B27 (the dot forms `SPEC.toString`, `SPEC.a.valueOf`, … type-checking clean) and A's and B's blocking spec defect (the bare bracket form `SPEC.a["toString"];`): the Developer's third accepted residual (below). Nothing is logged to a problems file for them and no fix is planned; Task 1 (landed) recorded the residual in AGENTS.md, as the "Known SPEC 4.1/14.7 gap for `Object`-member path names" bullet, which also records the hand check that `build` and `check` report the 14.7 finding for both spellings. xspec's own 14.7 finding for such paths stays required.
@@ -67,7 +67,7 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 | T14-6 | section-14 | 2 (landed) | passes since Task 2 |
 | T14-10 | section-14-ii | 2 (landed), 36 (landed) | passes whole since Task 36, arms (k) and (l) included (56.4 s locally; and in CI run 1556 at `3c214eb`) |
 | T13.5-8 | section-13.5 | 2 (landed) | passes since Task 2 |
-| T11.2-6 | section-11.2 | 7 | the unreadable emit directory, failing side: `view specs/A.mdx` answers, exit 1; expected the read failure, exit 2 |
+| T11.2-6 | section-11.2 | 7 (landed) | passes since Task 7 (17.6 s locally alone; its regression files — `section-11.2`, `-11.3`, `-11.4`, `-11.5`, `-14-ii`, `-16-p12`, `-16-p14` — 24 tests green, 453.2 s); at `e049255` the unreadable emit directory, failing side: `view specs/A.mdx` answered, exit 1; expected the read failure, exit 2 |
 | T12.0-13 | section-12.0-ii | 5 (landed) | passes since Task 5 (2.25 s locally, alone and in a twelve-file run; and in CI run 1562 at `4fac3a7`); at `e049255` `rename specs/a#b.mdx x y --json` exited 2 (unknown file), expected 1 (the invalid-workspace refusal) |
 | T12.3-1 | section-12.3-12.5 | 6 (landed) | passes since Task 6 (9.7 s locally in a ten-file run, its entries workspace's four human forms read through the human ids decoders included; and in CI run 1564 at `8dcf156`); at `e049255` `ids --json` entries: no entry for a discovered spec source holding no listed ID |
 | T10.1-4 | section-10.1 | 10 | the decomposed-item state: `review status cor` exits 0, expected 1 (corrupt) |
@@ -96,18 +96,6 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 | T10.6-3 | section-10.6 | 34 | p.a's item before the re-derivation: no `scopeNodes` member |
 | P-16 | section-16-p16 | 34 (first), 15, 20, 26 | falsified at seed 271828183, trial 1 of 6: `review export p16 --json` item-1 (subtree-coherence `specs/A.mdx`) has no `scopeNodes` member |
 | T7-1 (suite-windows) | `test/windows/e6-subset.test.ts` | 9 | the single-casing probe: `build` run from `sub/`, which holds only the plain file `XSPEC.config.ts` holding `)`, exits 2 with a configuration error, expected 0 |
-
-## Task 7 — The 11.2 surfaces make the gate's write-path reads on a failing workspace too (SPEC 11.2, 13.3, 14.22, 14.25; B19)
-
-**Requirement.** 11.2: "Past their argument checks (above), they judge those validations exactly as the gate of 13.3 does, making every read it makes whatever findings the sources carry — the journal's (14.13) and the kinds of `build`'s write-path directory components (14.22) included … a read failure (14.25), that judgement's included, or a refresh write the environment refuses (14.24) alone stops them, a usage error before any answer (12.0, 13.3)."
-
-**Observed** (B19; VERIFY): on a workspace whose sources fail validation, `view specs/A.mdx` with an emit-path directory component (`out/specs`) whose kind read is refused answers, exit 1; expected the read failure, exit 2, before any answer (T11.2-6's failing side).
-
-**Location.** `finishAvailabilityRefresh` in `src/workspace/availability.ts` returns as soon as `analysis.findings` is non-empty, before `refusedWriteFindings` (`src/workspace/build-validation.ts`), whose kind reads raise the read failure. Every surface reaches it after its argument checks: `view.ts` and `at.ts` (`src/cli/commands/`) call it directly once their operand checks pass, and `occurrences.ts` through `prepareAnalysisForAvailability` (`src/cli/prepare.ts`), its own checks being the parser's.
-
-**Change.** Always make `refusedWriteFindings`' reads (a refused one stops the command with the read failure, exit 2), then skip the refresh when either the source findings or the refused writes fail the workspace; on the passing side refresh as now. The answer and its findings are unchanged (a write-path condition accompanies no answer, 11.2). The journal is already read by every analysis (`src/workspace/pipeline.ts`), so T14-10(l)(i)'s journal arms need nothing more here — check them when T14-10 reaches them.
-
-**Verification.** T11.2-6 (section-11.2). Regressions: `section-11.2`, `section-11.3`, `section-11.4`, `section-11.5`, `section-14-ii` (T14-9, T14-10), `section-16-p12`, `section-16-p14`.
 
 ## Task 8 — A reference through an import that designates nothing reports as unresolved beside the import's 14.15 (SPEC 14, 2.1, 2.4, 4.5, 11.2; A3, B28)
 
