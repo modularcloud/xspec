@@ -29,8 +29,12 @@
 //      one whose scope root has no children in the current workspace (in a
 //      baseline session, deleted ones included), is refused — exit 1,
 //      nothing modified (SPEC 10.7);
-//   5. otherwise the decomposition of SPEC 10.7 applies
-//      (core/review-derive.ts `splitItemDecomposition`), the write path is
+//   5. otherwise the decomposition of SPEC 10.7 applies and is recorded,
+//      and the session is re-derived — the re-derivation `split` ends
+//      with (SPEC 10.5, 10.7), the generators run with the recorded
+//      creation parameters against the current workspace, every recorded
+//      decomposition replayed, the new one included
+//      (core/review-derive.ts `splitItemDecomposition`) — the write path is
 //      validated (SPEC 14.22, exit 1), and only then come the writes: the
 //      refresh of 13.3, then the session file, once, last (SPEC 10.7,
 //      13.5).
@@ -166,7 +170,8 @@ async function runSplit(
   }
   // SPEC 10.7: the decomposition items' content is the strategy's to define
   // — its generators, run with the recorded creation parameters, supply the
-  // decomposition content source.
+  // decomposition content source — and the same run is the one the
+  // re-derivation ending the split merges (SPEC 10.5).
   const generation = runSessionGenerators(
     session.parameters,
     loaded.analysis,
@@ -175,6 +180,7 @@ async function runSplit(
   const split = splitItemDecomposition({
     session,
     original,
+    generated: generation.items,
     contentSource: generation.contentSource,
     current: currentSideOf(loaded.analysis, generation),
     baseline: generation.baseline,

@@ -14,8 +14,9 @@
 //   decomposed item into all items of its decomposition;
 // - merges the expanded generation into a session's existing items under
 //   the re-derivation rules of SPEC 10.5 (`deriveSessionItems`) — the same
-//   computation serves `create` (merge into an empty session) and the
-//   re-derivation an `updated` resolve triggers;
+//   computation serves `create` (merge into an empty session), the
+//   re-derivation an `updated` resolve triggers, and the one every `split`
+//   ends with (`rederiveSession`: replay, then merge);
 // - computes each item's recorded `baseline` and `current` states
 //   (SPEC 10.2, 10.4), its recorded context set (written with `current`,
 //   SPEC 10.4), and its text snapshots (SPEC 10.7): `current` via
@@ -27,7 +28,9 @@
 //   reintroduced by a distinct node (SPEC 5.4) never leaks the wrong
 //   side's values;
 // - realizes the `split` decomposition (SPEC 10.7,
-//   `splitItemDecomposition`) and `resolve`'s status, context, and state
+//   `splitItemDecomposition`), recorded and then governing the
+//   re-derivation with which `split` ends (SPEC 10.5, 10.7), and
+//   `resolve`'s status, context, and state
 //   update — the item assigned its current context set and its state
 //   recorded over it (SPEC 10.4) — with its `updated`-triggered
 //   re-derivation (SPEC 10.5, `resolveSessionItem`), which an `updated`
@@ -1200,6 +1203,60 @@ export function deriveSessionItems(
   return { items, nextItemId };
 }
 
+/** The inputs of `rederiveSession`. */
+export interface RederiveSessionArgs {
+  /**
+   * The session to re-derive — canonical references (src/core/review.ts
+   * identity policy); its recorded decompositions govern the replay.
+   */
+  readonly session: ReviewSession;
+  /**
+   * The session strategy's generator run with the recorded creation
+   * parameters against the current workspace, canonicalized
+   * (`canonicalizeGeneration`), before decomposition replay.
+   */
+  readonly generated: readonly GeneratedItem[];
+  /** That run's decomposition content, in canonical-reference space. */
+  readonly contentSource: DecompositionContentSource;
+  readonly current: CurrentDerivationSide;
+  /** The recorded-baseline side; omitted for `audit`/`coverage` sessions
+   * (SPEC 10.2: their `baseline` is the entry-moment current state). */
+  readonly baseline?: BaselineDerivationSide;
+}
+
+/**
+ * SPEC 10.5: re-derive a session — the generators' run with the recorded
+ * creation parameters against the current workspace (`generated`), its
+ * recorded decompositions replayed over it (`expandDecompositions`), merged
+ * into the session's items under the re-derivation rules
+ * (`deriveSessionItems`): matched items keep their `id`, status, note, and
+ * recorded state and take the generated scope, context, origin, reason, and
+ * `blockedBy`; items that no longer generate remain, keeping their
+ * `blockedBy`; new items enter `unresolved` with current state and fresh
+ * ids. The re-derivation every `split` ends with (SPEC 10.7: the
+ * decomposition, once recorded, "governs re-derivation (10.5), with which
+ * `split` ends, so blocking is recomputed against the current graph"),
+ * replaying the decompositions `session` records — the new one included.
+ */
+export function rederiveSession(args: RederiveSessionArgs): ReviewSession {
+  const { session, generated, contentSource, current, baseline } = args;
+  const expanded = expandDecompositions(
+    generated,
+    session.decompositions.map((decomposition) => decomposition.scope),
+    current.graph,
+    current.journal,
+    contentSource,
+  );
+  const derived = deriveSessionItems({
+    existing: session.items,
+    nextItemId: session.nextItemId,
+    generated: expanded,
+    current,
+    baseline,
+  });
+  return { ...session, nextItemId: derived.nextItemId, items: derived.items };
+}
+
 // ---------------------------------------------------------------------------
 // The `split` decomposition (SPEC 10.7)
 // ---------------------------------------------------------------------------
@@ -1214,8 +1271,15 @@ export interface SplitDecompositionArgs {
   /** The item to decompose — an item of `session.items` (caller-resolved;
    * an unknown item id is the caller's usage error, SPEC 10.7, 12.0). */
   readonly original: ReviewItem;
+  /**
+   * The session strategy's generator run with the recorded creation
+   * parameters against the current workspace, canonicalized
+   * (`canonicalizeGeneration`), before decomposition replay — the run the
+   * re-derivation ending the split merges (SPEC 10.5, 10.7).
+   */
+  readonly generated: readonly GeneratedItem[];
   /** The session strategy's decomposition content (SPEC 10.7), in
-   * canonical-reference space (`canonicalizeGeneration`). */
+   * canonical-reference space (`canonicalizeGeneration`) — the same run's. */
   readonly contentSource: DecompositionContentSource;
   readonly current: CurrentDerivationSide;
   /** The recorded-baseline side; omitted for `audit`/`coverage` sessions
@@ -1227,9 +1291,12 @@ export interface SplitDecompositionArgs {
 export type SplitDecompositionResult =
   | {
       readonly ok: true;
+      /** The session the split leaves: decomposed, the decomposition
+       * recorded, then re-derived (SPEC 10.5, 10.7). */
       readonly session: ReviewSession;
       /** The decomposition's item ids — reused and newly created alike —
-       * in expansion order (SPEC 10.7: "all items of the decomposition"). */
+       * in expansion order (SPEC 10.7: "all items of the decomposition");
+       * the re-derivation keeps each (a matched item keeps its `id`). */
       readonly itemIds: readonly string[];
     }
   | {
@@ -1257,12 +1324,18 @@ export type SplitDecompositionResult =
  * becomes blocked by all items of the decomposition; the original is
  * removed and its id never reused (the id counter only advances); the
  * decomposition is recorded durably and governs re-derivation (SPEC 10.5,
- * 10.7).
+ * 10.7) — with which `split` ends (`rederiveSession` over `generated`,
+ * the decomposition just recorded among those it replays), so every
+ * generated or decomposition-produced item takes the strategy's content and
+ * `blockedBy` recomputed against the current graph, items that no longer
+ * generate keep theirs, and a change since the last derivation that
+ * generates a new item adds it, `unresolved` (SPEC 10.2, 10.5, 10.7).
  */
 export function splitItemDecomposition(
   args: SplitDecompositionArgs,
 ): SplitDecompositionResult {
-  const { session, original, contentSource, current, baseline } = args;
+  const { session, original, generated, contentSource, current, baseline } =
+    args;
 
   // SPEC 10.7: `split` on an item of any other kind is refused.
   if (original.kind !== "subtree-coherence") {
@@ -1412,18 +1485,31 @@ export function splitItemDecomposition(
   items.push(...newItems);
 
   // SPEC 10.7: the decomposition — the original's kind and scope node — is
-  // recorded durably in the session and governs re-derivation (10.5).
+  // recorded durably in the session and governs re-derivation (10.5), with
+  // which `split` ends: the generators' run replayed under every recorded
+  // decomposition, this one included, and merged under 10.5's rules — so
+  // blocking is recomputed against the current graph and stays acyclic
+  // (10.1). Every decomposition item is in the session the re-derivation
+  // merges into, so each keeps its id — matched where generated again,
+  // remaining as it stands where not (10.5).
+  const decomposed: ReviewSession = {
+    ...session,
+    decompositions: [
+      ...session.decompositions,
+      { kind: "subtree-coherence", scope: original.scope },
+    ],
+    nextItemId,
+    items,
+  };
   return {
     ok: true,
-    session: {
-      ...session,
-      decompositions: [
-        ...session.decompositions,
-        { kind: "subtree-coherence", scope: original.scope },
-      ],
-      nextItemId,
-      items,
-    },
+    session: rederiveSession({
+      session: decomposed,
+      generated,
+      contentSource,
+      current,
+      baseline,
+    }),
     itemIds,
   };
 }
