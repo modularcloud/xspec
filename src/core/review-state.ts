@@ -46,8 +46,11 @@
 // recorded state differs from the same state computed against the current
 // graph — a recorded hash changed, a node's presence changed in either
 // direction, or the item's context set changed. The recorded context set is
-// the item's `context` field (10.2), rewritten only where a strategy
-// assigns it — creation and re-derivation (10.5) — and the current context
+// the item's `context` field (10.2), rewritten only where it is assigned —
+// creation and re-derivation (10.5), a `split` (10.7), and each resolve,
+// which assigns the item its current context set and records `current`
+// over it (10.4: "the context a read of the same workspace presents",
+// review-derive.ts `resolveSessionItem`) — and the current context
 // set is the one the session's strategy generators, re-run with the
 // recorded creation parameters and decompositions against the current
 // workspace, assign to the item; callers supply it (`ItemValidityInputs`)

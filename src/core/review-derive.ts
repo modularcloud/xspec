@@ -25,8 +25,10 @@
 //   reintroduced by a distinct node (SPEC 5.4) never leaks the wrong
 //   side's values;
 // - realizes the `split` decomposition (SPEC 10.7,
-//   `splitItemDecomposition`) and `resolve`'s status/state update with its
-//   `updated`-triggered re-derivation (SPEC 10.5, `resolveSessionItem`);
+//   `splitItemDecomposition`) and `resolve`'s status, context, and state
+//   update — the item assigned its current context set and its state
+//   recorded over it (SPEC 10.4) — with its `updated`-triggered
+//   re-derivation (SPEC 10.5, `resolveSessionItem`);
 // - derives the generator-assigned current context sets reads feed to
 //   read-time invalidation and present as each item's `context`
 //   (SPEC 10.4, `currentContextSets`);
@@ -1434,26 +1436,42 @@ export interface ResolveItemArgs {
 }
 
 /**
- * SPEC 10.7 `resolve`: set the item's status and record the current
- * relevant state (10.4) — `current` is rewritten at this resolve (10.2) —
- * on any unblocked item regardless of current status, so an `invalidated`
- * or previously resolved item is re-resolved the same way. When the status
- * is `updated`, the session is re-derived at resolve time (SPEC 10.5, for
- * every strategy): the expanded generation is merged under the
- * re-derivation rules — the just-resolved item, matched by kind and scope
- * node, keeps its new status and recorded state through the merge.
- * Resolving with `no-change` or `skipped` never re-derives.
+ * SPEC 10.7 `resolve`: set the item's status and note, assign the item its
+ * current context set as `context`, and record the current relevant state
+ * (10.4) — `current` is rewritten at this resolve (10.2) — on any unblocked
+ * item regardless of current status, so an `invalidated` or previously
+ * resolved item is re-resolved the same way. The current context set is
+ * the one reads compute and present (`currentContextSets` over the same
+ * expanded generation, else the item's `context` as last assigned), and
+ * `current` is recorded over the item's scope, that context, and its
+ * origin, so a read of the same workspace finds the recorded context set
+ * equal to the current one (SPEC 10.4). When the status is `updated`, the
+ * session is re-derived at resolve time (SPEC 10.5, for every strategy):
+ * the expanded generation is merged under the re-derivation rules — the
+ * just-resolved item, matched by kind and scope node, keeps its new status
+ * and recorded state through the merge. Resolving with `no-change` or
+ * `skipped` never re-derives.
  */
 export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
   const { session, itemId, status, note, expanded, current, baseline } = args;
   const stateInputs = reviewStateInputs(current);
   const items = session.items.map((item): ReviewItem => {
     if (item.id !== itemId) return item;
+    // SPEC 10.4: "Resolving an item assigns it its current context set as
+    // `context` and records, in its `current` field (10.2), its relevant
+    // hashes per the list above and, for every scope, context, and origin
+    // node, whether the node is present — the context nodes so recorded
+    // forming its recorded context set, which is thus the context a read of
+    // the same workspace presents". Scope, origin, reason, and blockedBy
+    // stay as last assigned: a resolve assigns the context alone.
+    const context =
+      currentContextSets([item], expanded).get(item.id) ?? item.context;
+    const assigned: ReviewItem = { ...item, context };
     return {
-      ...item,
+      ...assigned,
       status,
       note,
-      current: computeRecordedState(item, stateInputs),
+      current: computeRecordedState(assigned, stateInputs),
     };
   });
   if (status !== "updated") {
