@@ -108,22 +108,25 @@ export function asciiCaseFold(text: string): string {
 }
 
 /**
- * SPEC 10.1: the existing session name that `candidate` matches ignoring
- * ASCII case, or null when none does. `review create` treats a match as the
- * name of an existing session and refuses it (10.7); every other subcommand
- * matches names exactly, byte-wise (SPEC 12.0).
+ * SPEC 10.1: every existing session name that `candidate` matches ignoring
+ * ASCII case — the byte-identical name included, when it exists — in the
+ * order `existing` lists them. `review create` treats `candidate` as the
+ * name of each such existing session (10.1: "of each, where several
+ * sessions so match"; 10.7); every other subcommand matches names exactly,
+ * byte-wise (SPEC 12.0).
  */
-export function existingNameIgnoringAsciiCase(
+export function sessionNamesMatchingIgnoringAsciiCase(
   existing: Iterable<string>,
   candidate: string,
-): string | null {
+): string[] {
   const folded = asciiCaseFold(candidate);
+  const matches: string[] = [];
   for (const name of existing) {
     if (asciiCaseFold(name) === folded) {
-      return name;
+      matches.push(name);
     }
   }
-  return null;
+  return matches;
 }
 
 // ---------------------------------------------------------------------------

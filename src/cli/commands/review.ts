@@ -30,12 +30,13 @@
 //      validation errors, exit 1, nothing created;
 //   4. the examination of the session directory (SPEC 10.7), each outcome
 //      ending the command with nothing modified — stale graph data stays
-//      stale (13.5): an existing session name — matched ignoring ASCII
-//      case (SPEC 10.1) — is refused, exit 1 (SPEC 10.7); when the session
-//      so named — the exact-name occupant, else the byte-least name
-//      colliding ignoring ASCII case — is corrupt, its corruption is
-//      reported in the refusal's place (SPEC 10.7, 14.21); and an
-//      obstructed session-file write path is refused, exit 1 (SPEC 14.22);
+//      stale (13.5): the name names every existing session it matches,
+//      exactly or ignoring ASCII case (SPEC 10.1), and each is read; when
+//      any is corrupt, the corruption is reported in the refusal's place —
+//      one finding per corrupt session matched, no refusal beside them
+//      (SPEC 10.7, 14.21) — exit 1; otherwise, when any matched, the one
+//      existing-name refusal, exit 1 (SPEC 10.7); and an obstructed
+//      session-file write path is refused, exit 1 (SPEC 14.22);
 //   5. derive the items (SPEC 10.5–10.7); then the writes, only past every
 //      outcome above: the refresh write of 13.3 (a no-op when the store
 //      already matches), then the session file, once, last (SPEC 10.7,
@@ -63,10 +64,10 @@ import { orderFindings } from "../../core/findings.js";
 import type { ReviewSession, SessionParameters } from "../../core/review.js";
 import {
   countsByStoredStatus,
-  existingNameIgnoringAsciiCase,
   parametersToJson,
   recordCoverageProfile,
   sessionFilePath,
+  sessionNamesMatchingIgnoringAsciiCase,
   sessionStrategy,
   statusNeedsReview,
 } from "../../core/review.js";
@@ -110,6 +111,39 @@ import {
 // ---------------------------------------------------------------------------
 // `review create` (SPEC 10.7)
 // ---------------------------------------------------------------------------
+
+/**
+ * The existing-name refusal's message (SPEC 10.1, 10.7): `existing` holds
+ * the readable sessions the requested name matches, exactly or ignoring
+ * ASCII case, in byte order. The wording is informational (12.7).
+ */
+function existingNameRefusalMessage(
+  name: string,
+  existing: readonly string[],
+): string {
+  const others = existing.filter((match) => match !== name);
+  const exact = others.length < existing.length;
+  if (others.length === 0) {
+    return (
+      `a session named '${name}' already exists — \`review create\` with ` +
+      `the name of an existing session is refused (SPEC 10.1, 10.7)`
+    );
+  }
+  const opening = exact
+    ? `a session named '${name}' already exists, and the name`
+    : `the name '${name}'`;
+  const listed = others.map((other) => `'${other}'`).join(", ");
+  const treated =
+    exact || others.length > 1
+      ? "each existing session it matches"
+      : "an existing session";
+  return (
+    `${opening} matches the existing ` +
+    `session${others.length === 1 ? "" : "s"} ${listed} ignoring ASCII ` +
+    `case, so it is treated as the name of ${treated} and refused ` +
+    `(SPEC 10.1, 10.7)`
+  );
+}
 
 /**
  * The `create` operation, run under workspace exclusivity (SPEC 13.5) over
@@ -216,58 +250,48 @@ async function runCreate(
   // stale graph data stays stale, the refresh of 13.3 waiting until every
   // one has passed.
 
-  // SPEC 10.1/10.7: `create` with the name of an existing session is
-  // refused (exit 1, nothing created); a name matching an existing
-  // session's ignoring ASCII case is treated as the name of an existing
-  // session. An exact-name corrupt occupant is a session `create` names,
-  // so the corruption is reported (SPEC 10.1, 14.21).
-  const occupant = await loadSession(workspace.root, name);
-  if (occupant.state === "corrupt") {
-    emitFindingsReport(invocation.json, stdout, [occupant.finding]);
-    return 1;
-  }
-  if (occupant.state === "ok") {
-    // SPEC 10.7/14: one code-less finding, exit 1, nothing created; the
-    // identities name the session (informational).
-    return emitReviewRefusal(
-      invocation.json,
-      stdout,
-      `a session named '${name}' already exists — \`review create\` with ` +
-        `the name of an existing session is refused (SPEC 10.1, 10.7)`,
-      [name],
-    );
-  }
-  // SPEC 10.1: no exact-name occupant, so a session whose name matches
-  // ignoring ASCII case is the existing session the name is treated as.
-  // Where several collide (only possible on a case-sensitive filesystem),
-  // the one judged is the byte-least colliding name — the first match
-  // `existingNameIgnoringAsciiCase` finds in the byte-ordered listing — so
-  // the outcome is deterministic (SPEC 12.0) and one finding either way
-  // (SPEC 10.7); the other colliding sessions are not read.
-  const collision = existingNameIgnoringAsciiCase(
+  // SPEC 10.1/10.7: the name `create` is given names every existing
+  // session it matches — exactly, or ignoring ASCII case, which `create`
+  // treats as naming that existing session: "of each, where several
+  // sessions so match" (10.1; only a case-sensitive filesystem holds
+  // several). Every match is read, the session directory's byte-ordered
+  // listing deciding which entries match (SPEC 10.1, 12.0). A listed entry
+  // gone by its read no longer exists and matches nothing.
+  const matched = sessionNamesMatchingIgnoringAsciiCase(
     await listSessionNames(workspace.root),
     name,
   );
-  if (collision !== null) {
-    // SPEC 10.7, 14.21, 13.5: when that session is corrupt, its corruption
-    // is reported in the refusal's place — one finding concerning its own
-    // session file, exit 1, nothing created — as for an exact-name
-    // occupant above.
-    const collided = await loadSession(workspace.root, collision);
-    if (collided.state === "corrupt") {
-      emitFindingsReport(invocation.json, stdout, [collided.finding]);
-      return 1;
+  const corruptions: Finding[] = [];
+  const existing: string[] = [];
+  for (const match of matched) {
+    const loaded = await loadSession(workspace.root, match);
+    if (loaded.state === "corrupt") {
+      corruptions.push(loaded.finding);
+    } else if (loaded.state === "ok") {
+      existing.push(match);
     }
-    // SPEC 10.1/10.7/14: one code-less finding, exit 1, nothing created;
-    // the identities name the requested and the colliding session
-    // (informational).
+  }
+  if (corruptions.length > 0) {
+    // SPEC 10.7, 14.21, 13.5: a matched session that is corrupt has its
+    // corruption reported in the refusal's place — one finding per corrupt
+    // session the name matches, each concerning its own session file, in
+    // the 12.7 order (the shared findings renderer's), the refusal not
+    // reported beside them even where the name also matches a valid
+    // session — exit 1, nothing created.
+    emitFindingsReport(invocation.json, stdout, corruptions);
+    return 1;
+  }
+  if (existing.length > 0) {
+    // SPEC 10.1/10.7/14: `create` with the name of an existing session is
+    // refused — one code-less finding however many sessions the name
+    // matches (each refusal one finding), exit 1, nothing created; the
+    // identities name the requested name and the existing sessions it
+    // matches ignoring ASCII case (informational, 12.7).
     return emitReviewRefusal(
       invocation.json,
       stdout,
-      `the name '${name}' matches the existing session '${collision}' ` +
-        `ignoring ASCII case, so it is treated as the name of an existing ` +
-        `session and refused (SPEC 10.1, 10.7)`,
-      [name, collision],
+      existingNameRefusalMessage(name, existing),
+      [name, ...existing.filter((match) => match !== name)],
     );
   }
 
