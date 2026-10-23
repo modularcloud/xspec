@@ -49,13 +49,16 @@
 // `findings` (SPEC 14, 12.7); exit 1 iff any is corrupt.
 //
 // `status`, `next`, `show`, `export` (reads) — the shared open flow of
-// review-session.ts (session existence, load, recorded-baseline
-// resolution, refresh — the name's form being the parser's), then the read-time view (SPEC 10.4: invalidation applied,
-// never persisted). `next` returns the first item in item order that needs
-// review and is unblocked, or reports the session fully resolved (exit 0,
-// the JSON payload with no item). `export` emits the entire session as a
-// single JSON document — its only output form, with or without `--json`
-// (SPEC 10.7).
+// review-session.ts, in SPEC 10.7's order (the name's form being the
+// parser's): session existence, the gate, the session read meeting any
+// corruption, `show`'s item ID, the recorded baseline, then the read-time
+// view (SPEC 10.4: invalidation applied, never persisted) and, past every
+// outcome, the refresh write of 13.3, the read answering only then — so
+// each outcome leaves stale graph data stale. `next` returns the first
+// item in item order that needs review and is unblocked, or reports the
+// session fully resolved (exit 0, the JSON payload with no item). `export`
+// emits the entire session as a single JSON document — its only output
+// form, with or without `--json` (SPEC 10.7).
 
 import type { JsonObject } from "../../core/canonical-json.js";
 import type { SourceClassification } from "../../core/discovery.js";
@@ -570,21 +573,19 @@ export async function reviewShowCommand(
     // Unreachable: the parser enforces the positionals (SPEC 10.7).
     throw new Error("xspec internal error: review show without its arguments");
   }
-  const opened = await openSessionForRead(name, invocation, context);
+  // SPEC 10.7 → 12.0: an unknown item ID in any `review` command's
+  // arguments is a usage error, judged by the open flow past the session
+  // read and before the recorded baseline and the refresh write — so it
+  // reads no git data and leaves stale graph data stale (review-session.ts).
+  const opened = await openSessionForRead(name, invocation, context, itemId);
   if (!opened.ok) {
     return opened.exit;
   }
   const view = opened.view;
-  const item = view.session.items.find((candidate) => candidate.id === itemId);
+  const item = opened.item;
   if (item === undefined) {
-    // SPEC 10.7 → 12.0: an unknown item ID in any `review` command's
-    // arguments is a usage error.
-    return usageError(
-      invocation,
-      context,
-      `unknown item '${itemId}' in session '${name}' — no item of the ` +
-        `session has that id (SPEC 10.7, 12.0)`,
-    );
+    // Unreachable: the open flow judged the item ID (SPEC 10.7, 12.0).
+    throw new Error("xspec internal error: review show without its item");
   }
   if (invocation.json) {
     // SPEC 10.7: the full item — every field of 10.2 plus the same

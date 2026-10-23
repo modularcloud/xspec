@@ -8,35 +8,49 @@
 // fixes — its configuration error or refused read reported there, exit 2
 // (SPEC 13.5, 12.0; ./mutation.ts).
 //
-// Outcome precedence, per subcommand (shared steps through
-// review-session.ts's `loadSessionForCommand` — session existence, load with
-// the corrupt check, recorded-baseline resolution, refresh-on-read):
+// Outcome precedence, per subcommand (SPEC 10.7: each step reached only
+// once every earlier one has passed; the shared steps through
+// review-session.ts's `loadSessionForCommand` — session existence, the gate
+// of 13.3, the session read with the corrupt check, the item ID, and the
+// recorded baseline's resolution — the refresh write handed back
+// uncommitted):
 //
 // `split <name> <item-id>`:
-//   1. unknown session or corrupt session (SPEC 10.7 → 12.0 exit 2; 14.21
-//      exit 1), baseline resolution (SPEC 6.3 → 12.0), refresh (SPEC 13.3)
-//      — the session name's form being the parser's, a syntax-class usage
-//      error reported before the configuration is loaded (SPEC 10.1, 12.0);
-//   2. an unknown item id is a usage error (SPEC 10.7 → 12.0, exit 2);
-//   3. `split` on an item of any other kind than `subtree-coherence`, or on
-//      one whose scope root has no children, is refused — exit 1, nothing
-//      modified (SPEC 10.7);
-//   4. otherwise the decomposition of SPEC 10.7 applies
+//   1. unknown session (SPEC 10.7 → 12.0, exit 2), the gate's findings
+//      (SPEC 13.3, exit 1), corrupt session (14.21, exit 1) — the session
+//      name's form being the parser's, a syntax-class usage error reported
+//      before the configuration is loaded (SPEC 10.1, 12.0);
+//   2. an unknown item id is a usage error (SPEC 10.7 → 12.0, exit 2), met
+//      before the recorded baseline, so it starts no git process (SPEC's
+//      preamble);
+//   3. the recorded baseline that cannot be resolved or reconstructed
+//      (SPEC 6.3 → 12.0, exit 2);
+//   4. `split` on an item of any other kind than `subtree-coherence`, or on
+//      one whose scope root has no children in the current workspace (in a
+//      baseline session, deleted ones included), is refused — exit 1,
+//      nothing modified (SPEC 10.7);
+//   5. otherwise the decomposition of SPEC 10.7 applies
 //      (core/review-derive.ts `splitItemDecomposition`), the write path is
-//      validated (SPEC 14.22), and the session file is rewritten.
+//      validated (SPEC 14.22, exit 1), and only then come the writes: the
+//      refresh of 13.3, then the session file, once, last (SPEC 10.7,
+//      13.5).
 //
 // `resolve <name> <item-id> --status <status> [--note <text>]`:
-//   1. as above (the parser already rejects any `--status` value outside
+//   1.–3. as above (the parser already rejects any `--status` value outside
 //      `updated`, `no-change`, `skipped` — SPEC 10.7 → 12.0);
-//   2. an unknown item id is a usage error (exit 2);
-//   3. resolving a blocked item is refused — exit 1, nothing modified —
-//      over the effective statuses of SPEC 10.4, so an invalidated blocker
-//      re-blocks its dependents (SPEC 10.3);
-//   4. otherwise the status is set and the current relevant state recorded
+//   4. resolving a blocked item is refused — exit 1, nothing modified —
+//      over the effective statuses of SPEC 10.4 against the current
+//      workspace, so an invalidated blocker re-blocks its dependents
+//      (SPEC 10.3);
+//   5. otherwise the status is set and the current relevant state recorded
 //      (SPEC 10.4; `resolve` applies to any unblocked item regardless of
 //      current status), an `updated` resolve re-derives the session
 //      (SPEC 10.5, every strategy), the write path is validated
-//      (SPEC 14.22), and the session file is rewritten.
+//      (SPEC 14.22, exit 1), and only then come the writes: the refresh of
+//      13.3, then the session file, once, last (SPEC 10.7, 13.5).
+//
+// Every outcome before the writes ends the subcommand modifying nothing:
+// stale graph data stays stale (SPEC 10.7, 13.5).
 
 import type { SourceClassification } from "../../core/discovery.js";
 import type { ExitCode } from "../../core/findings.js";
@@ -54,7 +68,7 @@ import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { emitFindingsReport } from "../report.js";
-import { emitDocument, usageError } from "./common.js";
+import { emitDocument } from "./common.js";
 import { runMutatingCommand } from "./mutation.js";
 import type { SessionGenerationRun } from "./review-session.js";
 import {
@@ -63,21 +77,6 @@ import {
   loadSessionForCommand,
   runSessionGenerators,
 } from "./review-session.js";
-
-/** SPEC 10.7 → 12.0: an unknown item ID in a review command's arguments. */
-function unknownItemError(
-  invocation: Invocation,
-  context: CommandContext,
-  name: string,
-  itemId: string,
-): ExitCode {
-  return usageError(
-    invocation,
-    context,
-    `unknown item '${itemId}' in session '${name}' — no item of the ` +
-      `session has that id (SPEC 10.7, 12.0)`,
-  );
-}
 
 /**
  * The current derivation side over the analysis and a generation run —
@@ -103,13 +102,18 @@ function currentSideOf(
  * SPEC 14.22: validate the session file's write path — a
  * workspace-relative directory component occupied by anything other than a
  * directory refuses the write, reported before modifying anything — then
- * write the session. Returns null on success.
+ * make the subcommand's writes (SPEC 10.7, 13.3, 13.5): the refresh of
+ * 13.3 (`commitRefresh`, a no-op when graph data is not stale), then the
+ * session file, once, last. Returns null on success. A write the
+ * environment refuses stops the command there (14.24), leaving the writes
+ * already made.
  */
 async function writeSessionChecked(
   invocation: Invocation,
   context: CommandContext,
   name: string,
   session: Parameters<typeof writeSession>[2],
+  commitRefresh: () => Promise<void>,
 ): Promise<ExitCode | null> {
   const findings = await obstructedWritePathFindings(context.workspace.root, [
     sessionFilePath(name),
@@ -118,6 +122,7 @@ async function writeSessionChecked(
     emitFindingsReport(invocation.json, context.stdout, findings);
     return 1;
   }
+  await commitRefresh();
   await writeSession(context.workspace.root, name, session);
   return null;
 }
@@ -137,12 +142,13 @@ async function runSplit(
   itemId: string,
   discovered: SourceClassification,
 ): Promise<ExitCode> {
-  const loaded = await loadSessionForCommand(
-    name,
-    invocation,
-    context,
+  // The loader meets the outcomes up to the recorded baseline — the item ID
+  // among them, before any git read — and hands back the refresh write
+  // uncommitted (review-session.ts).
+  const loaded = await loadSessionForCommand(name, invocation, context, {
+    itemId,
     discovered,
-  );
+  });
   if (!loaded.ok) {
     return loaded.exit;
   }
@@ -150,9 +156,10 @@ async function runSplit(
   // identity policy) — consumed as-is; no read-time identity rewrite exists.
   const journal = loaded.analysis.journal.journal;
   const session = loaded.session;
-  const original = session.items.find((item) => item.id === itemId);
+  const original = loaded.item;
   if (original === undefined) {
-    return unknownItemError(invocation, context, name, itemId);
+    // Unreachable: the loader judged the item ID (SPEC 10.7, 12.0).
+    throw new Error("xspec internal error: review split without its item");
   }
   // SPEC 10.7: the decomposition items' content is the strategy's to define
   // — its generators, run with the recorded creation parameters, supply the
@@ -171,7 +178,10 @@ async function runSplit(
   });
   if (!split.ok) {
     // SPEC 10.7/14: the refusal — one code-less finding, exit 1, nothing
-    // modified; the identities name the session and item (informational).
+    // modified: the refresh write has not run, so stale graph data stays
+    // stale; the scope root's children were judged against the current
+    // workspace (and the recorded baseline), never stale graph data. The
+    // identities name the session and item (informational).
     return emitReviewRefusal(invocation.json, context.stdout, split.refusal, [
       name,
       itemId,
@@ -180,10 +190,13 @@ async function runSplit(
   // The write re-records the journal's entry count as the session's
   // write-moment bound (core/review.ts identity policy: every stored
   // canonical position stays <= journalLength).
-  const failed = await writeSessionChecked(invocation, context, name, {
-    ...split.session,
-    journalLength: journal.entries.length,
-  });
+  const failed = await writeSessionChecked(
+    invocation,
+    context,
+    name,
+    { ...split.session, journalLength: journal.entries.length },
+    loaded.commitRefresh,
+  );
   if (failed !== null) {
     return failed;
   }
@@ -238,14 +251,20 @@ async function runResolve(
   note: string | undefined,
   discovered: SourceClassification,
 ): Promise<ExitCode> {
-  const loaded = await loadSessionForCommand(
-    name,
-    invocation,
-    context,
+  // The loader meets the outcomes up to the recorded baseline — the item ID
+  // among them, before any git read — and hands back the refresh write
+  // uncommitted (review-session.ts).
+  const loaded = await loadSessionForCommand(name, invocation, context, {
+    itemId,
     discovered,
-  );
+  });
   if (!loaded.ok) {
     return loaded.exit;
+  }
+  const item = loaded.item;
+  if (item === undefined) {
+    // Unreachable: the loader judged the item ID (SPEC 10.7, 12.0).
+    throw new Error("xspec internal error: review resolve without its item");
   }
   const generation = runSessionGenerators(
     loaded.session.parameters,
@@ -262,14 +281,12 @@ async function runResolve(
     generation,
     loaded.analysis,
   );
-  const item = view.session.items.find((candidate) => candidate.id === itemId);
-  if (item === undefined) {
-    return unknownItemError(invocation, context, name, itemId);
-  }
   if (view.blocked.get(item.id) ?? false) {
     // SPEC 10.7/14: resolving a blocked item is refused — one code-less
-    // finding, exit 1, nothing modified. Any *unblocked* item is resolvable
-    // regardless of status.
+    // finding, exit 1, nothing modified: the refresh write has not run, so
+    // stale graph data stays stale; the blocked state was judged against
+    // the current workspace, never stale graph data (SPEC 13.3). Any
+    // *unblocked* item is resolvable regardless of status.
     return emitReviewRefusal(
       invocation.json,
       context.stdout,
@@ -294,10 +311,16 @@ async function runResolve(
   });
   // The write re-records the journal's entry count as the session's
   // write-moment bound (core/review.ts identity policy).
-  const failed = await writeSessionChecked(invocation, context, name, {
-    ...session,
-    journalLength: loaded.analysis.journal.journal.entries.length,
-  });
+  const failed = await writeSessionChecked(
+    invocation,
+    context,
+    name,
+    {
+      ...session,
+      journalLength: loaded.analysis.journal.journal.entries.length,
+    },
+    loaded.commitRefresh,
+  );
   if (failed !== null) {
     return failed;
   }

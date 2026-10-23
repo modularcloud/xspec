@@ -20,16 +20,20 @@
 // 4. The gate (SPEC 13.3): on a workspace failing `build`'s validations
 //    the gate's findings report alone, exit 1, and no session file is read
 //    — a session's corruption (14.21) is reported exactly where sessions
-//    are read, on a passing workspace (SPEC 10.1). Passing, the session is
-//    loaded: corrupt → the 14.21 finding, exit 1, modifying nothing.
-// 5. For a readable `path-blocks` session, resolve the recorded baseline
+//    are read, on a passing workspace (SPEC 10.1).
+// 5. The session read, past the passing gate: corrupt → the 14.21 finding,
+//    exit 1, modifying nothing.
+// 6. The item ID of `show`, `resolve`, and `split` (SPEC 10.7, 12.0),
+//    judged against the session's stored items past the session read and
+//    before the recorded baseline: an unknown item is a usage error, exit
+//    2, met before any git read (SPEC's preamble: git data is read only
+//    where stated) and before any write.
+// 7. For a readable `path-blocks` session, resolve the recorded baseline
 //    commit (SPEC 10.7: every later generator run uses the recorded
 //    parameters). A baseline that cannot be resolved or reconstructed
-//    fails per 6.3 as a usage error (exit 2) — before the refresh write,
-//    so the failing invocation modifies nothing; a corrupt session has no
-//    readable parameters, the corruption reporting instead. Then the one
-//    refresh write of 13.3 commits.
-// 6. Re-run the session's strategy generators with the recorded creation
+//    fails per 6.3 as a usage error (exit 2), modifying nothing; a corrupt
+//    session has no readable parameters, the corruption reporting instead.
+// 8. Re-run the session's strategy generators with the recorded creation
 //    parameters against the current workspace (SPEC 10.4, 10.7),
 //    canonicalized at the derivation seam (core/review-derive.ts
 //    `canonicalizeGeneration` — stored references and generated nodes
@@ -39,6 +43,15 @@
 //    `invalidated`, never persisted), blocked states over those statuses
 //    (SPEC 10.3), and the presentation item order (10.5–10.7) over derived
 //    current spellings.
+// 9. The refresh write of 13.3 (SPEC 10.7, 13.5): the gate's assessment
+//    decided it without writing, and it commits only once every outcome
+//    has passed — a read's (the steps above) just before the read answers;
+//    `resolve`'s and `split`'s past their refusals and the session path's
+//    14.22 check, right before the session file's write
+//    (./review-mutate.ts) — so each outcome ends the subcommand with stale
+//    graph data still stale, and every judgement turning on the graph is
+//    made against the current workspace (and, in a baseline session, the
+//    recorded baseline), never against stale graph data (SPEC 10.7, 13.3).
 //
 // The payload renderers below fix the self-contained text payload of
 // SPEC 10.7 once, so `show`, `export`, and `next --json` can never disagree:
@@ -259,7 +272,7 @@ export interface SessionReadView {
 }
 
 /**
- * Derive a session's read-time view (module header step 6). Nothing is
+ * Derive a session's read-time view (module header step 8). Nothing is
  * persisted: read-time invalidation is computed and reported, never written
  * (SPEC 10.4). The stored session is consumed as-is — stored references
  * are canonical identities (SPEC 5.4), eternal under journal growth, so no
@@ -315,26 +328,40 @@ export function buildSessionReadView(
 }
 
 // ---------------------------------------------------------------------------
-// The shared open flow (module header steps 1–6)
+// The shared open flow (module header steps 1–9)
 // ---------------------------------------------------------------------------
 
-/** The open outcome: the view, or an already-emitted exit code. */
+/** The open outcome: the view and the named item, or an already-emitted
+ * exit code. */
 export type SessionOpenResult =
-  | { readonly ok: true; readonly view: SessionReadView }
+  | {
+      readonly ok: true;
+      readonly view: SessionReadView;
+      /** The item `show` names (module header step 6); absent for the
+       * reads naming none. */
+      readonly item?: ReviewItem;
+    }
   | { readonly ok: false; readonly exit: ExitCode };
 
 /**
  * Open a named session for a read (`status`, `next`, `show`, `export`) —
- * the module header's steps 1–6. Failures are fully reported here; the
- * caller returns `exit` unchanged. Mutating subcommands share steps 1–5
- * through `loadSessionForCommand` and run their own derivation.
+ * the module header's steps 1–9, `itemId` being `show`'s item operand.
+ * Failures are fully reported here; the caller returns `exit` unchanged.
+ * Every outcome of a read is met here, so the refresh write commits here
+ * too, last: the caller answers right after, with no outcome of its own
+ * in between (SPEC 10.7: "A read subcommand answers only then"). Mutating
+ * subcommands share steps 1–7 through `loadSessionForCommand`, run their
+ * own derivation and refusals, and commit the refresh themselves.
  */
 export async function openSessionForRead(
   name: string,
   invocation: Invocation,
   context: CommandContext,
+  itemId?: string,
 ): Promise<SessionOpenResult> {
-  const loaded = await loadSessionForCommand(name, invocation, context);
+  const loaded = await loadSessionForCommand(name, invocation, context, {
+    itemId,
+  });
   if (!loaded.ok) {
     return loaded;
   }
@@ -343,34 +370,59 @@ export async function openSessionForRead(
     loaded.analysis,
     loaded.baseline,
   );
-  return {
-    ok: true,
-    view: buildSessionReadView(
-      name,
-      loaded.session,
-      generation,
-      loaded.analysis,
-    ),
-  };
+  const view = buildSessionReadView(
+    name,
+    loaded.session,
+    generation,
+    loaded.analysis,
+  );
+  // Step 9 — SPEC 10.7, 13.3: past every outcome the refresh write (a no-op
+  // when the store already matches); a write the environment refuses fails
+  // the read before it answers (14.24).
+  await loaded.commitRefresh();
+  return { ok: true, view, item: loaded.item };
 }
 
-/** Steps 1–5 of the open flow: the stored session, the current analysis,
- * and — for a `path-blocks` session — the resolved recorded baseline. */
+/** What a subcommand hands `loadSessionForCommand` beside the name. */
+export interface SessionLoadOptions {
+  /** The item operand of `show`, `resolve`, and `split` (SPEC 10.7). */
+  readonly itemId?: string;
+  /** The classification a mutating subcommand's second discovery made
+   * holding exclusivity (SPEC 13.5; ./mutation.ts). */
+  readonly discovered?: SourceClassification;
+}
+
+/** Steps 1–7 of the open flow: the stored session, the current analysis,
+ * the named item, and — for a `path-blocks` session — the resolved
+ * recorded baseline, with the refresh write of 13.3 handed back
+ * uncommitted. */
 export interface LoadedSessionForCommand {
   readonly ok: true;
   readonly session: ReviewSession;
   readonly analysis: WorkspaceAnalysis;
+  /** The stored item `options.itemId` names (step 6); absent when the
+   * subcommand names none. */
+  readonly item?: ReviewItem;
   readonly baseline?: ResolvedBaseline;
+  /**
+   * Step 9 — SPEC 10.7, 13.3, 13.5: the refresh write (a no-op when the
+   * stored graph data already matches), the caller's to run, once, when
+   * every outcome of its own has passed: a read just before answering,
+   * `resolve` and `split` past their refusals and the session path's
+   * 14.22 check, right before the session file's write.
+   */
+  readonly commitRefresh: () => Promise<void>;
 }
 
 export async function loadSessionForCommand(
   name: string,
   invocation: Invocation,
   context: CommandContext,
-  discovered?: SourceClassification,
+  options: SessionLoadOptions = {},
 ): Promise<
   LoadedSessionForCommand | { readonly ok: false; readonly exit: ExitCode }
 > {
+  const { itemId, discovered } = options;
   // Step 1 — the name's form (SPEC 10.1) was judged by the parser
   // (cli/args.ts) before the configuration was loaded: a name outside it
   // is a syntax-class usage error (SPEC 12.0).
@@ -403,8 +455,9 @@ export async function loadSessionForCommand(
   // (SPEC 14.22) alike — the gate's findings are reported alone, exit 1,
   // and no session file is read: a session's corruption (14.21) is
   // reported exactly where sessions are read, on a passing workspace
-  // (SPEC 10.1, 12.0). The assessment decides without writing; the one
-  // refresh write commits below, once every remaining check has passed.
+  // (SPEC 10.1, 12.0). The assessment decides without writing; its one
+  // refresh write is handed back uncommitted (step 9), the caller running
+  // it once every outcome of its own has passed (SPEC 10.7, 13.5).
   const assessed = await assessWorkspaceRead(
     context.workspace,
     analyzed.analysis,
@@ -429,11 +482,27 @@ export async function loadSessionForCommand(
     return { ok: false, exit: 1 };
   }
 
-  // Step 6 — SPEC 10.7/6.3/12.0: resolve the recorded baseline of a
-  // readable session before source validation could mask it; failure is a
-  // usage error, nothing modified (the refresh write has not run yet). A
-  // corrupt session has no readable parameters — the corruption (or, on a
-  // failing workspace, the gate) reports instead.
+  // Step 6 — SPEC 10.7, 12.0: an unknown item ID, judged against the
+  // session's stored items once the session read has met any corruption,
+  // and before the recorded baseline: the usage error, exit 2, ends the
+  // subcommand before any git read (SPEC's preamble: git data is read only
+  // where stated) and before any write — stale graph data stays stale.
+  let item: ReviewItem | undefined;
+  if (itemId !== undefined) {
+    item = loaded.session.items.find((candidate) => candidate.id === itemId);
+    if (item === undefined) {
+      return {
+        ok: false,
+        exit: unknownItemError(invocation, context, name, itemId),
+      };
+    }
+  }
+
+  // Step 7 — SPEC 10.7/6.3/12.0: resolve the recorded baseline of a
+  // readable session — past the gate, one of 12.0's two usage-class checks
+  // running there; failure is a usage error, nothing modified (the refresh
+  // write has not run). A corrupt session has no readable parameters — the
+  // corruption (or, on a failing workspace, the gate) reports instead.
   let baseline: ResolvedBaseline | undefined;
   if (loaded.session.parameters.strategy === "path-blocks") {
     // The current journal as the analysis loaded it, read once — past the
@@ -458,15 +527,31 @@ export async function loadSessionForCommand(
     baseline = resolution.baseline;
   }
 
-  // Step 7 — refresh-on-read (SPEC 13.3): the one refresh write (a no-op
-  // when the store already matches), every check passed.
-  await assessed.commit();
+  // Step 9 is the caller's: the refresh write of 13.3 commits only past
+  // every outcome of its own (SPEC 10.7, 13.5).
   return {
     ok: true,
     session: loaded.session,
     analysis: analyzed.analysis,
+    item,
     baseline,
+    commitRefresh: assessed.commit,
   };
+}
+
+/** SPEC 10.7 → 12.0: an unknown item ID in a review command's arguments. */
+function unknownItemError(
+  invocation: Invocation,
+  context: CommandContext,
+  name: string,
+  itemId: string,
+): ExitCode {
+  return usageError(
+    invocation,
+    context,
+    `unknown item '${itemId}' in session '${name}' — no item of the ` +
+      `session has that id (SPEC 10.7, 12.0)`,
+  );
 }
 
 /** SPEC 10.7 → 12.0: an unknown session named in arguments. */
