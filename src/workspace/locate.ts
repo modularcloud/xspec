@@ -12,6 +12,20 @@
 // reported by every command as a usage error (exit 2, 12.0) preceding all
 // source analysis.
 //
+// SPEC 7, 12.0: the upward search stops at the nearest directory holding an
+// entry named `xspec.config.ts`, and names compare byte-wise and
+// case-sensitively — no case folding anywhere. A lookup of that name is
+// exact on a case-sensitive filesystem, but a case-insensitive one answers
+// it with an entry of another casing (`XSPEC.config.ts`), so a lookup that
+// finds an occupant is confirmed against the directory's listing, its names
+// compared as the bytes the filesystem reports: a directory whose listing
+// holds no entry named byte-wise `xspec.config.ts` holds no configuration
+// entry, and the search continues upward past it. The confirmation runs on
+// every platform (IMPLEMENTATION: no platform-specific code paths); a
+// directory whose lookup finds nothing is never listed, so the search lists
+// only a directory it may stop at. `--config` names a filesystem path,
+// resolved as the filesystem resolves one (12.0): no search, no listing.
+//
 // SPEC 14: a configuration error's concerned path is reported in the
 // anchoring form of 11.6, identified relative to the invocation working
 // directory — the configuration path the upward search found or `--config`
@@ -37,14 +51,16 @@
 // so the file read is the file anchored.
 //
 // SPEC 14.25: a read the environment refuses here — a directory the upward
-// search or the anchoring resolution examines, or the named configuration
-// path's kind — is condition 25, thrown as the typed read failure
+// search examines (its lookup of the name, or the listing confirming it) or
+// the anchoring resolution examines, or the named configuration path's
+// kind — is condition 25, thrown as the typed read failure
 // (./environment-refusal.ts) that the CLI reports as exit 2, its concerned
 // path in the anchoring form (the root is not yet known); the configuration
 // file's refused content read is invalid configuration instead (14.14).
 // Nonexistence is never a refusal: it is the missing configuration of
 // 14.14.
 
+import { Buffer } from "node:buffer";
 import type { Stats } from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -64,6 +80,12 @@ import {
 
 /** SPEC 7: the configuration file name the upward search looks for. */
 export const CONFIG_FILE_NAME = "xspec.config.ts";
+
+/**
+ * SPEC 7, 12.0: the configuration file name as the bytes a listed entry's
+ * name must equal — compared byte-wise and case-sensitively, never folded.
+ */
+const CONFIG_FILE_NAME_BYTES = Buffer.from(CONFIG_FILE_NAME, "utf8");
 
 /** A located workspace: the configuration file found and read, unparsed. */
 export interface LocatedWorkspace {
@@ -236,16 +258,48 @@ async function namedConfigurationEntry(
 }
 
 /**
+ * SPEC 7, 12.0: whether `directory` holds an entry named byte-wise
+ * `xspec.config.ts`, judged from the directory's listing — every name
+ * compared as the bytes the filesystem reports, case-sensitively, never
+ * through a lookup of the name, which a case-insensitive filesystem answers
+ * with an entry of another casing (`XSPEC.config.ts`). A directory gone
+ * since its lookup holds nothing (SPEC 14.25: nonexistence is never a
+ * refused read). SPEC 14.25: a listing the environment refuses is a refused
+ * read of a directory the upward search examines — `refused` builds the
+ * read failure, thrown so the command stops at this read, never taking the
+ * lookup's answer in its place.
+ */
+async function holdsConfigurationEntry(
+  directory: string,
+  refused: (cause: NodeJS.ErrnoException) => EnvironmentRefusal,
+): Promise<boolean> {
+  let names: Buffer[];
+  try {
+    names = await fsp.readdir(directory, { encoding: "buffer" });
+  } catch (error) {
+    if (isAbsenceFailure(error)) return false;
+    if (isFilesystemFailure(error)) throw refused(error);
+    throw error;
+  }
+  return names.some((name) => name.equals(CONFIG_FILE_NAME_BYTES));
+}
+
+/**
  * SPEC 7: upward search for `xspec.config.ts` from the working directory —
  * the working directory itself first. The search stops at the nearest
  * directory holding an entry of that name, whatever occupies it, so a
  * directory or a symbolic link of that name ends the search as surely as a
- * plain file does (the caller reads only a plain file). Returns the entry's
- * absolute path and occupant, or undefined when the search exhausts at the
+ * plain file does (the caller reads only a plain file). The name compares
+ * byte-wise and case-sensitively (SPEC 12.0): a directory whose lookup of
+ * the name finds an occupant is the stopping point only once its listing
+ * holds an entry of exactly that name (`holdsConfigurationEntry`) —
+ * otherwise the lookup found another casing through a case-insensitive
+ * filesystem, and the search continues upward. Returns the entry's absolute
+ * path and occupant, or undefined when the search exhausts at the
  * filesystem root. SPEC 14.25: a directory the search examines that the
- * environment refuses to read stops the command at that read — the read
- * failure concerning the directory in its anchoring form (11.6), examined
- * before the root is known.
+ * environment refuses to read — its lookup or its listing — stops the
+ * command at that read: the read failure concerning the directory in its
+ * anchoring form (11.6), examined before the root is known.
  */
 async function searchUpward(
   workingDirectory: string,
@@ -258,14 +312,23 @@ async function searchUpward(
   for (;;) {
     const configPath = path.join(dir, CONFIG_FILE_NAME);
     const examined = dir;
-    const occupant = await occupantOf(configPath, (cause) =>
+    const refused = (cause: NodeJS.ErrnoException): EnvironmentRefusal =>
       readFailure(
         anchoredPathSpelling(workingDirectory, examined),
         "listing",
         cause,
-      ),
-    );
-    if (occupant.kind !== "absent") return { configPath, occupant };
+      );
+    const occupant = await occupantOf(configPath, refused);
+    // SPEC 7, 12.0: a lookup finding nothing is exact on every filesystem —
+    // no entry of any casing — so only a found occupant needs the listing's
+    // byte-wise confirmation; a directory the lookup finds nothing in is
+    // never listed.
+    if (
+      occupant.kind !== "absent" &&
+      (await holdsConfigurationEntry(dir, refused))
+    ) {
+      return { configPath, occupant };
+    }
     const parent = path.dirname(dir);
     if (parent === dir) return undefined;
     dir = parent;
