@@ -15,8 +15,10 @@
 // 2. one `parent-consistency` item per non-root ancestor A on the path to
 //    the root — scope: A; context: the changed branches beneath A, each
 //    entering as one context node, A's child on that branch; origin: the
-//    changed branches' `changed` nodes; when multiple changed nodes share
-//    A, A receives a single item against the union of changed branches.
+//    `changed` nodes in A's subtree, skipped nodes included — the union of
+//    the rule 1 origins of the visited nodes beneath A; when multiple
+//    changed nodes share A, A receives a single item against the union of
+//    changed branches.
 //    Its `blockedBy` holds, for each changed branch, the item whose scope
 //    node is A's child on that branch: that child's `subtree-coherence`
 //    item when the child is the branch's changed node, otherwise the
@@ -111,8 +113,10 @@ interface ParentAccumulation {
   readonly ancestor: NodeChange;
   /** The distinct branch children (A's child on each changed branch). */
   readonly branches: NodeChange[];
-  /** The changed branches' `changed` nodes. */
-  readonly origins: NodeChange[];
+  /** The `changed` nodes in A's subtree (SPEC 10.5 rule 2's origin),
+   * skipped nodes included: the union of the rule 1 origins of the visited
+   * nodes beneath A (`accumulateParents`). */
+  readonly origins: Set<NodeChange>;
 }
 
 class PathBlocksComputation {
@@ -150,11 +154,18 @@ class PathBlocksComputation {
 
     // SPEC 10.5: for each `changed` node, skipping nodes that have a
     // `changed` ancestor — rule 1 items, and rule 2 accumulation over the
-    // surviving nodes' ancestor paths.
+    // surviving nodes' ancestor paths. Rule 1's origin — the `changed`
+    // nodes in the visited node's scope, the node and its changed
+    // descendants on either side, skipped nodes included — also feeds
+    // rule 2's origin for every ancestor on the path.
     for (const record of this.analysis.nodes) {
       if (!record.changed || this.hasChangedAncestor(record)) continue;
-      items.push(this.subtreeCoherenceItem(record));
-      this.accumulateParents(record, parents);
+      const scopeOrigin = this.scopeRecords(
+        record,
+        (candidate) => candidate.changed,
+      );
+      items.push(this.subtreeCoherenceItem(record, scopeOrigin));
+      this.accumulateParents(record, scopeOrigin, parents);
     }
 
     // SPEC 10.5: one `metadata-consistency` item per `metadata-changed`
@@ -414,10 +425,12 @@ class PathBlocksComputation {
   // Rule 1: subtree-coherence (SPEC 10.5)
   // -------------------------------------------------------------------------
 
-  private subtreeCoherenceItem(record: NodeChange): GeneratedItem {
-    // SPEC 10.5: origin is the `changed` nodes in scope — the node and its
-    // changed descendants on either side.
-    const origin = this.scopeRecords(record, (candidate) => candidate.changed);
+  /** `origin` is the `changed` nodes in scope (SPEC 10.5) — the node and
+   * its changed descendants on either side, as `compute` collects them. */
+  private subtreeCoherenceItem(
+    record: NodeChange,
+    origin: ReadonlySet<NodeChange>,
+  ): GeneratedItem {
     const scope = this.nodeOf(record);
     return {
       kind: "subtree-coherence",
@@ -436,10 +449,22 @@ class PathBlocksComputation {
   // Rule 2: parent-consistency (SPEC 10.5)
   // -------------------------------------------------------------------------
 
-  /** Accumulate the surviving changed node's path to the root into the
-   * per-ancestor unions of SPEC 10.5 rule 2. */
+  /**
+   * Accumulate the visited node's path to the root into the per-ancestor
+   * unions of SPEC 10.5 rule 2. `scopeOrigin` is the visited node's rule 1
+   * origin, the `changed` nodes in its scope.
+   *
+   * SPEC 10.5 rule 2's origin is "the `changed` nodes in A's subtree",
+   * skipped nodes included. A, an ancestor of a visited node, is not
+   * `changed`, nor is any ancestor of A; so each `changed` node in A's
+   * subtree has a topmost `changed` ancestor-or-self strictly beneath A —
+   * a visited node on one of A's changed branches — and lies in that
+   * visited node's scope. The union of the rule 1 origins accumulated here
+   * is therefore exactly A's origin.
+   */
   private accumulateParents(
     record: NodeChange,
+    scopeOrigin: ReadonlySet<NodeChange>,
     parents: Map<NodeChange, ParentAccumulation>,
   ): void {
     let child = record;
@@ -453,7 +478,7 @@ class PathBlocksComputation {
       if (!this.isRoot(ancestor)) {
         let accumulation = parents.get(ancestor);
         if (accumulation === undefined) {
-          accumulation = { ancestor, branches: [], origins: [] };
+          accumulation = { ancestor, branches: [], origins: new Set() };
           parents.set(ancestor, accumulation);
         }
         // SPEC 10.5: each changed branch enters as one context node — A's
@@ -461,9 +486,7 @@ class PathBlocksComputation {
         if (!accumulation.branches.includes(child)) {
           accumulation.branches.push(child);
         }
-        if (!accumulation.origins.includes(record)) {
-          accumulation.origins.push(record);
-        }
+        for (const member of scopeOrigin) accumulation.origins.add(member);
       }
       child = ancestor;
     }
@@ -493,6 +516,7 @@ class PathBlocksComputation {
       kind: "parent-consistency",
       scope,
       context: branches.map((branch) => this.nodeOf(branch)),
+      // SPEC 10.5: the `changed` nodes in A's subtree (ParentAccumulation).
       origin: this.nodesOf(accumulation.origins),
       reason:
         `changed branches lie beneath ${scope.identity}; review its own ` +
