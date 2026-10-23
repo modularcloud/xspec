@@ -61,9 +61,13 @@
 // `baseline`/`current` states, and text per item kind — a present node's
 // text from the current graph, an absent node's from the most recent
 // recorded state containing it (the derivation-time snapshots, else the
-// item's baseline snapshots), and no text for a node contained in none or
-// for a code-location scope — and, on a `metadata-consistency` item, its
-// scope node's metadata pair (core/review-metadata.ts).
+// item's baseline state: its baseline snapshots, and in a baseline session
+// the recorded-baseline graph the read reconstructed), and no text for a
+// node contained in none or for a code-location scope — and, on a
+// `metadata-consistency` item, its scope node's metadata pair
+// (core/review-metadata.ts). The context presented is the item's current
+// context set (SPEC 10.4: computed by the read, never persisted), while
+// `scope`, `origin`, `reason`, and `blockedBy` present as last assigned.
 
 import { generateAuditItems } from "../../core/audit.js";
 import type { JsonObject } from "../../core/canonical-json.js";
@@ -75,6 +79,7 @@ import type {
   ItemKind,
   ItemStatus,
   RecordedState,
+  RecordedTexts,
   ReviewItem,
   ReviewSession,
   SessionParameters,
@@ -103,6 +108,7 @@ import {
   deriveEffectiveStatuses,
   presentRecordedState,
   resolveReference,
+  resolveReferenceAt,
 } from "../../core/review-state.js";
 import type { ResolvedBaseline } from "../../workspace/baseline.js";
 import { resolveBaseline } from "../../workspace/baseline.js";
@@ -265,6 +271,15 @@ export interface SessionReadView {
   /** The decomposition-expanded generator run (SPEC 10.5, 10.7). */
   readonly expanded: readonly GeneratedItem[];
   readonly generation: SessionGenerationRun;
+  /**
+   * SPEC 10.4: each item's current context set, by item ID — the context
+   * the generators, run with the recorded creation parameters and
+   * decompositions against the current workspace, assign it — as canonical
+   * references (`currentContextSets`). An item the generators no longer
+   * produce is absent here: its current context set is its `context` as
+   * last assigned (`presentedContext`). Computed, never persisted.
+   */
+  readonly currentContexts: ReadonlyMap<string, readonly string[]>;
   /** SPEC 10.4: effective statuses — read-time invalidation applied. */
   readonly statuses: ReadonlyMap<string, ItemStatus>;
   /** SPEC 10.3: blocked states over the effective statuses. */
@@ -298,10 +313,14 @@ export function buildSessionReadView(
     generation.contentSource,
   );
   const stateInputs = generationStateInputs(analysis, generation);
+  // SPEC 10.4: the current context sets — computed without persisting
+  // anything, fed to context-set invalidation and presented as each item's
+  // `context` (`presentedContext`).
+  const currentContexts = currentContextSets(session.items, expanded);
   // SPEC 10.4: effective statuses — a stale resolution reads `invalidated`.
   const statuses = deriveEffectiveStatuses(session.items, {
     state: stateInputs,
-    currentContexts: currentContextSets(session.items, expanded),
+    currentContexts,
   });
   // SPEC 10.3: blocked over the effective statuses — a blocker that became
   // invalidated re-blocks its dependents.
@@ -323,11 +342,28 @@ export function buildSessionReadView(
     session,
     expanded,
     generation,
+    currentContexts,
     statuses,
     blocked,
     ordered,
     analysis,
   };
+}
+
+/**
+ * SPEC 10.4: the context a read presents for an item — its current context
+ * set: the generators' assignment where they still produce the item (kind
+ * and scope node matched canonically, `currentContextSets`), otherwise its
+ * `context` as last assigned (by `create`, a re-derivation, a `split`, or a
+ * resolve). Reads present it as the item's `context` (10.7), so a
+ * context-set change shows without waiting for a re-derivation, while
+ * `scope`, `origin`, `reason`, and `blockedBy` stay as last assigned.
+ */
+export function presentedContext(
+  view: SessionReadView,
+  item: ReviewItem,
+): readonly string[] {
+  return view.currentContexts.get(item.id) ?? item.context;
 }
 
 // ---------------------------------------------------------------------------
@@ -613,24 +649,71 @@ function contextTextSelection(kind: ItemKind): TextSelection {
 
 /**
  * SPEC 10.7: an absent node's text is its value in the most recent graph
- * state that contained it, among the item's `baseline` state and the states
- * under which mutating subcommands derived the item — the derivation-time
- * snapshots are rewritten per node at each derivation that finds it present,
- * so they are the most recent wherever they exist; a node contained in none
- * has no text. The tables are keyed by canonical reference (10.4), so the
- * lookup is exact whatever the node's spelling became.
+ * state that contained it, among the item's baseline state (10.2) and the
+ * states under which mutating subcommands derived the item with that node
+ * among its nodes — the derivation-time snapshots are rewritten per node at
+ * each derivation that finds it present, so they are the most recent
+ * wherever they exist; else the item's baseline state: its baseline
+ * snapshots (the nodes it held at entry), and — in a baseline session,
+ * whose items' baseline state is the graph at the recorded baseline — that
+ * graph itself (`baselineGraphTexts`), which holds a node that joined the
+ * item later too: a node entering the current context set at a read
+ * (SPEC 10.4), or one a re-derivation joined while already absent. A node
+ * contained in none has no text. The tables are keyed by canonical
+ * reference (10.4), so the lookup is exact whatever the node's spelling
+ * became.
  */
 function absentNodeText(
+  view: SessionReadView,
   item: ReviewItem,
   reference: string,
   selection: TextSelection,
 ): string | undefined {
+  if (selection === "code") {
+    return undefined;
+  }
   const recorded =
-    item.derivedTexts[reference] ?? item.baselineTexts[reference];
-  if (recorded === undefined || selection === "code") {
+    item.derivedTexts[reference] ??
+    item.baselineTexts[reference] ??
+    baselineGraphTexts(view, reference);
+  if (recorded === undefined) {
     return undefined;
   }
   return selection === "own" ? recorded.ownText : recorded.subtreeText;
+}
+
+/**
+ * A stored reference's texts in the recorded-baseline graph a baseline
+ * session's read reconstructed (`view.generation.baseline`; SPEC 10.2: the
+ * item's baseline state in a baseline session) — the reference resolved as
+ * of the baseline journal prefix (SPEC 6.3: the baseline journal is a
+ * prefix of the current one; `resolveReferenceAt`), so a node that entered
+ * the workspace after the baseline, or whose spelling a distinct chain bore
+ * there, finds none. Undefined in a session without a baseline (`audit`,
+ * `coverage`), whose items' baseline state — the current graph at entry —
+ * survives only in their entry-time snapshots.
+ */
+function baselineGraphTexts(
+  view: SessionReadView,
+  reference: string,
+): RecordedTexts | undefined {
+  const baseline = view.generation.baseline;
+  if (baseline === undefined) {
+    return undefined;
+  }
+  const { spelling, resolves } = resolveReferenceAt(
+    baseline.journal,
+    baseline.journalLength,
+    reference,
+  );
+  const node = resolves ? baseline.graph.requirementNode(spelling) : undefined;
+  if (node === undefined) {
+    return undefined;
+  }
+  return {
+    ownText: baseline.textModel.ownText(node.document, node.section),
+    subtreeText: baseline.textModel.subtreeText(node.document, node.section),
+  };
 }
 
 /**
@@ -691,7 +774,7 @@ function nodeStateJson(
   return {
     node: spelling,
     present: false,
-    text: absentNodeText(item, reference, selection),
+    text: absentNodeText(view, item, reference, selection),
   };
 }
 
@@ -742,8 +825,12 @@ function originEntryJson(
  * state, and the self-contained text payload) — `show`'s whole document,
  * one element of `export`'s item list, and `next --json`'s `item` member.
  * Status is the effective one (SPEC 10.4: a stale resolution is never
- * reported as resolved); `baseline` and `current` report as recorded, each
- * node presented under its current identity (`presentRecordedState`).
+ * reported as resolved); `context` is the item's current context set
+ * (`presentedContext`, SPEC 10.4), each node's payload — identity,
+ * presence, range, text — over that set; `scope`, `origin`, `reason`, and
+ * `blockedBy` present as last assigned; `baseline` and `current` report as
+ * recorded, each node presented under its current identity
+ * (`presentRecordedState`).
  */
 export function itemDocument(
   view: SessionReadView,
@@ -760,7 +847,7 @@ export function itemDocument(
     reason: item.reason,
     note: item.note,
     scope: nodeStateJson(view, item, item.scope, scopeSelection),
-    context: item.context.map((reference) =>
+    context: presentedContext(view, item).map((reference) =>
       nodeStateJson(view, item, reference, contextTextSelection(item.kind)),
     ),
     origin: item.origin.map((reference) =>

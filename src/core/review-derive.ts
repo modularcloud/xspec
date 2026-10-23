@@ -28,7 +28,8 @@
 //   `splitItemDecomposition`) and `resolve`'s status/state update with its
 //   `updated`-triggered re-derivation (SPEC 10.5, `resolveSessionItem`);
 // - derives the generator-assigned current context sets reads feed to
-//   read-time invalidation (SPEC 10.4, `currentContextSets`);
+//   read-time invalidation and present as each item's `context`
+//   (SPEC 10.4, `currentContextSets`);
 // - orders items per the total order of SPEC 10.5 (`sortItemsPathBlocks`)
 //   and per the file-path-then-document order of SPEC 10.6 audit sessions
 //   and SPEC 10.7 coverage sessions (`sortItemsByFileThenDocument`), with
@@ -1479,7 +1480,8 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
  * run's expanded output), matched to the session's items by kind and scope
  * node. An item the generators no longer produce is absent from the map
  * (it retains its recorded context set). Feeds `ItemValidityInputs.
- * currentContexts` (review-state.ts); nothing is persisted.
+ * currentContexts` (review-state.ts), and reads present it as each item's
+ * `context` (SPEC 10.4, 10.7); nothing is persisted.
  */
 export function currentContextSets(
   items: readonly ReviewItem[],
