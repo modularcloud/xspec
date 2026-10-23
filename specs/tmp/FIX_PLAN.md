@@ -4,7 +4,7 @@ Source: the compliance determination at `e049255` (2026-10-22; branch `claude/xs
 
 Findings are cited as A<n>, B<n>, C<n>. Where reviewers reported one gap, it is one task: A1 = B22 (Task 2), A2 = B24 (Task 4), A3 = B28 (Task 8), A4 = B20 (Task 5), A5 = B26 (Tasks 31–33), B5 = C2 (Task 13). VERIFY's suite-windows failure (T7-1), which no reviewer counted, is Task 9.
 
-Goal: every test passes — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head — and the product meets SPEC.md. Tasks 2, 4, 5, and 36 (landed), 6–27, and 34 turn VERIFY's 46 failures green (the index says which task each test waits on; Task 36 was found behind Task 2's arms). Tasks 28–33 and 37 fix SPEC departures no test pins (Task 37 was found beside Task 5); they are in scope all the same, as was Task 3 (landed), which resolves a given baseline whole, its content's validation included, ahead of the gate. Task 1 (landed) recorded the Developer's third accepted residual in AGENTS.md. Task 34 runs after every other task but Task 35, because it is expected to end in a TEST-SPEC problem (its text says why), and Task 35 confirms everything and deletes this file.
+Goal: every test passes — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head — and the product meets SPEC.md. Tasks 2, 4, 5, 6, and 36 (landed), 7–27, and 34 turn VERIFY's 46 failures green (the index says which task each test waits on; Task 36 was found behind Task 2's arms). Tasks 28–33 and 37 fix SPEC departures no test pins (Task 37 was found beside Task 5); they are in scope all the same, as was Task 3 (landed), which resolves a given baseline whole, its content's validation included, ahead of the gate. Task 1 (landed) recorded the Developer's third accepted residual in AGENTS.md. Task 34 runs after every other task but Task 35, because it is expected to end in a TEST-SPEC problem (its text says why), and Task 35 confirms everything and deletes this file.
 
 Not planned:
 - A6 and B27 (the dot forms `SPEC.toString`, `SPEC.a.valueOf`, … type-checking clean) and A's and B's blocking spec defect (the bare bracket form `SPEC.a["toString"];`): the Developer's third accepted residual (below). Nothing is logged to a problems file for them and no fix is planned; Task 1 (landed) recorded the residual in AGENTS.md, as the "Known SPEC 4.1/14.7 gap for `Object`-member path names" bullet, which also records the hand check that `build` and `check` report the 14.7 finding for both spellings. xspec's own 14.7 finding for such paths stays required.
@@ -69,10 +69,10 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 | T13.5-8 | section-13.5 | 2 (landed) | passes since Task 2 |
 | T11.2-6 | section-11.2 | 7 | the unreadable emit directory, failing side: `view specs/A.mdx` answers, exit 1; expected the read failure, exit 2 |
 | T12.0-13 | section-12.0-ii | 5 (landed) | passes since Task 5 (2.25 s locally, alone and in a twelve-file run; and in CI run 1562 at `4fac3a7`); at `e049255` `rename specs/a#b.mdx x y --json` exited 2 (unknown file), expected 1 (the invalid-workspace refusal) |
-| T12.3-1 | section-12.3-12.5 | 6 | `ids --json` entries: no entry for a discovered spec source holding no listed ID |
+| T12.3-1 | section-12.3-12.5 | 6 (landed) | passes since Task 6 (9.7 s locally in a ten-file run, its entries workspace's four human forms read through the human ids decoders included); at `e049255` `ids --json` entries: no entry for a discovered spec source holding no listed ID |
 | T10.1-4 | section-10.1 | 10 | the decomposed-item state: `review status cor` exits 0, expected 1 (corrupt) |
 | T12.0-10 | section-12.0-ii | 10 | the decomposed-item state: `review resolve cor <unknown-id> --status updated` exits 2 (unknown item), expected 1 (corrupt) |
-| T12.0-15 | section-12.0-iv | 10 (first), then 12, 6, 2 (landed: T6.3-6's journal errors, human twin `xspec: journal error: .xspec/journal: …`, pass by hand); 34 (expected harness collision, see Task 34) | its review family over T10.1-4's decomposed-item staging: `review status cor --json` exits 0, expected 1; its later families were never reached |
+| T12.0-15 | section-12.0-iv | 10 (first), then 12; 6 (landed: its `ids` family's fifteen twins pass — at Task 6's tree every family before the last, `runCorruptNamingTwins`, passed locally, 599.9 s in a seventeen-file run); 2 (landed: T6.3-6's journal errors, human twin `xspec: journal error: .xspec/journal: …`, pass by hand); 34 (expected harness collision, see Task 34) | its corrupt-naming family (the last) over T10.1-4's decomposed-item staging: `review status cor --json` exits 0, expected 1 — the same first failure at Task 6's tree |
 | T10.1-6 | section-10.1 | 11 | stale twin with `.xspec/reviews` a plain file: the refused `create` refreshes graph data before examining the session directory |
 | T10.7-1 | section-10.7-i | 12 | case pair (i), `foo.json` and `FOO.json` both corrupt: `review create --strategy audit --name Foo --json` reports 1 finding, expected 2 |
 | T10.7-15 | section-10.7-iii | 13 ((a)–(d), (g)), 14 ((e)), 11 ((f)(i)), 2 ((f)(ii); landed: its journal-error `create --base c1 --name a` beside an existing `a` exits 2 `journal-error` by hand, nothing modified) | (a) on (A)'s stale state, `resolve a <P's item> --status no-change` (blocked): graph data refreshed before the refusal |
@@ -96,18 +96,6 @@ VERIFY's 46 failures at `e049255`: 45 on `suite-linux` (locally and in CI run 15
 | T10.6-3 | section-10.6 | 34 | p.a's item before the re-derivation: no `scopeNodes` member |
 | P-16 | section-16-p16 | 34 (first), 15, 20, 26 | falsified at seed 271828183, trial 1 of 6: `review export p16 --json` item-1 (subtree-coherence `specs/A.mdx`) has no `scopeNodes` member |
 | T7-1 (suite-windows) | `test/windows/e6-subset.test.ts` | 9 | the single-casing probe: `build` run from `sub/`, which holds only the plain file `XSPEC.config.ts` holding `)`, exits 2 with a configuration error, expected 0 |
-
-## Task 6 — `ids` lists one entry per discovered spec source, empty ones included (SPEC 12.3; B21)
-
-**Requirement.** 12.3: "Lists requirement IDs grouped by file: one entry per discovered spec source — none for a code source … — in byte order of workspace-relative path, each holding its file's listed IDs in document order and present even when it holds none (a file with no sections, or one whose every ID `--unreferenced` excludes) … `--file <glob>` restricts the entries to the spec sources the glob matches … so a glob matching none, or only code sources, leaves no entry." `--tree` renders the same entries.
-
-**Observed** (B21; reviewer B's probe `p4`): a prose-only `specs/E.mdx` gets no entry; under `--unreferenced`, `specs/A.mdx`, whose only ID is referenced, gets no entry; `ids --file specs/E.mdx --json` answers `[]` where one empty entry is due (T12.3-1).
-
-**Location.** `idsCommand` and `groupByFile` in `src/cli/commands/ids.ts` build entries from the listed nodes alone; its module header (~line 20) defends omitting empty entries.
-
-**Change.** Build the entries from the discovered spec sources (those `--file` matches, when given), in byte order of path, each holding its listed IDs in document order — possibly none — in the JSON form, the flat human form (a file line with no ID lines beneath it, which T12.0-15's human `ids` decoder reads as an empty entry), and `--tree`. `ids` is a gated read (13.3), so every discovered spec source has a valid path where it answers. Rewrite the module header.
-
-**Verification.** T12.3-1 (section-12.3-12.5); T12.0-15's `ids` family once its earlier tasks land. Regressions: `section-12.3-12.5`, `section-12.0-i`, `section-13.3`, `section-14-ii` (T14-10(g)).
 
 ## Task 7 — The 11.2 surfaces make the gate's write-path reads on a failing workspace too (SPEC 11.2, 13.3, 14.22, 14.25; B19)
 

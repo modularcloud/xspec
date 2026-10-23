@@ -1,29 +1,38 @@
 // `xspec ids` (SPEC 12.3): requirement IDs grouped by file.
 //
-// Files in byte order of workspace-relative path, IDs within a file in
-// document order — exactly the order of the graph's requirement-node list
-// (SPEC 12.0 determinism). `--tree` renders each file's IDs as a tree
-// following section nesting instead of a flat list, in the same file and
-// document order. `--file <glob>` restricts the listing to files the glob
+// One entry per discovered spec source — none for a code source, which
+// bears no requirement IDs — in byte order of workspace-relative path, each
+// holding its file's listed IDs in document order and present even when it
+// holds none: a file with no sections, or one whose every ID
+// `--unreferenced` excludes (SPEC 12.3). The entries come from discovery —
+// the classification's spec sources, byte-ordered (SPEC 12.0) — and their
+// IDs from the graph's requirement-node list, whose nodes within a file
+// follow document order. `ids` is a gated read (SPEC 13.3), so where it
+// answers every discovered spec source has a valid path (14.19) and parses
+// (14.20). `--tree` renders each file's IDs as a tree following section
+// nesting instead of a flat list, in the same file and document order.
+// `--file <glob>` restricts the entries to the spec sources the glob
 // matches (the rules of SPEC 7, as in 11: a pattern resolving outside the
-// workspace root is an invalid flag value, exit 2). `--unreferenced`
-// restricts it to requirement nodes with no incoming dependency edges from
-// specs or code (`contains` does not count) — unreferenced is not the same
-// as uncovered (SPEC 12.3). When the listing is restricted and a listed
-// node's parent is not listed, `--tree` nests the node under its nearest
-// listed ancestor, or at its file's top level when no ancestor is listed:
-// the tree contains exactly the listed IDs.
+// workspace root is an invalid flag value, exit 2), so a glob matching
+// none, or only code sources, leaves no entry. `--unreferenced` restricts
+// the listed IDs to those of requirement nodes with no incoming dependency
+// edges from specs or code (`contains` does not count) — unreferenced is
+// not the same as uncovered (SPEC 12.3). When the listing is restricted and
+// a listed node's parent is not listed, `--tree` nests the node under its
+// nearest listed ancestor, or at its file's top level when no ancestor is
+// listed: the tree contains exactly the listed IDs.
 //
 // Roots never appear: the listing is of requirement IDs, and a file's
-// implicit root carries none (SPEC 1.2, 1.3). A file none of whose IDs
-// survive the restrictions contributes no entry (SPEC 12.3 fixes nothing
-// about empty entries; omitting them keeps both forms minimal and
-// byte-deterministic). The answer comes from the refreshed graph
-// (SPEC 13.3, via cli/prepare.ts); `--json` emits the single JSON document
-// per SPEC 12.0, and the human form carries the same information.
+// implicit root carries none (SPEC 1.2, 1.3). The answer comes from the
+// refreshed graph (SPEC 13.3, via cli/prepare.ts); `--json` emits the
+// single JSON document per SPEC 12.0, and the human form carries the same
+// information — each entry a file line with its IDs (or, under `--tree`,
+// its tree) beneath it, an empty entry its file line alone.
 
 import type { JsonObject } from "../../core/canonical-json.js";
+import type { DiscoveredSource } from "../../core/discovery.js";
 import type { ExitCode } from "../../core/findings.js";
+import type { CompiledGlob } from "../../core/glob.js";
 import type { RequirementNode, WorkspaceGraph } from "../../core/graph.js";
 import { renderPathText } from "../../core/path-text.js";
 import type { Invocation } from "../args.js";
@@ -53,31 +62,48 @@ function isReferenced(graph: WorkspaceGraph, node: RequirementNode): boolean {
     .some((edge) => edge.kind !== "contains");
 }
 
-/** One file's listed nodes, in document order. */
+/** One entry: a discovered spec source and its listed nodes, possibly none. */
 interface FileGroup {
   readonly file: string;
-  readonly nodes: RequirementNode[];
+  readonly nodes: readonly RequirementNode[];
 }
 
 /**
- * Group the listed nodes by file, preserving order: the input follows the
- * graph's requirement-node list — files in byte order of workspace-relative
- * path, nodes within a file in document order (SPEC 12.3, 12.0) — so each
- * file's nodes are contiguous and the groups come out file-byte-ordered.
+ * SPEC 12.3: the listing's entries — one per discovered spec source the
+ * listing covers (those `fileGlob` matches, when given), in byte order of
+ * workspace-relative path (the classification's order, SPEC 12.0), none
+ * for a code source — each holding its file's listed nodes in document
+ * order, and present even when it holds none. `listed` follows the graph's
+ * requirement-node list, whose nodes within a file come in document order,
+ * so each file's nodes accumulate in that order.
  */
-function groupByFile(listed: readonly RequirementNode[]): FileGroup[] {
-  const groups: FileGroup[] = [];
-  const byFile = new Map<string, FileGroup>();
-  for (const node of listed) {
-    let group = byFile.get(node.path);
-    if (group === undefined) {
-      group = { file: node.path, nodes: [] };
-      byFile.set(node.path, group);
-      groups.push(group);
-    }
-    group.nodes.push(node);
+function entriesOf(
+  specSources: readonly DiscoveredSource[],
+  listed: readonly RequirementNode[],
+  fileGlob: CompiledGlob | undefined,
+): FileGroup[] {
+  const byFile = new Map<string, RequirementNode[]>();
+  for (const source of specSources) {
+    byFile.set(source.path, []);
   }
-  return groups;
+  for (const node of listed) {
+    const nodes = byFile.get(node.path);
+    if (nodes === undefined) {
+      // A gated read answers from a passing workspace, every node of whose
+      // graph lies in a discovered spec source (SPEC 13.3, 5.1).
+      throw new Error(
+        `xspec internal error: requirement node ${node.identity} outside ` +
+          `every discovered spec source`,
+      );
+    }
+    nodes.push(node);
+  }
+  return specSources
+    .filter((source) => fileGlob === undefined || fileGlob.matches(source.path))
+    .map((source) => ({
+      file: source.path,
+      nodes: byFile.get(source.path) ?? [],
+    }));
 }
 
 /** One `--tree` node: the full requirement ID plus nested children. */
@@ -129,9 +155,10 @@ function treeNodeJson(node: TreeNode): JsonObject {
 }
 
 /**
- * The flat human listing: the file line — the path in the shared human
- * spelling (core/path-text.ts, SPEC 12.0), as in every human listing
- * here — with the IDs indented under it.
+ * The flat human listing: each entry's file line — the path in the shared
+ * human spelling (core/path-text.ts, SPEC 12.0), as in every human listing
+ * here — with its IDs indented under it; an entry holding no ID is its
+ * file line alone (SPEC 12.3).
  */
 function renderFlatHuman(groups: readonly FileGroup[]): string {
   let out = "";
@@ -144,7 +171,11 @@ function renderFlatHuman(groups: readonly FileGroup[]): string {
   return out;
 }
 
-/** The tree human listing: full IDs indented by nesting depth. */
+/**
+ * The tree human listing: each entry's file line with its tree's full IDs
+ * indented by nesting depth beneath it; an entry holding no node is its
+ * file line alone (SPEC 12.3).
+ */
 function renderTreeHuman(
   groups: readonly { file: string; nodes: readonly TreeNode[] }[],
 ): string {
@@ -181,18 +212,16 @@ export async function idsCommand(
   if (!prepared.ok) {
     return prepared.exit;
   }
-  const graph = prepared.analysis.graph;
+  const { graph, classification } = prepared.analysis;
   const unreferenced = flagPresent(invocation, "--unreferenced");
 
-  // The listed set (SPEC 12.3): non-root requirement nodes surviving the
-  // restrictions, in the graph's file-byte/document order.
-  const listed = graph.requirementNodes.filter((node) => {
-    if (node.id === null) return false;
-    if (fileGlob !== undefined && !fileGlob.matches(node.path)) return false;
-    if (unreferenced && isReferenced(graph, node)) return false;
-    return true;
-  });
-  const groups = groupByFile(listed);
+  // The listed IDs (SPEC 12.3): those of non-root requirement nodes
+  // surviving `--unreferenced`, in the graph's file-byte/document order;
+  // the entries, `--file`'s restriction among them, come from discovery.
+  const listed = graph.requirementNodes.filter(
+    (node) => node.id !== null && !(unreferenced && isReferenced(graph, node)),
+  );
+  const groups = entriesOf(classification.specSources, listed, fileGlob);
 
   if (flagPresent(invocation, "--tree")) {
     const trees = groups.map((group) => ({
