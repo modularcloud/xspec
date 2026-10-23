@@ -219,8 +219,11 @@ export interface GeneratedItem {
  * `subtree-coherence` items and the scope root's `parent-consistency`
  * item — is the strategy's to define (context, origin, reason), because it
  * mirrors what the strategy generates (SPEC 10.7: "its context the child's
- * ancestor chain, as in 10.5 and 10.6"; origin "the originating nodes
- * (5.6) within its scope and context — empty in an `audit` session").
+ * ancestor chain, as in 10.5 and 10.6"; "Each decomposition item's
+ * `origin` is, as in 10.5, the `changed` nodes in its scope — for a
+ * `parent-consistency` item, in its scope node's subtree — and is empty in
+ * an `audit` session"). The replay at re-derivation and `split` draw on the
+ * same source, so both assign the same content.
  */
 export interface DecompositionContentSource {
   /**

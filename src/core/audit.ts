@@ -107,8 +107,8 @@ class AuditItemBuilder {
         this.subtreeCoherenceItem(scopeIdentity),
       // SPEC 10.7: the decomposed scope root's `parent-consistency` item —
       // for its own text, context the child subtrees, blocked by the child
-      // items; its origin is the originating nodes within its scope and
-      // context — empty in an `audit` session.
+      // items; each decomposition item's origin "is empty in an `audit`
+      // session".
       splitParentConsistencyItem: (
         scopeIdentity,
         childIdentities,

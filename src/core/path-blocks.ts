@@ -768,11 +768,27 @@ class PathBlocksComputation {
     return { identity, baselineIdentity: null, deleted: false };
   }
 
+  /**
+   * SPEC 10.7: a decomposition item's origin is, "as in 10.5, the
+   * `changed` nodes in its scope — for a `parent-consistency` item, in its
+   * scope node's subtree": the `changed` nodes in the subtree rooted at
+   * the record, the root included when `changed` — rule 1's origin
+   * (`compute`), over the same walk. Nothing of the ancestor chain enters,
+   * and nothing merely `metadata-changed` (SPEC 5.6: categories are
+   * independent flags). Empty for a stored identity without a record.
+   */
+  private decompositionOrigin(record: NodeChange | undefined): GeneratedNode[] {
+    if (record === undefined) return [];
+    return this.nodesOf(
+      this.scopeRecords(record, (candidate) => candidate.changed),
+    );
+  }
+
   private contentSource(): DecompositionContentSource {
     return {
       // SPEC 10.7: one subtree-coherence item per child subtree — its
       // context the child's ancestor chain, as in 10.5; its origin the
-      // originating nodes (5.6) within its scope and context.
+      // `changed` nodes in its scope (`decompositionOrigin`).
       // `scopeResolves` (DecompositionContentSource doc) defaults to true:
       // an unflagged call names a current-graph node.
       subtreeCoherenceItem: (
@@ -782,29 +798,11 @@ class PathBlocksComputation {
         const record = this.recordOfStored(scopeIdentity, scopeResolves);
         const scope = this.generatedNodeOfStored(scopeIdentity, scopeResolves);
         const chain = record === undefined ? [] : this.ancestorChain(record);
-        const origin = new Set<NodeChange>();
-        if (record !== undefined) {
-          // Within its scope: the subtree's originating nodes (5.6 —
-          // `changed` or `metadata-changed`).
-          for (const member of this.scopeRecords(
-            record,
-            (candidate) => candidate.changed || candidate.metadataChanged,
-          )) {
-            origin.add(member);
-          }
-          // Within its context: the ancestor chain's own originating
-          // nodes.
-          for (const ancestor of chain) {
-            if (ancestor.changed || ancestor.metadataChanged) {
-              origin.add(ancestor);
-            }
-          }
-        }
         return {
           kind: "subtree-coherence",
           scope,
           context: this.nodesOf(chain),
-          origin: this.nodesOf(origin),
+          origin: this.decompositionOrigin(record),
           reason:
             `review the subtree rooted at ${scope.identity} as a single ` +
             `block — split from its parent's review (SPEC 10.7, 10.5)`,
@@ -812,7 +810,9 @@ class PathBlocksComputation {
         };
       },
       // SPEC 10.7: the scope root's parent-consistency item — for its own
-      // text, context the child subtrees, blocked by the child items.
+      // text, context the child subtrees, blocked by the child items; its
+      // origin the `changed` nodes in its scope node's subtree, the scope
+      // node included when `changed` (`decompositionOrigin`).
       splitParentConsistencyItem: (
         scopeIdentity,
         childIdentities,
@@ -820,17 +820,6 @@ class PathBlocksComputation {
       ): GeneratedItem => {
         const record = this.recordOfStored(scopeIdentity, scopeResolves);
         const scope = this.generatedNodeOfStored(scopeIdentity, scopeResolves);
-        const origin = new Set<NodeChange>();
-        if (record !== undefined) {
-          // The originating nodes within its scope (the root) and its
-          // context (the child subtrees) — together, the root's subtree.
-          for (const member of this.scopeRecords(
-            record,
-            (candidate) => candidate.changed || candidate.metadataChanged,
-          )) {
-            origin.add(member);
-          }
-        }
         return {
           kind: "parent-consistency",
           scope,
@@ -839,7 +828,7 @@ class PathBlocksComputation {
           context: childIdentities.map((identity) =>
             this.generatedNodeOfStored(identity, true),
           ),
-          origin: this.nodesOf(origin),
+          origin: this.decompositionOrigin(record),
           reason:
             `review the own text of ${scope.identity} against its child ` +
             `subtrees — split from its subtree review (SPEC 10.7)`,
