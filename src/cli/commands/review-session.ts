@@ -62,7 +62,8 @@
 // text from the current graph, an absent node's from the most recent
 // recorded state containing it (the derivation-time snapshots, else the
 // item's baseline snapshots), and no text for a node contained in none or
-// for a code-location scope.
+// for a code-location scope — and, on a `metadata-consistency` item, its
+// scope node's metadata pair (core/review-metadata.ts).
 
 import { generateAuditItems } from "../../core/audit.js";
 import type { JsonObject } from "../../core/canonical-json.js";
@@ -95,6 +96,8 @@ import {
   sortItemsPathBlocks,
 } from "../../core/review-derive.js";
 import type { BaselineDerivationSide } from "../../core/review-derive.js";
+import type { MetadataSide } from "../../core/review-metadata.js";
+import { metadataPairOf } from "../../core/review-metadata.js";
 import type { ReviewStateInputs } from "../../core/review-state.js";
 import {
   deriveEffectiveStatuses,
@@ -763,8 +766,49 @@ export function itemDocument(
     origin: item.origin.map((reference) =>
       originEntryJson(view, item, reference),
     ),
+    // SPEC 10.7: a `metadata-consistency` item's payload carries its scope
+    // node's metadata pair; no other kind's does.
+    metadata:
+      item.kind === "metadata-consistency"
+        ? metadataPairJson(view, item)
+        : undefined,
     baseline: recordedStateToJson(presentRecordedState(journal, item.baseline)),
     current: recordedStateToJson(presentRecordedState(journal, item.current)),
+  };
+}
+
+/**
+ * SPEC 10.7: a `metadata-consistency` item's metadata pair
+ * (core/review-metadata.ts) — before from the item's baseline state, the
+ * recorded-baseline graph a baseline session's read reconstructed
+ * (`view.generation.baseline`, SPEC 10.2), after from the current graph —
+ * as `{ "before", "after" }`, a side `{ "present": false }` where its graph
+ * state lacks the node, else `{ "present": true, "d", "coverage", "tags" }`:
+ * the `d` targets under their current identities (10.4), the coverage
+ * attribute and the tags in 12.7's value forms.
+ */
+function metadataPairJson(view: SessionReadView, item: ReviewItem): JsonObject {
+  const pair = metadataPairOf(
+    item.scope,
+    { graph: view.analysis.graph, journal: view.analysis.journal.journal },
+    view.generation.baseline,
+  );
+  return {
+    before: metadataSideJson(pair.before),
+    after: metadataSideJson(pair.after),
+  };
+}
+
+/** One metadata side as JSON (SPEC 10.7, 12.7; `metadataPairJson`). */
+function metadataSideJson(side: MetadataSide): JsonObject {
+  if (!side.present) {
+    return { present: false };
+  }
+  return {
+    present: true,
+    d: [...side.d],
+    coverage: side.coverage,
+    tags: side.tags === null ? null : [...side.tags],
   };
 }
 
@@ -797,6 +841,11 @@ export function renderItemHuman(
   out += `  origin:${origins.length === 0 ? " (none)" : ""}\n`;
   for (const entry of origins) {
     out += renderOriginHuman(entry);
+  }
+  const metadata = document["metadata"];
+  if (metadata !== undefined) {
+    // SPEC 10.7: the metadata pair, on `metadata-consistency` items alone.
+    out += renderMetadataPairHuman(metadata as JsonObject);
   }
   const journal = view.analysis.journal.journal;
   out += `  baseline: ${compactStateHuman(presentRecordedState(journal, item.baseline))}\n`;
@@ -836,6 +885,49 @@ function renderOriginHuman(entry: JsonObject): string {
     if (typeof text === "string") {
       out += renderTextBlock(text, "      ");
     }
+  }
+  return out;
+}
+
+/**
+ * A metadata pair as human lines (SPEC 10.7, 12.0: the information of the
+ * JSON member): each side's presence and, for a present side, its `d`
+ * targets and tags one per line beneath their labels (`(none)` on the label
+ * line for an empty list, `(absent)` for a root's structurally absent tags)
+ * and its coverage attribute (`(absent)` for a root's).
+ */
+function renderMetadataPairHuman(pair: JsonObject): string {
+  let out = "  metadata:\n";
+  for (const side of ["before", "after"] as const) {
+    const sideObject = pair[side] as JsonObject;
+    if (sideObject["present"] !== true) {
+      out += `    ${side}: absent\n`;
+      continue;
+    }
+    out += `    ${side}: present\n`;
+    out += renderMetadataListHuman("d", sideObject["d"] as readonly string[]);
+    const coverage = sideObject["coverage"];
+    out += `      coverage: ${coverage === null ? "(absent)" : String(coverage)}\n`;
+    const tags = sideObject["tags"] as readonly string[] | null;
+    out +=
+      tags === null
+        ? "      tags: (absent)\n"
+        : renderMetadataListHuman("tags", tags);
+  }
+  return out;
+}
+
+/** A labelled list of a metadata side, one element per line. */
+function renderMetadataListHuman(
+  label: string,
+  values: readonly string[],
+): string {
+  if (values.length === 0) {
+    return `      ${label}: (none)\n`;
+  }
+  let out = `      ${label}:\n`;
+  for (const value of values) {
+    out += `        - ${value}\n`;
   }
   return out;
 }

@@ -674,11 +674,21 @@ export class Journal {
    * remaining journal, SPEC 10.4/6.3), byte-for-byte what a Journal over
    * that slice computes, without materializing one. Defaults to the whole
    * journal; values beyond it clamp to the empty suffix, as `slice` does.
+   * The optional `to` stops before entry `to` — the mapping of
+   * `entries.slice(from, to)`, so `to` = a baseline journal's length maps
+   * an identity as of that prefix (SPEC 6.3: the baseline journal is a
+   * prefix of the current one). Defaults to the journal's end; values
+   * beyond it clamp, as `slice` does.
    */
-  mapForward(identity: string, from = 0): string {
+  mapForward(
+    identity: string,
+    from = 0,
+    to: number = this.sourceIndex.length,
+  ): string {
     let current = identity;
     const start = journalBound(from, this.sourceIndex.length);
-    for (let index = start; index < this.sourceIndex.length; index += 1) {
+    const end = journalBound(to, this.sourceIndex.length);
+    for (let index = start; index < end; index += 1) {
       const target = this.sourceIndex[index].get(current);
       if (target !== undefined) {
         current = target;

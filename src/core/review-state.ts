@@ -479,6 +479,41 @@ export function resolveReference(
 }
 
 /**
+ * Resolve a stored reference as of the journal's first `length` entries —
+ * the recorded-baseline side of a baseline session, whose journal is that
+ * prefix of the current one (SPEC 6.3): the identity the referenced node
+ * bore then (its canonical identity mapped forward through the prefix
+ * alone), and whether the reference resolves there — `resolveReference`'s
+ * round trip, judged against the prefix (SPEC 5.4, 10.4). It does not
+ * resolve when the reference's chain begins past the prefix (the node
+ * entered the workspace after it) or when, at the prefix, its spelling is
+ * borne by a different chain; a baseline-graph lookup then finds no node
+ * of this reference.
+ */
+export function resolveReferenceAt(
+  journal: Journal,
+  length: number,
+  reference: string,
+): ReferenceResolution {
+  const canonical = parseReference(reference);
+  if (canonical.position > length) {
+    return { spelling: canonical.identity, resolves: false };
+  }
+  const spelling = journal.mapForward(
+    canonical.identity,
+    canonical.position,
+    length,
+  );
+  const roundTrip = journal.canonicalIdentity(spelling, length);
+  return {
+    spelling,
+    resolves:
+      roundTrip.identity === canonical.identity &&
+      roundTrip.position === canonical.position,
+  };
+}
+
+/**
  * A recorded state as presented (SPEC 10.2: reads report both fields as
  * recorded; 10.4: every recorded node presented under its current
  * identity): each node keyed by its derived current spelling. Where two
