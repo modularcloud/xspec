@@ -11,14 +11,16 @@
 //
 // - `subtree-coherence` — subtreeHash and metadataHash of each scope node.
 //   The scope is the root and all its descendants (10.5, 10.6), so the
-//   scope-node set is derived from the graph the state is computed against:
-//   a present root contributes itself and every current descendant, an
-//   absent root contributes itself alone. Deriving the set identically at
-//   record and at check keeps the two computations structurally aligned —
-//   a descendant added or removed since the record surfaces as a key
-//   difference (and through the root's subtreeHash), while a
-//   metadata-only edit on a descendant, which changes no subtreeHash
-//   (SPEC 5.5), still invalidates through that scope node's metadataHash.
+//   scope-node set is derived from the graph the state is recorded
+//   against: a present root contributes itself and every current
+//   descendant, an absent root contributes itself alone. The check judges
+//   the recorded nodes alone (below): a descendant added since the record
+//   has no entry and surfaces through the root's recorded subtreeHash
+//   (SPEC 5.5: it changes whenever a node in the subtree is added, removed,
+//   or reordered), a removed one through its own recorded presence and the
+//   root's subtreeHash, while a metadata-only edit on a descendant, which
+//   changes no subtreeHash (SPEC 5.5), still invalidates through that
+//   scope node's recorded metadataHash.
 // - `parent-consistency` — ownHash and metadataHash of the scope node;
 //   subtreeHash of each context node (the branch children, 10.5).
 // - `dependency-consistency` — ownHash and metadataHash of the scope node;
@@ -43,23 +45,32 @@
 // itself, while its deletion, a presence change, does.
 //
 // Invalidation (SPEC 10.4): a resolved item becomes `invalidated` when its
-// recorded state differs from the same state computed against the current
-// graph — a recorded hash changed, a node's presence changed in either
-// direction, or the item's context set changed. The recorded context set is
-// the item's `context` field (10.2), rewritten only where it is assigned —
-// creation and re-derivation (10.5), a `split` (10.7), and each resolve,
-// which assigns the item its current context set and records `current`
-// over it (10.4: "the context a read of the same workspace presents",
-// review-derive.ts `resolveSessionItem`; an `updated` resolve once the
-// re-derivation it triggers is done, against the item as re-derived) —
-// and the current context
-// set is the one the session's strategy generators, re-run with the
-// recorded creation parameters and decompositions against the current
-// workspace, assign to the item; callers supply it (`ItemValidityInputs`)
-// and an item the generators no longer produce retains its recorded set. A
-// node that was already absent when the state was recorded does not
-// invalidate by remaining absent — the absent marker compares equal — so
-// deletion review stays resolvable (SPEC 10.4, 10.2).
+// recorded state differs from the current graph — a recorded hash changed,
+// a recorded presence changed in either direction, or its current context
+// set differs from its recorded context set. Each node recorded in
+// `current` is judged alone, against the current graph, under the presence
+// and the hash names recorded for it (`recordedNodesHold`), whether or not
+// the item still names it; a node of the item's scope, context, or origin
+// with no recorded entry — one that joined the item after `current` was
+// last written, at a re-derivation (10.5) — has no recorded presence until
+// a resolve records it and contributes nothing, so a changed origin by
+// itself invalidates nothing (10.5). The recorded context set is the
+// item's `recordedContext` (src/core/review.ts): the context nodes
+// recorded with `current` — at creation, and at each resolve, which
+// assigns the item its current context set as `context` and records
+// `current` over it (10.4: "the context a read of the same workspace
+// presents", review-derive.ts `resolveSessionItem`; an `updated` resolve
+// once the re-derivation it triggers is done, against the item as
+// re-derived) — and kept, with `current`, where `context` alone is
+// reassigned: a re-derivation (10.5) or a `split` reusing the item (10.7).
+// The current context set is the one the session's strategy generators,
+// re-run with the recorded creation parameters and decompositions against
+// the current workspace, assign to the item — callers supply it
+// (`ItemValidityInputs`) — and, for an item the generators no longer
+// produce, its `context` as last assigned. A node that was already absent
+// when the state was recorded does not invalidate by remaining absent —
+// the absent marker compares equal — so deletion review stays resolvable
+// (SPEC 10.4, 10.2).
 //
 // Identity policy (src/core/review.ts header; SPEC 10.4, 5.4): sessions
 // store every node reference as a canonical identity in the injective key
@@ -90,10 +101,11 @@
 // Everything here is pure: item validity is recomputed against the current
 // graph on every read (`status`, `next`, `show`, `export`) and never
 // persisted — reads never write the session file; sessions change only
-// through the mutating subcommands (SPEC 10.4, 13.5). The one computation
-// (`computeRecordedState`) serves both sides: the mutating subcommands
-// record its result (item creation and each resolve, 10.2), and reads
-// compare the recorded value against a fresh run.
+// through the mutating subcommands (SPEC 10.4, 13.5). One per-node
+// computation (`recordedNodeState`) serves both sides: the mutating
+// subcommands record `computeRecordedState`'s result (item creation and
+// each resolve, 10.2), and reads judge each recorded node against a fresh
+// run of it over the current graph.
 
 import type { RequirementNode, WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
@@ -160,8 +172,9 @@ export interface ItemStateSpec {
  * item's relevant hashes per the kind table (module header) and, for every
  * scope, context, and origin node, whether the node is present — an absent
  * node's hashes recorded as the explicit absent marker. This is the value
- * the mutating subcommands record (item creation and each resolve, 10.2)
- * and the value reads recompute for the invalidation comparison.
+ * the mutating subcommands record (item creation and each resolve, 10.2);
+ * reads judge each node it records against the current graph
+ * (`recordedNodesHold`).
  */
 export function computeRecordedState(
   item: ItemStateSpec,
@@ -254,8 +267,7 @@ export function computeRecordedState(
  * to a current node — deleted, or its identity ceased to resolve
  * (SPEC 10.4) even though its derived spelling is borne by a distinct
  * recaptured node — has no descendants and contributes its stored
- * reference alone. Deriving the set identically at record and at check
- * keeps the two computations structurally aligned (module header).
+ * reference alone.
  */
 function scopeSubtreeReferences(
   inputs: ReviewStateInputs,
@@ -291,7 +303,7 @@ function scopeSubtreeReferences(
  * node, the absent marker otherwise. Hashes are read only for a resolving,
  * present node. */
 function recordedNodeState(
-  item: ItemStateSpec,
+  item: Pick<ItemStateSpec, "kind" | "scope">,
   reference: string,
   names: ReadonlySet<RecordedHashName>,
   inputs: ReviewStateInputs,
@@ -332,31 +344,39 @@ function recordedNodeState(
 }
 
 // ---------------------------------------------------------------------------
-// Comparing recorded states (SPEC 10.4)
+// Judging recorded states (SPEC 10.4)
 // ---------------------------------------------------------------------------
 
 /**
- * SPEC 10.4: whether two recorded states agree — the same node set, each
- * node with the same presence and, when present, the same recorded hash
- * values. Any difference is an invalidation cause: a recorded hash changed,
- * a node's presence changed in either direction, or the derived node set
- * itself moved (a scope subtree or impact-target set gaining or losing a
- * member). Both states must be in one identity space — recorded states
- * mapped forward before comparing (module header).
+ * SPEC 10.4: whether every node an item's `current` records still holds
+ * against the graph `inputs` describes — each recorded node judged alone,
+ * under its recorded presence and the hash names recorded for it: a node
+ * recorded absent must still be absent (an already-absent node does not
+ * invalidate by remaining absent), and a node recorded present must still
+ * be present, each recorded hash value unchanged. A recorded node the item
+ * no longer names keeps its entry and is judged all the same. A node with
+ * no recorded entry — one that joined the item's scope, context, or origin
+ * after `current` was last written (10.5), a descendant authored since, an
+ * impact-edge target gained since — contributes nothing: it "has no
+ * recorded presence until a resolve records it", so a changed origin by
+ * itself invalidates nothing (10.5). Recorded keys are stored canonical
+ * references, judged by canonical resolution (module header).
  */
-export function recordedStatesEqual(
-  a: RecordedState,
-  b: RecordedState,
+export function recordedNodesHold(
+  item: Pick<ReviewItem, "kind" | "scope" | "current">,
+  inputs: ReviewStateInputs,
 ): boolean {
-  const aEntries = Object.entries(a.nodes);
-  if (aEntries.length !== Object.keys(b.nodes).length) {
-    return false;
-  }
-  for (const [identity, aNode] of aEntries) {
-    if (!Object.hasOwn(b.nodes, identity)) {
-      return false;
+  for (const [reference, recorded] of Object.entries(item.current.nodes)) {
+    const names = new Set<RecordedHashName>();
+    if (recorded.present) {
+      for (const name of RECORDED_HASH_NAMES) {
+        if (recorded.hashes[name] !== undefined) {
+          names.add(name);
+        }
+      }
     }
-    if (!recordedNodeStatesEqual(aNode, b.nodes[identity])) {
+    const now = recordedNodeState(item, reference, names, inputs);
+    if (!recordedNodeStatesEqual(recorded, now)) {
       return false;
     }
   }
@@ -383,10 +403,9 @@ function recordedNodeStatesEqual(
 
 /**
  * SPEC 10.4: whether two context sets agree, as sets of node references —
- * the recorded context set (the item's `context` field, 10.2) against the
- * generator-derived current one. Both sides are canonical references
- * (module header), so string equality is canonical-identity equality
- * (SPEC 5.4).
+ * the recorded context set (the item's `recordedContext`) against its
+ * current one. Both sides are canonical references (module header), so
+ * string equality is canonical-identity equality (SPEC 5.4).
  */
 export function identitySetsEqual(
   a: readonly string[],
@@ -562,21 +581,23 @@ export interface ItemValidityInputs {
    * decompositions (10.5, 10.7) against the current workspace, computed
    * without persisting anything, as canonical references (module header).
    * An item the generators no longer produce MUST be absent from the map:
-   * it retains its recorded context set and cannot invalidate through it.
+   * its current context set is then its `context` as last assigned.
    */
   readonly currentContexts: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
  * SPEC 10.4: the status a read reports for one item. A resolved item
- * (SPEC 10.3) is reported `invalidated` when its recorded `current` state
- * differs from the same state computed against the current graph — both
- * keyed canonically (module header), so the comparison is the canonical
- * one SPEC 10.4 requires — or when its context set changed
- * (`ItemValidityInputs`). An item needing review (`unresolved`,
- * `invalidated`) reports its stored status unchanged. This function never
- * rewrites anything: a stale resolution is reported `invalidated`, never
- * persisted.
+ * (SPEC 10.3) is reported `invalidated` when its recorded state differs
+ * from the current graph: a node its `current` records no longer holds —
+ * a recorded hash changed, or a recorded presence changed in either
+ * direction (`recordedNodesHold`, keyed canonically, module header, so the
+ * comparison is the canonical one SPEC 10.4 requires) — or its current
+ * context set (`ItemValidityInputs`, else its `context` as last assigned)
+ * differs from its recorded context set. An item needing review
+ * (`unresolved`, `invalidated`) reports its stored status unchanged. This
+ * function never rewrites anything: a stale resolution is reported
+ * `invalidated`, never persisted.
  */
 export function effectiveItemStatus(
   item: ReviewItem,
@@ -585,15 +606,17 @@ export function effectiveItemStatus(
   if (!isResolvedStatus(item.status)) {
     return item.status;
   }
-  const fresh = computeRecordedState(item, inputs.state);
-  if (!recordedStatesEqual(item.current, fresh)) {
+  // SPEC 10.4: "a recorded hash changed, a recorded presence changed in
+  // either direction" — over the recorded nodes alone; a node that joined
+  // the item since has no recorded presence (10.5).
+  if (!recordedNodesHold(item, inputs.state)) {
     return "invalidated";
   }
-  const currentContext = inputs.currentContexts.get(item.id);
-  if (
-    currentContext !== undefined &&
-    !identitySetsEqual(item.context, currentContext)
-  ) {
+  // SPEC 10.4: "or its current context set differs from its recorded
+  // context set" — the generators' context, else `context` as last
+  // assigned, against the context recorded with `current`.
+  const currentContext = inputs.currentContexts.get(item.id) ?? item.context;
+  if (!identitySetsEqual(item.recordedContext, currentContext)) {
     return "invalidated";
   }
   return item.status;

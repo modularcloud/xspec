@@ -17,10 +17,12 @@
 //   computation serves `create` (merge into an empty session) and the
 //   re-derivation an `updated` resolve triggers;
 // - computes each item's recorded `baseline` and `current` states
-//   (SPEC 10.2, 10.4) and its text snapshots (SPEC 10.7): `current` via
-//   review-state.ts's `computeRecordedState` — byte-identical to what
-//   read-time invalidation recomputes, so a freshly derived item is never
-//   born invalidated — and `baseline` against the recorded-baseline graph,
+//   (SPEC 10.2, 10.4), its recorded context set (written with `current`,
+//   SPEC 10.4), and its text snapshots (SPEC 10.7): `current` via
+//   review-state.ts's `computeRecordedState` against the graph the
+//   derivation runs over — so read-time invalidation, judging each
+//   recorded node against that graph, never finds a freshly derived item
+//   invalidated — and `baseline` against the recorded-baseline graph,
 //   resolving nodes through their per-side identities so an identity
 //   reintroduced by a distinct node (SPEC 5.4) never leaks the wrong
 //   side's values;
@@ -978,13 +980,15 @@ function derivedTextTable(
 
 /**
  * One new session item from a generated item (SPEC 10.2): status
- * `unresolved`, `current` computed against the current graph exactly as
- * read-time invalidation recomputes it (so a freshly created item is never
- * born invalidated), `baseline` against the recorded-baseline side — or the
- * current graph's values at this moment for a session without one — and the
- * SPEC 10.7 text snapshots. `blockedBy` is the caller's: resolved blocker
- * references plus, for a `split`'s newly created decomposition items, the
- * inherited set (SPEC 10.7).
+ * `unresolved`, `current` computed against the current graph, with the
+ * generated context as its recorded context set (SPEC 10.4), so read-time
+ * invalidation finds every recorded node and the context set holding (a
+ * freshly created item is never born invalidated), `baseline` against the
+ * recorded-baseline side — or the current graph's values at this moment
+ * for a session without one — and the SPEC 10.7 text snapshots.
+ * `blockedBy` is the caller's: resolved blocker references plus, for a
+ * `split`'s newly created decomposition items, the inherited set
+ * (SPEC 10.7).
  */
 function newItemFromGenerated(
   generated: GeneratedItem,
@@ -1016,6 +1020,9 @@ function newItemFromGenerated(
         ? currentState
         : computeBaselineRecordedState(generated, baseline),
     current: currentState,
+    // SPEC 10.4: the context nodes so recorded form the recorded context
+    // set, written with `current`.
+    recordedContext: generated.context.map((node) => node.identity),
     status: "unresolved",
     blockedBy,
     baselineTexts: baselineTextTable(generated, baseline, current),
@@ -1057,14 +1064,18 @@ export interface DerivedSessionItems {
  *
  * - a generated item whose kind and scope node match an existing item is
  *   that item — it keeps its `id`, `status`, `note`, and recorded state
- *   (`baseline`, `current`); its `context`, `origin`, and `reason` are
- *   updated from the generation (a changed context set surfaces as
- *   read-time invalidation once the item is resolved, SPEC 10.4);
+ *   (`baseline`, `current`, and the recorded context set); its `context`,
+ *   `origin`, and `reason` are updated from the generation, and 10.4
+ *   alone, against that recorded state, decides whether it then reads
+ *   `invalidated` (a node joining its scope, context, or origin has no
+ *   recorded presence, so a changed origin by itself invalidates nothing,
+ *   while a context set differing from the recorded one does, SPEC 10.4,
+ *   10.5);
  * - items that no longer generate remain in the session untouched,
- *   keeping their `blockedBy` (and recorded context set, SPEC 10.4);
+ *   keeping their `blockedBy` (and recorded state, SPEC 10.4);
  * - new items are added with current state — status `unresolved`
- *   (SPEC 10.2), `current` computed against the current graph exactly as
- *   read-time invalidation recomputes it, `baseline` against the
+ *   (SPEC 10.2), `current` computed against the current graph, the
+ *   generated context its recorded context set, `baseline` against the
  *   recorded-baseline side (or the current graph when none, SPEC 10.2) —
  *   and fresh ids in generation order (ids are never reused, SPEC 10.7);
  * - `blockedBy` is recomputed for every generated item from its blocker
@@ -1136,8 +1147,9 @@ export function deriveSessionItems(
     const blockedBy = resolveRefs(item, key);
     const existingItem = existingByKey.get(key);
     if (existingItem !== undefined) {
-      // SPEC 10.5: the matched item keeps id, status, and recorded state;
-      // context (and the strategy content around it) is updated.
+      // SPEC 10.5: the matched item keeps id, status, note, and recorded
+      // state — `baseline`, `current`, and the recorded context set — and
+      // takes the generated scope, context, origin, and reason.
       mergedByKey.set(key, {
         ...existingItem,
         scope: item.scope.identity,
@@ -1235,13 +1247,14 @@ export type SplitDecompositionResult =
  * decomposed is spliced recursively (SPEC 10.5). An item of the
  * decomposition whose kind and scope node already exist in the session is
  * not created: the existing item takes its place, keeping its `id`,
- * status, and recorded state — untouched entirely. Newly created
- * decomposition items enter `unresolved` with current state and
- * additionally inherit the original's `blockedBy`; every item that was
- * blocked by the original becomes blocked by all items of the
- * decomposition; the original is removed and its id never reused (the id
- * counter only advances); the decomposition is recorded durably and
- * governs re-derivation (SPEC 10.5, 10.7).
+ * status, and recorded state (`current` with its recorded context set,
+ * SPEC 10.4) — untouched entirely. Newly created decomposition items
+ * enter `unresolved` with current state and additionally inherit the
+ * original's `blockedBy`; every item that was blocked by the original
+ * becomes blocked by all items of the decomposition; the original is
+ * removed and its id never reused (the id counter only advances); the
+ * decomposition is recorded durably and governs re-derivation (SPEC 10.5,
+ * 10.7).
  */
 export function splitItemDecomposition(
   args: SplitDecompositionArgs,
@@ -1446,10 +1459,10 @@ export interface ResolveItemArgs {
  * the one reads compute and present (`currentContextSets` over the same
  * expanded generation, else the item's `context` as last assigned), and
  * `current` is recorded over the item's scope, that context, and its
- * origin, so a read of the same workspace finds the recorded context set
- * equal to the current one (SPEC 10.4). Resolving with `no-change` or
- * `skipped` never re-derives: the item is assigned and recorded as it
- * stands. When the status is `updated`, the session is re-derived at
+ * origin, that context becoming its recorded context set, so a read of the
+ * same workspace finds the recorded context set equal to the current one
+ * (SPEC 10.4). Resolving with `no-change` or `skipped` never re-derives:
+ * the item is assigned and recorded as it stands. When the status is `updated`, the session is re-derived at
  * resolve time (SPEC 10.5, for every strategy) — the expanded generation
  * merged under the re-derivation rules, with the item in the session
  * holding its new status and note, which the merge keeps (a matched item
@@ -1480,6 +1493,7 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
     return {
       ...assigned,
       current: computeRecordedState(assigned, stateInputs),
+      recordedContext: context,
     };
   };
   const withStatus = session.items.map((item): ReviewItem =>
@@ -1524,9 +1538,10 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
  * and decompositions against the current workspace (`generated` is that
  * run's expanded output), matched to the session's items by kind and scope
  * node. An item the generators no longer produce is absent from the map
- * (it retains its recorded context set). Feeds `ItemValidityInputs.
- * currentContexts` (review-state.ts), and reads present it as each item's
- * `context` (SPEC 10.4, 10.7); nothing is persisted.
+ * (its current context set is its `context` as last assigned). Feeds
+ * `ItemValidityInputs.currentContexts` (review-state.ts), and reads
+ * present it as each item's `context` (SPEC 10.4, 10.7); nothing is
+ * persisted.
  */
 export function currentContextSets(
   items: readonly ReviewItem[],

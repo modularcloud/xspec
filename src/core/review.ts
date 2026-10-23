@@ -28,12 +28,13 @@
 //
 // and each item carries exactly the fields of SPEC 10.2 — `id`, `kind`,
 // `scope`, `context`, `reason`, `origin`, `baseline`, `current`, `status`,
-// optional `note`, `blockedBy` — plus the recorded text snapshots
-// (`baselineTexts`, `derivedTexts`) that keep items actionable after the
-// referenced nodes are edited, moved, or deleted (SPEC 10.2, 10.7: an absent
-// node's text is its value in the most recent graph state that contained it,
-// among the item's `baseline` state and the states under which mutating
-// subcommands derived the item).
+// optional `note`, `blockedBy` — plus the recorded context set
+// (`recordedContext`: the context nodes recorded with `current`, SPEC 10.4)
+// and the recorded text snapshots (`baselineTexts`, `derivedTexts`) that
+// keep items actionable after the referenced nodes are edited, moved, or
+// deleted (SPEC 10.2, 10.7: an absent node's text is its value in the most
+// recent graph state that contained it, among the item's `baseline` state
+// and the states under which mutating subcommands derived the item).
 //
 // Identity policy: every stored node reference — an item's `scope`, its
 // `context` and `origin` entries, the node keys of `baseline`/`current` and
@@ -267,6 +268,17 @@ export interface ReviewItem {
    * the current graph and never rewrites it.
    */
   readonly current: RecordedState;
+  /**
+   * SPEC 10.4: the recorded context set — the context nodes recorded with
+   * `current` (whose `nodes` record each one's presence), written wherever
+   * `current` is: the item's context at creation, and at each resolve the
+   * current context set that resolve assigns as `context`. Part of the
+   * recorded state, so it is never rewritten where `current` is not: a
+   * re-derivation matching the item (10.5) and a `split` reusing it (10.7)
+   * keep it while reassigning `context`, and read-time invalidation
+   * compares the item's current context set against it.
+   */
+  readonly recordedContext: readonly string[];
   readonly status: ItemStatus;
   /** SPEC 10.2/10.7: the optional `--note` text of the last resolve. */
   readonly note?: string;
@@ -540,6 +552,7 @@ function itemToJson(item: ReviewItem): JsonObject {
     origin: [...item.origin],
     baseline: recordedStateToJson(item.baseline),
     current: recordedStateToJson(item.current),
+    recordedContext: [...item.recordedContext],
     status: item.status,
     note: item.note,
     blockedBy: [...item.blockedBy],
@@ -878,6 +891,7 @@ const ITEM_REQUIRED_KEYS = [
   "origin",
   "baseline",
   "current",
+  "recordedContext",
   "status",
   "blockedBy",
   "baselineTexts",
@@ -938,6 +952,12 @@ function parseItem(
     `${where}.current`,
     problems,
   );
+  // SPEC 10.4: the recorded context set, written with `current`.
+  const recordedContext = parseIdentityList(
+    value["recordedContext"],
+    `${where}.recordedContext`,
+    problems,
+  );
 
   // SPEC 10.1: statuses drawn from 10.3.
   const status = value["status"];
@@ -990,6 +1010,7 @@ function parseItem(
     origin,
     baseline,
     current,
+    recordedContext,
     status: status as ItemStatus,
     note,
     blockedBy,
@@ -1308,6 +1329,9 @@ function checkCanonicalReferences(
     });
     item.origin.forEach((reference, at) => {
       check(reference, `${where}.origin[${String(at)}]`);
+    });
+    item.recordedContext.forEach((reference, at) => {
+      check(reference, `${where}.recordedContext[${String(at)}]`);
     });
     for (const [which, state] of [
       ["baseline", item.baseline],
