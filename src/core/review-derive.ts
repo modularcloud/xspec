@@ -189,23 +189,14 @@ export interface GeneratedItem {
   readonly context: readonly GeneratedNode[];
   readonly origin: readonly GeneratedNode[];
   readonly reason: string;
-  /** The strategy-assigned blockers (SPEC 10.5, 10.6), as references. */
-  readonly blockedBy: readonly GeneratedBlockerRef[];
   /**
-   * SPEC 10.7: blockers a decomposition-produced item inherits from the
-   * decomposed original ("newly created decomposition items additionally
-   * inherit the original's `blockedBy`") — applied by the merge only when
-   * the item is newly created, so a reused existing item is untouched.
-   * Inheritance is the `split` subcommand's split-time rule — the caller's
-   * to inject from the stored original's `blockedBy` — never derived by the
-   * decomposition replay from the generated original's recomputed blockers:
-   * at re-derivation `blockedBy` is recomputed per the strategy's rules and
-   * 10.7 (SPEC 10.5 rule 5), and an audit original's recomputed blockers
-   * are its children's items — the decomposition's own items — so
-   * replay-time inheritance would make a newly authored child of a
-   * decomposed node block itself, contradicting SPEC 10.1's acyclicity.
+   * The strategy-assigned blockers (SPEC 10.5, 10.6), as references — for
+   * a decomposition item, the decomposition's (SPEC 10.7: a per-child
+   * item's are the ones its session's strategy gives a `subtree-coherence`
+   * item, the scope root's `parent-consistency` item's the child items),
+   * never the decomposed original's.
    */
-  readonly inheritedBlockedBy?: readonly GeneratedBlockerRef[];
+  readonly blockedBy: readonly GeneratedBlockerRef[];
   /**
    * `code-impact` only (SPEC 10.4, 9.2): every node targeted by the scoped
    * location's impact edges — the union over both sides, qualifying for
@@ -376,10 +367,6 @@ export function canonicalizeGeneration(
       kind: ref.kind,
       scope: refKey(ref),
     })),
-    inheritedBlockedBy: item.inheritedBlockedBy?.map((ref) => ({
-      kind: ref.kind,
-      scope: refKey(ref),
-    })),
     impactTargets: item.impactTargets?.map(canonicalNode),
   });
 
@@ -515,8 +502,8 @@ export function expandDecompositions(
   // memoized so nested decompositions expand once (SPEC 10.5: "recursively").
   // The replacement items carry the content and blockers the strategy's
   // rules and 10.7 assign them; nothing is inherited from the replaced
-  // generated item — split-time inheritance is the `split` subcommand's own
-  // (`GeneratedItem.inheritedBlockedBy`).
+  // item (SPEC 10.7: a per-child item's `blockedBy` is the one its
+  // session's strategy gives a `subtree-coherence` item).
   const expansionMemo = new Map<string, readonly GeneratedItem[]>();
   const expanding = new Set<string>();
 
@@ -587,10 +574,6 @@ export function expandDecompositions(
     expanded[existingIndex] = {
       ...existing,
       blockedBy: mergeRefs(existing.blockedBy, item.blockedBy),
-      inheritedBlockedBy: mergeRefs(
-        existing.inheritedBlockedBy ?? [],
-        item.inheritedBlockedBy ?? [],
-      ),
     };
   };
   for (const item of generated) {
@@ -631,10 +614,6 @@ export function expandDecompositions(
   return expanded.map((item) => ({
     ...item,
     blockedBy: rewriteRefs(item.blockedBy),
-    inheritedBlockedBy:
-      item.inheritedBlockedBy === undefined
-        ? undefined
-        : rewriteRefs(item.inheritedBlockedBy),
   }));
 }
 
@@ -981,7 +960,7 @@ function derivedTextTable(
 }
 
 // ---------------------------------------------------------------------------
-// New-item construction (shared by the merge and `split`)
+// Item construction and reassignment (shared by the merge and `split`)
 // ---------------------------------------------------------------------------
 
 /**
@@ -992,9 +971,8 @@ function derivedTextTable(
  * freshly created item is never born invalidated), `baseline` against the
  * recorded-baseline side — or the current graph's values at this moment
  * for a session without one — and the SPEC 10.7 text snapshots.
- * `blockedBy` is the caller's: resolved blocker references plus, for a
- * `split`'s newly created decomposition items, the inherited set
- * (SPEC 10.7).
+ * `blockedBy` is the caller's: the generated item's blocker references,
+ * resolved to item ids.
  */
 function newItemFromGenerated(
   generated: GeneratedItem,
@@ -1033,6 +1011,35 @@ function newItemFromGenerated(
     blockedBy,
     baselineTexts: baselineTextTable(generated, baseline, current),
     derivedTexts: derivedTextTable(generated, current, {}),
+  };
+}
+
+/**
+ * An existing session item standing for a generated item of the same kind
+ * and scope node — a re-derivation's matched item (SPEC 10.5) or a
+ * `split`'s reused decomposition item (SPEC 10.7): it keeps its `id`,
+ * status, note, and recorded state — `baseline`, `current`, and the
+ * recorded context set, which only creation and a resolve write
+ * (SPEC 10.2, 10.4) — and takes the generated scope, context, origin,
+ * reason, and `blockedBy` (the caller's, resolved to item ids). The
+ * derivation-time text snapshots are rewritten per node of the item as
+ * assigned that the current graph contains, never removed (SPEC 10.7: the
+ * states under which mutating subcommands derived the item count).
+ */
+function reassignedExistingItem(
+  existing: ReviewItem,
+  generated: GeneratedItem,
+  blockedBy: readonly string[],
+  current: CurrentDerivationSide,
+): ReviewItem {
+  return {
+    ...existing,
+    scope: generated.scope.identity,
+    context: generated.context.map((node) => node.identity),
+    origin: generated.origin.map((node) => node.identity),
+    reason: generated.reason,
+    blockedBy,
+    derivedTexts: derivedTextTable(generated, current, existing.derivedTexts),
   };
 }
 
@@ -1086,8 +1093,8 @@ export interface DerivedSessionItems {
  *   and fresh ids in generation order (ids are never reused, SPEC 10.7);
  * - `blockedBy` is recomputed for every generated item from its blocker
  *   references (decomposed references were already replaced by
- *   `expandDecompositions`); newly created decomposition items add their
- *   inherited blockers (SPEC 10.7);
+ *   `expandDecompositions`), matched and new items alike (SPEC 10.5,
+ *   10.7);
  * - text snapshots follow SPEC 10.7: a new item records baseline texts
  *   and current texts; a matched item's derivation-time texts are
  *   rewritten per node found present, never removed.
@@ -1111,7 +1118,6 @@ export function deriveSessionItems(
   // ids; SPEC 10.7: an id is never reused).
   let nextItemId = args.nextItemId;
   const idByKey = new Map<string, string>();
-  const isNew = new Set<string>();
   for (const item of generated) {
     const key = kindScopeKey(item.kind, item.scope.identity);
     const existingItem = existingByKey.get(key);
@@ -1121,16 +1127,12 @@ export function deriveSessionItems(
       const allocation = allocateItemId(nextItemId);
       nextItemId = allocation.nextItemId;
       idByKey.set(key, allocation.id);
-      isNew.add(key);
     }
   }
 
-  const resolveRefs = (item: GeneratedItem, key: string): readonly string[] => {
-    const refs = isNew.has(key)
-      ? mergeRefs(item.blockedBy, item.inheritedBlockedBy ?? [])
-      : item.blockedBy;
+  const resolveRefs = (item: GeneratedItem): readonly string[] => {
     const ids: string[] = [];
-    for (const ref of refs) {
+    for (const ref of item.blockedBy) {
       const id = idByKey.get(kindScopeKey(ref.kind, ref.scope));
       if (id === undefined) {
         // Every blocker reference names a generated item (SPEC 10.5, 10.6:
@@ -1150,25 +1152,17 @@ export function deriveSessionItems(
   const mergedByKey = new Map<string, ReviewItem>();
   for (const item of generated) {
     const key = kindScopeKey(item.kind, item.scope.identity);
-    const blockedBy = resolveRefs(item, key);
+    const blockedBy = resolveRefs(item);
     const existingItem = existingByKey.get(key);
     if (existingItem !== undefined) {
       // SPEC 10.5: the matched item keeps id, status, note, and recorded
       // state — `baseline`, `current`, and the recorded context set — and
-      // takes the generated scope, context, origin, and reason.
-      mergedByKey.set(key, {
-        ...existingItem,
-        scope: item.scope.identity,
-        context: item.context.map((node) => node.identity),
-        origin: item.origin.map((node) => node.identity),
-        reason: item.reason,
-        blockedBy,
-        derivedTexts: derivedTextTable(
-          item,
-          current,
-          existingItem.derivedTexts,
-        ),
-      });
+      // takes the generated scope, context, origin, reason, and
+      // `blockedBy`.
+      mergedByKey.set(
+        key,
+        reassignedExistingItem(existingItem, item, blockedBy, current),
+      );
     } else {
       mergedByKey.set(
         key,
@@ -1311,25 +1305,33 @@ export type SplitDecompositionResult =
  * SPEC 10.7 `split`: decompose a `subtree-coherence` item whose scope root
  * has children into one `subtree-coherence` item per current child subtree
  * plus one `parent-consistency` item for the scope root's own text — the
- * strategy's decomposition content fixes each item's context, origin, and
- * reason ("its context the child's ancestor chain, as in 10.5 and 10.6"),
- * and a child whose kind and scope node are themselves recorded as
- * decomposed is spliced recursively (SPEC 10.5). An item of the
- * decomposition whose kind and scope node already exist in the session is
- * not created: the existing item takes its place, keeping its `id`,
- * status, and recorded state (`current` with its recorded context set,
- * SPEC 10.4) — untouched entirely. Newly created decomposition items
- * enter `unresolved` with current state and additionally inherit the
- * original's `blockedBy`; every item that was blocked by the original
- * becomes blocked by all items of the decomposition; the original is
- * removed and its id never reused (the id counter only advances); the
- * decomposition is recorded durably and governs re-derivation (SPEC 10.5,
- * 10.7) — with which `split` ends (`rederiveSession` over `generated`,
- * the decomposition just recorded among those it replays), so every
- * generated or decomposition-produced item takes the strategy's content and
- * `blockedBy` recomputed against the current graph, items that no longer
- * generate keep theirs, and a change since the last derivation that
- * generates a new item adds it, `unresolved` (SPEC 10.2, 10.5, 10.7).
+ * strategy's decomposition content fixes each item's scope, context,
+ * origin, reason, and `blockedBy` ("its context the child's ancestor
+ * chain, as in 10.5 and 10.6"; a per-child item's `blockedBy` "the one its
+ * session's strategy gives a `subtree-coherence` item", the
+ * `parent-consistency` item's "those child items") — and a child whose
+ * kind and scope node are themselves recorded as decomposed is spliced
+ * recursively, its decomposition's items standing in for its per-child
+ * item, in the `parent-consistency` item's `blockedBy` too (SPEC 10.5,
+ * 10.7). An item of the decomposition whose kind and scope node already
+ * exist in the session is not created: the existing item takes its place,
+ * keeping its `id`, status, note, and recorded state (`baseline`,
+ * `current`, and its recorded context set, SPEC 10.4) and taking the
+ * decomposition's scope, context, origin, reason, and `blockedBy`
+ * (`reassignedExistingItem`). Newly created decomposition items enter
+ * `unresolved` with current state and the decomposition's `blockedBy`
+ * alone, never the original's; every item outside the decomposition that
+ * was blocked by the original becomes blocked by all items of the
+ * decomposition; the original is removed and its id never reused (the id
+ * counter only advances); the decomposition is recorded durably and
+ * governs re-derivation (SPEC 10.5, 10.7) — with which `split` ends
+ * (`rederiveSession` over `generated`, the decomposition just recorded
+ * among those it replays), so every generated or decomposition-produced
+ * item takes the strategy's content and `blockedBy` recomputed against the
+ * current graph, items that no longer generate keep theirs — a
+ * decomposition item, where its scope root's item no longer generates,
+ * keeping this split's assignment — and a change since the last derivation
+ * that generates a new item adds it, `unresolved` (SPEC 10.2, 10.5, 10.7).
  */
 export function splitItemDecomposition(
   args: SplitDecompositionArgs,
@@ -1399,7 +1401,6 @@ export function splitItemDecomposition(
   }
   let nextItemId = session.nextItemId;
   const idByKey = new Map<string, string>();
-  const newByKey = new Map<string, GeneratedItem>();
   for (const generated of expansion) {
     const key = kindScopeKey(generated.kind, generated.scope.identity);
     const existing = existingByKey.get(key);
@@ -1409,44 +1410,47 @@ export function splitItemDecomposition(
       const allocation = allocateItemId(nextItemId);
       nextItemId = allocation.nextItemId;
       idByKey.set(key, allocation.id);
-      newByKey.set(key, generated);
     }
   }
 
   // A blocker reference resolves against the decomposition's items and the
   // session's items. SPEC 10.1 lets `blockedBy` name only item ids present
-  // in the session, so a reference to an item that never entered it (a new
-  // child's own children, itemless until a re-derivation) is dropped —
-  // re-derivation recomputes every blocker per the strategy's rules
-  // (SPEC 10.5).
+  // in the session, so a reference to an item that never entered it (in an
+  // `audit` session, a new child's own children, itemless until the
+  // re-derivation ending the split adds them and recomputes every blocker
+  // per the strategy's rules, SPEC 10.5) is dropped.
   const idOfRef = (ref: GeneratedBlockerRef): string | undefined => {
     const key = kindScopeKey(ref.kind, ref.scope);
     return idByKey.get(key) ?? existingByKey.get(key)?.id;
   };
 
-  // SPEC 10.7: newly created decomposition items — per-child items and the
-  // scope root's parent-consistency item alike — additionally inherit the
-  // original's `blockedBy`.
-  const newItems: ReviewItem[] = [];
+  // SPEC 10.7: every item of the decomposition, newly created or reused,
+  // as the decomposition assigns it — its `blockedBy` the decomposition's
+  // own (a per-child item's the strategy's: none in a baseline session, its
+  // child sections' items in an `audit` session; the scope root's
+  // `parent-consistency` item's the child items), never the original's. A
+  // reused item keeps its `id`, status, note, and recorded state and takes
+  // the decomposition's scope, context, origin, reason, and `blockedBy`.
+  const assignedByKey = new Map<string, ReviewItem>();
   for (const generated of expansion) {
     const key = kindScopeKey(generated.kind, generated.scope.identity);
-    if (!newByKey.has(key)) continue;
     const blockedBy: string[] = [];
     for (const ref of generated.blockedBy) {
       const id = idOfRef(ref);
       if (id !== undefined && !blockedBy.includes(id)) blockedBy.push(id);
     }
-    for (const inherited of original.blockedBy) {
-      if (!blockedBy.includes(inherited)) blockedBy.push(inherited);
-    }
-    newItems.push(
-      newItemFromGenerated(
-        generated,
-        idByKey.get(key) as string,
-        blockedBy,
-        current,
-        baseline,
-      ),
+    const existing = existingByKey.get(key);
+    assignedByKey.set(
+      key,
+      existing !== undefined
+        ? reassignedExistingItem(existing, generated, blockedBy, current)
+        : newItemFromGenerated(
+            generated,
+            idByKey.get(key) as string,
+            blockedBy,
+            current,
+            baseline,
+          ),
     );
   }
 
@@ -1457,13 +1461,18 @@ export function splitItemDecomposition(
       ) as string,
   );
 
-  // SPEC 10.7: the original is removed; every item that was blocked by it
-  // becomes blocked by all items of the decomposition. Reused items are
-  // otherwise untouched — id, status, recorded state, and everything else
-  // kept.
+  // SPEC 10.7: the original is removed; every item outside the
+  // decomposition that was blocked by it becomes blocked by all items of
+  // the decomposition. Reused decomposition items keep their places, as
+  // assigned above; newly created ones follow in expansion order.
   const items: ReviewItem[] = [];
   for (const item of session.items) {
     if (item.id === original.id) continue;
+    const assigned = assignedByKey.get(kindScopeKey(item.kind, item.scope));
+    if (assigned !== undefined) {
+      items.push(assigned);
+      continue;
+    }
     if (!item.blockedBy.includes(original.id)) {
       items.push(item);
       continue;
@@ -1482,7 +1491,12 @@ export function splitItemDecomposition(
     }
     items.push({ ...item, blockedBy });
   }
-  items.push(...newItems);
+  for (const generated of expansion) {
+    const key = kindScopeKey(generated.kind, generated.scope.identity);
+    if (!existingByKey.has(key)) {
+      items.push(assignedByKey.get(key) as ReviewItem);
+    }
+  }
 
   // SPEC 10.7: the decomposition — the original's kind and scope node — is
   // recorded durably in the session and governs re-derivation (10.5), with
