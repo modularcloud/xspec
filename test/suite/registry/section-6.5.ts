@@ -49,7 +49,15 @@
 //   under each modifier form and its side-effect import — each rewritten
 //   all the same (6.5: every specifier naming a spec module stands in an
 //   import declaration, 4), its pre-move edge sets pinned empty as a
-//   staging premise, and closes with `check` and `build` finding-free.
+//   staging premise, and closes with `check` and `build` finding-free. A
+//   sixth stages a code source whose one spec module import stands nested
+//   in a function body (4: wherever the declaration stands; T4.5-10), its
+//   specifier rewritten under the same byte contract, the preview's entry
+//   for that file pinned to the one rewrite at TEST-SPEC's [38, 56), and
+//   closes with `check` and `build` exiting 0 and the marker's
+//   `references` edge from the enclosing function to the moved section —
+//   the file never compiled under H-2's channel, TypeScript's checker
+//   rejecting a nested import declaration after parsing (T4.5-10).
 // - "Mapping appended to the journal" uses the SUITE-21 operationalization:
 //   the journal (absent before the first journaled operation, SPEC 6.1) is a
 //   plain file holding exactly one line-oriented entry after the one move;
@@ -418,7 +426,7 @@ export default defineConfig({
 // rewrites span MDX and TypeScript sources and whose fresh-build compare
 // covers every derived-file kind (the T6.4-7 configuration). A staged-source
 // record: T6.5-1 stages it after a product invocation — every arm's preview
-// copy, and arms (b)–(e) — and T12.0-15 every arm's
+// copy, and arms (b)–(f) — and T12.0-15 every arm's
 // (T6_5_1_FILE_MOVE_STAGINGS; S-9's timing clause).
 const FULL_CONFIG = stagedTs(
   "T6.5-1/T12.0-15 xspec.config.ts — specs, code, and Markdown emission",
@@ -1266,6 +1274,15 @@ interface EdgeSets {
   readonly references: readonly GraphEdge[];
 }
 
+/**
+ * How a T6.5-1 arm closes after the move: `check` exiting 0 (arms (a)–(d));
+ * `check`, then `build`, each exiting 0 (the nested-declaration arm,
+ * TEST-SPEC T6.5-1: "`build` and `check` exit 0 afterward"); or, as the
+ * five-declaration arm pins, `check` and `build` each exiting 0 with no
+ * finding, their `--json` reports decoded form-exact as `{"findings": []}`.
+ */
+type FileMoveClose = "check" | "check-and-build" | "finding-free";
+
 /** One staged arm of T6.5-1, everything the driver asserts precomputed. */
 interface FileMoveArm {
   readonly name: string;
@@ -1276,6 +1293,15 @@ interface FileMoveArm {
   readonly rewrites: readonly SpecifierRewrite[];
   /** Staged files the move rewrites nothing in (the configuration included). */
   readonly untouched: readonly string[];
+  /**
+   * Why the move rewrites none of the moved file's own specifiers — `null`
+   * exactly where it rewrites one, `rewrites` holding the origin's entry —
+   * for the diagnosis of the file's landing under its new path
+   * byte-identical to its pre-move bytes (SPEC 6.5: a specifier is
+   * rewritten exactly when its characters would no longer designate the
+   * source, and beyond its edits a move changes no bytes).
+   */
+  readonly movedFileKept: string | null;
   /** The preview's complete `files`, ordered by file path bytes (6.6, 12.7). */
   readonly previewFiles: readonly ExpectedPreviewFile[];
   /** The applied mapping: every node of the moved file, the root first. */
@@ -1286,13 +1312,8 @@ interface FileMoveArm {
   readonly edges: (movedPath: string) => EdgeSets;
   /** The non-derived post-move state seeding a fresh-build directory. */
   readonly seedFiles: readonly string[];
-  /**
-   * Whether the arm closes as TEST-SPEC T6.5-1's five-declaration arm pins:
-   * `check` and `build` each exit 0 with no finding after the move, their
-   * `--json` reports decoded form-exact as `{"findings": []}` — rather than
-   * the post-move `check` exiting 0 alone.
-   */
-  readonly findingFreeClose: boolean;
+  /** How the arm closes after the move (`FileMoveClose`). */
+  readonly close: FileMoveClose;
 }
 
 /** Compare two plain paths by their UTF-8 bytes (12.7's `files` order). */
@@ -1436,13 +1457,20 @@ function fileMoveArm(geometry: FileMoveGeometry): FileMoveArm {
     files,
     rewrites,
     untouched: ["xspec.config.ts", other],
+    movedFileKept:
+      geometry.ownRewrite === null
+        ? `its own imports (${geometry.ownImports
+            .map((line) => `\`${line}\``)
+            .join(", ")}) still designate \`${other}\` from ` +
+          `\`${posixPath.dirname(destination)}/\``
+        : null,
     previewFiles,
     mapping,
     preIdentities: identities(origin),
     postIdentities: identities(destination),
     edges,
     seedFiles,
-    findingFreeClose: false,
+    close: "check",
   };
 }
 
@@ -1581,6 +1609,7 @@ function fiveDeclarationArm(): FileMoveArm {
     },
     rewrites,
     untouched: ["xspec.config.ts", other],
+    movedFileKept: null,
     previewFiles,
     mapping: [
       { from: origin, to: destination },
@@ -1600,12 +1629,134 @@ function fiveDeclarationArm(): FileMoveArm {
       code,
       JOURNAL_PATH,
     ],
-    findingFreeClose: true,
+    close: "finding-free",
   };
 }
 
-// The five relocations TEST-SPEC T6.5-1 pins, each literal spelled as the
-// entry spells it (SPEC 6.5: the `..` ascents, then the descending segments,
+// Arm (f): nested declarations alike (TEST-SPEC T6.5-1; SPEC 4: every
+// specifier naming a spec module stands in an import declaration, wherever
+// the declaration stands; 6.5; T4.5-10). Under the same move, `move
+// specs/A.mdx specs/sub/A.mdx`, the workspace discovers `specs/A.mdx`,
+// holding section `x` alone, and a code source `src/n.ts` whose one spec
+// module import stands nested in `g`'s body, its binding rooting the marker
+// `A.x` there — the file well-formed (S-9) and never compiled under H-2's
+// channel, TypeScript's checker rejecting a nested import declaration after
+// parsing (T4.5-10), so the arm observes xspec's surfaces alone. The bytes
+// are TEST-SPEC's, every line terminated by U+000A.
+const T651F_MOVED_SOURCE = ['<S id="x">x</S>', ""].join("\n");
+const T651F_CODE_SOURCE = [
+  "export function g() {",
+  '  import A from "../specs/A.xspec"',
+  "  A.x",
+  "}",
+  "",
+].join("\n");
+const T651F_MOVED = stagedMdx(
+  "T6.5-1/T12.0-15 (f) specs/A.mdx — the moved file, section x alone",
+  T651F_MOVED_SOURCE,
+);
+const T651F_CODE = stagedTs(
+  "T6.5-1/T12.0-15 (f) src/n.ts — an import of A's module nested in g's body, rooting the marker A.x there",
+  T651F_CODE_SOURCE,
+);
+// The nested declaration's specifier literal as TEST-SPEC T6.5-1 pins it,
+// [38, 56), checked against the staged bytes at module load
+// (`nestedDeclarationArm`): a mismatch is a harness defect, never a product
+// verdict.
+const T651F_SPECIFIER_RANGE: SourceRange = { start: 38, end: 56 };
+
+/**
+ * Arm (f)'s staging and expectations (TEST-SPEC T6.5-1, "Nested
+ * declarations alike"). The move rewrites the nested declaration's
+ * specifier to `"../specs/sub/A.xspec"` under the byte contract, no other
+ * byte of `src/n.ts` changing, and the moved file, importing nothing, lands
+ * byte-identical; the preview's `files` holds the relocation entry and, for
+ * `src/n.ts`, exactly one `import-specifier-rewrite`, spanning the literal
+ * at [38, 56), and no other edit (T6.6-4 (c)); `check`, then `build`, exit
+ * 0 afterward; and the workspace's edges are exactly the marker's
+ * `references` edge from `src/n.ts#g` — the innermost enclosing named unit
+ * (4.6) — to the moved file's `x`: `specs/A.mdx#x` before the move, a
+ * staging premise, and `specs/sub/A.mdx#x` after it. A product rewriting
+ * the specifiers of top-level declarations alone leaves the nested one
+ * designating no discovered source — 14.15 at the next `check` — and fails.
+ */
+function nestedDeclarationArm(): FileMoveArm {
+  const where = "T6.5-1 (a nested declaration) staging";
+  const origin = "specs/A.mdx";
+  const destination = "specs/sub/A.mdx";
+  const code = "src/n.ts";
+  const before = '"../specs/A.xspec"';
+  const range = uniqueSpan(T651F_CODE_SOURCE, before, `${where} ${code}`);
+  if (
+    range.start !== T651F_SPECIFIER_RANGE.start ||
+    range.end !== T651F_SPECIFIER_RANGE.end
+  ) {
+    throw new Error(
+      `${where}: ${code}'s specifier literal ${before} spans ` +
+        `[${String(range.start)}, ${String(range.end)}) in the staged ` +
+        `bytes, not [38, 56) as TEST-SPEC T6.5-1 pins it — fix the staging`,
+    );
+  }
+  // The relocation spanning the entire moved file, and the nested
+  // declaration's one specifier rewrite; entries in file path byte order
+  // (SPEC 6.6, 12.7).
+  const previewFiles: ExpectedPreviewFile[] = [
+    {
+      file: origin,
+      edits: [
+        {
+          class: "file-relocation",
+          range: { start: 0, end: utf8Length(T651F_MOVED_SOURCE) },
+        },
+      ],
+    },
+    {
+      file: code,
+      edits: [
+        { class: "import-specifier-rewrite", range: T651F_SPECIFIER_RANGE },
+      ],
+    },
+  ];
+  previewFiles.sort((x, y) => comparePathBytes(x.file, y.file));
+  return {
+    name: "a nested declaration",
+    origin,
+    destination,
+    files: { [origin]: T651F_MOVED, [code]: T651F_CODE },
+    rewrites: [
+      {
+        pre: code,
+        post: code,
+        source: T651F_CODE_SOURCE,
+        before,
+        after: '"../specs/sub/A.xspec"',
+      },
+    ],
+    untouched: ["xspec.config.ts"],
+    movedFileKept: "it spells no import declaration, holding section `x` alone",
+    previewFiles,
+    mapping: [
+      { from: origin, to: destination },
+      { from: `${origin}#x`, to: `${destination}#x` },
+    ],
+    preIdentities: [origin, `${origin}#x`],
+    postIdentities: [destination, `${destination}#x`],
+    // The marker's `references` edge alone: the import declaration records
+    // none of its own (4, 4.5), and the moved file references nothing.
+    edges: (movedPath) => ({
+      depends: [],
+      embeds: [],
+      references: [
+        { from: `${code}#g`, to: `${movedPath}#x`, kind: "references" },
+      ],
+    }),
+    seedFiles: ["xspec.config.ts", destination, code, JOURNAL_PATH],
+    close: "check-and-build",
+  };
+}
+
+// The six arms TEST-SPEC T6.5-1 pins, each literal spelled as the entry
+// spells it (SPEC 6.5: the `..` ascents, then the descending segments,
 // joined with `/`, no `.` segments, `./`-prefixed when there is no ascent,
 // `.mdx` replaced by `.xspec`; the quote style kept, 6.4).
 const FILE_MOVE_ARMS: readonly FileMoveArm[] = [
@@ -1691,7 +1842,24 @@ const FILE_MOVE_ARMS: readonly FileMoveArm[] = [
   // each of the code source's three `"../specs/A.xspec"`
   // `"../specs/sub/A.xspec"`.
   fiveDeclarationArm(),
+  // (f) A nested declaration, rewritten alike: `src/n.ts`'s import in `g`'s
+  // body, its `"../specs/A.xspec"` at [38, 56) becoming
+  // `"../specs/sub/A.xspec"`.
+  nestedDeclarationArm(),
 ];
+// Each arm's account of the moved file agrees with its rewrites: a reason
+// the file lands byte-identical exactly where no rewrite is the origin's.
+for (const arm of FILE_MOVE_ARMS) {
+  const rewritesOwn = arm.rewrites.some(
+    (rewrite) => rewrite.pre === arm.origin,
+  );
+  if (rewritesOwn === (arm.movedFileKept !== null)) {
+    throw new Error(
+      `T6.5-1 (${arm.name}) staging: \`movedFileKept\` must be null exactly ` +
+        `where the arm's rewrites include the moved file's own — fix the arm`,
+    );
+  }
+}
 
 /**
  * T6.5-1's stagings (FILE_MOVE_ARMS, in its order), exported for
@@ -1790,8 +1958,9 @@ async function assertEdges(
  * report's mentions of its applied mapping; the specifier-rewrite byte
  * contract, the untouched files, the journal, `check`, and the node and
  * edge inventories; with `fullProtocol`, the finishing regeneration as
- * T6.4-7 (H-6); and, for an arm closing finding-free, a final `build` with
- * no finding.
+ * T6.4-7 (H-6); and, for an arm closing with a `build` (`FileMoveClose`), a
+ * final `build` exiting 0 — with no finding, for an arm closing
+ * finding-free.
  */
 async function runFileMoveArm(
   product: ProductBinding,
@@ -1998,19 +2167,18 @@ async function runFileMoveArm(
       );
     }
     // A moved file whose own specifiers still designate their source from
-    // its new directory lands byte-identical: neither rewritten nor
-    // reported (SPEC 6.5, 2.1).
-    if (!arm.rewrites.some((rewrite) => rewrite.pre === arm.origin)) {
+    // its new directory — or that spells none — lands byte-identical:
+    // nothing in it rewritten or reported (SPEC 6.5, 2.1).
+    if (arm.movedFileKept !== null) {
       await assertFileBytes(
         workspace.path(arm.destination),
         preMoveBytes.get(arm.origin)!,
-        `${context}: ${arm.destination} — relocated within its own ` +
-          `directory, the moved file's own specifiers (the canonical ` +
-          `\`./C.xspec\` and the non-canonical \`.//C.xspec\`) still ` +
-          `designate \`C.mdx\` from there, so the file must land ` +
-          `byte-identical to its pre-move bytes: a specifier is rewritten ` +
-          `exactly when its characters would no longer designate the ` +
-          `source (SPEC 6.5, 2.1)`,
+        `${context}: ${arm.destination} — the move rewrites none of the ` +
+          `moved file's own specifiers: ${arm.movedFileKept}, so the file ` +
+          `must land byte-identical to its pre-move bytes — a specifier is ` +
+          `rewritten exactly when its characters would no longer designate ` +
+          `the source, and beyond its edits a move changes no bytes ` +
+          `(SPEC 6.5, 2.1)`,
       );
     }
     // Nothing else changed: a file the move rewrites nothing in is
@@ -2029,14 +2197,14 @@ async function runFileMoveArm(
     await assertJournalHoldsOneEntry(workspace, `${context} after the move`);
 
     // Everything resolves and no stale output remains: `check` exit 0
-    // immediately after the move (SPEC 6.5, 12.2, 14.10) — in the
-    // five-declaration arm with no finding, its `--json` report exactly
-    // `{"findings": []}` (TEST-SPEC T6.5-1; 12.7).
+    // immediately after the move (SPEC 6.5, 12.2, 14.10) — in an arm
+    // closing finding-free (the five-declaration arm) with no finding, its
+    // `--json` report exactly `{"findings": []}` (TEST-SPEC T6.5-1; 12.7).
     const checkContext =
       `${context} \`check\` immediately after the file-form move — all ` +
       `rewritten imports and references resolve and the finishing ` +
       `regeneration left no staleness (SPEC 6.5, 12.2, 14.10, 14.15)`;
-    if (arm.findingFreeClose) {
+    if (arm.close === "finding-free") {
       await expectFindingFreeReport(
         product,
         workspace,
@@ -2068,18 +2236,22 @@ async function runFileMoveArm(
       await assertFreshBuildAgrees(product, workspace, arm, context);
     }
 
-    // The five-declaration arm's close (TEST-SPEC T6.5-1): `build` exits 0
-    // with no finding after the move as well — run last, so that no arm's
-    // fresh-build compare ever follows a `build` of the moved workspace.
-    if (arm.findingFreeClose) {
+    // The closing `build` (TEST-SPEC T6.5-1): the five-declaration arm's
+    // exits 0 with no finding after the move as well, the nested-declaration
+    // arm's exits 0 — run last, so that no arm's fresh-build compare ever
+    // follows a `build` of the moved workspace.
+    const buildContext =
+      `${context} \`build\` after the file-form move — every rewritten ` +
+      `specifier designates a discovered source (SPEC 6.5, 2.1, 4, 14.15)`;
+    if (arm.close === "finding-free") {
       await expectFindingFreeReport(
         product,
         workspace,
         ["build", "--json"],
-        `${context} \`build\` after the file-form move — every rewritten ` +
-          `specifier designates a discovered source (SPEC 6.5, 2.1, 4, ` +
-          `14.15)`,
+        buildContext,
       );
+    } else if (arm.close === "check-and-build") {
+      await expectExit(product, workspace, ["build"], 0, buildContext);
     }
   });
 }
@@ -2130,7 +2302,7 @@ async function assertFreshBuildAgrees(
 const T6_5_1 = defineProductTest({
   id: "T6.5-1",
   title:
-    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal and reported as the form-exact performed-operation document, and the human `move`, run on the preview's copy at the pre-move state, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3; SPEC 12.0); the finishing regeneration is byte-identical to a fresh build — the specifier-rewrite byte contract of 6.5 byte-asserted, the `import-specifier-rewrite` ranges read from a preview on a copy whose `files` is pinned form-exact, over a move into a subdirectory (the importer's `\"./A.xspec\"` becomes `\"./sub/A.xspec\"`, the moved file's own `'./C.xspec'` `'../C.xspec'` with its single quotes kept), out of one (an ascent lost), and across sibling directories (`\"../x/A.xspec\"`, ascents before descents) — each rewritten literal exactly the kept delimiters around the canonical relative spelling and every other byte unchanged, so a `.` segment, a missing `./` prefix, a stale `..`, a switched quote style, or any rewrite beyond the literals fails — and a relocation within the file's own directory (`specs/A.mdx` → `specs/A2.mdx`) that leaves its canonical `./C.xspec` and non-canonical `.//C.xspec` imports byte-untouched and unreported while the importer's `./A.xspec` becomes `./A2.xspec`, the preview's `files` exactly the relocation entry and the importer's rewrite — and, under `move specs/A.mdx specs/sub/A.mdx`, five import declarations recording no edge or occurrence (the moved file's own `import C from \"./C.xspec\"` and the spec importer's `import A from \"./A.xspec\"`, neither binding referenced, and a code source's `import type T`, `import { type text as t }`, and side-effect `import` of `\"../specs/A.xspec\"`) each rewritten under the same byte contract, its quote style kept, whatever uses its bindings — the preview's `files` the relocation entry and exactly five `import-specifier-rewrite` edits, each spanning its literal — and `check` and `build` exiting 0 with no finding afterward, so a product collecting the specifiers it rewrites from recorded edges, occurrences, or used bindings fails",
+    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal and reported as the form-exact performed-operation document, and the human `move`, run on the preview's copy at the pre-move state, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3; SPEC 12.0); the finishing regeneration is byte-identical to a fresh build — the specifier-rewrite byte contract of 6.5 byte-asserted, the `import-specifier-rewrite` ranges read from a preview on a copy whose `files` is pinned form-exact, over a move into a subdirectory (the importer's `\"./A.xspec\"` becomes `\"./sub/A.xspec\"`, the moved file's own `'./C.xspec'` `'../C.xspec'` with its single quotes kept), out of one (an ascent lost), and across sibling directories (`\"../x/A.xspec\"`, ascents before descents) — each rewritten literal exactly the kept delimiters around the canonical relative spelling and every other byte unchanged, so a `.` segment, a missing `./` prefix, a stale `..`, a switched quote style, or any rewrite beyond the literals fails — and a relocation within the file's own directory (`specs/A.mdx` → `specs/A2.mdx`) that leaves its canonical `./C.xspec` and non-canonical `.//C.xspec` imports byte-untouched and unreported while the importer's `./A.xspec` becomes `./A2.xspec`, the preview's `files` exactly the relocation entry and the importer's rewrite — and, under `move specs/A.mdx specs/sub/A.mdx`, five import declarations recording no edge or occurrence (the moved file's own `import C from \"./C.xspec\"` and the spec importer's `import A from \"./A.xspec\"`, neither binding referenced, and a code source's `import type T`, `import { type text as t }`, and side-effect `import` of `\"../specs/A.xspec\"`) each rewritten under the same byte contract, its quote style kept, whatever uses its bindings — the preview's `files` the relocation entry and exactly five `import-specifier-rewrite` edits, each spanning its literal — and `check` and `build` exiting 0 with no finding afterward, so a product collecting the specifiers it rewrites from recorded edges, occurrences, or used bindings fails — and nested declarations alike: under the same move, the import of `\"../specs/A.xspec\"` standing nested in `g`'s body in `src/n.ts` (well-formed, never compiled) rewritten to `\"../specs/sub/A.xspec\"` under the same byte contract, no other byte of the file changing, the preview's entry for `src/n.ts` exactly one `import-specifier-rewrite`, spanning the literal at [38, 56), `check` and `build` exiting 0 afterward, and `query edges` holding exactly the marker's `references` edge from `src/n.ts#g` to `specs/sub/A.mdx#x`, so a product rewriting the specifiers of top-level declarations alone fails",
   run: async (product) => {
     for (let i = 0; i < FILE_MOVE_ARMS.length; i += 1) {
       await runFileMoveArm(product, FILE_MOVE_ARMS[i]!, i === 0);
