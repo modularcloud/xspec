@@ -98,7 +98,8 @@
 //   `declare const o: Record<string, number>;` for the binding pattern
 //   `const { SPEC } = o`, an ambient `declare function dec(...)` for the
 //   decorated `@dec class SPEC {}` — each binding no `SPEC`, so the
-//   collision stays the arm's sole defect; the located construct is fixed
+//   collision stays the arm's sole defect; the `export default`-prefixed
+//   and modifier-bearing forms need none; the located construct is fixed
 //   from the exact bytes as for the original forms (SPEC 14, 1.7). The
 //   spec-source case's two arms both declare S-9's `duplicate-import-binding`
 //   allowance: the stock parser judges all of a file's ESM blocks as one
@@ -1931,20 +1932,43 @@ export interface SameScopeDeclarationArm {
 // `construct` unused there). The located construct is the
 // variable DECLARATOR (`SPEC = 1`, the `const` statement excluded) or the
 // declaration's own characters (14, 1.7). The further located forms follow
-// 14's declarator and decorator rules as 1.7 reads them: a declarator
-// without initializer is its name alone; a binding pattern spans the pattern
-// through the initializer; a decorator list is part of the class it
-// decorates, whose own characters begin at its first decorator; and a
-// leading `export`, with whatever separates it from the construct's first
-// token, is excluded.
+// 14's declarator, decorator, and modifier rules as 1.7 reads them: a
+// declarator without initializer is its name alone; a binding pattern spans
+// the pattern through the initializer; a decorator list is part of the class
+// it decorates, whose own characters begin at its first decorator; a leading
+// `export` or `export default`, with whatever separates it from the
+// construct's first token, is excluded — a default export of a named
+// construct takes that construct's own range; and every other modifier is
+// part of the declaration it modifies, whose own characters begin at its
+// first modifier: `async` (a leading `export` or `export default` before it
+// still excluded), `abstract`, the `const` of a const enum (an enum, const
+// or not, binds at value level, 2.4), and `declare`. Of the further forms,
+// only the binding pattern and the decorated class need a supporting
+// declaration.
 //
-// The four further forms T14-11 names are shared with its 14.15 range arm
+// The twelve further forms T14-11 names are shared with its 14.15 range arm
 // (section-14.ts) through `T4_5_8_FURTHER_LOCATED_FORMS` — one staging of
-// each form, keyed for file naming there: each `line` exact, its
-// `construct` the characters a condition-15 finding locates (SPEC 14, 1.7).
+// each form, keyed for file naming there (`src/collide-<key>.ts`): each
+// `line` exact, its `construct` the characters a condition-15 finding
+// locates (SPEC 14, 1.7), occurring once in its line. A product starting a
+// declaration's range at its keyword fails the modifier-bearing forms; one
+// starting it at the `export` or the `default` of a leading `export
+// default` — TypeScript's syntax tree carries both as modifiers of the
+// declaration — fails the three `export default` forms.
 export const T4_5_8_FURTHER_LOCATED_FORMS: Readonly<
   Record<
-    "let" | "pattern" | "decorated" | "exportedClass",
+    | "let"
+    | "pattern"
+    | "decorated"
+    | "exportedClass"
+    | "defaultFunction"
+    | "defaultClass"
+    | "asyncFunction"
+    | "exportedAsyncFunction"
+    | "defaultAsyncFunction"
+    | "abstractClass"
+    | "constEnum"
+    | "declareNamespace",
     SameScopeDeclarationArm
   >
 > = {
@@ -1967,6 +1991,46 @@ export const T4_5_8_FURTHER_LOCATED_FORMS: Readonly<
     name: "an exported class `export class SPEC {}` (SPEC 2.4, 14, 1.7)",
     line: "export class SPEC {}",
     construct: "class SPEC {}",
+  },
+  defaultFunction: {
+    name: "a default-exported function `export default function SPEC() {}` (SPEC 2.4, 14, 1.7)",
+    line: "export default function SPEC() {}",
+    construct: "function SPEC() {}",
+  },
+  defaultClass: {
+    name: "a default-exported class `export default class SPEC {}` (SPEC 2.4, 14, 1.7)",
+    line: "export default class SPEC {}",
+    construct: "class SPEC {}",
+  },
+  asyncFunction: {
+    name: "an async function `async function SPEC() {}` (SPEC 2.4, 14, 1.7)",
+    line: "async function SPEC() {}",
+    construct: "async function SPEC() {}",
+  },
+  exportedAsyncFunction: {
+    name: "an exported async function `export async function SPEC() {}` (SPEC 2.4, 14, 1.7)",
+    line: "export async function SPEC() {}",
+    construct: "async function SPEC() {}",
+  },
+  defaultAsyncFunction: {
+    name: "a default-exported async function `export default async function SPEC() {}` (SPEC 2.4, 14, 1.7)",
+    line: "export default async function SPEC() {}",
+    construct: "async function SPEC() {}",
+  },
+  abstractClass: {
+    name: "an abstract class `abstract class SPEC {}` (SPEC 2.4, 14, 1.7)",
+    line: "abstract class SPEC {}",
+    construct: "abstract class SPEC {}",
+  },
+  constEnum: {
+    name: "a const enum `const enum SPEC {}` (SPEC 2.4, 14, 1.7)",
+    line: "const enum SPEC {}",
+    construct: "const enum SPEC {}",
+  },
+  declareNamespace: {
+    name: "an ambient namespace binding a value `declare namespace SPEC { export const v: number }` (SPEC 2.4, 14, 1.7)",
+    line: "declare namespace SPEC { export const v: number }",
+    construct: "declare namespace SPEC { export const v: number }",
   },
 };
 
@@ -2013,6 +2077,8 @@ const T4_5_8_COLLIDING_ARMS: readonly SameScopeDeclarationArm[] = [
     construct: "namespace SPEC { export const v = 1 }",
   },
   ...Object.values(T4_5_8_FURTHER_LOCATED_FORMS),
+  // T4.5-8's own further form, beside the shared table: T14-11 names
+  // `export class SPEC {}` among its 14.15 forms but not this one.
   {
     name: "an exported function `export function SPEC() {}` (SPEC 2.4, 14, 1.7)",
     line: "export function SPEC() {}",
@@ -2073,15 +2139,21 @@ interface StagedSameScopeArm {
  * marker statement and the `text(...)` call statement, each on its own line
  * — and fix every construct's byte position from the exact bytes. The file
  * is pure ASCII, so string indices are byte offsets. A construct missing
- * from its line is a harness defect, never a product failure. It registers
- * a record, so it runs at module load only.
+ * from its line, or occurring in it more than once (its position would be
+ * ambiguous), is a harness defect, never a product failure. It registers a
+ * record, so it runs at module load only.
  */
 function stageSameScopeArm(arm: SameScopeDeclarationArm): StagedSameScopeArm {
   const constructAt = arm.line.indexOf(arm.construct);
-  if (constructAt === -1) {
+  if (
+    constructAt === -1 ||
+    (arm.construct !== "" &&
+      arm.line.lastIndexOf(arm.construct) !== constructAt)
+  ) {
     throw new Error(
-      `T4.5-8 fixture broke: the located construct must occur within the ` +
-        `declaration line (${arm.name}) — fix the arm table in section-4.5.ts`,
+      `T4.5-8 fixture broke: the located construct must occur exactly once ` +
+        `within the declaration line (${arm.name}) — fix the arm table in ` +
+        `section-4.5.ts`,
     );
   }
   const declarationPrefix = `${T4_5_8_IMPORT}\n\n`;
@@ -2202,8 +2274,10 @@ function assertSameScopeCollisionFindings(
   // The non-import's location byte-asserted against its precomputed offsets
   // (TEST-SPEC T4.5-8): the declarator's own characters — name or binding
   // pattern through initializer, the `const`, `let`, `using`, or `await
-  // using` statement excluded — or the declaration's own characters, a
-  // decorator list included and a leading `export` excluded (SPEC 14, 1.7).
+  // using` statement excluded — or the declaration's own characters, its
+  // decorators and modifiers included (from the first `@`, `async`,
+  // `abstract`, `const`, or `declare`) and a leading `export` or `export
+  // default` excluded (SPEC 14, 1.7).
   // None ends in a statement terminator, so its exact span is unambiguous;
   // the import's own characters keep the end-widened window above.
   assertSameJson(
@@ -2805,7 +2879,7 @@ async function assertTypeOnlySideArm(
 const T4_5_8 = defineProductTest({
   id: "T4.5-8",
   title:
-    'same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `using`, `await using`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name, byte-exact (the declarator `SPEC = 1`, the `const` statement excluded; `SPEC = f()` for `using SPEC = f()` and `await using SPEC = f()`, the `using` or `await using` excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, and `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20; and on the type-only side — the spec import type-only (`import type SPEC`), the call `text(SPEC.b)` left out, beside each module-scope value-level form above, one arm each, and `import { type text as t }` with the call `t("x")` beside `function t(x: unknown) {}` and, separately, beside `const t = (x: unknown) => ""` — every arm collides with nothing: `build` and `check` report no finding, exit 0, `query edges` lists no edge from the file and `occurrences` no record, the marker-shaped `SPEC.a` raising no 14.7 and no 14.8 and `t("x")` no 14.8 (SPEC 2.4, 4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)',
+    'same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `using`, `await using`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name, byte-exact (the declarator `SPEC = 1`, the `const` statement excluded; `SPEC = f()` for `using SPEC = f()` and `await using SPEC = f()`, the `using` or `await using` excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded, `export default function SPEC() {}` / `export default class SPEC {}` from `function` / `class`, the `export default` excluded, and the modifier-bearing `async function SPEC() {}`, `export async function SPEC() {}`, and `export default async function SPEC() {}` from `async`, `abstract class SPEC {}` from `abstract`, `const enum SPEC {}` from `const`, and `declare namespace SPEC { export const v: number }` from `declare`), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20; and on the type-only side — the spec import type-only (`import type SPEC`), the call `text(SPEC.b)` left out, beside each module-scope value-level form above, one arm each, and `import { type text as t }` with the call `t("x")` beside `function t(x: unknown) {}` and, separately, beside `const t = (x: unknown) => ""` — every arm collides with nothing: `build` and `check` report no finding, exit 0, `query edges` lists no edge from the file and `occurrences` no record, the marker-shaped `SPEC.a` raising no 14.7 and no 14.8 and `t("x")` no 14.8 (SPEC 2.4, 4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)',
   run: async (product) => {
     for (const staging of T4_5_8_COLLIDING_STAGINGS) {
       await assertSameScopeCollisionArm(product, staging);

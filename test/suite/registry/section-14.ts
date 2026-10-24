@@ -7237,21 +7237,33 @@ const T14_11_D_ELISIONS = assemble([
 // without initializer is its name), `const { SPEC } = o` at `{ SPEC } = o`
 // (the binding pattern through its initializer, the `const` statement
 // excluded), `@dec class SPEC {}` from its `@` (a decorator list is part of
-// the class it decorates), and `export class SPEC {}` from `class` (the
-// leading `export` excluded) — each in its own code file beside the import
-// declaration it collides with, located by its own characters (staged
-// without `;`, as in (j)), the chains the collided identifier roots
-// unresolved (14.7, SPEC 2.4): the marker by its bare chain exclusive of
-// the `;`, the `text(...)` call callee through closing parenthesis (5.7) —
-// `a` and `b` exist, so a product ignoring the collision resolves them and
-// reports nothing. A form's supporting declaration (`declare const o`,
-// `declare function dec`) precedes its colliding line and binds no `SPEC`.
+// the class it decorates), `export class SPEC {}` from `class` (the leading
+// `export` excluded), `export default function SPEC() {}` from `function`
+// and `export default class SPEC {}` from `class` (the leading `export
+// default` excluded: a default export of a named construct takes that
+// construct's own range), and, carrying modifiers other than a leading
+// `export` or `export default`, `async function SPEC() {}`, `export async
+// function SPEC() {}`, and `export default async function SPEC() {}` from
+// `async`, `abstract class SPEC {}` from `abstract`, `const enum SPEC {}`
+// from `const`, and `declare namespace SPEC { export const v: number }`
+// from `declare` (a declaration's modifiers are among its own characters) —
+// a product starting the range at the declaration's keyword failing the
+// modifier-bearing forms, one starting it at a leading `export default`'s
+// `export` or `default` the three `export default` forms — each in its own
+// code file beside the import declaration it collides with, located by its
+// own characters (staged without `;`, as in (j)), the chains the collided
+// identifier roots unresolved (14.7, SPEC 2.4): the marker by its bare
+// chain exclusive of the `;`, the `text(...)` call callee through closing
+// parenthesis (5.7) — `a` and `b` exist, so a product ignoring the
+// collision resolves them and reports nothing. A form's supporting
+// declaration (`declare const o`, `declare function dec`) precedes its
+// colliding line and binds no `SPEC`.
 function collisionFixture(form: SameScopeDeclarationArm): AssembledFixture {
   const at = form.line.indexOf(form.construct);
-  if (at === -1) {
+  if (at === -1 || form.line.lastIndexOf(form.construct) !== at) {
     throw new Error(
-      `T14-11 (u) fixture broke: the located construct must occur within ` +
-        `the declaration line (${form.name}) — fix ` +
+      `T14-11 (u) fixture broke: the located construct must occur exactly ` +
+        `once within the declaration line (${form.name}) — fix ` +
         `T4_5_8_FURTHER_LOCATED_FORMS in section-4.5.ts (harness bug)`,
     );
   }
@@ -7986,7 +7998,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
   },
   {
     arm: "u",
-    rule: "14.15 — a colliding non-import declaration by the construct binding the name, per form: `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`, each beside its import (14.7 for the chains it roots)",
+    rule: "14.15 — a colliding non-import declaration by the construct binding the name, per form: `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`, `export default function SPEC() {}` from `function` and `export default class SPEC {}` from `class` (the `export default` excluded), `async function SPEC() {}`, `export async function SPEC() {}`, and `export default async function SPEC() {}` from `async`, `abstract class SPEC {}` from `abstract`, `const enum SPEC {}` from `const`, `declare namespace SPEC { export const v: number }` from `declare`, each beside its import (14.7 for the chains it roots)",
     config: SPEC_AND_CODE_CONFIG,
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
@@ -8483,7 +8495,7 @@ export const T14_11_FIXTURES: readonly T1411Fixture[] = [
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF/U+1680/U+3000, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings — while a trailing comma spells no hole: `d={[BASE.a,]}` valid, one `depends` edge and one occurrence spanning `BASE.a`, no finding), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), the other kinds' spans — an MDX embedding at its whole braced container under 14.8 (`{text()}` and `{ /* c */ text(BASE?.a) }`, inner whitespace and comment included), a TypeScript `text(...)` call callee through closing parenthesis under 14.7 (`text(SPEC.missing)`, and the aliased `t(SPEC.missing)` from `t`), and a marker's bare chain exclusive of its `;` (the unresolved `SPEC.missing;` at `SPEC.missing`; the non-static `SPEC?.a;`, and `(SPEC.a);` located as `(SPEC.a)`, its parentheses included) — the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms (`export import X = require(…)` from `import`, its `export` excluded), import types (`import` through the closing parenthesis of the argument list — `typeof import(…).default` and `import(…).T<number>`, the `typeof`, qualifier, and type arguments excluded), string-named module declarations (`declare module` whole, `export declare module` from `declare`), and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.4, 1.6, 1.7, 2.2, 2.3, 2.4, 4, 4.3, 4.5, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF/U+1680/U+3000, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings — while a trailing comma spells no hole: `d={[BASE.a,]}` valid, one `depends` edge and one occurrence spanning `BASE.a`, no finding), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), the other kinds' spans — an MDX embedding at its whole braced container under 14.8 (`{text()}` and `{ /* c */ text(BASE?.a) }`, inner whitespace and comment included), a TypeScript `text(...)` call callee through closing parenthesis under 14.7 (`text(SPEC.missing)`, and the aliased `t(SPEC.missing)` from `t`), and a marker's bare chain exclusive of its `;` (the unresolved `SPEC.missing;` at `SPEC.missing`; the non-static `SPEC?.a;`, and `(SPEC.a);` located as `(SPEC.a)`, its parentheses included) — the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms (`export import X = require(…)` from `import`, its `export` excluded), import types (`import` through the closing parenthesis of the argument list — `typeof import(…).default` and `import(…).T<number>`, the `typeof`, qualifier, and type arguments excluded), string-named module declarations (`declare module` whole, `export declare module` from `declare`), and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`, `export default function SPEC() {}` / `export default class SPEC {}` from `function` / `class`, the `export default` excluded, and the modifier-bearing `async function SPEC() {}`, `export async function SPEC() {}`, and `export default async function SPEC() {}` from `async`, `abstract class SPEC {}` from `abstract`, `const enum SPEC {}` from `const`, and `declare namespace SPEC { export const v: number }` from `declare`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.4, 1.6, 1.7, 2.2, 2.3, 2.4, 4, 4.3, 4.5, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);
