@@ -276,6 +276,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // --file` gives on the failing workspace (11.2).
   "T4-4": ["4", "4.5", "5.7", "11.2", "14"],
   "T4-5": ["4", "2.1", "2.4", "4.5", "5.7", "11.2", "14"],
+  // T4-6: 4's module-linking forms and spec module imports wherever each
+  // stands, each failing file's 14.15 at the declaration's own characters
+  // (1.7); its nested `text` binding the module's `text` export (4.3),
+  // declared in the scope of the function enclosing it (4.5), the call's
+  // `embeds` edge attributed to that unit (4.6) and its occurrence record
+  // (5.7) read through `occurrences` (11.3).
+  "T4-6": ["4", "1.7", "4.3", "4.5", "4.6", "5.7", "11.3", "14"],
   "T4.1-1": ["4.1"],
   "T4.1-2": ["4.1"],
   "T4.1-3": ["4.1"],

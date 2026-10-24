@@ -1,5 +1,5 @@
 // TEST-SPEC §4 preamble (generated TypeScript modules) — SUITE-12:
-// T4-1 … T4-5.
+// T4-1 … T4-6.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -43,7 +43,11 @@
 // nothing, and a `require(…)` call's argument, a triple-slash directive, or
 // a string literal elsewhere is never read, validated, or rewritten (6.5) as
 // a specifier; imports colliding on a binding identifier are 14.15 when
-// either import is a spec module import.
+// either import is a spec module import. Each module-linking form and each
+// spec module import is defined by construct, wherever it stands —
+// TypeScript's parser admits the declaration forms beyond a file's
+// top-level statement list, the placement restrictions being post-parse
+// checks (14.20) — so T4-6 holds nested ones to the same rules.
 //
 // Conservative operationalizations (noted per H-4 — wording is free, so only
 // the stated observables are asserted):
@@ -84,6 +88,19 @@
 //   validations the mismatch forms of 14.10 are undetectable, and a
 //   never-built workspace holds no record for its other two forms to
 //   consult (14.10).
+// - T4-6's failing arms ("each fails with 14.15 located at the
+//   declaration's own characters"): each arm's files share one workspace,
+//   and `build --json` and `check --json` each report exactly one 14.15 per
+//   file and nothing else — `check`'s findings with nothing set aside, as
+//   T4-4's mixed arms assert them — each located byte-exactly, no
+//   end-widening: TEST-SPEC places the range at the declaration's own
+//   characters (T14-11), so `byteWindow`'s line-granular tolerance is set
+//   aside. Arm (b)'s "`query edges` reports one `embeds` edge": the whole
+//   workspace's dependency edges are compared with that one edge, the
+//   structural `contains` edges set aside as in T4-2's no-other-construct
+//   arm; its "one call occurrence" is the complete record set of
+//   `occurrences --file src/t.ts`, the record's every datum pinned from the
+//   bytes, its source's range included (SPEC 5.7, 1.7).
 
 import { Buffer } from "node:buffer";
 import { basename } from "node:path";
@@ -157,11 +174,11 @@ export default defineConfig({
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their imports and
 // spec-module usage (4, 4.5). A staged-source record (S-9's timing clause):
-// every arm workspace of T4-2, T4-4, and T4-5 past each body's first — T4-4's
-// two mixed-combination workspaces among them — is created after a product
-// invocation; T4-3's one workspace stages it before any.
+// every arm workspace of T4-2, T4-4, T4-5, and T4-6 past each body's first —
+// T4-4's two mixed-combination workspaces among them — is created after a
+// product invocation; T4-3's one workspace stages it before any.
 const SPEC_AND_CODE_CONFIG = stagedTs(
-  "T4-2/T4-4/T4-5 xspec.config.ts — one spec group and one code group, the arm workspaces' default",
+  "T4-2/T4-4/T4-5/T4-6 xspec.config.ts — one spec group and one code group, the arm workspaces' default",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1540,7 +1557,7 @@ const T4_3 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// Shared by T4-4's mixed arms and T4-5's arms
+// Shared by T4-4's mixed arms, T4-5's arms, and T4-6's arms
 // ---------------------------------------------------------------------------
 
 /** A finding's locations as JSON-safe `[file, start, end]` tuples (12.7 order). */
@@ -2365,6 +2382,489 @@ const T4_5 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T4-6
+// ---------------------------------------------------------------------------
+
+// `specs/NAME.mdx`, one node `a`: every T4-6 arm's discovered spec source —
+// the spec module arm (b)'s nested import names, and the source every other
+// arm's specifier but `missing.xspec` designates (no `specs/missing.mdx` is
+// staged anywhere). A staged-source record (S-9's timing clause): every
+// arm's workspace past the first is created after a product invocation, so
+// the configuration (SPEC_AND_CODE_CONFIG) and every code source below are
+// records too.
+const T4_6_SPEC_SOURCE = stagedMdx(
+  "T4-6 specs/NAME.mdx — one node `a`, every arm's discovered spec source",
+  '<S id="a">\nAlpha behavior.\n</S>\n',
+);
+
+/**
+ * One failing code source of T4-6's arms (a), (c), and (d): a module-linking
+ * form nested in a function body or a namespace body, beyond the file's
+ * top-level statement list (SPEC 4: each form is defined by construct,
+ * wherever it stands; 14.20: the restrictions on where each may stand are
+ * post-parse checks). Exported, as `T4_6_NESTED_LINKING_FORMS`, for T14-11's
+ * 14.15 range arm (section-14.ts) — TEST-SPEC T14-11 locates T4-6's nested
+ * forms as it locates their top-level twins — to restage each `text` under
+ * a record of its own, as its arm (u) restages
+ * `T4_5_8_FURTHER_LOCATED_FORMS`.
+ */
+export interface NestedLinkingFormStaging {
+  /** The T4-6 arm staging the file, beside the arm's other files. */
+  readonly arm: "a" | "c" | "d";
+  /** Which form, in which container (failure diagnostics). */
+  readonly name: string;
+  /** The code source's workspace-relative path, under `src/`. */
+  readonly file: string;
+  /**
+   * The file's exact text — pure ASCII, accepted by TypeScript 5.9.3 both
+   * as module code and as script code (S-9).
+   */
+  readonly text: string;
+  /**
+   * The declaration's own characters — the one range its condition-15
+   * finding locates (SPEC 14, 1.7) — occurring exactly once within `text`.
+   */
+  readonly construct: string;
+}
+
+// The two containers T4-6 names, laid out by the harness — TEST-SPEC fixes
+// each declaration and its container alone: a function body, `export
+// function f() {` as (d)'s own text opens, and a namespace body, `namespace
+// N {` as (c) spells it. Each holds its one declaration on a line of its
+// own, two-space-indented, with no `;`, so that the declaration's own
+// characters end at its last token unambiguously (as T14-11's arms stage
+// theirs: TypeScript's node for a declaration spelling a `;` spans it).
+function inFunctionBody(declaration: string): string {
+  return `export function f() {\n  ${declaration}\n}\n`;
+}
+function inNamespaceBody(declaration: string): string {
+  return `namespace N {\n  ${declaration}\n}\n`;
+}
+
+// The declarations, each staged in the containers TEST-SPEC names for it.
+const T4_6_MISSING_IMPORT = 'import X from "../specs/missing.xspec"';
+const T4_6_NAMED_IMPORT = 'import { a } from "../specs/NAME.xspec"';
+const T4_6_REQUIRE = 'import X = require("../specs/NAME.xspec")';
+const T4_6_EXPORT = 'export * from "../specs/NAME.xspec"';
+const T4_6_MODULE = 'declare module "../specs/NAME.xspec" { }';
+const T4_6_DERIVED_IMPORT = 'import "../specs/NAME.xspec.ts"';
+
+// T4-6's ten failing files, in TEST-SPEC's order. (a) A nested spec module
+// import held to 4's rules: an import of `../specs/missing.xspec`, no such
+// source, and an import binding the named export `a`, no binding 4 permits
+// (the default and `text` alone), each in a function body and, in a
+// further file, in a namespace body. (c) Every other module-linking form
+// whose specifier ends in `.xspec`, invalid wherever it stands:
+// `import X = require(…)` and `export * from`, each in a namespace body and
+// in a function body, and the string-named module declaration in a
+// namespace body. (d) TEST-SPEC's own text: a side-effect import nested in
+// a function body, its relative specifier designating the derived-file path
+// `specs/NAME.xspec.ts` (13.4: a file name containing `.xspec.`) other than
+// through `.xspec` — classified by path, so no file need exist there. The
+// located construct: an import, export, or import-equals declaration by its
+// own characters (SPEC 14: the import range of 11.4), the string-named
+// module declaration by its own characters, its `declare` modifier included
+// (14, 1.7) — so a product examining a file's top-level statements alone
+// reports none of these, and one judging derived-path designations over
+// the top-level statements alone reports (a) and (c) but not (d).
+export const T4_6_NESTED_LINKING_FORMS: readonly NestedLinkingFormStaging[] = [
+  {
+    arm: "a",
+    name: "an import of the missing `../specs/missing.xspec` in a function body",
+    file: "src/missing-function.ts",
+    text: inFunctionBody(T4_6_MISSING_IMPORT),
+    construct: T4_6_MISSING_IMPORT,
+  },
+  {
+    arm: "a",
+    name: "an import of the missing `../specs/missing.xspec` in a namespace body",
+    file: "src/missing-namespace.ts",
+    text: inNamespaceBody(T4_6_MISSING_IMPORT),
+    construct: T4_6_MISSING_IMPORT,
+  },
+  {
+    arm: "a",
+    name: "an import binding the named export `a` (no binding 4 permits) in a function body",
+    file: "src/named-function.ts",
+    text: inFunctionBody(T4_6_NAMED_IMPORT),
+    construct: T4_6_NAMED_IMPORT,
+  },
+  {
+    arm: "a",
+    name: "an import binding the named export `a` (no binding 4 permits) in a namespace body",
+    file: "src/named-namespace.ts",
+    text: inNamespaceBody(T4_6_NAMED_IMPORT),
+    construct: T4_6_NAMED_IMPORT,
+  },
+  {
+    arm: "c",
+    name: "`import X = require(…)` of a `.xspec` specifier in a namespace body",
+    file: "src/require-namespace.ts",
+    text: inNamespaceBody(T4_6_REQUIRE),
+    construct: T4_6_REQUIRE,
+  },
+  {
+    arm: "c",
+    name: "`import X = require(…)` of a `.xspec` specifier in a function body",
+    file: "src/require-function.ts",
+    text: inFunctionBody(T4_6_REQUIRE),
+    construct: T4_6_REQUIRE,
+  },
+  {
+    arm: "c",
+    name: "`export * from` a `.xspec` specifier in a namespace body",
+    file: "src/export-namespace.ts",
+    text: inNamespaceBody(T4_6_EXPORT),
+    construct: T4_6_EXPORT,
+  },
+  {
+    arm: "c",
+    name: "`export * from` a `.xspec` specifier in a function body",
+    file: "src/export-function.ts",
+    text: inFunctionBody(T4_6_EXPORT),
+    construct: T4_6_EXPORT,
+  },
+  {
+    arm: "c",
+    name: "a string-named module declaration named by a `.xspec` specifier in a namespace body",
+    file: "src/module-namespace.ts",
+    text: inNamespaceBody(T4_6_MODULE),
+    construct: T4_6_MODULE,
+  },
+  {
+    arm: "d",
+    name: "a side-effect import designating the derived-file path `../specs/NAME.xspec.ts`, nested in a function body",
+    file: "src/d.ts",
+    text: `export function f() { ${T4_6_DERIVED_IMPORT} }\n`,
+    construct: T4_6_DERIVED_IMPORT,
+  },
+];
+
+/** A failing T4-6 file laid out at module load: its record and pinned range. */
+interface LaidOutNestedLinkingForm {
+  readonly form: NestedLinkingFormStaging;
+  /** The file's text as a staged-source record (S-9's timing clause). */
+  readonly source: StagedTs;
+  /** The declaration's own characters as UTF-8 byte offsets (SPEC 1.7). */
+  readonly range: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Lay out one failing file: register its record and fix its construct's
+ * byte range from the exact text, throwing (a harness defect, never a
+ * product verdict) unless the construct occurs exactly once. It registers a
+ * record, so it runs at module load only (`T4_6_LAID_OUT_FORMS`).
+ */
+function layOutNestedLinkingForm(
+  form: NestedLinkingFormStaging,
+): LaidOutNestedLinkingForm {
+  const at = form.text.indexOf(form.construct);
+  if (at === -1 || form.text.lastIndexOf(form.construct) !== at) {
+    throw new Error(
+      `T4-6 fixture self-check: the located declaration must occur exactly ` +
+        `once in ${form.file} (${form.name}) — fix ` +
+        `T4_6_NESTED_LINKING_FORMS (harness bug)`,
+    );
+  }
+  const start = Buffer.byteLength(form.text.slice(0, at), "utf8");
+  return {
+    form,
+    source: stagedTs(
+      `T4-6 (${form.arm}) ${form.file} — ${form.name}`,
+      form.text,
+    ),
+    range: { start, end: start + Buffer.byteLength(form.construct, "utf8") },
+  };
+}
+
+const T4_6_LAID_OUT_FORMS: readonly LaidOutNestedLinkingForm[] =
+  T4_6_NESTED_LINKING_FORMS.map(layOutNestedLinkingForm);
+
+// TEST-SPEC pins (d)'s range itself, [22, 53): the table must reproduce it.
+{
+  const d = T4_6_LAID_OUT_FORMS.filter((laid) => laid.form.arm === "d");
+  if (
+    d.length !== 1 ||
+    d[0]!.form.file !== "src/d.ts" ||
+    d[0]!.range.start !== 22 ||
+    d[0]!.range.end !== 53
+  ) {
+    throw new Error(
+      `T4-6 fixture self-check: arm (d) stages src/d.ts alone, its nested ` +
+        `side-effect import at TEST-SPEC's [22, 53); the table gives ` +
+        `${JSON.stringify(d.map((laid) => [laid.form.file, laid.range]))} — ` +
+        `fix T4_6_NESTED_LINKING_FORMS (harness bug)`,
+    );
+  }
+}
+
+// Arm (b)'s `src/t.ts`, TEST-SPEC's exact text: a nested import binding the
+// default export and `text`, and the call `text(N.a)` in the same function
+// body — a spec module `text` call (4.3), its callee and its argument's root
+// bound by the nested import in `g`'s scope (4.5), recording its `embeds`
+// edge from `src/t.ts#g`, the innermost enclosing named unit (4.6). A
+// product resolving a callee through top-level imports alone records
+// nothing.
+const T4_6_TEXT_FILE = "src/t.ts";
+const T4_6_TEXT_CALL = "text(N.a)";
+const T4_6_TEXT_UNIT = "function g() {";
+const T4_6_TEXT_SOURCE_TEXT =
+  "export function g() {\n" +
+  '  import N, { text } from "../specs/NAME.xspec"\n' +
+  `  ${T4_6_TEXT_CALL}\n` +
+  "}\n";
+const T4_6_TEXT_SOURCE = stagedTs(
+  "T4-6 (b) src/t.ts — `text(N.a)` beside the nested `import N, { text }` in `g`",
+  T4_6_TEXT_SOURCE_TEXT,
+);
+
+/**
+ * Arm (b)'s one occurrence record (SPEC 5.7) as a JSON-safe tuple — file,
+ * own range, kind, source (identity and range), target, in the order of
+ * `occurrenceTuple` — pinned from the exact bytes: the call expression,
+ * callee through closing parenthesis; its source the unit `g`, whose range
+ * is the function declaration by its own characters, `function` through
+ * the closing brace, the leading `export ` excluded (1.7).
+ */
+const T4_6_TEXT_RECORD: readonly unknown[] = (() => {
+  const call = T4_6_TEXT_SOURCE_TEXT.indexOf(T4_6_TEXT_CALL);
+  const unit = T4_6_TEXT_SOURCE_TEXT.indexOf(T4_6_TEXT_UNIT);
+  const unitEnd = T4_6_TEXT_SOURCE_TEXT.lastIndexOf("}") + 1;
+  if (
+    call === -1 ||
+    T4_6_TEXT_SOURCE_TEXT.lastIndexOf(T4_6_TEXT_CALL) !== call ||
+    unit === -1 ||
+    T4_6_TEXT_SOURCE_TEXT.lastIndexOf(T4_6_TEXT_UNIT) !== unit ||
+    T4_6_TEXT_SOURCE_TEXT.slice(unitEnd) !== "\n"
+  ) {
+    throw new Error(
+      "T4-6 fixture self-check: arm (b)'s src/t.ts must hold the call " +
+        "`text(N.a)` and the unit `function g() {` once each, the unit's " +
+        "closing brace ending the file's last line (harness bug)",
+    );
+  }
+  const bytes = (text: string): number => Buffer.byteLength(text, "utf8");
+  const callStart = bytes(T4_6_TEXT_SOURCE_TEXT.slice(0, call));
+  return [
+    T4_6_TEXT_FILE,
+    callStart,
+    callStart + bytes(T4_6_TEXT_CALL),
+    "embeds",
+    [
+      `${T4_6_TEXT_FILE}#g`,
+      bytes(T4_6_TEXT_SOURCE_TEXT.slice(0, unit)),
+      bytes(T4_6_TEXT_SOURCE_TEXT.slice(0, unitEnd)),
+    ],
+    "specs/NAME.mdx#a",
+  ];
+})();
+
+/**
+ * Assert a failing T4-6 arm's findings: exactly one condition-15 finding
+ * per staged file, nothing beside — no other condition, no finding for
+ * `specs/NAME.mdx` — each concerning no path (12.7) and carrying exactly
+ * one location, its file's declaration by its own characters, byte-exact
+ * (SPEC 4, 14, 1.7). The lists are compared as multisets: the order among
+ * the findings is 12.7's contract, not this test's.
+ */
+function assertNestedLinkingFindings(
+  findings: readonly Finding[],
+  forms: readonly LaidOutNestedLinkingForm[],
+  context: string,
+): void {
+  assertSameJson(
+    findings.map((finding) => finding.condition ?? finding.code),
+    forms.map(() => "14.15"),
+    `${context}: exactly one condition-15 finding per staged file and ` +
+      `nothing else — 4's rules hold a module-linking form and a spec module ` +
+      `import wherever it stands, a function body and a namespace body ` +
+      `included (SPEC 4, 14.15) — never the silence of a product examining ` +
+      `a file's top-level statements alone`,
+  );
+  for (const finding of findings) {
+    if (finding.path !== null) {
+      fail(
+        `${context}: a finding locating in source concerns no path — ` +
+          `\`path\` is null for located conditions (SPEC 12.7, 14); got ` +
+          `${renderPathValue(finding.path)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+  const byJson = (a: unknown, b: unknown): number => {
+    const left = JSON.stringify(a);
+    const right = JSON.stringify(b);
+    return left < right ? -1 : left > right ? 1 : 0;
+  };
+  assertSameJson(
+    findings.map(locationTuples).sort(byJson),
+    forms
+      .map(({ form, range }) => [[form.file, range.start, range.end]])
+      .sort(byJson),
+    `${context}: each condition-15 finding locates exactly its file's ` +
+      `nested declaration by its own characters — an import, export, or ` +
+      `import-equals declaration \`import\` or \`export\` through its closing ` +
+      `quote or parenthesis (no \`;\` staged), a string-named module ` +
+      `declaration from its \`declare\` modifier through its closing brace ` +
+      `— as \`[file, start, end]\` byte offsets, end-exclusive (SPEC 14, ` +
+      `1.7, 11.4)`,
+  );
+}
+
+/**
+ * One failing arm, its files together on a workspace of its own beside
+ * `specs/NAME.mdx`: `build` and `check` each exit 1 with exactly the arm's
+ * findings — `check`'s nothing set aside, no staleness standing on the
+ * failing, never-built workspace (14.10; module header) — and nothing is
+ * compiled (TypeScript's checker rejects each nested form after parsing).
+ */
+async function assertNestedLinkingArm(
+  product: ProductBinding,
+  arm: "a" | "c" | "d",
+  description: string,
+): Promise<void> {
+  const forms = T4_6_LAID_OUT_FORMS.filter((laid) => laid.form.arm === arm);
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    {
+      "specs/NAME.mdx": T4_6_SPEC_SOURCE,
+      ...Object.fromEntries(forms.map((laid) => [laid.form.file, laid.source])),
+    },
+    async (workspace) => {
+      const buildContext = `T4-6 (${arm}) \`build --json\` over ${description}`;
+      assertNestedLinkingFindings(
+        await buildFindings(product, workspace, buildContext),
+        forms,
+        buildContext,
+      );
+      const checkContext = `T4-6 (${arm}) \`check --json\` over ${description}`;
+      assertNestedLinkingFindings(
+        await runFindingsReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          1,
+          `${checkContext} — \`check\` performs all build validations and ` +
+            `exits 1 on the findings (SPEC 12.2, 4, 14.15)`,
+        ),
+        forms,
+        checkContext,
+      );
+    },
+  );
+}
+
+/**
+ * Arm (b), on a workspace of its own: `build` and `check` are finding-free
+ * (exit 0, `{"findings": []}`); the workspace's dependency edges — the spec
+ * source's structural `contains` edges set aside (SPEC 5.2) — are exactly
+ * the call's `embeds` edge from `src/t.ts#g` to `specs/NAME.mdx#a`; and
+ * `occurrences --file src/t.ts` answers no finding and exactly the call's
+ * record (5.7, 11.3).
+ */
+async function assertNestedTextArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    {
+      "specs/NAME.mdx": T4_6_SPEC_SOURCE,
+      [T4_6_TEXT_FILE]: T4_6_TEXT_SOURCE,
+    },
+    async (workspace) => {
+      const context = "T4-6 (b) over src/t.ts's nested `import N, { text }`";
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["build", "--json"],
+        `${context}: \`build --json\` — a nested \`text\` binding is its ` +
+          `module's \`text\` export, so the call is a sanctioned use (SPEC ` +
+          `4, 4.3, 4.5)`,
+      );
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${context}: \`check --json\` on the freshly built workspace (SPEC ` +
+          `12.2)`,
+      );
+
+      const edgesLabel = `${context}: \`query edges\``;
+      const edges = decodeEdgesReport(
+        await runJson(product, workspace, ["query", "edges"], edgesLabel),
+        edgesLabel,
+      );
+      assertEdgeSetEqual(
+        edges.filter((edge) => edge.kind !== "contains"),
+        [
+          {
+            from: `${T4_6_TEXT_FILE}#g`,
+            to: "specs/NAME.mdx#a",
+            kind: "embeds",
+          },
+        ],
+        `${edgesLabel}: the call's \`embeds\` edge from \`src/t.ts#g\` — the ` +
+          `innermost enclosing named unit — to \`specs/NAME.mdx#a\` is the ` +
+          `only dependency edge (SPEC 4.3, 4.5, 4.6) — never none, as from a ` +
+          `product resolving a callee through top-level imports alone`,
+      );
+
+      const occLabel = `${context}: \`occurrences --file ${T4_6_TEXT_FILE}\``;
+      const report = decodeOccurrencesReport(
+        await runJson(
+          product,
+          workspace,
+          ["occurrences", "--file", T4_6_TEXT_FILE],
+          occLabel,
+        ),
+        occLabel,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${occLabel}: the valid workspace's answer carries no finding ` +
+          `(SPEC 11.3)`,
+      );
+      assertSameJson(
+        report.occurrences.map(occurrenceTuple),
+        [T4_6_TEXT_RECORD],
+        `${occLabel}: exactly the call's occurrence — spanning \`text(N.a)\`, ` +
+          `callee through closing parenthesis, kind \`embeds\`, its source ` +
+          `\`src/t.ts#g\` with the unit's own range (\`function\` through ` +
+          `the closing brace, the leading \`export\` excluded), its target ` +
+          `\`specs/NAME.mdx#a\` (SPEC 5.7, 4.6, 1.7)`,
+      );
+    },
+  );
+}
+
+const T4_6 = defineProductTest({
+  id: "T4-6",
+  title:
+    "nested module-linking forms and spec module imports — 4 judges each by construct wherever it stands, nested in a function body or a namespace body, each file S-9 well-formed and none compiled, every arm on a workspace of its own beside `specs/NAME.mdx` holding `a`: (a) an import of the missing `../specs/missing.xspec` and an import binding the named export `a`, each in a function body and in a namespace body, and (c) `import X = require(…)` and `export * from` of a `.xspec` specifier, each in a namespace body and in a function body, and `declare module` named by one in a namespace body, fail — `build` and `check` exit 1 with exactly one 14.15 per file, located byte-exactly at the declaration's own characters (the module declaration's `declare` included); (b) a nested `text` binding is its module's `text` export — `text(N.a)` beside `import N, { text }` in `g`'s body builds and checks finding-free, `query edges` holding exactly the call's `embeds` edge from `src/t.ts#g` to `specs/NAME.mdx#a` and `occurrences --file src/t.ts` exactly its record, source `src/t.ts#g`; (d) the side-effect import `import \"../specs/NAME.xspec.ts\"` nested in a function body, designating a derived-file path other than through `.xspec`, fails — exactly one 14.15 at [22, 53) — never the silence of a product examining a file's top-level statements alone, or judging derived-path designations there alone (SPEC 4, 1.7, 4.3, 4.5, 4.6, 5.7, 11.3, 14.15)",
+  run: async (product) => {
+    await assertNestedLinkingArm(
+      product,
+      "a",
+      "an import of a missing spec source and an import binding the named " +
+        "export `a`, each in a function body and in a namespace body",
+    );
+    await assertNestedTextArm(product);
+    await assertNestedLinkingArm(
+      product,
+      "c",
+      "`import X = require(…)` and `export * from` of a `.xspec` specifier, " +
+        "each in a namespace body and in a function body, and a string-named " +
+        "module declaration named by one in a namespace body",
+    );
+    await assertNestedLinkingArm(
+      product,
+      "d",
+      "src/d.ts's side-effect import of the derived-file path " +
+        "`../specs/NAME.xspec.ts`, nested in a function body",
+    );
+  },
+});
+
 /** TEST-SPEC §4 preamble, in canonical ID order (SUITE-12). */
 export const section4Tests: readonly ProductTestEntry[] = [
   T4_1,
@@ -2372,4 +2872,5 @@ export const section4Tests: readonly ProductTestEntry[] = [
   T4_3,
   T4_4,
   T4_5,
+  T4_6,
 ];
