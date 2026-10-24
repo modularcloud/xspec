@@ -1913,6 +1913,9 @@ class CodeAnalyzer {
    * `export { … };` without a module specifier references local bindings:
    * re-exporting a spec module binding is an unsanctioned value-level use
    * (SPEC 4.5 → 14.18); type-only forms are type-level and unrestricted.
+   * SPEC 14: the 14.18 locates the binding's spelling at the offending
+   * use — the specifier's local name (`SPEC` of `SPEC as Y`), never the
+   * exported name or the whole specifier; no chain extends it there.
    */
   private visitExportSpecifiers(declaration: tst.ExportDeclaration): void {
     if (declaration.isTypeOnly) return;
@@ -1930,10 +1933,14 @@ class CodeAnalyzer {
       ) {
         continue;
       }
-      const local = (element.propertyName ?? element.name).text;
+      // The local name resolved to the binding, so it is an identifier: a
+      // string-literal local name resolves to nothing without a module
+      // specifier.
+      const localName = element.propertyName ?? element.name;
+      const local = localName.text;
       this.addFinding(
         18,
-        element,
+        localName,
         `unsupported node usage: ${JSON.stringify(local)} re-exports a ` +
           `spec module binding — re-export is not a sanctioned value-level ` +
           `use; consume nodes as dependency markers or "text" arguments in ` +
@@ -1945,11 +1952,18 @@ class CodeAnalyzer {
   /**
    * `import X = A.B;` aliases the entity `A` — an unsanctioned
    * value-level use of a spec module binding (SPEC 4.5 → 14.18). The
-   * require form was handled by scanModuleLinks.
+   * require form was handled by scanModuleLinks. SPEC 14: the 14.18
+   * locates the binding's spelling at the offending use — the entity
+   * name's leftmost identifier, extended for a node binding by the
+   * longest static property chain (2.4) it roots there, the qualified
+   * name's segments being non-computed accesses (`SPEC.a.b` of
+   * `export import X = SPEC.a.b;`), and for a `text` binding by nothing
+   * (`text` of `import t2 = text;`) — never the whole declaration.
    */
   private visitImportEqualsUse(declaration: tst.ImportEqualsDeclaration): void {
-    if (ts.isExternalModuleReference(declaration.moduleReference)) return;
-    let name: tst.EntityName = declaration.moduleReference;
+    const reference = declaration.moduleReference;
+    if (ts.isExternalModuleReference(reference)) return;
+    let name: tst.EntityName = reference;
     while (ts.isQualifiedName(name)) name = name.left;
     const binding = this.bindingOfSymbol(
       this.checker.getSymbolAtLocation(name),
@@ -1961,9 +1975,16 @@ class CodeAnalyzer {
     ) {
       return;
     }
+    // A colliding identifier's use here is a `text` binding's exactly
+    // where its imports bind the `text` export and not the default one,
+    // as visitIdentifier routes a use outside callee position (SPEC 2.4,
+    // 4.5).
+    const textSpelling =
+      binding.kind === "text" ||
+      (binding.kind === "colliding" && binding.text && !binding.node);
     this.addFinding(
       18,
-      declaration,
+      textSpelling ? name : reference,
       `unsupported node usage: an import alias of a spec module binding — ` +
         `aliasing is not a sanctioned value-level use (SPEC 4.5, 14.18)`,
     );
