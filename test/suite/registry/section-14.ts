@@ -638,7 +638,13 @@
 //   own. The trailing-comma arm (ab), run after (n), stages a valid
 //   workspace: `d={[BASE.a,]}`, ECMAScript's one-element array literal,
 //   holds no elision — `build --json` finding-free, one `depends` edge, and
-//   one occurrence spanning `BASE.a` alone. T12.0-15 restages every one of
+//   one occurrence spanning `BASE.a` alone. The nested-forms arm (ac), the
+//   table's last entry, restages T4-6's ten failing files
+//   (`T4_6_NESTED_LINKING_FORMS`, section-4.ts) in one workspace beside
+//   `specs/NAME.mdx` holding `a`: each module-linking form nested in a
+//   function or namespace body located as its top-level twin is, one
+//   14.15 per file — (d)'s side-effect import of a derived-file path at
+//   [22, 53). T12.0-15 restages every one of
 //   these per-condition fixtures (`T14_11_FIXTURES`: the table's arms, then
 //   (n)'s, (ab)'s, and — Linux leg — (o)'s workspaces, the very file maps
 //   T14-11's body stages) for its human-form twins of `build` and `check`
@@ -701,6 +707,8 @@ import {
   RENAME_REFUSAL_CONFIG,
   RENAME_REFUSAL_FILES,
 } from "./section-6.4.js";
+import type { NestedLinkingFormStaging } from "./section-4.js";
+import { T4_6_NESTED_LINKING_FORMS } from "./section-4.js";
 import type { SameScopeDeclarationArm } from "./section-4.5.js";
 import { T4_5_8_FURTHER_LOCATED_FORMS } from "./section-4.5.js";
 import {
@@ -7718,6 +7726,106 @@ const T14_11_PAREN_TS = assemble([
   ";\n",
 ]);
 
+// (ac) 14.15 — the nested forms of T4-6 located alike (SPEC 4, 14): a
+// module-linking form is defined by construct wherever it stands, so one
+// nested beyond the file's top-level statement list is located as its
+// top-level twin is ((j), (x)) — an import, export, or import-equals
+// declaration by its own characters, a string-named module declaration by
+// its own characters, its `declare` included. T4-6's ten failing files
+// (`T4_6_NESTED_LINKING_FORMS`, section-4.ts), the same texts restaged
+// under records of this module's own: (a)'s imports of the missing
+// `../specs/missing.xspec` and of the named export `a` (no binding 4
+// permits), each in a function body and in a namespace body; (c)'s
+// `import X = require(…)` and `export * from` a `.xspec` specifier, each in
+// a namespace body and in a function body, and `declare module
+// "../specs/NAME.xspec" { }` in a namespace body; and (d)'s side-effect
+// import of the derived-file path `../specs/NAME.xspec.ts` nested in a
+// function body, at TEST-SPEC's [22, 53) — each declaration staged without
+// `;`, as in (j). The ten files share one workspace beside `specs/NAME.mdx`
+// holding `a` — the spec source every specifier but `missing.xspec`
+// designates, T4-6's text — so each file's one finding is 14.15's at its
+// declaration and nothing stands beside: a product examining a file's
+// top-level statements alone reports none of them, and one judging
+// derived-path designations over the top-level statements alone misses
+// (d)'s.
+const T14_11_NAME_MDX = stagedMdx(
+  "T12.0-15/T14-11 (ac) specs/NAME.mdx (one node a, the spec source T4-6's nested forms designate)",
+  '<S id="a">\nAlpha behavior.\n</S>\n',
+);
+
+/** One T4-6 file with its declaration's own characters pinned. */
+function nestedLinkingFixture(
+  form: NestedLinkingFormStaging,
+): AssembledFixture {
+  const at = form.text.indexOf(form.construct);
+  if (at === -1 || form.text.lastIndexOf(form.construct) !== at) {
+    throw new Error(
+      `T14-11 (ac) fixture broke: the located declaration must occur ` +
+        `exactly once in ${form.file} (${form.name}) — fix ` +
+        `T4_6_NESTED_LINKING_FORMS in section-4.ts (harness bug)`,
+    );
+  }
+  return assemble([
+    form.text.slice(0, at),
+    pin(form.construct),
+    form.text.slice(at + form.construct.length),
+  ]);
+}
+
+/**
+ * The (ac) forms as the code files of one workspace, each a staged-source
+ * record (S-9; arm (ac) follows the body's first invocation).
+ */
+const T14_11_NESTED_LINKING_FILES = T4_6_NESTED_LINKING_FORMS.map((form) => {
+  const fixture = nestedLinkingFixture(form);
+  return {
+    file: form.file,
+    fixture,
+    source: stagedTs(
+      `T12.0-15/T14-11 (ac) ${form.file} (T4-6 (${form.arm}): ${form.name})`,
+      fixture.text,
+    ),
+  };
+});
+
+// The (ac) table's module-load self-check (a mismatch is a harness defect —
+// fix the table — never a product verdict): ten files, each path its own
+// (the three T4-6 arms' files share one workspace here) and none
+// `specs/NAME.mdx`'s, each text exactly its T4-6 text, and (d)'s `src/d.ts`
+// pinned at TEST-SPEC's own [22, 53).
+{
+  const files = T14_11_NESTED_LINKING_FILES.map((entry) => entry.file);
+  const d = T14_11_NESTED_LINKING_FILES.filter(
+    (entry) => entry.file === "src/d.ts",
+  );
+  const dRange = d.length === 1 ? d[0]!.fixture.ranges[0] : undefined;
+  if (
+    files.length !== 10 ||
+    new Set(files).size !== files.length ||
+    files.some((file) => !file.startsWith("src/")) ||
+    T14_11_NESTED_LINKING_FILES.some(
+      (entry, index) =>
+        entry.fixture.text !== T4_6_NESTED_LINKING_FORMS[index]!.text,
+    ) ||
+    dRange === undefined ||
+    dRange.start !== 22 ||
+    dRange.end !== 53
+  ) {
+    throw new Error(
+      `T14-11 (ac) fixture self-check: T4-6's ten failing files, each path ` +
+        `its own under src/, each text its T4-6 text, src/d.ts's side-effect ` +
+        `import at TEST-SPEC's [22, 53); the table gives ` +
+        `${JSON.stringify(
+          T14_11_NESTED_LINKING_FILES.map((entry) => [
+            entry.file,
+            entry.fixture.ranges,
+          ]),
+        )} — fix T14_11_NESTED_LINKING_FILES or T4_6_NESTED_LINKING_FORMS ` +
+        `(harness bug)`,
+    );
+  }
+}
+
 const T14_11_SPEC = "specs/A.mdx";
 const T14_11_CODE = "src/app.ts";
 
@@ -8231,6 +8339,21 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
       },
     ],
   },
+  {
+    arm: "ac",
+    rule: '14.15 — the nested forms of T4-6 located alike, each by its declaration\'s own characters as its top-level twin is: imports of the missing `../specs/missing.xspec` and of the named export `a`, each in a function body and in a namespace body; `import X = require(…)` and `export * from` a `.xspec` specifier, each in a namespace body and in a function body; `declare module "../specs/NAME.xspec" { }` in a namespace body, from `declare`; and the side-effect import of `../specs/NAME.xspec.ts` nested in a function body, at [22, 53) — one 14.15 per file, nothing beside',
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      "specs/NAME.mdx": T14_11_NAME_MDX,
+      ...Object.fromEntries(
+        T14_11_NESTED_LINKING_FILES.map((entry) => [entry.file, entry.source]),
+      ),
+    },
+    expected: T14_11_NESTED_LINKING_FILES.map((entry) => ({
+      condition: "14.15",
+      locations: located(entry.file, entry.fixture, 0),
+    })),
+  },
 ];
 
 /**
@@ -8612,7 +8735,7 @@ export const T14_11_FIXTURES: readonly T1411Fixture[] = [
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF/U+1680/U+3000, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings — while a trailing comma spells no hole: `d={[BASE.a,]}` valid, one `depends` edge and one occurrence spanning `BASE.a`, no finding), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), the other kinds' spans — an MDX embedding at its whole braced container under 14.8 (`{text()}` and `{ /* c */ text(BASE?.a) }`, inner whitespace and comment included), a TypeScript `text(...)` call callee through closing parenthesis under 14.7 (`text(SPEC.missing)`, and the aliased `t(SPEC.missing)` from `t`), and a marker's bare chain exclusive of its `;` (the unresolved `SPEC.missing;` at `SPEC.missing`; the non-static `SPEC?.a;`, and `(SPEC.a);` located as `(SPEC.a)`, its parentheses included) — the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms (`export import X = require(…)` from `import`, its `export` excluded; with their decorators and modifiers, `@dec export * from …` and `@dec import X = require(…)` from `@`, `@dec export import X = require(…)` whole from `@`, its `export` inside, and the invalid `@dec import { a } from …` from `@` and `export import { a } from …` from `export` — each its one 14.15, never 14.20), import types (`import` through the closing parenthesis of the argument list — `typeof import(…).default` and `import(…).T<number>`, the `typeof`, qualifier, and type arguments excluded), string-named module declarations (`declare module` whole, `export declare module` from `declare`, `@dec declare module` from `@`), and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`, `export default function SPEC() {}` / `export default class SPEC {}` from `function` / `class`, the `export default` excluded, and the modifier-bearing `async function SPEC() {}`, `export async function SPEC() {}`, and `export default async function SPEC() {}` from `async`, `abstract class SPEC {}` from `abstract`, `const enum SPEC {}` from `const`, and `declare namespace SPEC { export const v: number }` from `declare`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.4, 1.6, 1.7, 2.2, 2.3, 2.4, 4, 4.3, 4.5, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF/U+1680/U+3000, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings — while a trailing comma spells no hole: `d={[BASE.a,]}` valid, one `depends` edge and one occurrence spanning `BASE.a`, no finding), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), the other kinds' spans — an MDX embedding at its whole braced container under 14.8 (`{text()}` and `{ /* c */ text(BASE?.a) }`, inner whitespace and comment included), a TypeScript `text(...)` call callee through closing parenthesis under 14.7 (`text(SPEC.missing)`, and the aliased `t(SPEC.missing)` from `t`), and a marker's bare chain exclusive of its `;` (the unresolved `SPEC.missing;` at `SPEC.missing`; the non-static `SPEC?.a;`, and `(SPEC.a);` located as `(SPEC.a)`, its parentheses included) — the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms (`export import X = require(…)` from `import`, its `export` excluded; with their decorators and modifiers, `@dec export * from …` and `@dec import X = require(…)` from `@`, `@dec export import X = require(…)` whole from `@`, its `export` inside, and the invalid `@dec import { a } from …` from `@` and `export import { a } from …` from `export` — each its one 14.15, never 14.20), import types (`import` through the closing parenthesis of the argument list — `typeof import(…).default` and `import(…).T<number>`, the `typeof`, qualifier, and type arguments excluded), string-named module declarations (`declare module` whole, `export declare module` from `declare`, `@dec declare module` from `@`), T4-6's nested forms located alike (imports, `import X = require(…)`, and `export * from …` nested in a function or namespace body, and `declare module` in a namespace body from `declare`, each by its own characters as its top-level twin is, and the side-effect import of a derived-file path nested in a function body at [22, 53) — one 14.15 per file), and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`, `export default function SPEC() {}` / `export default class SPEC {}` from `function` / `class`, the `export default` excluded, and the modifier-bearing `async function SPEC() {}`, `export async function SPEC() {}`, and `export default async function SPEC() {}` from `async`, `abstract class SPEC {}` from `abstract`, `const enum SPEC {}` from `const`, and `declare namespace SPEC { export const v: number }` from `declare`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.4, 1.6, 1.7, 2.2, 2.3, 2.4, 4, 4.3, 4.5, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);
