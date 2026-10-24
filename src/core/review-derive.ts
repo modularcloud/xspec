@@ -188,6 +188,20 @@ export interface GeneratedItem {
   /** The scope node — the subtree root for `subtree-coherence` (SPEC 10.5),
    * the scoped code location for `code-impact`. */
   readonly scope: GeneratedNode;
+  /**
+   * A `subtree-coherence` item's scope nodes beneath its scope root
+   * (SPEC 10.5: "scope: N and all descendants"), as the strategy's node
+   * relation gives them — in a baseline session over the links of 10.5
+   * (src/core/path-blocks.ts: present nodes under their current parents,
+   * deleted nodes under their baseline parents mapped through the
+   * journal), so a deleted descendant is among them and a node a journaled
+   * move took out of the subtree is not. Every `subtree-coherence` item a
+   * baseline session's generator or decomposition content source produces
+   * carries it, empty for a leaf; the recorded-baseline state's relevant
+   * hashes cover the scope root and these nodes
+   * (`computeBaselineRecordedState`). Omitted elsewhere.
+   */
+  readonly scopeDescendants?: readonly GeneratedNode[];
   readonly context: readonly GeneratedNode[];
   readonly origin: readonly GeneratedNode[];
   readonly reason: string;
@@ -363,6 +377,7 @@ export function canonicalizeGeneration(
   const canonicalizeItem = (item: GeneratedItem): GeneratedItem => ({
     ...item,
     scope: canonicalNode(item.scope),
+    scopeDescendants: item.scopeDescendants?.map(canonicalNode),
     context: item.context.map(canonicalNode),
     origin: item.origin.map(canonicalNode),
     blockedBy: item.blockedBy.map((ref) => ({
@@ -702,10 +717,12 @@ export function reviewStateInputs(
  * `GeneratedNode.baselineIdentity` (module header), never by looking a
  * stored reference up in the baseline graph, so a reintroduced identity
  * (SPEC 5.4) cannot alias a distinct baseline node. Keys are stored
- * canonical references: a baseline-side subtree member's key is its
- * canonical identity as of the baseline journal prefix (SPEC 5.4 — never
- * its forward-mapped spelling canonicalized against the full journal,
- * module header).
+ * canonical references, the generated nodes' own
+ * (`canonicalizeGeneration`): a deleted node's key is its canonical
+ * identity as of the baseline journal prefix (SPEC 5.4 — never its
+ * forward-mapped spelling canonicalized against the full journal, module
+ * header). A `subtree-coherence` item's scope nodes are the generator's
+ * (`GeneratedItem.scopeDescendants`, over SPEC 10.5's links).
  */
 export function computeBaselineRecordedState(
   item: GeneratedItem,
@@ -747,37 +764,25 @@ export function computeBaselineRecordedState(
   switch (item.kind) {
     case "subtree-coherence": {
       // SPEC 10.4: subtreeHash and metadataHash of each scope node — the
-      // root and all its descendants in the baseline graph (SPEC 10.5); an
-      // absent root contributes itself alone.
-      const rootIdentity = item.scope.baselineIdentity;
-      const root =
-        rootIdentity === null
-          ? undefined
-          : baseline.graph.requirementNode(rootIdentity);
-      if (root === undefined) {
-        recordNode(item.scope, "subtreeHash", "metadataHash");
-        break;
-      }
-      const stack: RequirementNode[] = [root];
-      while (stack.length > 0) {
-        const node = stack.pop();
-        if (node === undefined) break;
-        record(
-          encodeCanonicalIdentity(
-            canonicalAt(
-              baseline.journal,
-              baseline.journalLength,
-              node.identity,
-            ),
-          ),
-          node.identity,
-          "subtreeHash",
-          "metadataHash",
+      // root and all its descendants over the links of SPEC 10.5, which
+      // the generator supplies (`GeneratedItem.scopeDescendants`): a node
+      // set alone, so each node's values are its own in the baseline graph
+      // (SPEC 10.5: hashes keep their definitions) — a node moved into the
+      // subtree since the baseline holds its baseline values, one added
+      // since is absent there (the explicit absent marker), and one moved
+      // out of the subtree is no scope node.
+      const descendants = item.scopeDescendants;
+      if (descendants === undefined) {
+        throw new Error(
+          `xspec internal error: the recorded-baseline state of a ` +
+            `subtree-coherence item (scope ${item.scope.identity}) needs ` +
+            `its scope nodes beneath the root (SPEC 10.4, 10.5), but the ` +
+            `generator supplied none`,
         );
-        const children = baseline.graph.childrenOf(node);
-        for (let index = children.length - 1; index >= 0; index -= 1) {
-          stack.push(children[index]);
-        }
+      }
+      recordNode(item.scope, "subtreeHash", "metadataHash");
+      for (const node of descendants) {
+        recordNode(node, "subtreeHash", "metadataHash");
       }
       break;
     }

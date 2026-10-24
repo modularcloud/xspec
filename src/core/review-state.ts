@@ -13,14 +13,21 @@
 //   The scope is the root and all its descendants (10.5, 10.6), so the
 //   scope-node set is derived from the graph the state is recorded
 //   against: a present root contributes itself and every current
-//   descendant, an absent root contributes itself alone. The check judges
-//   the recorded nodes alone (below): a descendant added since the record
-//   has no entry and surfaces through the root's recorded subtreeHash
-//   (SPEC 5.5: it changes whenever a node in the subtree is added, removed,
-//   or reordered), a removed one through its own recorded presence and the
-//   root's subtreeHash, while a metadata-only edit on a descendant, which
-//   changes no subtreeHash (SPEC 5.5), still invalidates through that
-//   scope node's recorded metadataHash.
+//   descendant, an absent root contributes itself alone. In a baseline
+//   session the scope also holds the deleted nodes linked beneath the root
+//   (10.5's links, src/core/path-blocks.ts), which no current-graph walk
+//   reaches: each is `changed` (5.6), so it lies in the item's origin as
+//   last assigned, and its presence — the absent marker — is recorded
+//   through that role (the recorded-baseline state takes the generator's
+//   scope set, review-derive.ts `computeBaselineRecordedState`). The
+//   check judges the recorded nodes alone (below): a descendant added
+//   since the record has no entry and surfaces through the root's
+//   recorded subtreeHash (SPEC 5.5: it changes whenever a node in the
+//   subtree is added, removed, or reordered), a removed one through its
+//   own recorded presence and the root's subtreeHash, while a
+//   metadata-only edit on a descendant, which changes no subtreeHash
+//   (SPEC 5.5), still invalidates through that scope node's recorded
+//   metadataHash.
 // - `parent-consistency` — ownHash and metadataHash of the scope node;
 //   subtreeHash of each context node (the branch children, 10.5).
 // - `dependency-consistency` — ownHash and metadataHash of the scope node;
