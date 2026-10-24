@@ -8,6 +8,20 @@
 // the repository, takes locks, or touches the index — the product treats
 // git as a read-only content store.
 //
+// SPEC preamble: "xspec performs no network access", and git data is read
+// locally alone. In a partial clone (`--filter=blob:none`, `tree:0`) those
+// same readers would fetch an object missing locally from the promisor
+// remote — a network access, and a write of the fetched pack into the
+// repository — so every git spawned here runs with lazy fetching disabled
+// (`GIT_NO_LAZY_FETCH=1`) and with no transport allowed: `GIT_ALLOW_PROTOCOL`
+// set to the empty list, which overrides every `protocol.*` configuration
+// and any inherited list, and `-c protocol.allow=never` beside it, for an
+// environment that does not deliver the variable. A read of an object the
+// repository does not hold then fails — the reader exits nonzero or
+// answers `missing` — and the baseline is unreadable, the usage error of
+// SPEC 6.3 and 12.0 (./baseline.ts), with no connection attempted and
+// `.git` untouched.
+//
 // Diagnostics never render git's own stderr: its wording varies by git
 // version and can carry absolute paths, both of which SPEC 12.0's
 // byte-determinism rules exclude from output. Callers compose their own
@@ -36,24 +50,47 @@ import {
 } from "./environment-refusal.js";
 
 /**
- * The environment for a spawned git, normalized for the platform: on
- * Windows, a `GIT_CONFIG_GLOBAL` naming the null device by Node's spelling
- * (`os.devNull` = `\\.\nul`) is translated to `nul` — git accepts the
- * classic device name (and `/dev/null`) where a configuration file path is
- * expected, but its config access dies on the `\\.\nul` spelling, which
- * would fail every git invocation with an unrelated fatal error. The
- * intent of such a value — read no global configuration — is preserved
- * exactly; nothing else is changed (SPEC 6.3: git is a read-only content
- * store, and the caller's environment otherwise applies as is).
+ * SPEC preamble ("xspec performs no network access"), 6.3: what keeps a
+ * spawned git from fetching (module header) — lazy fetching disabled, and
+ * the empty list of allowed transports. The keys are spelled in upper case:
+ * where the platform's environment names are case-insensitive, Node passes
+ * the first of a name's spellings in sort order, and the upper-case one
+ * sorts first.
+ */
+const NO_FETCH_ENVIRONMENT: Readonly<Record<string, string>> = {
+  GIT_NO_LAZY_FETCH: "1",
+  GIT_ALLOW_PROTOCOL: "",
+};
+
+/** SPEC preamble, 6.3: the transport guard git reads as configuration,
+ * placed before the subcommand (module header). */
+const NO_FETCH_ARGUMENTS: readonly string[] = ["-c", "protocol.allow=never"];
+
+/**
+ * The environment for a spawned git: the caller's, with lazy fetching
+ * disabled and no transport allowed (`NO_FETCH_ENVIRONMENT`, module
+ * header), normalized for the platform: on Windows, a `GIT_CONFIG_GLOBAL`
+ * naming the null device by Node's spelling (`os.devNull` = `\\.\nul`) is
+ * translated to `nul` — git accepts the classic device name (and
+ * `/dev/null`) where a configuration file path is expected, but its config
+ * access dies on the `\\.\nul` spelling, which would fail every git
+ * invocation with an unrelated fatal error. The intent of such a value —
+ * read no global configuration — is preserved exactly. Beyond these, the
+ * caller's environment applies as is (SPEC 6.3: git is a read-only content
+ * store).
  */
 function gitEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...NO_FETCH_ENVIRONMENT,
+  };
   if (
     process.platform === "win32" &&
     process.env["GIT_CONFIG_GLOBAL"] === os.devNull
   ) {
-    return { ...process.env, GIT_CONFIG_GLOBAL: "nul" };
+    environment["GIT_CONFIG_GLOBAL"] = "nul";
   }
-  return process.env;
+  return environment;
 }
 
 /** The outcome of one git invocation. */
@@ -65,7 +102,8 @@ export type GitResult =
        * `unavailable`: the `git` executable could not be started at all
        * (not installed, not on PATH). `failed`: git ran and exited
        * nonzero — for the plumbing readers used here, the queried object
-       * or repository state does not exist or cannot be read.
+       * or repository state does not exist or cannot be read, an object a
+       * partial clone does not hold locally included (never fetched).
        */
       readonly kind: "unavailable" | "failed";
     };
@@ -73,9 +111,11 @@ export type GitResult =
 /**
  * Run one read-only git plumbing command with the given working directory,
  * feeding `stdin` when given (the `cat-file --batch` protocol) and
- * capturing standard output as exact bytes. Standard error is discarded
- * (see the module header). Never throws for git-level failures — only for
- * harness-level stream errors Node itself raises.
+ * capturing standard output as exact bytes. git never fetches: lazy
+ * fetching is disabled and no transport is allowed (module header), so an
+ * object the repository does not hold fails the command. Standard error is
+ * discarded (see the module header). Never throws for git-level failures —
+ * only for harness-level stream errors Node itself raises.
  */
 export function runGit(
   cwd: string,
@@ -83,7 +123,7 @@ export function runGit(
   stdin?: Buffer,
 ): Promise<GitResult> {
   return new Promise((resolve) => {
-    const child = spawn("git", args, {
+    const child = spawn("git", [...NO_FETCH_ARGUMENTS, ...args], {
       cwd,
       env: gitEnvironment(),
       stdio: ["pipe", "pipe", "ignore"],

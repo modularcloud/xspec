@@ -61,7 +61,10 @@
 // IMPLEMENTATION (Key libraries, Architecture): the system `git`
 // executable via read-only plumbing subcommands only — `rev-parse`,
 // `ls-tree`, `cat-file` (./git.ts), the discovery's confirmation reading
-// the filesystem alone and writing nothing — and the same pure core the
+// the filesystem alone and writing nothing — over the repository's local
+// objects alone: git never fetches (SPEC preamble: no network access), so
+// in a partial clone a baseline whose objects are not held locally is
+// unreadable, the plain usage error above — and the same pure core the
 // filesystem pipeline composes (classification, parsing, validation,
 // hashing), over bytes read from the ref's tree (pipeline.ts
 // `analyzeWorkspaceContent`): the baseline analysis and the current
@@ -266,7 +269,10 @@ function parseTreeListing(stdout: Buffer): TreeEntry[] {
  * Read blob objects by name through one `git cat-file --batch` run — a
  * read-only plumbing bulk read. Returns the content bytes per object name,
  * or `null` when any object cannot be read as a blob (repository
- * corruption, a shallow clone missing objects).
+ * corruption, a shallow or partial clone missing objects, which git never
+ * fetches here: ./git.ts) — whether git answers `missing` for it or exits
+ * nonzero, as it does for an object a partial clone's promisor remote
+ * would have supplied — never a partial set.
  */
 async function readBlobs(
   cwd: string,
@@ -335,12 +341,29 @@ function invalidBaselineMessage(
   );
 }
 
-/** The blob-read failure message (repository corruption, shallow clone). */
+/**
+ * SPEC preamble ("xspec performs no network access"), 6.3: the closing
+ * clause of a git read failure's message wherever the repository may not
+ * hold the ref's objects locally — a partial clone fetches them lazily, a
+ * shallow one lacks them — since the product never fetches (./git.ts).
+ */
+const LOCAL_OBJECTS_NOTE =
+  "xspec reads the repository's local objects alone and never fetches " +
+  "missing ones (a partial or shallow clone may lack them)";
+
+/** The missing-objects cause of a failed tree read at the ref (a partial
+ * clone's trees are fetched lazily, ./git.ts). */
+const MISSING_TREES =
+  "the repository does not hold the ref's tree objects locally, or is " +
+  "corrupt";
+
+/** The blob-read failure message (objects missing locally, corruption). */
 function unreadableMessage(ref: string): string {
   return (
     `the workspace content at baseline ref '${ref}' cannot be read from ` +
-    `the repository — git object reads failed; the repository may be ` +
-    `corrupt or a shallow clone missing the ref's objects (SPEC 6.3)`
+    `the repository — git object reads failed: the repository does not ` +
+    `hold the ref's objects locally, or is corrupt; ${LOCAL_OBJECTS_NOTE} ` +
+    `(SPEC 6.3)`
   );
 }
 
@@ -455,10 +478,18 @@ async function readBaseline(
     prefix === "" ? `${commit}^{tree}` : `${commit}:${prefix}`,
   ]);
   if (!treeResult.ok) {
+    // `<commit>^{tree}` reads the ref's root tree, and `<commit>:<prefix>`
+    // the trees along the prefix as well, which a partial clone may not
+    // hold (never fetched, ./git.ts); the repository's root exists at
+    // every ref, a directory below it perhaps not.
     return failure(
-      `the workspace directory '${prefix}' does not exist at baseline ` +
-        `ref '${ref}' — the baseline is reconstructed from the workspace ` +
-        `content at the ref (SPEC 6.3)`,
+      prefix === ""
+        ? `the tree of baseline ref '${ref}' cannot be read — ` +
+            `${MISSING_TREES}; ${LOCAL_OBJECTS_NOTE} (SPEC 6.3)`
+        : `the workspace directory '${prefix}' does not exist at baseline ` +
+            `ref '${ref}', or ${MISSING_TREES} — the baseline is ` +
+            `reconstructed from the workspace content at the ref, and ` +
+            `${LOCAL_OBJECTS_NOTE} (SPEC 6.3)`,
     );
   }
   const tree = treeResult.stdout.toString("utf8").trim();
@@ -472,10 +503,15 @@ async function readBaseline(
     tree,
   ]);
   if (!listing.ok) {
+    // The listing reads every tree below the workspace directory, which a
+    // partial clone may not hold (never fetched, ./git.ts); below the
+    // repository's root, that directory's path may name a file at the ref.
     return failure(
       `the workspace content at baseline ref '${ref}' cannot be listed — ` +
-        `'${prefix === "" ? "." : prefix}' is not a directory at that ref ` +
-        `(SPEC 6.3)`,
+        (prefix === ""
+          ? ""
+          : `'${prefix}' is not a directory at that ref, or `) +
+        `${MISSING_TREES}; ${LOCAL_OBJECTS_NOTE} (SPEC 6.3)`,
     );
   }
 
