@@ -362,43 +362,61 @@ function d20DesignationCode(
 }
 
 /**
- * (d)'s six stagings, one per module-linking form SPEC 4 names, each text
- * TypeScript 5.9.3 accepts both as module code and as script code (S-9
- * judges each record both ways): with emission enabled each makes the move
- * to `specs/B.mdx` refused, the specifier designating the destination's
- * would-be emit path (SPEC 6.5, 4, 14.15); with emission disabled no emit
+ * The tests staging (d)'s module-linking forms: T6.5-20 itself (its refused
+ * stagings and its emission-disabled controls), and T6.6-3, T6.6-7,
+ * T12.0-15, and T14-7, which reach its refused stagings through
+ * `d20RefusedStagings`.
+ */
+const D20_D_FORM_TESTS = "T6.5-20/T6.6-3/T6.6-7/T12.0-15/T14-7";
+
+/**
+ * (d)'s seven stagings: one per module-linking form SPEC 4 names, then a
+ * seventh, the first form nested in a function body (SPEC 4 reads
+ * module-linking forms by construct, wherever each stands: TEST-SPEC T4-6),
+ * each text TypeScript 5.9.3 accepts both as module code and as script code
+ * (S-9 judges each record both ways; the check confining import
+ * declarations to a file's top level is a post-parse one, 14.20): with
+ * emission enabled each makes the move to `specs/B.mdx` refused, the
+ * specifier designating the destination's would-be emit path (SPEC 6.5, 4,
+ * 14.15) — a product collecting designations from a file's top-level
+ * statements alone performs the seventh; with emission disabled no emit
  * destination arises, and the move is performed (the controls).
  */
 const D20_D_FORMS: readonly D20DesignationCode[] = [
   d20DesignationCode(
-    "T6.5-20/T6.6-3/T6.6-7/T12.0-15",
+    D20_D_FORM_TESTS,
     "an import declaration",
     'import "../specs/B.md"',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3/T6.6-7/T12.0-15",
+    D20_D_FORM_TESTS,
     "an export declaration with a module specifier",
     'export * from "../specs/B.md"',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3/T6.6-7/T12.0-15",
+    D20_D_FORM_TESTS,
     "an import X = require(…) declaration",
     'import X = require("../specs/B.md")',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3/T6.6-7/T12.0-15",
+    D20_D_FORM_TESTS,
     "a dynamic import() whose specifier is a static string literal",
     'import("../specs/B.md")',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3/T6.6-7/T12.0-15",
+    D20_D_FORM_TESTS,
     "an import type",
     'type T = import("../specs/B.md")',
   ),
   d20DesignationCode(
-    "T6.5-20/T6.6-3/T6.6-7/T12.0-15",
+    D20_D_FORM_TESTS,
     "a string-named module declaration",
     'declare module "../specs/B.md" { }',
+  ),
+  d20DesignationCode(
+    D20_D_FORM_TESTS,
+    "an import declaration nested in a function body",
+    'export function f() { import "../specs/B.md" }',
   ),
 ];
 
@@ -703,11 +721,11 @@ const D20_C_EXEMPTION_SECTION_STAGING: D20RefusedStaging = {
 /**
  * (d), a module-linking form made to designate a derived-file path: with
  * emission next to sources, the code source `src/c.ts` holds one form
- * alone, its relative specifier `../specs/B.md` — valid while no
- * `specs/B.mdx` exists, `specs/B.md` then no derived-file path — and the
- * move to `specs/B.mdx` (of either form) would make it the destination's
- * emit path (SPEC 6.5, 4, 14.15). Staged before any build (the module
- * header's note).
+ * alone (the seventh staging nested in a function body), its relative
+ * specifier `../specs/B.md` — valid while no `specs/B.mdx` exists,
+ * `specs/B.md` then no derived-file path — and the move to `specs/B.mdx`
+ * (of either form) would make it the destination's emit path (SPEC 6.5, 4,
+ * 14.15). Staged before any build (the module header's note).
  */
 function d20DesignationStaging(code: D20DesignationCode): D20RefusedStaging {
   return {
@@ -787,7 +805,7 @@ const D20_E_SECTION_STAGING: D20RefusedStaging = {
 };
 
 /**
- * Every refused staging of T6.5-20, in the entry's order — (d)'s six, then
+ * Every refused staging of T6.5-20, in the entry's order — (d)'s seven, then
  * (c)'s exemption staging under the section form, as the entry's
  * section-form paragraph states it, then (e)'s controls — the companion legs
  * read first (`readRecordedCompanionPaths`, as T13.4-9(e) reads them: for
@@ -1134,7 +1152,7 @@ async function runD20Performed(
 /**
  * (d)'s controls, each performed with `check` clean afterward (the moved
  * file `specs/Z.mdx`, holding no import, to `specs/B.mdx`): emission
- * disabled under each of the six stagings, no emit destination arising
+ * disabled under each of the seven stagings, no emit destination arising
  * (SPEC 7.3); and emission enabled with `specs/B.md` named only by a
  * construct that is no module-linking form (SPEC 4).
  */
@@ -1221,7 +1239,7 @@ async function runD20RetiredPerformed(product: ProductBinding): Promise<void> {
 const T6_5_20 = defineProductTest({
   id: "T6.5-20",
   title:
-    'destination refusals over derived paths, arms (a) through (e): 6.5 refuses, as `refused-invalid-destination` concerning the destination path, a move whose destination would leave the finishing regeneration a write it cannot make — each refused move exits 1 and modifies nothing (whole-root byte compare, the journal absent or byte-unchanged), reporting exactly that one finding, `path` the destination (the section form\'s target file) as spelled, `locations` `[]`, never 14.22, a refused operation reporting refusal reasons alone, and its `--preview` reports the same (T6.6-3); spec globs `specs/**/*.mdx` throughout, so each destination is otherwise valid: (a) under a derived path the sources would generate after the move — beside a discovered `specs/A.mdx`, `move specs/Z.mdx specs/A.xspec.ts/B.mdx` and the section form `move specs/Z.mdx#x specs/A.xspec.ts/B.mdx#x` creating that target, and the same pair under each companion path `specs/A.xspec.<suffix>` of `specs/A.mdx` (read from `inventory`\'s `recorded` set after a scratch twin\'s build, as T13.4-9(e) reads them; none for a product writing no companions), each staged before any build so nothing occupies the derived path; the module-path pair once more after a `build`, `specs/A.xspec.ts` then the plain file that build wrote, the two relations meeting at one component — exactly one finding per move; and, under `markdown.outDir: "out"` beside a discovered `specs/x.mdx`, `move specs/Z.mdx specs/x.md/y.mdx` and its section form, staged before any build, the destination\'s emit path `out/specs/x.md/y.md` lying under `out/specs/x.md` while the destination itself lies under no derived path; (b) a directory component of another derived path — under `markdown.outDir: "out"` beside a discovered `specs/a.md/b.mdx`, `move specs/Z.mdx specs/a.mdx` and `move specs/Z.mdx#x specs/a.mdx#x`, the emit path `out/specs/a.md` a directory component of `out/specs/a.md/b.md`; and, under `markdown.outDir: "specs/B.mdx/md"` staged before any build, `move specs/Z.mdx specs/B.mdx` and `move specs/Z.mdx#x specs/B.mdx#x`, every emit destination lying under the destination\'s path; (c) a source hidden or replaced, with emission next to sources and each refused staging staged before any build, so nothing occupies `specs/Z.md` — `move specs/Z.mdx specs/B.mdx` and its section form beside a discovered code source `specs/B.md` (a code group globbing `specs/*.md`), beside a discovered `specs/B.md/C.mdx`, and beside a discovered code source `specs/B.md/x.ts`, the only file beneath `specs/B.md` (a code group globbing `specs/**/*.ts`, the file holding `export const v = 1`); `move specs/Z.mdx specs/A.mdx` and its section form beside a discovered code source `specs/A.xspec.ts/c.ts`, and, one staging per companion path of the destination (read from a twin holding `specs/Z.mdx`\'s bytes at `specs/A.mdx`), beside `specs/A.xspec.<suffix>/c.ts` instead; and the exemption, performed — `move specs/B.md/C.mdx specs/B.mdx` after a `build`, `C.mdx` holding no import and the only source under `specs/B.md`, exits 0, leaving `specs/B.mdx` holding the moved bytes and `specs/B.md` a plain file holding its Markdown (what a freshly built twin emits there), `check` clean — while its section form, `move specs/B.md/C.mdx#x specs/B.mdx#x` after a `build`, is refused, the source left below the emit path being no relocated origin; (d) a module-linking form made to designate a derived-file path — with emission next to sources, a code source `src/c.ts` (a code group globbing `src/**/*.ts`) holding one module-linking form alone, its relative specifier `../specs/B.md`, one staging per form SPEC 4 names, each the line followed by U+000A — `import "../specs/B.md"`, `export * from "../specs/B.md"`, `import X = require("../specs/B.md")`, `import("../specs/B.md")`, `type T = import("../specs/B.md")`, and `declare module "../specs/B.md" { }`, each accepted by TypeScript 5.9.3 both as module code and as script code — makes `move specs/Z.mdx specs/B.mdx` and its section form `move specs/Z.mdx#x specs/B.mdx#x` refused, each staged before any build, the specifier designating the destination\'s would-be emit path `specs/B.md`; its controls, each performed (exit 0, the destination holding the moved bytes) with `check` clean afterward: emission disabled (`emit: false`) under each of the six stagings, and emission enabled with the path named only by `require("../specs/B.md")`, by `/// <reference path="../specs/B.md" />`, and by the template-literal `import()`, none a module-linking form; (e) the derived paths a file-form move retires — with emission next to sources and `specs/A.mdx`, holding a section `x` and no import, the only source, each staged before any build: `move specs/A.mdx specs/A.xspec.ts/B.mdx`, `move specs/A.mdx specs/A.md/B.mdx`, and, one staging per companion path of `specs/A.mdx` (read as T13.4-9(e) reads them), `move specs/A.mdx specs/A.xspec.<suffix>/B.mdx` each exit 0, the destination holding the moved bytes and its derived paths — its module, its Markdown, and each companion path a scratch twin holding the moved bytes at the destination records — written beneath the fresh directory, `check` clean; its controls, refused under the common contract: each of those file-form moves staged after a `build` instead (T6.5-4\'s relation alone, the retired path then the plain file that build wrote), and the section form `move specs/A.mdx#x specs/A.xspec.ts/B.mdx#x`, staged before any build, `specs/A.mdx` still generating `specs/A.xspec.ts` (SPEC 6.5, 4, 14.15, 13.4, 13.1, 13.2, 7.3, 14, 12.7)',
+    'destination refusals over derived paths, arms (a) through (e): 6.5 refuses, as `refused-invalid-destination` concerning the destination path, a move whose destination would leave the finishing regeneration a write it cannot make — each refused move exits 1 and modifies nothing (whole-root byte compare, the journal absent or byte-unchanged), reporting exactly that one finding, `path` the destination (the section form\'s target file) as spelled, `locations` `[]`, never 14.22, a refused operation reporting refusal reasons alone, and its `--preview` reports the same (T6.6-3); spec globs `specs/**/*.mdx` throughout, so each destination is otherwise valid: (a) under a derived path the sources would generate after the move — beside a discovered `specs/A.mdx`, `move specs/Z.mdx specs/A.xspec.ts/B.mdx` and the section form `move specs/Z.mdx#x specs/A.xspec.ts/B.mdx#x` creating that target, and the same pair under each companion path `specs/A.xspec.<suffix>` of `specs/A.mdx` (read from `inventory`\'s `recorded` set after a scratch twin\'s build, as T13.4-9(e) reads them; none for a product writing no companions), each staged before any build so nothing occupies the derived path; the module-path pair once more after a `build`, `specs/A.xspec.ts` then the plain file that build wrote, the two relations meeting at one component — exactly one finding per move; and, under `markdown.outDir: "out"` beside a discovered `specs/x.mdx`, `move specs/Z.mdx specs/x.md/y.mdx` and its section form, staged before any build, the destination\'s emit path `out/specs/x.md/y.md` lying under `out/specs/x.md` while the destination itself lies under no derived path; (b) a directory component of another derived path — under `markdown.outDir: "out"` beside a discovered `specs/a.md/b.mdx`, `move specs/Z.mdx specs/a.mdx` and `move specs/Z.mdx#x specs/a.mdx#x`, the emit path `out/specs/a.md` a directory component of `out/specs/a.md/b.md`; and, under `markdown.outDir: "specs/B.mdx/md"` staged before any build, `move specs/Z.mdx specs/B.mdx` and `move specs/Z.mdx#x specs/B.mdx#x`, every emit destination lying under the destination\'s path; (c) a source hidden or replaced, with emission next to sources and each refused staging staged before any build, so nothing occupies `specs/Z.md` — `move specs/Z.mdx specs/B.mdx` and its section form beside a discovered code source `specs/B.md` (a code group globbing `specs/*.md`), beside a discovered `specs/B.md/C.mdx`, and beside a discovered code source `specs/B.md/x.ts`, the only file beneath `specs/B.md` (a code group globbing `specs/**/*.ts`, the file holding `export const v = 1`); `move specs/Z.mdx specs/A.mdx` and its section form beside a discovered code source `specs/A.xspec.ts/c.ts`, and, one staging per companion path of the destination (read from a twin holding `specs/Z.mdx`\'s bytes at `specs/A.mdx`), beside `specs/A.xspec.<suffix>/c.ts` instead; and the exemption, performed — `move specs/B.md/C.mdx specs/B.mdx` after a `build`, `C.mdx` holding no import and the only source under `specs/B.md`, exits 0, leaving `specs/B.mdx` holding the moved bytes and `specs/B.md` a plain file holding its Markdown (what a freshly built twin emits there), `check` clean — while its section form, `move specs/B.md/C.mdx#x specs/B.mdx#x` after a `build`, is refused, the source left below the emit path being no relocated origin; (d) a module-linking form made to designate a derived-file path — with emission next to sources, a code source `src/c.ts` (a code group globbing `src/**/*.ts`) holding one module-linking form alone, its relative specifier `../specs/B.md`, one staging per form SPEC 4 names, each the line followed by U+000A — `import "../specs/B.md"`, `export * from "../specs/B.md"`, `import X = require("../specs/B.md")`, `import("../specs/B.md")`, `type T = import("../specs/B.md")`, and `declare module "../specs/B.md" { }`, and a seventh, the first form nested in a function body, `export function f() { import "../specs/B.md" }` (SPEC 4 reading module-linking forms by construct, wherever each stands), each accepted by TypeScript 5.9.3 both as module code and as script code — makes `move specs/Z.mdx specs/B.mdx` and its section form `move specs/Z.mdx#x specs/B.mdx#x` refused, each staged before any build, the specifier designating the destination\'s would-be emit path `specs/B.md`; its controls, each performed (exit 0, the destination holding the moved bytes) with `check` clean afterward: emission disabled (`emit: false`) under each of the seven stagings, and emission enabled with the path named only by `require("../specs/B.md")`, by `/// <reference path="../specs/B.md" />`, and by the template-literal `import()`, none a module-linking form; (e) the derived paths a file-form move retires — with emission next to sources and `specs/A.mdx`, holding a section `x` and no import, the only source, each staged before any build: `move specs/A.mdx specs/A.xspec.ts/B.mdx`, `move specs/A.mdx specs/A.md/B.mdx`, and, one staging per companion path of `specs/A.mdx` (read as T13.4-9(e) reads them), `move specs/A.mdx specs/A.xspec.<suffix>/B.mdx` each exit 0, the destination holding the moved bytes and its derived paths — its module, its Markdown, and each companion path a scratch twin holding the moved bytes at the destination records — written beneath the fresh directory, `check` clean; its controls, refused under the common contract: each of those file-form moves staged after a `build` instead (T6.5-4\'s relation alone, the retired path then the plain file that build wrote), and the section form `move specs/A.mdx#x specs/A.xspec.ts/B.mdx#x`, staged before any build, `specs/A.mdx` still generating `specs/A.xspec.ts` (SPEC 6.5, 4, 14.15, 13.4, 13.1, 13.2, 7.3, 14, 12.7)',
   run: async (product) => {
     for (const staging of await d20RefusedStagings(product, "T6.5-20")) {
       await runD20RefusedStaging(
