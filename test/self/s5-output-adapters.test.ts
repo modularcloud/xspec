@@ -11148,7 +11148,7 @@ test("S-5: the human review-item decoder rejects a field printed twice or unknow
   rejected(
     "an unknown field",
     previewWithLine(lines, 1, "  colour: red"),
-    'a field the item\'s report prints — kind, status, blocked, blockedBy, reason, note, scope, context, origin, baseline, current — got the label "colour"',
+    'a field the item\'s report prints — kind, status, blocked, blockedBy, reason, note, scope, scopeNodes, context, origin, baseline, current — got the label "colour"',
   );
   rejected(
     "a kind outside the vocabulary",
@@ -11263,12 +11263,12 @@ test("S-5: the human review-item decoder rejects a field printed twice or unknow
   rejected(
     "a range beneath no node",
     [...lines.slice(0, 3), "    range: 0-87", ...lines.slice(3)],
-    "a line beneath a scope, a context entry, or an origin entry — this one stands beneath none",
+    "a line beneath a scope, a context entry, a scope-set entry, or an origin entry — this one stands beneath none",
   );
   rejected(
     "a text line beneath no text",
     [...lines.slice(0, 3), "      Pee own line.", ...lines.slice(3)],
-    "a line beneath a scope, a context entry, or an origin entry — this one stands beneath none",
+    "a line beneath a scope, a context entry, a scope-set entry, or an origin entry — this one stands beneath none",
   );
   rejected(
     "a line at the margin beneath a field other than a reason or a note",
@@ -11287,7 +11287,7 @@ test("S-5: the human review-item decoder rejects a field printed twice or unknow
   );
 });
 
-test("S-5: the human review-item comparison rejects a `show` report omitting or changing the id, kind, status, blocked state, a blocker, the note, the reason, the scope node's identity, presence, range, or text, a context or origin entry, an origin side, or a recorded entry, or omitting a twin's scope set or metadata pair — naming the datum", () => {
+test("S-5: the human review-item comparison rejects a `show` report omitting or changing the id, kind, status, blocked state, a blocker, the note, the reason, the scope node's identity, presence, range, or text, a context or origin entry, an origin side, or a recorded entry, or omitting a twin's metadata pair — naming the datum", () => {
   const rejected = (
     label: string,
     lines: readonly string[],
@@ -11479,25 +11479,6 @@ test("S-5: the human review-item comparison rejects a `show` report omitting or 
     lines.slice(0, -1),
     "the report prints no current line",
   );
-  const scopeSet = expectDiagnosed("a twin's scope set", () =>
-    assertHumanItemCarries(
-      decodeHumanItemReport(previewReport(lines), "a twin's scope set"),
-      decodeItemReport(
-        {
-          ...ITEM_DOC,
-          scopeNodes: [
-            { node: "specs/T.mdx#p", present: true },
-            { node: "specs/T.mdx#p.b", present: true },
-          ],
-        },
-        "the scope-set twin",
-      ),
-      "a twin's scope set",
-    ),
-  );
-  expect(scopeSet.message).toContain(
-    'the --json twin\'s scope holds "specs/T.mdx#p.b" beside the scope root',
-  );
   const metadata = expectDiagnosed("a twin's metadata pair", () =>
     assertHumanItemCarries(
       decodeHumanItemReport(
@@ -11525,7 +11506,433 @@ test("S-5: the human review-item comparison rejects a `show` report omitting or 
   );
 });
 
-test("S-5: the human review-next decoder decodes the fully-resolved report and the item returned", () => {
+/**
+ * A subtree-coherence twin of the item above carrying a scope set (the
+ * review adapter's `scopeNodes`; SPEC 10.4, 10.7: every scope node): the
+ * scope root, a present node with its range, an absent node, and a present
+ * node carrying a text.
+ */
+const SCOPE_SET_DOC = {
+  ...ITEM_DOC,
+  kind: "subtree-coherence",
+  scopeNodes: [
+    {
+      node: "specs/T.mdx#p",
+      present: true,
+      sourceRange: { end: 87, start: 0 },
+    },
+    {
+      node: "specs/T.mdx#p.a",
+      present: true,
+      sourceRange: { end: 53, start: 26 },
+    },
+    { node: "specs/T.mdx#p.c", present: false },
+    {
+      node: "specs/T.mdx#p.e",
+      present: true,
+      sourceRange: { end: 86, start: 81 },
+      text: "Pee line.\n",
+    },
+  ],
+};
+
+/** Its --json twin, decoded by the review adapter. */
+const SCOPE_SET_TWIN = decodeItemReport(SCOPE_SET_DOC, "the scope-set twin");
+
+/**
+ * Its scope set beyond the root as the human item report's layout reads it
+ * (human-reports.ts' header: the `scopeNodes` field, a layout chosen ahead
+ * of the product, laid out as `context` is), in another order than the
+ * twin's.
+ */
+const HUMAN_SCOPE_SET_FIELD: readonly string[] = [
+  "  scopeNodes:",
+  "    -: specs/T.mdx#p.e (present)",
+  "    range: 81-86",
+  "    text: |",
+  "      Pee line.",
+  "      ",
+  "    -: specs/T.mdx#p.c (absent)",
+  "    -: specs/T.mdx#p.a (present)",
+  "    range: 26-53",
+];
+
+/** The item's human report under the twin's kind, printing no scope set. */
+const HUMAN_SUBTREE_ITEM_LINES: readonly string[] = previewWithLine(
+  HUMAN_ITEM_LINES,
+  1,
+  "  kind: subtree-coherence",
+);
+
+/** That report with the scope set, the field printed after `scope`. */
+const HUMAN_SCOPE_SET_LINES: readonly string[] = [
+  ...HUMAN_SUBTREE_ITEM_LINES.slice(
+    0,
+    lineIndex(HUMAN_SUBTREE_ITEM_LINES, "  context:"),
+  ),
+  ...HUMAN_SCOPE_SET_FIELD,
+  ...HUMAN_SUBTREE_ITEM_LINES.slice(
+    lineIndex(HUMAN_SUBTREE_ITEM_LINES, "  context:"),
+  ),
+];
+
+test("S-5: the human review-item decoder decodes a `show` report's scope set — the `scopeNodes` field, laid out as the context is — onto its entries in the report's order — `(none)` as no entry, the field unprinted as none printed (`null`) — and rejects an entry without its presence, a malformed range or text block, a line beneath an entry holding no datum of it, a node presented twice in the scope set or in the context, and the field printed twice or in no layout", () => {
+  const decoded = decodeHumanItemReport(
+    previewReport(HUMAN_SCOPE_SET_LINES),
+    "scope set",
+  );
+  expect(decoded.scopeNodes).toEqual([
+    {
+      node: "specs/T.mdx#p.e",
+      present: true,
+      range: { start: 81, end: 86 },
+      value: "Pee line.\n",
+      line: 15,
+      text: "    -: specs/T.mdx#p.e (present)",
+    },
+    {
+      node: "specs/T.mdx#p.c",
+      present: false,
+      range: null,
+      value: null,
+      line: 20,
+      text: "    -: specs/T.mdx#p.c (absent)",
+    },
+    {
+      node: "specs/T.mdx#p.a",
+      present: true,
+      range: { start: 26, end: 53 },
+      value: null,
+      line: 21,
+      text: "    -: specs/T.mdx#p.a (present)",
+    },
+  ]);
+  // The fields around it decode as they do without it.
+  expect(decoded.scope?.value).toBe("Pee own line.\n\n");
+  expect(decoded.context?.map(({ node, line }) => [node, line])).toEqual([
+    ["specs/T.mdx#p.a", 24],
+    ["specs/T.mdx#p.c", 29],
+  ]);
+  expect(
+    decodeHumanItemReport(previewReport(HUMAN_ITEM_LINES), "no scope set")
+      .scopeNodes,
+  ).toBeNull();
+  expect(
+    decodeHumanItemReport(
+      previewReport([...HUMAN_ITEM_LINES, "  scopeNodes: (NONE)"]),
+      "an empty scope set",
+    ).scopeNodes,
+  ).toEqual([]);
+
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      decodeHumanItemReport(previewReport(lines), label),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const lines = HUMAN_SCOPE_SET_LINES;
+  const field = lineIndex(lines, "  scopeNodes:");
+  const entryC = lineIndex(lines, "    -: specs/T.mdx#p.c (absent)");
+  const entryA = lineIndex(lines, "    -: specs/T.mdx#p.a (present)");
+  rejected(
+    "a scope-set entry without its presence",
+    previewWithLine(lines, entryC, "    -: specs/T.mdx#p.c"),
+    "a scope-set entry: the node's identity and its presence, `<node> (present)` or `<node> (absent)`",
+    `line ${String(entryC + 1)} (`,
+  );
+  rejected(
+    "a scope-set entry's range without its end",
+    previewWithLine(lines, entryA + 1, "    range: 26-"),
+    "a source range `range: <start>-<end>`, its two byte offsets in decimal",
+    `line ${String(entryA + 2)} (`,
+  );
+  rejected(
+    "a scope-set entry's range whose end precedes its start",
+    previewWithLine(lines, entryA + 1, "    range: 53-26"),
+    "a range whose end is not before its start (SPEC 1.7), got 53-26",
+  );
+  rejected(
+    "a scope-set entry's text block without its lines",
+    [...lines.slice(0, field + 4), ...lines.slice(field + 6)],
+    "every text has at least one line",
+  );
+  rejected(
+    "two ranges beneath a scope-set entry",
+    [
+      ...lines.slice(0, entryA + 2),
+      "    range: 26-53",
+      ...lines.slice(entryA + 2),
+    ],
+    'one source range beneath the scope-set entry "specs/T.mdx#p.a", never two',
+  );
+  rejected(
+    "a line beneath a scope-set entry holding no datum of it",
+    [...lines.slice(0, entryA + 2), "    note: x", ...lines.slice(entryA + 2)],
+    'beneath the scope-set entry "specs/T.mdx#p.a", its source range `range: <start>-<end>` or its text',
+  );
+  rejected(
+    "a scope-set entry presented twice",
+    [
+      ...lines.slice(0, entryA + 2),
+      "    -: specs/T.mdx#p.a (absent)",
+      ...lines.slice(entryA + 2),
+    ],
+    `each node presented once in the scope set — line ${String(entryA + 1)} presents "specs/T.mdx#p.a" already`,
+  );
+  rejected(
+    "a context entry presented twice",
+    [
+      ...HUMAN_ITEM_LINES.slice(0, lineIndex(HUMAN_ITEM_LINES, "  origin:")),
+      "    -: specs/T.mdx#p.a (present)",
+      ...HUMAN_ITEM_LINES.slice(lineIndex(HUMAN_ITEM_LINES, "  origin:")),
+    ],
+    'each node presented once in the context — line 15 presents "specs/T.mdx#p.a" already',
+  );
+  rejected(
+    "the scope set printed twice",
+    [...lines, "  scopeNodes: (none)"],
+    `the field scopeNodes printed once — line ${String(field + 1)} prints it already`,
+  );
+  rejected(
+    "a scope-set header with no entry beneath it",
+    [...lines.slice(0, field + 1), ...lines.slice(entryA + 2)],
+    "`scopeNodes:` with its entries beneath it, `    -: <node> (present|absent)`, or `scopeNodes: (none)` (SPEC 10.4, 10.7) — no entry stands beneath this one",
+  );
+  rejected(
+    "a scope-set value in no layout",
+    [
+      ...lines.slice(0, field),
+      "  scopeNodes: specs/T.mdx#p.a (present)",
+      ...lines.slice(entryA + 2),
+    ],
+    "`scopeNodes:` with its entries beneath it, or `scopeNodes: (none)` (SPEC 10.4, 10.7)",
+  );
+});
+
+test("S-5: the human review-item comparison holds a `show` report's scope set to its twin's beyond the scope root — matched by node, order free, the root's own entry admitted and compared, none demanded of a twin carrying none — and rejects an entry omitted, presented with the other presence, given another range, a range on an absent node, or another text, and an entry the twin lacks — naming the entry", () => {
+  // Carried: the twin's scope set beyond its root, in another order.
+  assertHumanItemCarries(
+    decodeHumanItemReport(previewReport(HUMAN_SCOPE_SET_LINES), "scope set"),
+    SCOPE_SET_TWIN,
+    "scope set",
+  );
+  // The root's own entry admitted, the field printed last, an entry's
+  // range and text in either order, a presence respelled.
+  assertHumanItemCarries(
+    decodeHumanItemReport(
+      previewReport([
+        ...HUMAN_SUBTREE_ITEM_LINES,
+        "  scopeNodes:",
+        "    -: specs/T.mdx#p.a (present)",
+        "    range: 26-53",
+        "    -: specs/T.mdx#p (PRESENT)",
+        "    range: 0-87",
+        "    -: specs/T.mdx#p.c (Absent)",
+        "    -: specs/T.mdx#p.e (present)",
+        "    text: |",
+        "      Pee line.",
+        "      ",
+        "    range: 81-86",
+      ]),
+      "the root's own entry",
+    ),
+    SCOPE_SET_TWIN,
+    "the root's own entry",
+  );
+  // A scope set holding its root alone: the field not printed, printed as
+  // none, or printing the root's entry alone.
+  const rootOnlyTwin = decodeItemReport(
+    { ...SCOPE_SET_DOC, scopeNodes: SCOPE_SET_DOC.scopeNodes.slice(0, 1) },
+    "the root-only twin",
+  );
+  for (const [label, report] of [
+    ["no scope-set field", HUMAN_SUBTREE_ITEM_LINES],
+    [
+      "the scope set printed as none",
+      [...HUMAN_SUBTREE_ITEM_LINES, "  scopeNodes: (none)"],
+    ],
+    [
+      "the root's entry alone",
+      [
+        ...HUMAN_SUBTREE_ITEM_LINES,
+        "  scopeNodes:",
+        "    -: specs/T.mdx#p (present)",
+        "    range: 0-87",
+      ],
+    ],
+  ] as const) {
+    assertHumanItemCarries(
+      decodeHumanItemReport(previewReport(report), label),
+      rootOnlyTwin,
+      label,
+    );
+  }
+  // A twin carrying no scope set (the built product's) demands none.
+  assertHumanItemCarries(
+    decodeHumanItemReport(
+      previewReport([...HUMAN_ITEM_LINES, "  scopeNodes: (none)"]),
+      "no scope set, printed as none",
+    ),
+    JSON_ITEM_TWIN,
+    "no scope set, printed as none",
+  );
+
+  const rejected = (
+    label: string,
+    lines: readonly string[],
+    twin: ReturnType<typeof decodeItemReport>,
+    ...fragments: readonly string[]
+  ): void => {
+    const failure = expectDiagnosed(label, () =>
+      assertHumanItemCarries(
+        decodeHumanItemReport(previewReport(lines), label),
+        twin,
+        label,
+      ),
+    );
+    for (const fragment of fragments) {
+      expect(failure.message, label).toContain(fragment);
+    }
+    expect(failure.message, label).toContain(label);
+  };
+  const noScopeSetTwin = decodeItemReport(
+    { ...ITEM_DOC, kind: "subtree-coherence" },
+    "a twin carrying no scope set",
+  );
+  const lines = HUMAN_SCOPE_SET_LINES;
+  const entryE = lineIndex(lines, "    -: specs/T.mdx#p.e (present)");
+  const entryC = lineIndex(lines, "    -: specs/T.mdx#p.c (absent)");
+  const entryA = lineIndex(lines, "    -: specs/T.mdx#p.a (present)");
+  rejected(
+    "a scope-set entry dropped",
+    previewWithLine(lines, entryC, null),
+    SCOPE_SET_TWIN,
+    'the scope node "specs/T.mdx#p.c" (absent) is missing — no scope-set entry names it',
+  );
+  rejected(
+    "the scope set dropped",
+    HUMAN_SUBTREE_ITEM_LINES,
+    SCOPE_SET_TWIN,
+    'the scope node "specs/T.mdx#p.a" (present) is missing — the report prints no scopeNodes field',
+    'the scope node "specs/T.mdx#p.c" (absent) is missing',
+    'the scope node "specs/T.mdx#p.e" (present) is missing',
+  );
+  rejected(
+    "the scope set printed as none",
+    [...HUMAN_SUBTREE_ITEM_LINES, "  scopeNodes: (none)"],
+    SCOPE_SET_TWIN,
+    'the scope node "specs/T.mdx#p.e" (present) is missing — no scope-set entry names it',
+  );
+  rejected(
+    "a scope-set entry presented absent",
+    previewWithLine(
+      previewWithLine(lines, entryA + 1, null),
+      entryA,
+      "    -: specs/T.mdx#p.a (absent)",
+    ),
+    SCOPE_SET_TWIN,
+    `line ${String(entryA + 1)} (the scope-set entry "specs/T.mdx#p.a") presents the node absent where the --json twin presents it present`,
+  );
+  rejected(
+    "an absent scope-set entry presented present",
+    previewWithLine(lines, entryC, "    -: specs/T.mdx#p.c (present)"),
+    SCOPE_SET_TWIN,
+    `line ${String(entryC + 1)} (the scope-set entry "specs/T.mdx#p.c") presents the node present where the --json twin presents it absent`,
+  );
+  rejected(
+    "a scope-set entry's range changed",
+    previewWithLine(lines, entryA + 1, "    range: 26-54"),
+    SCOPE_SET_TWIN,
+    `line ${String(entryA + 1)} (the scope-set entry "specs/T.mdx#p.a") prints the source range 26-54 where the --json twin carries the source range 26-53`,
+  );
+  rejected(
+    "a scope-set entry's range dropped",
+    previewWithLine(lines, entryA + 1, null),
+    SCOPE_SET_TWIN,
+    `line ${String(entryA + 1)} (the scope-set entry "specs/T.mdx#p.a") prints no source range where the --json twin carries the source range 26-53`,
+  );
+  rejected(
+    "a range on an absent scope-set entry",
+    [
+      ...lines.slice(0, entryC + 1),
+      "    range: 60-70",
+      ...lines.slice(entryC + 1),
+    ],
+    SCOPE_SET_TWIN,
+    `line ${String(entryC + 1)} (the scope-set entry "specs/T.mdx#p.c") prints the source range 60-70 where the --json twin carries no source range`,
+  );
+  rejected(
+    "a scope-set entry's text changed",
+    previewWithLine(lines, entryE + 3, "      Pee line!"),
+    SCOPE_SET_TWIN,
+    `line ${String(entryE + 1)} (the scope-set entry "specs/T.mdx#p.e") prints the text "Pee line!\\n" where the --json twin carries the text "Pee line.\\n"`,
+  );
+  rejected(
+    "a scope-set entry's text dropped",
+    [...lines.slice(0, entryE + 2), ...lines.slice(entryE + 5)],
+    SCOPE_SET_TWIN,
+    `line ${String(entryE + 1)} (the scope-set entry "specs/T.mdx#p.e") prints no text where the --json twin carries the text "Pee line.\\n"`,
+  );
+  rejected(
+    "a text the twin's scope-set entry lacks",
+    [
+      ...lines.slice(0, entryA + 2),
+      "    text: (empty)",
+      ...lines.slice(entryA + 2),
+    ],
+    SCOPE_SET_TWIN,
+    `line ${String(entryA + 1)} (the scope-set entry "specs/T.mdx#p.a") prints the text "" where the --json twin carries no text`,
+  );
+  rejected(
+    "a scope-set entry the twin lacks",
+    [
+      ...lines.slice(0, entryA + 2),
+      "    -: specs/T.mdx#p.z (absent)",
+      ...lines.slice(entryA + 2),
+    ],
+    SCOPE_SET_TWIN,
+    `line ${String(entryA + 3)} presents the scope-set entry "specs/T.mdx#p.z", which the --json twin's scope set lacks`,
+  );
+  rejected(
+    "the scope root's entry changed",
+    [
+      ...lines.slice(0, entryA + 2),
+      "    -: specs/T.mdx#p (present)",
+      "    range: 0-86",
+      ...lines.slice(entryA + 2),
+    ],
+    SCOPE_SET_TWIN,
+    `line ${String(entryA + 3)} (the scope-set entry "specs/T.mdx#p") prints the source range 0-86 where the --json twin carries the source range 0-87`,
+  );
+  rejected(
+    "a scope set beside a twin carrying none",
+    lines,
+    noScopeSetTwin,
+    `line ${String(entryE + 1)} presents the scope-set entry "specs/T.mdx#p.e", which the --json twin's scope set lacks`,
+    'presents the scope-set entry "specs/T.mdx#p.a", which',
+    'presents the scope-set entry "specs/T.mdx#p.c", which',
+  );
+  rejected(
+    "the root's entry beside a twin carrying no scope set",
+    [
+      ...HUMAN_SUBTREE_ITEM_LINES,
+      "  scopeNodes:",
+      "    -: specs/T.mdx#p (present)",
+      "    range: 0-87",
+    ],
+    noScopeSetTwin,
+    'presents the scope-set entry "specs/T.mdx#p", which the --json twin\'s scope set lacks',
+  );
+});
+
+test("S-5: the human review-next decoder decodes the fully-resolved report and the item returned, its scope set decoded as `show`'s and compared not at all", () => {
   const resolvedTwin = decodeNextReport(
     { fullyResolved: true },
     "the fully-resolved twin",
@@ -11586,6 +11993,62 @@ test("S-5: the human review-next decoder decodes the fully-resolved report and t
     itemTwin,
     "next with another scope text",
   );
+  // The scope set, part of that payload, decodes as `show`'s does: the
+  // twin's scope set unprinted, a scope set the twin lacks, and one the
+  // twin's differs from each carry the item returned.
+  const scopeSetTwin = decodeNextReport(
+    { fullyResolved: false, item: SCOPE_SET_DOC },
+    "the scope-set next twin",
+  );
+  const withScopeSet = decodeHumanNextReport(
+    previewReport(HUMAN_SCOPE_SET_LINES),
+    "next with a scope set",
+  );
+  expect(
+    withScopeSet.item?.scopeNodes?.map(({ node, present, range }) => [
+      node,
+      present,
+      range,
+    ]),
+  ).toEqual([
+    ["specs/T.mdx#p.e", true, { start: 81, end: 86 }],
+    ["specs/T.mdx#p.c", false, null],
+    ["specs/T.mdx#p.a", true, { start: 26, end: 53 }],
+  ]);
+  assertHumanNextCarries(withScopeSet, scopeSetTwin, "next with a scope set");
+  assertHumanNextCarries(
+    decodeHumanNextReport(
+      previewReport(HUMAN_SUBTREE_ITEM_LINES),
+      "next without its scope set",
+    ),
+    scopeSetTwin,
+    "next without its scope set",
+  );
+  assertHumanNextCarries(
+    withScopeSet,
+    decodeNextReport(
+      {
+        fullyResolved: false,
+        item: { ...ITEM_DOC, kind: "subtree-coherence" },
+      },
+      "a next twin carrying no scope set",
+    ),
+    "next with a scope set its twin lacks",
+  );
+  assertHumanNextCarries(
+    decodeHumanNextReport(
+      previewReport(
+        previewWithLine(
+          HUMAN_SCOPE_SET_LINES,
+          lineIndex(HUMAN_SCOPE_SET_LINES, "    -: specs/T.mdx#p.c (absent)"),
+          "    -: specs/T.mdx#p.z (present)",
+        ),
+      ),
+      "next with another scope set",
+    ),
+    scopeSetTwin,
+    "next with another scope set",
+  );
 });
 
 test("S-5: the human review-next decoder rejects an empty report, a report that is neither the item returned nor the fully-resolved report, and every failure of the item decode", () => {
@@ -11626,6 +12089,17 @@ test("S-5: the human review-next decoder rejects an empty report, a report that 
     "an item decode failure",
     previewWithLine(HUMAN_ITEM_LINES, 2, "  status: resolved"),
     "the item's status, one SPEC 10.3 lists",
+  );
+  rejected(
+    "a scope-set decode failure",
+    [
+      ...HUMAN_SCOPE_SET_LINES,
+      "  scopeNodes:",
+      "    -: specs/T.mdx#p.a (present)",
+    ],
+    `the field scopeNodes printed once — line ${String(
+      lineIndex(HUMAN_SCOPE_SET_LINES, "  scopeNodes:") + 1,
+    )} prints it already`,
   );
   rejected(
     "bytes that are not UTF-8",

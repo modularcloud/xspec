@@ -71,7 +71,10 @@
 // and `show` reports of T8.2-1's, T12.3-1's, and T12.4-1's stagings, and
 // hand-staged empty profile sections, a configuration of no profile,
 // tagless sections, and texts empty, holding indented lines, and ending
-// without a line feed — never by reading its source):
+// without a line feed — never by reading its source), save an item report's
+// scope set, which the built product prints in neither form: its layout
+// (below) is this adapter's choice, made ahead of the product as the review
+// adapter's `scopeNodes` member was (review.ts' header):
 //
 // - A findings report — a failing `build`'s validation errors, `check`'s
 //   findings, a gated read's report (13.3), a refused operation's refusal
@@ -182,7 +185,8 @@
 //   (the built product's order: `kind`, `status`, `blocked` — `true` or
 //   `false` — `blockedBy` — the ids joined by `, `, or `(none)` — `reason`,
 //   the optional `note`, `scope`, `context`, `origin`, `baseline`,
-//   `current`; the kind and status read as codes are). A reason or a note
+//   `current`; the kind and status read as codes are; the scope set's
+//   `scopeNodes`, below, may stand anywhere among them). A reason or a note
 //   is printed as it stands: a line feed it holds breaks it, and each
 //   following line at the margin continues it, joined by the line feed
 //   (an empty note prints `note: ` with nothing after). `scope: <node>
@@ -194,20 +198,34 @@
 //   empty line), or `text: (empty)` for the empty text, and no text line
 //   where the payload holds none (a code location, 10.7). `context: (none)`,
 //   or `context:` with its entries beneath it, each `-: <node>
-//   (present|absent)` at four spaces with its details at four as well.
-//   `origin: (none)`, or `origin:` with its entries, each `- <node>` at two
-//   spaces, then at four its range (none for a currently absent node) and
-//   its sides `before: present|absent` and `after: present|absent`, each
-//   followed, where it carries text, by `text: …` at six with the text's
-//   lines at eight. `baseline: ` and `current: ` hold the recorded entries,
-//   joined by `; `: `<node>={<hash name>:<hash> …}` — the node recorded
-//   present, its hashes under 5.5's names separated by spaces, `{}` for
-//   none — or `<node>=absent`, the explicit absent marker of 10.4 (and
-//   `(none)` reads as no entry). The built product prints neither a
-//   metadata-consistency item's metadata pair nor a scope set beyond the
-//   scope root, in either form; no layout for them is fitted. A `next`
-//   report is either such an item report or the fully-resolved report —
-//   one line holding the phrase `fully resolved` (the built product's
+//   (present|absent)` at four spaces with its details at four as well, no
+//   node presented twice. The scope set — every node of the item's scope,
+//   under its current identity and presence, a present one with its source
+//   range (10.4, 10.7) — is laid out as the context is, so a product can
+//   print both with one renderer: `scopeNodes: (none)`, or `scopeNodes:`
+//   with its entries beneath it, each `-: <node> (present|absent)` at four
+//   spaces with its range and any text at four as well, no node presented
+//   twice. An entry naming the scope root — the node `scope:` presents,
+//   with its text — is admitted, read as the root's own entry and compared
+//   with the twin's (below): a product may list its scope set with the
+//   root or without it. `origin: (none)`, or `origin:` with its entries,
+//   each `- <node>` at two spaces, then at four its range (none for a
+//   currently absent node) and its sides `before: present|absent` and
+//   `after: present|absent`, each followed, where it carries text, by
+//   `text: …` at six with the text's lines at eight. `baseline: ` and
+//   `current: ` hold the recorded entries, joined by `; `:
+//   `<node>={<hash name>:<hash> …}` — the node recorded present, its hashes
+//   under 5.5's names separated by spaces, `{}` for none — or
+//   `<node>=absent`, the explicit absent marker of 10.4 (and `(none)` reads
+//   as no entry). The built product prints a metadata-consistency item's
+//   metadata pair in both forms — in the item report, `metadata:` after the
+//   origin entries, its sides beneath it — in lines this layout does not
+//   read, so the decode rejects them as lines outside it: T12.0-15 reads no
+//   such item (T10.7-7's payload arm stages none, and T10.7-8's session is
+//   an audit session), so neither its `show` twins nor its `next` twins
+//   meet them. A `next` report is either such an item report or the
+//   fully-resolved report — one line holding the phrase `fully resolved`
+//   (the built product's
 //   `review session '<name>' is fully resolved: no item needs review`).
 // - A coverage report — `coverage` or `coverage <name>` without `--json`,
 //   `--check` or not (SPEC 8.2) — is empty with no profile, and is
@@ -379,23 +397,32 @@
 //   identity, presence, range, and text equal; the context and origin
 //   entries matched by node, each context entry's presence, range, and text,
 //   and each origin entry's range and its before and after sides' presence
-//   and text, equal; the `baseline` and `current` recorded states matched by
-//   node against the twin's `decodeRecordedState` entries, each one's
-//   presence, absent marker, and hash under each of 5.5's names equal; and,
-//   where the twin carries them, every scope node beyond the scope root and
-//   the metadata pair, which the human report — the layout fitted holding
-//   no reading of either — then fails to carry. A blockedBy, context, or
-//   origin line the report does not print reads as none, as a missing count
-//   does in a listing (whether an empty list is printed is concrete shape,
-//   H-3); a missing scope, recorded state, kind, status, or blocked state
-//   fails wherever the twin carries one. `next` (T12.0-15: "the item
-//   returned, and the fully-resolved report"): the session fully resolved
-//   exactly where the twin reports it so, else the item's id, kind,
-//   status, blocked state, blockers, note, and reason compared as `show`'s
-//   are; `next --json`'s self-contained payload — the nodes, their texts
-//   and ranges, the recorded states, a metadata pair — is content SPEC 10.7
-//   defines for the JSON form alone, which T12.0-15 does not ask of the
-//   human report.
+//   and text, equal; the scope set matched by node against the twin's
+//   `scopeNodes` (the review adapter's member), order free (10.7 fixes
+//   none): every entry the twin carries beyond the scope root needs a human
+//   entry — a datum the `--json` document carries and the human report
+//   omits — and every human entry needs the twin's, the root's own entry
+//   compared with the twin's root entry, each pair's presence, range, and
+//   text equal, as a context entry's are, so a human entry the twin lacks
+//   fails as an extra context entry does; a twin carrying no scope set (the
+//   built product's) demands none, every human entry then one it lacks; the
+//   `baseline` and `current` recorded states matched by node against the
+//   twin's `decodeRecordedState` entries, each one's presence, absent
+//   marker, and hash under each of 5.5's names equal; and, where the twin
+//   carries it, the metadata pair, which the human report — the layout
+//   fitted holding no reading of it — then fails to carry. A blockedBy,
+//   context, scopeNodes, or origin line the report does not print reads as
+//   none, as a missing count does in a listing (whether an empty list is
+//   printed is concrete shape, H-3); a missing scope, recorded state, kind,
+//   status, or blocked state fails wherever the twin carries one. `next`
+//   (T12.0-15: "the item returned, and the fully-resolved report"): the
+//   session fully resolved exactly where the twin reports it so, else the
+//   item's id, kind, status, blocked state, blockers, note, and reason
+//   compared as `show`'s are; `next --json`'s self-contained payload — the
+//   nodes, the scope set among them, their texts and ranges, the recorded
+//   states, a metadata pair — is content SPEC 10.7 defines for the JSON
+//   form alone, which T12.0-15 does not ask of the human report: `next`'s
+//   item decodes as `show`'s does, its payload compared not at all.
 // - An impact report's comparison is exact on the impact model, its order
 //   free (T12.0-15 lists none for `impact`: SPEC fixes no order for the
 //   report itself). Its unit is one category of one requirement entry —
@@ -2585,15 +2612,16 @@ const ORIGIN_ENTRY_LINE = /^ {2}- (.+)$/;
 
 /**
  * A line beneath a payload node (the module header): four spaces, its label
- * — `range`, `text`, `before`, `after`, or a context entry's `-` — a colon,
- * and after one space its value, `undefined` where nothing follows.
+ * — `range`, `text`, `before`, `after`, or a context or scope-set entry's
+ * `-` — a colon, and after one space its value, `undefined` where nothing
+ * follows.
  */
 const NODE_DETAIL_LINE = /^ {4}([A-Za-z]+|-):(?: (.*))?$/;
 
 /** An origin side's text line (the module header): six spaces, `text:`. */
 const SIDE_TEXT_LINE = /^ {6}text:(?: (.*))?$/;
 
-/** The indentation of a scope's or context entry's text lines. */
+/** The indentation of a scope's, context entry's, or scope-set entry's text lines. */
 const NODE_TEXT_INDENT = " ".repeat(6);
 
 /** The indentation of an origin side's text lines. */
@@ -2622,10 +2650,11 @@ const ABSENT_MARKER_WORD = /^absent$/i;
 const FULLY_RESOLVED_PHRASE = /\bfully[^A-Za-z0-9]?resolved\b/i;
 
 /**
- * One node a human item report presents — its scope node or one of its
- * context entries (SPEC 10.7) — with where it stood: its identity and
- * presence (10.4), and the source range (1.7) and the text value (1.6)
- * printed beneath it, each `null` where none is printed.
+ * One node a human item report presents — its scope node, one of its
+ * context entries, or one of its scope set's entries (SPEC 10.7) — with
+ * where it stood: its identity and presence (10.4), and the source range
+ * (1.7) and the text value (1.6) printed beneath it, each `null` where none
+ * is printed.
  */
 export interface HumanItemNode {
   readonly node: string;
@@ -2707,6 +2736,13 @@ export interface HumanItemReport {
   readonly reason: string | null;
   readonly note: string | null;
   readonly scope: HumanItemNode | null;
+  /**
+   * The scope set's entries as printed (the module header: the `scopeNodes`
+   * field, a layout chosen ahead of the product), in the report's order —
+   * an entry naming the scope root, where printed, among them — `null`
+   * where the field is not printed.
+   */
+  readonly scopeNodes: readonly HumanItemNode[] | null;
   readonly context: readonly HumanItemNode[] | null;
   readonly origin: readonly HumanOriginEntry[] | null;
   readonly baseline: HumanRecordedState | null;
@@ -2846,9 +2882,10 @@ function decodePresentedNode(
 }
 
 /**
- * The details beneath a scope node or a context entry (the module header):
- * its source range and its text value, each at most once, in either order,
- * until a line holding neither — a context entry's `-:` line included.
+ * The details beneath a scope node, a context entry, or a scope-set entry
+ * (the module header): its source range and its text value, each at most
+ * once, in either order, until a line holding neither — a context or
+ * scope-set entry's `-:` line included.
  */
 function readItemNodeDetails(
   at: ItemReportLines,
@@ -2896,6 +2933,93 @@ function readItemNodeDetails(
     );
   }
   return { range, value, last };
+}
+
+/**
+ * The fields listing payload nodes as `-:` entries (the module header): the
+ * context, and the scope set, whose layout mirrors it.
+ */
+const NODE_LIST_FIELDS = {
+  context: {
+    list: "the context",
+    entry: "a context entry",
+    owner: "the context entry",
+    spec: "SPEC 10.7",
+  },
+  scopeNodes: {
+    list: "the scope set",
+    entry: "a scope-set entry",
+    owner: "the scope-set entry",
+    spec: "SPEC 10.4, 10.7",
+  },
+} as const;
+
+/**
+ * A field's list of payload nodes (the module header): `<field>: (none)`
+ * for none, or `<field>:` with its entries beneath it, each `-: <node>
+ * (present|absent)` at four spaces with its details — its source range and
+ * its text — at four as well, no node presented twice (which entry is the
+ * node's would be ambiguous). Returns the entries, in the report's order,
+ * and the 0-based index of the list's last line.
+ */
+function readItemNodeList(
+  at: ItemReportLines,
+  index: number,
+  value: string | undefined,
+  field: keyof typeof NODE_LIST_FIELDS,
+): { readonly entries: HumanItemNode[]; readonly last: number } {
+  const names = NODE_LIST_FIELDS[field];
+  if (value !== undefined) {
+    if (!NONE_WORD.test(value)) {
+      itemDecodeFail(
+        at,
+        index,
+        `\`${field}:\` with its entries beneath it, or \`${field}: (none)\` (${names.spec})`,
+      );
+    }
+    return { entries: [], last: index };
+  }
+  const entries: HumanItemNode[] = [];
+  const presentedAt = new Map<string, number>();
+  let last = index;
+  while (last + 1 < at.lines.length) {
+    const entry = NODE_DETAIL_LINE.exec(at.lines[last + 1]!);
+    if (entry === null || entry[1] !== "-") break;
+    last += 1;
+    const presented = decodePresentedNode(at, last, entry[2], names.entry);
+    const earlier = presentedAt.get(presented.node);
+    if (earlier !== undefined) {
+      itemDecodeFail(
+        at,
+        last,
+        `each node presented once in ${names.list} — line ${String(earlier)} presents ` +
+          `${JSON.stringify(presented.node)} already, so which entry is its is ambiguous`,
+      );
+    }
+    presentedAt.set(presented.node, last + 1);
+    const details = readItemNodeDetails(
+      at,
+      last,
+      `${names.owner} ${JSON.stringify(presented.node)}`,
+    );
+    entries.push({
+      ...presented,
+      range: details.range,
+      value: details.value,
+      line: last + 1,
+      text: at.lines[last]!,
+    });
+    last = details.last;
+  }
+  if (entries.length === 0) {
+    itemDecodeFail(
+      at,
+      index,
+      `\`${field}:\` with its entries beneath it, \`    -: <node> (present|absent)\`, or ` +
+        `\`${field}: (none)\` (${names.spec}) — no entry stands beneath this one`,
+    );
+  }
+  return { entries, last };
 }
 
 /**
@@ -3084,6 +3208,7 @@ const ITEM_FIELD_LABELS: readonly string[] = [
   "reason",
   "note",
   "scope",
+  "scopeNodes",
   "context",
   "origin",
   "baseline",
@@ -3108,6 +3233,7 @@ function decodeItemLines(at: ItemReportLines): HumanItemReport {
   let reason: string | null = null;
   let note: string | null = null;
   let scope: HumanItemNode | null = null;
+  let scopeNodes: HumanItemNode[] | null = null;
   let context: HumanItemNode[] | null = null;
   let origin: HumanOriginEntry[] | null = null;
   let baseline: HumanRecordedState | null = null;
@@ -3123,8 +3249,9 @@ function decodeItemLines(at: ItemReportLines): HumanItemReport {
         at,
         index,
         text.startsWith("   ")
-          ? "a line beneath a scope, a context entry, or an origin entry — this one stands " +
-              "beneath none, or holds neither a source range, a text, nor an origin side"
+          ? "a line beneath a scope, a context entry, a scope-set entry, or an origin entry — " +
+              "this one stands beneath none, or holds neither a source range, a text, nor an " +
+              "origin side"
           : "a field line `  <label>: <value>` at the item's first level — a line at the " +
               "margin stands only first, `item <id>`, or continues a reason or a note a line " +
               "feed broke",
@@ -3250,52 +3377,12 @@ function decodeItemLines(at: ItemReportLines): HumanItemReport {
         index = details.last;
         break;
       }
+      case "scopeNodes":
       case "context": {
-        if (value !== undefined) {
-          if (!NONE_WORD.test(value)) {
-            itemDecodeFail(
-              at,
-              index,
-              "`context:` with its entries beneath it, or `context: (none)` (SPEC 10.7)",
-            );
-          }
-          context = [];
-          break;
-        }
-        const entries: HumanItemNode[] = [];
-        while (index + 1 < at.lines.length) {
-          const entry = NODE_DETAIL_LINE.exec(at.lines[index + 1]!);
-          if (entry === null || entry[1] !== "-") break;
-          index += 1;
-          const presented = decodePresentedNode(
-            at,
-            index,
-            entry[2],
-            "a context entry",
-          );
-          const details = readItemNodeDetails(
-            at,
-            index,
-            `the context entry ${JSON.stringify(presented.node)}`,
-          );
-          entries.push({
-            ...presented,
-            range: details.range,
-            value: details.value,
-            line: index + 1,
-            text: at.lines[index]!,
-          });
-          index = details.last;
-        }
-        if (entries.length === 0) {
-          itemDecodeFail(
-            at,
-            index,
-            "`context:` with its entries beneath it, `    -: <node> (present|absent)`, or " +
-              "`context: (none)` (SPEC 10.7) — no entry stands beneath this one",
-          );
-        }
-        context = entries;
+        const list = readItemNodeList(at, index, value, label);
+        if (label === "context") context = list.entries;
+        else scopeNodes = list.entries;
+        index = list.last;
         break;
       }
       case "origin": {
@@ -3359,6 +3446,7 @@ function decodeItemLines(at: ItemReportLines): HumanItemReport {
     reason,
     note,
     scope,
+    scopeNodes,
     context,
     origin,
     baseline,
@@ -3389,15 +3477,17 @@ function decodeItemReportBytes(
 /**
  * Decode a human `review show <name> <item-id>` report — its standard
  * output without `--json` (SPEC 10.7, 12.0) — onto the item model (the
- * module header's layout): the item's id and every field it prints. Takes a
- * run (its stdout bytes) or the report's bytes. Fails diagnosed on bytes
- * that are not valid UTF-8, an empty report or line, a first line other
- * than `item <id>`, a field printed twice or unknown, a kind, status, or
- * blocked state outside its vocabulary, a node without its presence, a
- * malformed range, a text block without its lines, an origin side without
- * its presence, a recorded entry without its hashes or marker or holding a
- * hash under no name of 5.5, and every line outside the layout. A harness
- * step under its own guard (TEST-SPEC S-3).
+ * module header's layout): the item's id and every field it prints, the
+ * scope set's `scopeNodes` — a layout chosen ahead of the product — among
+ * them. Takes a run (its stdout bytes) or the report's bytes. Fails
+ * diagnosed on bytes that are not valid UTF-8, an empty report or line, a
+ * first line other than `item <id>`, a field printed twice or unknown, a
+ * kind, status, or blocked state outside its vocabulary, a node without its
+ * presence, a context or scope-set entry naming a node its list presents
+ * already, a malformed range, a text block without its lines, an origin
+ * side without its presence, a recorded entry without its hashes or marker
+ * or holding a hash under no name of 5.5, and every line outside the
+ * layout. A harness step under its own guard (TEST-SPEC S-3).
  */
 export function decodeHumanItemReport(
   output: RunResult | Uint8Array,
@@ -6244,13 +6334,56 @@ function recordedStateProblems(
 }
 
 /**
+ * What the human report's scope set omits, changes, or lists beside the
+ * --json twin's `scopeNodes` (SPEC 10.4, 10.7: every scope node; the module
+ * header): its entries matched by node, order free (10.7 fixes none) —
+ * every twin entry beyond the scope root needing a human entry, the root's
+ * own optional (`scope:` presents the root), each matched pair's presence,
+ * source range, and text compared as a context entry's are, and a human
+ * entry the twin lacks named as such. A twin carrying no scope set demands
+ * none.
+ */
+function scopeSetProblems(json: ReviewItem, human: HumanItemReport): string[] {
+  const { pairs, missing, extra } = matchByKey(
+    json.scopeNodes ?? [],
+    human.scopeNodes ?? [],
+    (state) => state.node,
+    (entry) => entry.node,
+  );
+  const problems: string[] = [];
+  for (const state of missing) {
+    if (state.node === json.scope.node) continue;
+    problems.push(
+      `the scope node ${JSON.stringify(state.node)} (${presenceWord(state.present)}) is ` +
+        "missing — " +
+        (human.scopeNodes === null
+          ? "the report prints no scopeNodes field"
+          : "no scope-set entry names it") +
+        " (SPEC 10.4, 10.7: every scope node)",
+    );
+  }
+  for (const pair of pairs) {
+    problems.push(
+      ...itemNodeProblems(pair.json, pair.human, "the scope-set entry"),
+    );
+  }
+  for (const entry of extra) {
+    problems.push(
+      `line ${String(entry.line)} presents the scope-set entry ${JSON.stringify(entry.node)}, ` +
+        "which the --json twin's scope set lacks",
+    );
+  }
+  return problems;
+}
+
+/**
  * What the human `show` report omits or changes of the --json twin's full
  * item beyond the fields `next` shares (the module header): the scope
  * node — its identity, presence, range, and text — each context entry and
  * each origin entry, matched by node, order free (10.7 fixes no order), the
- * `baseline` and `current` recorded states, and, where the twin carries
- * them, the scope set beyond the scope root and the metadata pair, which
- * the layout the adapter is fitted to holds no reading of.
+ * scope set beyond the scope root (`scopeSetProblems`), the `baseline` and
+ * `current` recorded states, and, where the twin carries it, the metadata
+ * pair, which the layout the adapter is fitted to holds no reading of.
  */
 function itemPayloadProblems(
   json: ReviewItem,
@@ -6273,6 +6406,7 @@ function itemPayloadProblems(
       ...itemNodeProblems(json.scope, human.scope, "the scope node"),
     );
   }
+  problems.push(...scopeSetProblems(json, human));
   const contextMatch = matchByKey(
     json.context,
     human.context ?? [],
@@ -6341,14 +6475,6 @@ function itemPayloadProblems(
       ),
     );
   }
-  for (const state of json.scopeNodes ?? []) {
-    if (state.node === json.scope.node) continue;
-    problems.push(
-      `the --json twin's scope holds ${JSON.stringify(state.node)} beside the scope root, which ` +
-        "the report presents alone — the layout the adapter is fitted to prints no other scope " +
-        "node (SPEC 10.4, 10.7: every scope node)",
-    );
-  }
   if (json.metadata !== undefined) {
     problems.push(
       "the --json twin carries the scope node's metadata pair (SPEC 10.7: a " +
@@ -6367,12 +6493,15 @@ function itemPayloadProblems(
  * (its wording never compared); its scope node's identity, presence,
  * source range, and text; each context entry's and each origin entry's,
  * matched by node, order free — an origin entry's range and its before and
- * after sides' presence and text; the `baseline` and `current` recorded
- * states, entry by entry — each node's presence and hashes or absent marker
- * (read from the twin through `decodeRecordedState`); and, where the twin
- * carries them, the scope set beyond the scope root and the metadata pair.
- * Fails diagnosed, naming every datum the human report omits, changes, or
- * lists beside its twin's.
+ * after sides' presence and text; where the twin carries a scope set
+ * (`scopeNodes`), each of its nodes beyond the scope root, matched by node,
+ * order free — its presence, source range, and text — and no scope-set
+ * entry the twin lacks, an entry naming the root compared with the twin's
+ * root entry; the `baseline` and `current` recorded states, entry by
+ * entry — each node's presence and hashes or absent marker (read from the
+ * twin through `decodeRecordedState`); and, where the twin carries it, the
+ * metadata pair. Fails diagnosed, naming every datum the human report
+ * omits, changes, or lists beside its twin's.
  */
 export function assertHumanItemCarries(
   human: HumanItemReport,
@@ -6418,10 +6547,10 @@ export function assertHumanItemReportCarries(
  * reports it so, and otherwise the item the twin returns — its id, kind,
  * status, blocked state, blockers (a set), note, and a reason (its wording
  * never compared). Not asked: `next --json`'s self-contained payload —
- * scope, context, and origin nodes, their texts and ranges, the recorded
- * states, a metadata pair — content SPEC 10.7 defines for the JSON form
- * alone (T12.0-15). Fails diagnosed, naming every datum the human report
- * omits or changes.
+ * scope, scope-set, context, and origin nodes, their texts and ranges, the
+ * recorded states, a metadata pair — content SPEC 10.7 defines for the JSON
+ * form alone (T12.0-15). Fails diagnosed, naming every datum the human
+ * report omits or changes.
  */
 export function assertHumanNextCarries(
   human: HumanNextReport,
