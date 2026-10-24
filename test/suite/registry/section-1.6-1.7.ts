@@ -1579,10 +1579,13 @@ const T1_7_1 = defineProductTest({
 // two, one per `using` and `await using` unit of T4.6-1) — a dependency
 // marker (4.5) or a `text(...)` call (4.3) — inside one named-code-unit
 // shape of SPEC 4.6 (TEST-SPEC T1.7-2's further forms included: the
-// constructor, a decorated class and member, the property members — one
-// spelling its `;`, its twin spelling none, a decorated one — and their
-// control, a method followed by a stray `;`, the export exclusion, the
-// `default` unit's spellings, a legacy `module`, and a declaration file),
+// constructor, a decorated class and member, the modifier-bearing units
+// spanning from their first modifier (`async function f`, `export async
+// function g`, `abstract class C`, and `D`'s `static` method), the property
+// members — one spelling its `;`, its twin spelling none, a decorated one —
+// and their control, a method followed by a stray `;`, the export
+// exclusion, the `default` unit's spellings, a legacy `module`, and a
+// declaration file),
 // and the test asserts the complete `occurrences` document, a form-exact 12.7
 // surface (H-3: no adapter in the path, and a JSON-only surface, so no
 // `--json` flag is passed), against precomputed byte offsets. Every file
@@ -1926,6 +1929,62 @@ const OCC_USING_BEFORE_AWAIT =
 const OCC_USING_SOURCE =
   OCC_USING_BEFORE_AWAIT + OCC_AWAIT_USING_UNIT + "\n}\n";
 
+// The modifier stagings — `abstract.ts`, `async.ts`, `expasync.ts`, and
+// `static.ts` — each spell one of TEST-SPEC T1.7-2's modifier-bearing forms
+// exactly, in a file of its own, its marker `SPEC.a` or `SPEC.b` (target `a`
+// or `b`) as TEST-SPEC spells it. A construct carrying a modifier other than
+// a leading `export` spans from its first decorator or modifier, a modifier
+// being of the construct's own characters as a decorator is (SPEC 1.7
+// excludes only a leading `export` or `export default` and what separates
+// it), so each unit's range starts at its modifier — `async`, `async`,
+// `abstract`, or `static` — and, no terminator spelled, ends at the
+// construct's closing brace: a product starting a unit's range at its
+// keyword or name (`function`, `class`, or `m`) fails the record (the
+// unit-range counterpart of T4.5-8's and T14-11's modifier arms).
+const OCC_MODIFIER_MARKER_A = "SPEC.a";
+const OCC_MODIFIER_MARKER_B = "SPEC.b";
+
+// src/abstract.ts — `abstract class C { static { SPEC.a } }`: a class static
+// block is no named unit (SPEC 4.6), so its marker attributes to the
+// innermost enclosing one, the class `C` (T4.6-1), whose range runs from its
+// `abstract` modifier through its closing `}`.
+const OCC_ABSTRACT_HEAD =
+  '// prélude 🦄 abstract\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ABSTRACT_UNIT_PRE = "abstract class C { static { ";
+const OCC_ABSTRACT_UNIT =
+  OCC_ABSTRACT_UNIT_PRE + OCC_MODIFIER_MARKER_A + " } }";
+const OCC_ABSTRACT_SOURCE = OCC_ABSTRACT_HEAD + OCC_ABSTRACT_UNIT + "\n";
+
+// src/async.ts — `async function f() { SPEC.a }`: unit `f` spans from
+// `async`, never from `function`.
+const OCC_ASYNC_HEAD =
+  '// prélude 🦄 async\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ASYNC_UNIT_PRE = "async function f() { ";
+const OCC_ASYNC_UNIT = OCC_ASYNC_UNIT_PRE + OCC_MODIFIER_MARKER_A + " }";
+const OCC_ASYNC_SOURCE = OCC_ASYNC_HEAD + OCC_ASYNC_UNIT + "\n";
+
+// src/expasync.ts — `export async function g() { SPEC.b }`: the leading
+// `export` and the space separating it from the construct are excluded,
+// the `async` modifier kept — unit `g` spans `async function g() { SPEC.b }`.
+const OCC_EXPASYNC_HEAD =
+  '// prélude 🦄 expasync\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_EXPASYNC_EXPORT_PRE = "export ";
+const OCC_EXPASYNC_UNIT_PRE = "async function g() { ";
+const OCC_EXPASYNC_UNIT = OCC_EXPASYNC_UNIT_PRE + OCC_MODIFIER_MARKER_B + " }";
+const OCC_EXPASYNC_SOURCE =
+  OCC_EXPASYNC_HEAD + OCC_EXPASYNC_EXPORT_PRE + OCC_EXPASYNC_UNIT + "\n";
+
+// src/static.ts — `class D { static m() { SPEC.b } }`: the static method is
+// the member unit `D.m` (SPEC 4.6), spanning `static m() { SPEC.b }`, from
+// its `static` modifier through the method's closing `}`, never from `m`.
+const OCC_STATIC_HEAD =
+  '// prélude 🦄 static\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_STATIC_CLASS_PRE = "class D { ";
+const OCC_STATIC_UNIT_PRE = "static m() { ";
+const OCC_STATIC_UNIT = OCC_STATIC_UNIT_PRE + OCC_MODIFIER_MARKER_B + " }";
+const OCC_STATIC_SOURCE =
+  OCC_STATIC_HEAD + OCC_STATIC_CLASS_PRE + OCC_STATIC_UNIT + " }\n";
+
 /** One staged occurrence: its expected record plus fixture-self-check data. */
 interface OccurrenceArm {
   readonly what: string;
@@ -1941,15 +2000,39 @@ interface OccurrenceArm {
 }
 
 // The complete expected enumeration, in occurrence order (SPEC 5.7: by
-// referencing file path bytes — anon < arrow < cls < ctor < decdef < decexp
-// < deco < expdec < fn < mod < multi < named < ns < pair < prop < propbare
-// < propdec < spaced < stray < top < types.d.ts < using, `prop.ts` first of
-// its three for `.` < `b` — then by range start, which places `deco.ts`'s
-// property embed before the marker in its decorated member, and `using.ts`'s
-// `f` before `g.h`): the spec source stages no `d` prop, no MDX embedding,
-// and no import, and import declarations record no occurrence (5.7), so the
-// twenty-five staged references are the workspace's only occurrences.
+// referencing file path bytes — abstract < anon < arrow < async < cls < ctor
+// < decdef < decexp < deco < expasync < expdec < fn < mod < multi < named
+// < ns < pair < prop < propbare < propdec < spaced < static < stray < top
+// < types.d.ts < using, `prop.ts` first of its three for `.` < `b` — then by
+// range start, which places `deco.ts`'s property embed before the marker in
+// its decorated member, and `using.ts`'s `f` before `g.h`): the spec source
+// stages no `d` prop, no MDX embedding, and no import, and import
+// declarations record no occurrence (5.7), so the twenty-nine staged
+// references are the workspace's only occurrences.
 const OCC_EXPECTED: readonly OccurrenceArm[] = [
+  {
+    what:
+      "`abstract class C { static { SPEC.a } }` — the static block's marker " +
+      "attributes to its class (SPEC 4.6; T4.6-1), whose unit `C` spans " +
+      "from its `abstract` modifier through its closing brace, never from " +
+      "`class` (SPEC 1.7)",
+    fileSource: OCC_ABSTRACT_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_A,
+    unitSpan: OCC_ABSTRACT_UNIT,
+    record: {
+      file: "src/abstract.ts",
+      range: rangeAfter(
+        OCC_ABSTRACT_HEAD + OCC_ABSTRACT_UNIT_PRE,
+        OCC_MODIFIER_MARKER_A,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/abstract.ts#C",
+        range: rangeAfter(OCC_ABSTRACT_HEAD, OCC_ABSTRACT_UNIT),
+      },
+      target: OCC_A_ID,
+    },
+  },
   {
     what:
       "anonymous default export spelling no terminator — unit `default` " +
@@ -1986,6 +2069,27 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
         range: rangeAfter(OCC_ARROW_HEAD, OCC_ARROW_DECL),
       },
       target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`async function f() { SPEC.a }` — unit `f` spans from its `async` " +
+      "modifier through its closing brace, never from `function` (SPEC 1.7)",
+    fileSource: OCC_ASYNC_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_A,
+    unitSpan: OCC_ASYNC_UNIT,
+    record: {
+      file: "src/async.ts",
+      range: rangeAfter(
+        OCC_ASYNC_HEAD + OCC_ASYNC_UNIT_PRE,
+        OCC_MODIFIER_MARKER_A,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/async.ts#f",
+        range: rangeAfter(OCC_ASYNC_HEAD, OCC_ASYNC_UNIT),
+      },
+      target: OCC_A_ID,
     },
   },
   {
@@ -2115,6 +2219,32 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
         ),
       },
       target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`export async function g() { SPEC.b }` — the leading `export` and " +
+      "what separates it excluded, the `async` modifier kept: unit `g` " +
+      "spans `async function g() { SPEC.b }`, never from `function` (SPEC " +
+      "1.7)",
+    fileSource: OCC_EXPASYNC_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_B,
+    unitSpan: OCC_EXPASYNC_UNIT,
+    record: {
+      file: "src/expasync.ts",
+      range: rangeAfter(
+        OCC_EXPASYNC_HEAD + OCC_EXPASYNC_EXPORT_PRE + OCC_EXPASYNC_UNIT_PRE,
+        OCC_MODIFIER_MARKER_B,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/expasync.ts#g",
+        range: rangeAfter(
+          OCC_EXPASYNC_HEAD + OCC_EXPASYNC_EXPORT_PRE,
+          OCC_EXPASYNC_UNIT,
+        ),
+      },
+      target: OCC_B_ID,
     },
   },
   {
@@ -2392,6 +2522,31 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
   },
   {
     what:
+      "`class D { static m() { SPEC.b } }` — the static method's member " +
+      "unit `D.m` spans `static m() { SPEC.b }`, from its `static` modifier " +
+      "through the method's closing brace, never from `m` (SPEC 1.7, 4.6)",
+    fileSource: OCC_STATIC_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_B,
+    unitSpan: OCC_STATIC_UNIT,
+    record: {
+      file: "src/static.ts",
+      range: rangeAfter(
+        OCC_STATIC_HEAD + OCC_STATIC_CLASS_PRE + OCC_STATIC_UNIT_PRE,
+        OCC_MODIFIER_MARKER_B,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/static.ts#D.m",
+        range: rangeAfter(
+          OCC_STATIC_HEAD + OCC_STATIC_CLASS_PRE,
+          OCC_STATIC_UNIT,
+        ),
+      },
+      target: OCC_B_ID,
+    },
+  },
+  {
+    what:
       "the control: a METHOD followed by a stray `;` — the `;` a class " +
       "element of its own, which 1.7's extension, a property member's " +
       "alone, never reaches, so unit `C.m` spans `m() { SPEC.a }`, ending " +
@@ -2530,7 +2685,7 @@ function assertStagedSpan(
 const T1_7_2 = defineProductTest({
   id: "T1.7-2",
   title:
-    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement, and for the `using` and `await using` units (`using f = () => { SPEC.a }` spans `f = () => { SPEC.a }`, `await using h = () => { SPEC.b }` in an async `g` spans `h = () => { SPEC.b }`, neither from `using` nor from `await`); the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, a property member through the `;` ending it where it spells one (`m = () => { SPEC.a };`; its twin spelling none ending at its closing brace; a decorated property from its `@` through its `;`), a method followed by a stray `;` ending at its closing brace (`m() { SPEC.a }`), the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
+    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement, and for the `using` and `await using` units (`using f = () => { SPEC.a }` spans `f = () => { SPEC.a }`, `await using h = () => { SPEC.b }` in an async `g` spans `h = () => { SPEC.b }`, neither from `using` nor from `await`); the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, a construct carrying a modifier other than a leading `export` from its first modifier (`async function f() { SPEC.a }`'s `f` and `export async function g() { SPEC.b }`'s `g` from `async`, `abstract class C { static { SPEC.a } }`'s `C` — its static block's marker attributed to the class — from `abstract`, and `class D { static m() { SPEC.b } }`'s `D.m` from `static`, never from the keyword or name), a property member through the `;` ending it where it spells one (`m = () => { SPEC.a };`; its twin spelling none ending at its closing brace; a decorated property from its `@` through its `;`), a method followed by a stray `;` ending at its closing brace (`m() { SPEC.a }`), the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
   run: async (product) => {
     for (const arm of OCC_EXPECTED) {
       assertStagedSpan(
@@ -2551,13 +2706,16 @@ const T1_7_2 = defineProductTest({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
         "specs/R.mdx": OCC_TARGET_SOURCE,
+        "src/abstract.ts": OCC_ABSTRACT_SOURCE,
         "src/anon.ts": OCC_ANON_SOURCE,
         "src/arrow.ts": OCC_ARROW_SOURCE,
+        "src/async.ts": OCC_ASYNC_SOURCE,
         "src/cls.ts": OCC_CLS_SOURCE,
         "src/ctor.ts": OCC_CTOR_SOURCE,
         "src/decdef.ts": OCC_DECDEF_SOURCE,
         "src/decexp.ts": OCC_DECEXP_SOURCE,
         "src/deco.ts": OCC_DECO_SOURCE,
+        "src/expasync.ts": OCC_EXPASYNC_SOURCE,
         "src/expdec.ts": OCC_EXPDEC_SOURCE,
         "src/fn.ts": OCC_FN_SOURCE,
         "src/mod.ts": OCC_MOD_SOURCE,
@@ -2569,6 +2727,7 @@ const T1_7_2 = defineProductTest({
         "src/propbare.ts": OCC_PROPBARE_SOURCE,
         "src/propdec.ts": OCC_PROPDEC_SOURCE,
         "src/spaced.ts": OCC_SPACED_SOURCE,
+        "src/static.ts": OCC_STATIC_SOURCE,
         "src/stray.ts": OCC_STRAY_SOURCE,
         "src/top.ts": OCC_TOP_SOURCE,
         "src/types.d.ts": OCC_DTS_SOURCE,
@@ -2580,7 +2739,7 @@ const T1_7_2 = defineProductTest({
       // sanctioned use (4.5) that resolves, so the enumeration below is
       // complete and finding-free (11.2). A product disputing any staging
       // judgment (the property-initializer `text(...)`, the namespace-body
-      // marker) fails loudly here.
+      // marker, the static-block marker) fails loudly here.
       await buildOk(
         product,
         workspace,
