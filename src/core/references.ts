@@ -182,6 +182,61 @@ const OTHER_FORM_REASON =
   "rooted at an import binding";
 
 /**
+ * SPEC 2.4: why one property or element access is no static property
+ * chain segment, or null where it is one — a non-computed access whose
+ * name is an identifier, or a computed access whose index is a static
+ * string literal, neither optional. The one segment grammar shared by
+ * `classifyReference` and `longestStaticChain`.
+ */
+function segmentDefect(
+  access: tst.PropertyAccessExpression | tst.ElementAccessExpression,
+): string | null {
+  if (access.questionDotToken !== undefined) {
+    // SPEC 2.4: optional chaining makes the reference dynamic.
+    return "optional chaining does not participate in a static property chain";
+  }
+  if (ts.isPropertyAccessExpression(access)) {
+    return ts.isIdentifier(access.name)
+      ? null
+      : "a private-name access does not participate in a static " +
+          "property chain";
+  }
+  // SPEC 2.4: any other index form makes the reference dynamic.
+  return ts.isStringLiteral(access.argumentExpression)
+    ? null
+    : "a computed access is static only when its index is a plain " +
+        "single- or double-quoted string literal";
+}
+
+/**
+ * SPEC 2.4: the longest static property chain `root` roots where it
+ * stands — `root` extended through each enclosing access of which the
+ * chain so far is the object, while that access is a static segment
+ * (`segmentDefect`). Every other enclosing form ends it: parentheses, a
+ * non-null assertion, a type assertion, an instantiation expression,
+ * optional chaining, a call, and any other index or access form — so
+ * `A.a` of `(A.a)`, `A.a!.b`, `A.a as T`, `A.a?.b`, `A.a<X>`, and
+ * `A.a[k]`, and `A` of `A[k]`. SPEC 14 locates a node binding's
+ * unsupported usage (14.18) by this spelling.
+ */
+export function longestStaticChain(root: tst.Identifier): tst.Expression {
+  let chain: tst.Expression = root;
+  for (;;) {
+    const parent: tst.Node = chain.parent;
+    if (
+      (ts.isPropertyAccessExpression(parent) ||
+        ts.isElementAccessExpression(parent)) &&
+      parent.expression === chain &&
+      segmentDefect(parent) === null
+    ) {
+      chain = parent;
+      continue;
+    }
+    return chain;
+  }
+}
+
+/**
  * Classify one expression per the static argument rule (SPEC 2.4): a
  * static string literal (plain single- or double-quoted; template
  * literals are not static), a static property chain (a root identifier
@@ -239,17 +294,11 @@ export function classifyReference(
       };
     }
     if (ts.isPropertyAccessExpression(node)) {
-      if (node.questionDotToken !== undefined) {
-        // SPEC 2.4: optional chaining makes the reference dynamic.
-        return dynamic(
-          "optional chaining does not participate in a static property chain",
-        );
-      }
-      if (!ts.isIdentifier(node.name)) {
-        return dynamic(
-          "a private-name access does not participate in a static " +
-            "property chain",
-        );
+      // SPEC 2.4: a static segment, or dynamic for the reason given (the
+      // name test only narrows: `segmentDefect` admits identifier names).
+      const defect = segmentDefect(node);
+      if (defect !== null || !ts.isIdentifier(node.name)) {
+        return dynamic(defect ?? OTHER_FORM_REASON);
       }
       collected.push({
         // SPEC 2.4: the segment's identifier is read as spelled.
@@ -263,19 +312,12 @@ export function classifyReference(
       continue;
     }
     if (ts.isElementAccessExpression(node)) {
-      if (node.questionDotToken !== undefined) {
-        // SPEC 2.4: optional chaining makes the reference dynamic.
-        return dynamic(
-          "optional chaining does not participate in a static property chain",
-        );
-      }
+      // SPEC 2.4: likewise (the index test only narrows: `segmentDefect`
+      // admits string-literal indices).
+      const defect = segmentDefect(node);
       const index = node.argumentExpression;
-      if (!ts.isStringLiteral(index)) {
-        // SPEC 2.4: any other index form makes the reference dynamic.
-        return dynamic(
-          "a computed access is static only when its index is a plain " +
-            "single- or double-quoted string literal",
-        );
+      if (defect !== null || !ts.isStringLiteral(index)) {
+        return dynamic(defect ?? OTHER_FORM_REASON);
       }
       collected.push({
         // SPEC 2.4: the index literal's value is its characters as spelled.

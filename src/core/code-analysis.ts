@@ -43,7 +43,11 @@ import { derivedFilePathKind } from "./discovery.js";
 import type { Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { ClassifiedChain } from "./references.js";
-import { classifyReference, stringLiteralValue } from "./references.js";
+import {
+  classifyReference,
+  longestStaticChain,
+  stringLiteralValue,
+} from "./references.js";
 import { decodeSourceBytes } from "./source-text.js";
 import { tsSyntaxFailureOffset } from "./ts-syntax-failure.js";
 import type { PathText } from "./path-text.js";
@@ -2028,8 +2032,10 @@ class CodeAnalyzer {
    * static chain in expression-statement position — or as the sole
    * argument of a call whose callee is a spec module's `text` export.
    * Everything else is 14.18 (or 14.8 for a non-static chain in marker
-   * position). A colliding identifier (SPEC 2.4, 4.5) names no target:
-   * its static chain in marker position is unresolved (14.7).
+   * position), located at the longest static chain the identifier roots
+   * (SPEC 14, 2.4). A colliding identifier (SPEC 2.4, 4.5) names no
+   * target: its static chain in marker position is unresolved (14.7); its
+   * other uses take the same 14.18 location.
    */
   private visitNodeBindingUse(
     identifier: tst.Identifier,
@@ -2120,9 +2126,14 @@ class CodeAnalyzer {
     // callee (visitTextBindingUse) — one report per call, never two.
     if (this.isTextCallArgument(use)) return;
 
+    // SPEC 14: the 14.18 locates the binding's spelling at the offending
+    // use — the identifier extended by the longest static property chain
+    // (2.4) it roots there, never the wrappers or dynamic accesses `use`
+    // climbed through: `A.a` of `(A.a)`, `A.a!.b`, `A.a as T`, `A.a?.b`,
+    // and `A.a<X>`; `A` of `A[k]` and `A<X>`.
     this.addFinding(
       18,
-      use,
+      longestStaticChain(identifier),
       `unsupported node usage: a spec module node or binding is used as a ` +
         `value outside the sanctioned forms — the only value-level uses ` +
         `are a bare static chain as an expression statement (a dependency ` +
@@ -3064,7 +3075,9 @@ function rootsTypeArgumentsExpression(identifier: tst.Identifier): boolean {
  * instantiation expressions — the wrappers SPEC 2.4 rules on (each beyond
  * plain accesses makes the reference dynamic). The result is the
  * expression classified as marker (SPEC 4.5), `text` argument, or
- * unsanctioned use.
+ * unsanctioned use, and the location of a marker-position 14.7 or 14.8
+ * (SPEC 14: the statement's expression); an unsanctioned use's 14.18
+ * locates `longestStaticChain` instead (SPEC 14, 2.4).
  */
 function climbUseExpression(identifier: tst.Identifier): tst.Expression {
   let use: tst.Expression = identifier;
