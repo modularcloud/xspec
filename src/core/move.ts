@@ -316,13 +316,10 @@ export function planMoveFile(
     }
   }
   for (const analysis of code) {
+    // Every spec module import, nested ones included (SPEC 4: an import
+    // declaration is one by its specifier alone, wherever it stands — "the
+    // form a file move rewrites"; `CodeImport.topLevel`).
     for (const imported of analysis.imports) {
-      // Top-level declarations only, for now: rewriting a nested spec
-      // module import (SPEC 4, 6.5; `CodeImport.topLevel`) is not
-      // implemented yet.
-      if (!imported.topLevel) {
-        continue;
-      }
       if (imported.targetPath === originPath) {
         specifierEdit(
           analysis.path,
@@ -1694,7 +1691,15 @@ function admitsAddedCodeDeclarations(
  * edit). An added declaration's offset lies inside no statement
  * (`admitsCodeAdditionOffset` checks that first); a held declaration's
  * start lies at the start of, or inside, the top-level statement holding
- * it, which therefore never counts as one standing between.
+ * it, which therefore never counts as one standing between. A nested
+ * spec module import (SPEC 4) — `declaration`, or the held one — is
+ * judged by its position alike, as 6.5 reads timeliness ("positions in
+ * pre-operation coordinates"): the top-level statement enclosing it never
+ * stands between, and the statements nested beside it are no top-level
+ * statements. (6.5's rationale, each import running where it stands as in
+ * TypeScript's CommonJS output, gives a nested import no initialization
+ * point: that output drops a namespace's import declaration, TS1147, and
+ * keeps a function body's verbatim, TS1232.)
  */
 function timelyAt(
   layout: StatementLayout,
@@ -2540,7 +2545,13 @@ function composeMoveSection(
     // top-level statement between them but import declarations: the first
     // such in document order — declarations, then a declaration's bindings
     // — deterministic; null where the file holds none there, and the
-    // added declaration's binding roots the spelling instead.
+    // added declaration's binding roots the spelling instead. A nested
+    // spec module import's binding (SPEC 4; `CodeImport.topLevel` false)
+    // is held where TypeScript scoping gives it to the occurrence alone:
+    // outside its scope the name resolves to something else, so it is in
+    // `shadowedImportNames` there (4.5; spec module import bindings are
+    // file-wide distinct in a valid workspace, 14.15). Timeliness reads
+    // positions as 6.5 gives them, whatever the nesting (`timelyAt`).
     const holdsTarget = (imported: CodeImport): boolean =>
       imported.valid && imported.targetPath === targetPath;
     const existingBinding = (
@@ -2549,14 +2560,7 @@ function composeMoveSection(
       former: number,
     ): { readonly importIndex: number; readonly name: string } | null => {
       for (const [importIndex, imported] of analysis.imports.entries()) {
-        // Top-level declarations only, for now: holding a nested spec
-        // module import's binding (SPEC 4, 6.5; `CodeImport.topLevel`)
-        // is not implemented yet.
-        if (
-          !imported.topLevel ||
-          !holdsTarget(imported) ||
-          !heldTimely(former, importIndex)
-        ) {
+        if (!holdsTarget(imported) || !heldTimely(former, importIndex)) {
           continue;
         }
         const binding = bindingsOf(imported).find(
@@ -2718,12 +2722,10 @@ function composeMoveSection(
         );
       }
     }
-    // Top-level declarations only, for now: removing a nested spec module
-    // import (SPEC 4, 6.5; `CodeImport.topLevel`) is not implemented yet,
-    // so one its last use leaves unused stays, unused (2.1).
+    // Nested spec module imports included (SPEC 4, 6.5: "an existing spec
+    // module import is removed exactly when …", wherever it stands).
     const removed = analysis.imports.filter(
-      (imported, index) =>
-        imported.topLevel && usesBefore[index]! > 0 && usesAfter[index] === 0,
+      (_imported, index) => usesBefore[index]! > 0 && usesAfter[index] === 0,
     );
     if (removed.length > 0) {
       codeRemovals.set(analysis.path, removed);
@@ -3121,12 +3123,18 @@ function composeMoveSection(
   // holds a spec module import, its chains rooting at import bindings, but
   // every one may stand nested, SPEC 4 — then this candidate is skipped:
   // an added import is a top-level declaration), the first removed
-  // import's line start, the file's start, then every other line start,
-  // every top-level statement's end, and every line's end — an offset at
-  // the start of a line, judged over the composed text, taken over any
-  // other: the one deterministic offset the preview reports (SPEC 6.5,
-  // 6.6), an addition at the end of a removal's range reading what that
-  // removal leaves (SPEC 6.5 "Composition and admissibility").
+  // top-level import's line start, the file's start, then every other
+  // line start, every top-level statement's end, and every line's end —
+  // an offset at the start of a line, judged over the composed text, taken
+  // over any other: the one deterministic offset the preview reports (SPEC
+  // 6.5, 6.6), an addition at the end of a removal's range reading what
+  // that removal leaves (SPEC 6.5 "Composition and admissibility"). A
+  // removed nested import (SPEC 4) is deleted like a top-level one; one
+  // standing as another statement's body (`if (x) import A …;`) leaves
+  // that statement taking what follows as its body, or nothing — a case
+  // SPEC 6.5's removal rule leaves open: an addition the file needs is
+  // then admissible nowhere (14.20), and with none the post-move
+  // re-validation refuses an unparseable result.
   for (const analysis of code) {
     const bytes = encoder.encode(analysis.text);
     const removed = codeRemovals.get(analysis.path) ?? [];
@@ -3174,7 +3182,11 @@ function composeMoveSection(
             judging !== null,
           ),
         );
-      const firstRemoved = removed[0];
+      // An added line takes a removed declaration's place only where that
+      // declaration is a top-level one (SPEC 6.5 "Added imports"): the
+      // first removed top-level import's line start is the candidate, a
+      // nested removal's never.
+      const firstRemoved = removed.find((imported) => imported.topLevel);
       const placed = placeCodeImportAdditions(
         analysis.path,
         bytes,
