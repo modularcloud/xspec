@@ -35,8 +35,9 @@ import type {
   DecompositionContentSource,
   GeneratedBlockerRef,
   GeneratedItem,
+  GeneratedNode,
 } from "./review-derive.js";
-import { currentAncestorChain } from "./review-derive.js";
+import { currentAncestorChain, currentChildren } from "./review-derive.js";
 
 /** The output of one audit generator run (SPEC 10.6). */
 export interface AuditGeneration {
@@ -103,34 +104,35 @@ class AuditItemBuilder {
 
   contentSource(): DecompositionContentSource {
     return {
+      // SPEC 10.7: in an audit session a scope root's children are its
+      // current ones alone (10.6: the node and all its current
+      // descendants), each a current-graph node; a stored scope that no
+      // longer canonically resolves (SPEC 10.4) has none, so a dangling
+      // scope never enumerates the children of the distinct node that
+      // recaptured its spelling.
+      scopeChildren: (scopeIdentity, scopeResolves = true): GeneratedNode[] =>
+        scopeResolves ? currentChildren(this.graph, scopeIdentity) : [],
       subtreeCoherenceItem: (scopeIdentity): GeneratedItem =>
         this.subtreeCoherenceItem(scopeIdentity),
       // SPEC 10.7: the decomposed scope root's `parent-consistency` item —
       // for its own text, context the child subtrees, blocked by the child
       // items; each decomposition item's origin "is empty in an `audit`
       // session".
-      splitParentConsistencyItem: (
-        scopeIdentity,
-        childIdentities,
-      ): GeneratedItem => ({
+      splitParentConsistencyItem: (scopeIdentity, children): GeneratedItem => ({
         kind: "parent-consistency",
         scope: {
           identity: scopeIdentity,
           baselineIdentity: null,
           deleted: false,
         },
-        context: childIdentities.map((identity) => ({
-          identity,
-          baselineIdentity: null,
-          deleted: false,
-        })),
+        context: [...children],
         origin: [],
         reason:
           `review the own text of ${scopeIdentity} against its child ` +
           `subtrees — split from its subtree review (SPEC 10.7)`,
-        blockedBy: childIdentities.map((identity) => ({
+        blockedBy: children.map((child) => ({
           kind: "subtree-coherence" as const,
-          scope: identity,
+          scope: child.identity,
         })),
       }),
     };

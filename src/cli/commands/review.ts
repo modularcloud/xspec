@@ -326,8 +326,6 @@ async function runCreate(
   const expanded = expandDecompositions(
     generation.items,
     [],
-    analysis.graph,
-    analysis.journal.journal,
     generation.contentSource,
   );
   const derived = deriveSessionItems({

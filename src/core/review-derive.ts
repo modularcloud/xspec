@@ -10,8 +10,10 @@
 // - replays the session's recorded `split` decompositions over the
 //   generated items (SPEC 10.5: a generated item whose kind and scope node
 //   are recorded as decomposed is never added back — its decomposition
-//   applies instead, recursively), rewriting every blocker reference to a
-//   decomposed item into all items of its decomposition;
+//   applies instead, recursively, over the children the strategy's node
+//   relation gives the scope node: in a baseline session SPEC 10.5's
+//   links, deleted children included), rewriting every blocker reference
+//   to a decomposed item into all items of its decomposition;
 // - merges the expanded generation into a session's existing items under
 //   the re-derivation rules of SPEC 10.5 (`deriveSessionItems`) — the same
 //   computation serves `create` (merge into an empty session), the
@@ -72,7 +74,7 @@
 // and generator content.
 
 import { compareBytes } from "./bytes.js";
-import type { RequirementNode, WorkspaceGraph } from "./graph.js";
+import type { WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
 import type { Journal } from "./journal.js";
 import { canonicalAt, encodeCanonicalIdentity } from "./journal.js";
@@ -93,6 +95,7 @@ import {
   canonicalKeyOfCurrent,
   computeRecordedState,
   resolveReference,
+  resolveReferenceAt,
   spellingOfReference,
 } from "./review-state.js";
 import type { WorkspaceTextModel } from "./text-model.js";
@@ -138,15 +141,16 @@ export interface GeneratedBlockerRef {
   /**
    * The reference's scope node as the emitting generator knows it — set by
    * generator-space emitters that build the reference from a change record
-   * (path-blocks' `parent-consistency` blockers), so the reference
-   * canonicalizes exactly as its target item's scope does: from the
-   * record's sidedness (`GeneratedNode.deleted`), never from graph
-   * occupancy of the `scope` spelling. A reference naming a current-graph
-   * node (audit's child blockers, the decomposition content sources' child
-   * references) may omit it and canonicalizes as a current spelling.
-   * Canonicalized output references never carry it —
-   * `canonicalizeGeneration` emits `{kind, scope}` only, `scope` a
-   * canonical reference.
+   * (path-blocks' `parent-consistency` blockers, and its decomposition
+   * content source's child references, a deleted child among them), so
+   * the reference canonicalizes exactly as its target item's scope does:
+   * from the record's sidedness (`GeneratedNode.deleted`), never from
+   * graph occupancy of the `scope` spelling. A reference naming a
+   * current-graph node (audit's child blockers, the audit and coverage
+   * decomposition content sources' child references) may omit it and
+   * canonicalizes as a current spelling. Canonicalized output references
+   * never carry it — `canonicalizeGeneration` emits `{kind, scope}` only,
+   * `scope` a canonical reference.
    */
   readonly scopeNode?: GeneratedNode;
 }
@@ -179,6 +183,27 @@ export function currentAncestorChain(
     });
   }
   return chain.reverse();
+}
+
+/**
+ * The node's children in the current graph, in document order — the
+ * children of a scope root in the strategies without a baseline (SPEC
+ * 10.7: in a baseline session deleted ones are included, 10.5 — that
+ * strategy's content source enumerates its own links), each with no
+ * baseline identity, as `currentAncestorChain`'s nodes. Empty for an
+ * absent node and for a leaf.
+ */
+export function currentChildren(
+  graph: WorkspaceGraph,
+  identity: string,
+): GeneratedNode[] {
+  const node = graph.requirementNode(identity);
+  if (node === undefined) return [];
+  return graph.childrenOf(node).map((child) => ({
+    identity: child.identity,
+    baselineIdentity: null,
+    deleted: false,
+  }));
 }
 
 /** One strategy-generated review item: the SPEC 10.2 content plus the
@@ -233,39 +258,78 @@ export interface GeneratedItem {
  * `origin` is, as in 10.5, the `changed` nodes in its scope — for a
  * `parent-consistency` item, in its scope node's subtree — and is empty in
  * an `audit` session"). The replay at re-derivation and `split` draw on the
- * same source, so both assign the same content.
+ * same source, so both assign the same content — over the same children:
+ * which nodes a scope root's children are is the strategy's node relation
+ * too (SPEC 10.7: "whose scope root has children (in a baseline session,
+ * deleted ones included, 10.5)"), so the source enumerates them
+ * (`scopeChildren`), and `split`'s childless refusal, its decomposition,
+ * and the re-derivation's replay all take them from it.
+ *
+ * Every scope argument names a stored node. In canonical space (the
+ * wrapper `canonicalizeGeneration` builds, which the replay and `split`
+ * consume) it is a stored canonical reference and the optional resolution
+ * arguments are omitted; the wrapper resolves the reference and hands the
+ * strategy's spelling-space source its derived current spelling plus:
+ * `scopeResolves`, whether the reference canonically resolves through the
+ * full journal (SPEC 10.4) — false exactly when the spelling was
+ * recaptured for a distinct chain — and, in a baseline session,
+ * `scopeBaselineIdentity`, the identity the referenced node bore at the
+ * recorded baseline when the reference resolves as of the baseline
+ * journal prefix (review-state.ts `resolveReferenceAt`; SPEC 6.3), null
+ * when it does not (a node that entered the workspace since). A
+ * stored-spelling record lookup thus consults exactly the side the
+ * reference names — a present node by its current spelling only while the
+ * reference resolves, a deleted node by its baseline identity — never
+ * current-first across both by spelling alone (a dangling stored scope
+ * must never alias the node that recaptured its spelling, and a deleted
+ * node's resolving reference names no present node). A strategy without
+ * per-side records (audit, coverage) may ignore `scopeBaselineIdentity`.
  */
 export interface DecompositionContentSource {
   /**
+   * The scope root's children under the strategy's node relation
+   * (SPEC 10.7), in a deterministic order: a node per child, carrying its
+   * sidedness (`GeneratedNode.deleted`) and baseline identity, so each
+   * canonicalizes as the generator knows it. In a baseline session they
+   * follow SPEC 10.5's links — the root's present children and the
+   * deleted nodes whose baseline parent it is, so a deleted root's
+   * children are the deleted nodes linked beneath it; in a session
+   * without a baseline, the root's current children. Empty for a root
+   * without any — `split`'s childless refusal (SPEC 10.7). Spelling-space
+   * nodes from the strategy's source, canonical references from the
+   * wrapper.
+   */
+  scopeChildren(
+    scopeIdentity: string,
+    scopeResolves?: boolean,
+    scopeBaselineIdentity?: string | null,
+  ): readonly GeneratedNode[];
+  /**
    * The `subtree-coherence` item for a child subtree rooted at
-   * `scopeIdentity` (a stored identity). `scopeResolves` is the
-   * resolution sidedness `canonicalizeGeneration`'s wrapper passes the
-   * strategy's spelling-space source: whether the requested scope
-   * reference canonically resolves through the journal (SPEC 10.4) —
-   * false exactly when the spelling was recaptured for a distinct chain —
-   * so a stored-spelling record lookup consults the side the reference
-   * actually names, never current-first across both (a dangling stored
-   * scope must never alias the recapturing node). Canonical-space
-   * consumers (the decomposition replay, `split`) omit it; a strategy
-   * without per-side records (audit, coverage) may ignore it.
+   * `scopeIdentity` (SPEC 10.7: its context the child's ancestor chain,
+   * as in 10.5 and 10.6). The resolution arguments as in the interface
+   * doc.
    */
   subtreeCoherenceItem(
     scopeIdentity: string,
     scopeResolves?: boolean,
+    scopeBaselineIdentity?: string | null,
   ): GeneratedItem;
   /**
    * The decomposed scope root's `parent-consistency` item (SPEC 10.7):
-   * scope `scopeIdentity`, context the child subtrees (`childIdentities`,
-   * the scope root's current child nodes in document order — enumerated
-   * from the current graph, so they carry no resolution flag). `blockedBy`
-   * MUST reference the child items — the replay rewrites references into
-   * decomposed children recursively. `scopeResolves` as on
-   * `subtreeCoherenceItem`.
+   * scope `scopeIdentity`, context the child subtrees — `children`,
+   * exactly the nodes `scopeChildren` gave for the same scope (the wrapper
+   * hands the strategy's source each one's spelling, sidedness, and
+   * baseline identity). `blockedBy` MUST reference the child items, each
+   * reference canonicalizing as its child's item's scope does — the
+   * replay rewrites references into decomposed children recursively. The
+   * resolution arguments as in the interface doc.
    */
   splitParentConsistencyItem(
     scopeIdentity: string,
-    childIdentities: readonly string[],
+    children: readonly GeneratedNode[],
     scopeResolves?: boolean,
+    scopeBaselineIdentity?: string | null,
   ): GeneratedItem;
 }
 
@@ -352,13 +416,15 @@ export function canonicalizeGeneration(
   // A blocker reference canonicalizes exactly as its target item's scope
   // does — from the emitting record's sidedness, carried on
   // `GeneratedBlockerRef.scopeNode` by the generator-space emitters that
-  // build references from change records — never by resolving the scope
-  // spelling through graph occupancy: a spelling vacated by a manual
-  // deletion and recaptured by a journaled entry is ambiguous, sidedness
-  // is not (module header). A reference without `scopeNode` names a
-  // current-graph node (audit's child blockers, the decomposition content
-  // sources' child references — decomposition is per *current* child
-  // subtree, SPEC 10.5, 10.7) and canonicalizes as a current spelling.
+  // build references from change records (path-blocks' `parent-consistency`
+  // blockers and its decomposition child references, a deleted child's
+  // included) — never by resolving the scope spelling through graph
+  // occupancy: a spelling vacated by a manual deletion and recaptured by a
+  // journaled entry is ambiguous, sidedness is not (module header). A
+  // reference without `scopeNode` names a current-graph node (audit's
+  // child blockers, the audit and coverage decomposition content sources'
+  // child references — their children are current ones, SPEC 10.6, 10.7)
+  // and canonicalizes as a current spelling.
   // Because every reference is built from the same record — or the same
   // current-graph node — as its target item's scope, reference and scope
   // canonicalize identically by construction, so every blocker reference
@@ -389,22 +455,52 @@ export function canonicalizeGeneration(
 
   const items = run.items.map(canonicalizeItem);
 
-  // The decomposition content source in reference space. An input scope
-  // reference is resolved (`resolveReference`), and the strategy's
-  // spelling-space builder receives both the derived spelling and whether
-  // the reference canonically resolves (SPEC 10.4), so its stored-spelling
-  // record lookups are resolution-sided — a dangling reference, whose
-  // spelling may be borne by the distinct node that recaptured it, never
-  // aliases that node (module header). Child identities are enumerated
-  // from the current graph (`expandDecompositions`) and decode to
-  // spellings alone. The wrapper is authoritative for the produced item's
-  // canonical scope: it carries exactly the requested reference — never a
-  // decode-then-recanonicalize round trip, which could land on a
-  // recapturing chain — because `expandDecompositions` memoizes and
-  // matches by that reference, which the wrapper already knows.
+  // The decomposition content source in reference space
+  // (DecompositionContentSource doc). An input scope reference is resolved
+  // on each side — through the full journal (`resolveReference`) and, in a
+  // baseline session, as of the baseline journal prefix
+  // (`resolveReferenceAt`) — and the strategy's spelling-space builder
+  // receives the derived spelling, whether the reference canonically
+  // resolves (SPEC 10.4), and the identity the referenced node bore at the
+  // recorded baseline, so its stored-spelling record lookups are
+  // resolution-sided: a dangling reference, whose spelling may be borne by
+  // the distinct node that recaptured it, never aliases that node, and a
+  // deleted node's reference reaches its baseline-side record (module
+  // header). The children the builder enumerates (`scopeChildren`)
+  // canonicalize from their sidedness, as every generated node does, and
+  // decode back to spellings — sidedness and baseline identity kept — for
+  // the `parent-consistency` item they frame. The wrapper is authoritative
+  // for the produced item's canonical scope: it carries exactly the
+  // requested reference — never a decode-then-recanonicalize round trip,
+  // which could land on a recapturing chain — because
+  // `expandDecompositions` memoizes and matches by that reference, which
+  // the wrapper already knows.
   const inner = run.contentSource;
-  const decode = (reference: string): string =>
-    spellingOfReference(journal, reference);
+  const { baselineJournalLength } = inputs;
+  const resolveScope = (
+    reference: string,
+  ): {
+    readonly spelling: string;
+    readonly resolves: boolean;
+    readonly baselineIdentity: string | null;
+  } => {
+    const resolution = resolveReference(journal, reference);
+    let baselineIdentity: string | null = null;
+    if (baselineJournalLength !== undefined) {
+      const atBaseline = resolveReferenceAt(
+        journal,
+        baselineJournalLength,
+        reference,
+      );
+      if (atBaseline.resolves) baselineIdentity = atBaseline.spelling;
+    }
+    return { ...resolution, baselineIdentity };
+  };
+  const decodeNode = (node: GeneratedNode): GeneratedNode => ({
+    identity: spellingOfReference(journal, node.identity),
+    baselineIdentity: node.baselineIdentity,
+    deleted: node.deleted,
+  });
   const withScopeReference = (
     item: GeneratedItem,
     reference: string,
@@ -413,26 +509,34 @@ export function canonicalizeGeneration(
     scope: { ...item.scope, identity: reference },
   });
   const contentSource: DecompositionContentSource = {
+    scopeChildren: (scopeReference): readonly GeneratedNode[] => {
+      const scope = resolveScope(scopeReference);
+      return inner
+        .scopeChildren(scope.spelling, scope.resolves, scope.baselineIdentity)
+        .map(canonicalNode);
+    },
     subtreeCoherenceItem: (scopeReference): GeneratedItem => {
-      const resolution = resolveReference(journal, scopeReference);
+      const scope = resolveScope(scopeReference);
       return withScopeReference(
         canonicalizeItem(
-          inner.subtreeCoherenceItem(resolution.spelling, resolution.resolves),
+          inner.subtreeCoherenceItem(
+            scope.spelling,
+            scope.resolves,
+            scope.baselineIdentity,
+          ),
         ),
         scopeReference,
       );
     },
-    splitParentConsistencyItem: (
-      scopeReference,
-      childReferences,
-    ): GeneratedItem => {
-      const resolution = resolveReference(journal, scopeReference);
+    splitParentConsistencyItem: (scopeReference, children): GeneratedItem => {
+      const scope = resolveScope(scopeReference);
       return withScopeReference(
         canonicalizeItem(
           inner.splitParentConsistencyItem(
-            resolution.spelling,
-            childReferences.map(decode),
-            resolution.resolves,
+            scope.spelling,
+            children.map(decodeNode),
+            scope.resolves,
+            scope.baselineIdentity,
           ),
         ),
         scopeReference,
@@ -488,27 +592,29 @@ function kindScopeKey(kind: ItemKind, scope: string): string {
  * Replay the session's recorded decompositions over a generation
  * (SPEC 10.5): a generated item whose kind and scope node are recorded as
  * decomposed by `split` (SPEC 10.7) is never added back — it is replaced
- * by one `subtree-coherence` item per current child subtree of the scope
- * node plus the scope node's `parent-consistency` item, recursively (a
- * replacement child item that is itself decomposed is replaced in turn).
- * Every blocker reference to a decomposed item is replaced by references
- * to all items of its decomposition (rule 5), and a kind and scope node
- * produced more than once yields a single item (rule 1's dedup, applied
- * here so the expansion output is the one-item-per-kind-and-scope set the
- * merge consumes; SPEC 10.1).
+ * by one `subtree-coherence` item per child subtree the scope node has at
+ * the re-derivation plus the scope node's `parent-consistency` item,
+ * recursively (a replacement child item that is itself decomposed is
+ * replaced in turn). The children are the strategy's
+ * (`DecompositionContentSource.scopeChildren`): in a baseline session
+ * over SPEC 10.5's links, deleted children included ("ancestors,
+ * descendants, children, and subtrees — in decompositions (10.7) too —
+ * follow these links"), else the current ones. Every blocker reference to
+ * a decomposed item is replaced by references to all items of its
+ * decomposition (rule 5), and a kind and scope node produced more than
+ * once yields a single item (rule 1's dedup, applied here so the
+ * expansion output is the one-item-per-kind-and-scope set the merge
+ * consumes; SPEC 10.1).
  *
  * `decomposedScopes` holds the recorded decompositions' scope references
  * (all recorded decompositions are `subtree-coherence`, SPEC 10.7), as
  * stored canonical references; `generated` and `source` are
- * canonical-space (`canonicalizeGeneration`). A decomposed scope resolves
- * to a current graph node for child enumeration through its derived
- * spelling (`journal`).
+ * canonical-space (`canonicalizeGeneration`), so the source resolves each
+ * scope reference on both sides itself.
  */
 export function expandDecompositions(
   generated: readonly GeneratedItem[],
   decomposedScopes: readonly string[],
-  graph: WorkspaceGraph,
-  journal: Journal,
   source: DecompositionContentSource,
 ): GeneratedItem[] {
   const decomposed = new Set(decomposedScopes);
@@ -535,26 +641,19 @@ export function expandDecompositions(
     }
     expanding.add(scopeIdentity);
     try {
-      // SPEC 10.5: one subtree-coherence item per *current* child subtree
-      // of the scope node — an absent scope node (10.4: deleted, or its
-      // identity ceased to resolve through the journal) has no current
-      // children, so a dangling stored scope never enumerates the distinct
-      // node that recaptured its spelling. A canonically resolving scope
-      // reaches its graph node through its derived spelling; the children,
-      // current-graph nodes, canonicalize against the full journal (module
-      // header).
-      const resolution = resolveReference(journal, scopeIdentity);
-      const scopeNode = resolution.resolves
-        ? graph.requirementNode(resolution.spelling)
-        : undefined;
-      const children: RequirementNode[] =
-        scopeNode === undefined ? [] : graph.childrenOf(scopeNode);
-      const childReferences = children.map((child) =>
-        canonicalKeyOfCurrent(journal, child.identity),
-      );
+      // SPEC 10.5: one subtree-coherence item per child subtree the scope
+      // node has at the re-derivation — the strategy's children
+      // (`scopeChildren`): in a baseline session over the links of 10.5,
+      // a deleted child under its baseline parent, each child's reference
+      // canonicalized from its sidedness (module header); otherwise the
+      // current children, of which an absent scope node (10.4: deleted, or
+      // its identity ceased to resolve through the journal) has none, so a
+      // dangling stored scope never enumerates the distinct node that
+      // recaptured its spelling.
+      const children = source.scopeChildren(scopeIdentity);
       const items: GeneratedItem[] = [];
-      for (const childReference of childReferences) {
-        const childItem = source.subtreeCoherenceItem(childReference);
+      for (const child of children) {
+        const childItem = source.subtreeCoherenceItem(child.identity);
         if (isDecomposed(childItem.kind, childItem.scope.identity)) {
           // SPEC 10.5: the decomposition applies recursively.
           items.push(...expandScope(childItem.scope.identity));
@@ -562,9 +661,7 @@ export function expandDecompositions(
           items.push(childItem);
         }
       }
-      items.push(
-        source.splitParentConsistencyItem(scopeIdentity, childReferences),
-      );
+      items.push(source.splitParentConsistencyItem(scopeIdentity, children));
       expansionMemo.set(scopeIdentity, items);
       return items;
     } finally {
@@ -1292,8 +1389,6 @@ export function rederiveSession(args: RederiveSessionArgs): ReviewSession {
   const expanded = expandDecompositions(
     generated,
     session.decompositions.map((decomposition) => decomposition.scope),
-    current.graph,
-    current.journal,
     contentSource,
   );
   const derived = deriveSessionItems({
@@ -1358,9 +1453,11 @@ export type SplitDecompositionResult =
 
 /**
  * SPEC 10.7 `split`: decompose a `subtree-coherence` item whose scope root
- * has children into one `subtree-coherence` item per current child subtree
- * plus one `parent-consistency` item for the scope root's own text — the
- * strategy's decomposition content fixes each item's scope, context,
+ * has children — the strategy's (`DecompositionContentSource.scopeChildren`:
+ * in a baseline session, deleted ones included, SPEC 10.5) — into one
+ * `subtree-coherence` item per child subtree plus one `parent-consistency`
+ * item for the scope root's own text — the strategy's decomposition
+ * content fixes each item's scope, context,
  * origin, reason, and `blockedBy` ("its context the child's ancestor
  * chain, as in 10.5 and 10.6"; a per-child item's `blockedBy` "the one its
  * session's strategy gives a `subtree-coherence` item", the
@@ -1404,28 +1501,31 @@ export function splitItemDecomposition(
         `children (SPEC 10.7)`,
     };
   }
-  // SPEC 10.7: a childless scope root is refused. The decomposition is per
-  // *current* child subtree (SPEC 10.5), so an absent scope root — deleted,
-  // or its identity ceased to resolve through the journal (SPEC 10.4) —
-  // has no current children and is childless here: a dangling scope never
-  // splits over the children of the distinct node that recaptured its
-  // spelling. A canonically resolving scope reaches its graph node through
-  // its derived spelling, which is also how the refusal names it
-  // (SPEC 10.4: nodes surface under current identities).
-  const scopeResolution = resolveReference(current.journal, original.scope);
-  const scopeSpelling = scopeResolution.spelling;
-  const scopeNode = scopeResolution.resolves
-    ? current.graph.requirementNode(scopeSpelling)
-    : undefined;
-  const children =
-    scopeNode === undefined ? [] : current.graph.childrenOf(scopeNode);
-  if (children.length === 0) {
+  // SPEC 10.7: a scope root without children is refused. Its children are
+  // the strategy's — the ones the decomposition below and the replay at
+  // every re-derivation take (`scopeChildren`) — judged, as every outcome
+  // turning on the graph is, "against the current workspace and, in a
+  // baseline session, the recorded baseline" (SPEC 10.7): in a baseline
+  // session over the links of 10.5, so a root whose only children were
+  // deleted since the baseline — or a deleted root with deleted children
+  // of its own — has children; in an `audit` session the current ones
+  // alone, of which an absent root (SPEC 10.4: deleted, or its identity
+  // ceased to resolve through the journal) has none, so a dangling scope
+  // never splits over the children of the distinct node that recaptured
+  // its spelling. The refusal names the root under its derived current
+  // spelling (SPEC 10.4: nodes surface under current identities).
+  if (contentSource.scopeChildren(original.scope).length === 0) {
+    const scopeSpelling = resolveReference(
+      current.journal,
+      original.scope,
+    ).spelling;
     return {
       ok: false,
       refusal:
         `the scope root ${scopeSpelling} of item '${original.id}' has no ` +
-        `children in the current graph — \`split\` on a subtree-coherence ` +
-        `item whose scope root has no children is refused (SPEC 10.7)`,
+        `children (in a baseline session, deleted ones included, SPEC ` +
+        `10.5) — \`split\` on a subtree-coherence item whose scope root has ` +
+        `no children is refused (SPEC 10.7)`,
     };
   }
 
@@ -1440,8 +1540,6 @@ export function splitItemDecomposition(
   const expansion = expandDecompositions(
     [contentSource.subtreeCoherenceItem(original.scope)],
     decomposedScopes,
-    current.graph,
-    current.journal,
     contentSource,
   );
 

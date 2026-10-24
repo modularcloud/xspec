@@ -37,8 +37,9 @@ import type { RecordedProfile } from "./review.js";
 import type {
   DecompositionContentSource,
   GeneratedItem,
+  GeneratedNode,
 } from "./review-derive.js";
-import { currentAncestorChain } from "./review-derive.js";
+import { currentAncestorChain, currentChildren } from "./review-derive.js";
 
 /** The output of one coverage-session generator run (SPEC 10.7). */
 export interface CoverageSessionGeneration {
@@ -141,6 +142,11 @@ function coverageContentSource(
   graph: WorkspaceGraph,
 ): DecompositionContentSource {
   return {
+    // SPEC 10.7: a session without a baseline has its scope roots' current
+    // children alone; a stored scope that no longer canonically resolves
+    // (SPEC 10.4) has none.
+    scopeChildren: (scopeIdentity, scopeResolves = true): GeneratedNode[] =>
+      scopeResolves ? currentChildren(graph, scopeIdentity) : [],
     subtreeCoherenceItem: (scopeIdentity): GeneratedItem => ({
       kind: "subtree-coherence",
       scope: {
@@ -155,28 +161,21 @@ function coverageContentSource(
         `split from its parent's review (SPEC 10.7, 10.5)`,
       blockedBy: [],
     }),
-    splitParentConsistencyItem: (
-      scopeIdentity,
-      childIdentities,
-    ): GeneratedItem => ({
+    splitParentConsistencyItem: (scopeIdentity, children): GeneratedItem => ({
       kind: "parent-consistency",
       scope: {
         identity: scopeIdentity,
         baselineIdentity: null,
         deleted: false,
       },
-      context: childIdentities.map((identity) => ({
-        identity,
-        baselineIdentity: null,
-        deleted: false,
-      })),
+      context: [...children],
       origin: [],
       reason:
         `review the own text of ${scopeIdentity} against its child ` +
         `subtrees — split from its subtree review (SPEC 10.7)`,
-      blockedBy: childIdentities.map((identity) => ({
+      blockedBy: children.map((child) => ({
         kind: "subtree-coherence" as const,
-        scope: identity,
+        scope: child.identity,
       })),
     }),
   };

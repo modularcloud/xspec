@@ -395,8 +395,10 @@ export function recordCoverageProfile(
  * SPEC 10.7: one recorded `split` decomposition — the original item's kind
  * and scope node; the replacement (per-child `subtree-coherence` items plus
  * the scope node's `parent-consistency` item) is computed against the
- * current workspace on every re-derivation (10.5), so only the decomposed
- * (kind, scope) is durable.
+ * current workspace — and, in a baseline session, the recorded baseline,
+ * whose deleted nodes are children of their baseline parents (10.5) — on
+ * every re-derivation (10.5), so only the decomposed (kind, scope) is
+ * durable.
  */
 export interface RecordedDecomposition {
   readonly kind: "subtree-coherence";

@@ -11,15 +11,17 @@
 // through the journal (6.3), and a present node the child of its current
 // parent. One link relation (`linkParentOf`, and its inverse
 // `linkChildren`) carries every relation and node set below — ancestors
-// (visiting, ancestor-chain contexts, the branches of rule 2), descendants
-// and subtrees (scope sets, origins), in decompositions (10.7) too — as node
-// relations and node sets alone: text values and hashes keep their
-// definitions (1.6, 5.5), each computed over its own graph's structure
-// (./changes.ts, ./hashes.ts, ./text-model.ts), never over the links. A
-// present node's link parent is present, so a present node's link subtree
-// holds exactly its current descendants plus the deleted nodes linked
-// beneath them; a node moved out of a subtree by a journaled move leaves
-// it, and one moved in joins it.
+// (visiting, ancestor-chain contexts, the branches of rule 2), children (a
+// split or replayed decomposition's per-child items and the scope root's
+// `parent-consistency` context, so a root whose children were deleted
+// still has them, SPEC 10.7), descendants and subtrees (scope sets,
+// origins), in decompositions (10.7) too — as node relations and node sets
+// alone: text values and hashes keep their definitions (1.6, 5.5), each
+// computed over its own graph's structure (./changes.ts, ./hashes.ts,
+// ./text-model.ts), never over the links. A present node's link parent is
+// present, so a present node's link subtree holds exactly its current
+// descendants plus the deleted nodes linked beneath them; a node moved out
+// of a subtree by a journaled move leaves it, and one moved in joins it.
 //
 // For each `changed` node N, skipping nodes that have a `changed` ancestor
 // (SPEC 10.5):
@@ -139,8 +141,6 @@ class PathBlocksComputation {
   private readonly replay: Journal;
   /** Deterministic record order (the analysis' node order, SPEC 12.0). */
   private readonly ordinals = new Map<NodeChange, number>();
-  /** Deleted records by stored (forward-mapped) identity. */
-  private readonly deletedByStored = new Map<string, NodeChange>();
   /** Stored identity per record, memoized. */
   private readonly storedIdentities = new Map<NodeChange, string>();
   /**
@@ -164,9 +164,6 @@ class PathBlocksComputation {
     );
     this.analysis.nodes.forEach((record, index) => {
       this.ordinals.set(record, index);
-      if (record.currentIdentity === null && record.baselineIdentity !== null) {
-        this.deletedByStored.set(this.storedIdentity(record), record);
-      }
     });
     // SPEC 10.5: the link relation, built once over every record. It is a
     // forest: a present node's link parent is present (the current graph
@@ -753,36 +750,48 @@ class PathBlocksComputation {
   // -------------------------------------------------------------------------
 
   /**
-   * The record bearing a stored identity, resolution-sided (SPEC 10.4,
-   * 5.4): a canonically resolving reference names the chain currently
-   * bearing the spelling, so only a present node's record
-   * (`byCurrentIdentity`) can be it; a non-resolving reference names a
-   * chain whose spelling was recaptured by a journaled entry, so only a
-   * deleted node's record whose forward-mapped identity matches
-   * (`deletedByStored`) can be it. Never current-first across both — that
-   * would alias a dangling stored scope to the distinct node that
-   * recaptured its spelling.
+   * The record a stored node names, resolution-sided (SPEC 10.4, 5.4; the
+   * resolution arguments of review-derive.ts's DecompositionContentSource
+   * doc): while the reference canonically resolves it names the chain
+   * currently bearing its spelling, so a present node's record there
+   * (`byCurrentIdentity`) is it; otherwise — the reference resolving to no
+   * present node, or its spelling recaptured by a journaled entry for a
+   * distinct chain — it can name only a node deleted since the baseline,
+   * found by the identity it bore at the recorded baseline
+   * (`byBaselineIdentity`, the records matching the two sides by canonical
+   * identity, ./changes.ts). Never by spelling alone across both sides: a
+   * dangling stored scope must not alias the node that recaptured its
+   * spelling, and two deleted chains can come to share a forward-mapped
+   * spelling (a spelling a later chain recaptured before its own
+   * deletion), while their baseline identities stay distinct. Undefined
+   * for a stored node with no record (one that entered and left the
+   * workspace between the baseline and now).
    */
   private recordOfStored(
     identity: string,
     resolves: boolean,
+    baselineIdentity: string | null,
   ): NodeChange | undefined {
-    return resolves
-      ? this.analysis.byCurrentIdentity.get(identity)
-      : this.deletedByStored.get(identity);
+    if (resolves) {
+      const present = this.analysis.byCurrentIdentity.get(identity);
+      if (present !== undefined) return present;
+    }
+    if (baselineIdentity === null) return undefined;
+    const record = this.analysis.byBaselineIdentity.get(baselineIdentity);
+    return record !== undefined && record.currentIdentity === null
+      ? record
+      : undefined;
   }
 
   /** The stored identity as a `GeneratedNode`, via its resolution-sided
-   * record. Without a record the node stays non-deleted: for a resolving
-   * identity no baseline-side record exists for it, and for a
-   * non-resolving one the canonicalization wrapper's scope override
+   * record. Without a record the node stays non-deleted: no record of
+   * either side is it, and the canonicalization wrapper's scope override
    * governs the stored reference regardless (review-derive.ts
    * `canonicalizeGeneration`). */
   private generatedNodeOfStored(
     identity: string,
-    resolves: boolean,
+    record: NodeChange | undefined,
   ): GeneratedNode {
-    const record = this.recordOfStored(identity, resolves);
     if (record !== undefined) return this.nodeOf(record);
     return { identity, baselineIdentity: null, deleted: false };
   }
@@ -806,19 +815,49 @@ class PathBlocksComputation {
 
   private contentSource(): DecompositionContentSource {
     return {
+      // SPEC 10.7: the scope root's children — "in a baseline session,
+      // deleted ones included, 10.5": its link children (`linkChildren`),
+      // its present children in the current graph's document order, then
+      // the deleted nodes whose baseline parent it is, each under its
+      // mapped baseline identity with its sidedness, so a deleted child
+      // canonicalizes from its baseline identity (review-derive.ts module
+      // header). A deleted root has the deleted nodes linked beneath it; a
+      // stored identity without a record has none. The resolution
+      // arguments (DecompositionContentSource doc) default to a present
+      // node's: an unflagged call names a current-graph node.
+      scopeChildren: (
+        scopeIdentity,
+        scopeResolves = true,
+        scopeBaselineIdentity = null,
+      ): readonly GeneratedNode[] => {
+        const record = this.recordOfStored(
+          scopeIdentity,
+          scopeResolves,
+          scopeBaselineIdentity,
+        );
+        if (record === undefined) return [];
+        return (this.linkChildren.get(record) ?? []).map((child) =>
+          this.nodeOf(child),
+        );
+      },
       // SPEC 10.7: one subtree-coherence item per child subtree — its
       // scope the child and its link descendants (SPEC 10.5, in
       // decompositions too), its context the child's ancestor chain over
-      // the links, as in 10.5; its origin the `changed` nodes in its scope
+      // the links, as in 10.5 (a deleted child's through its baseline
+      // parent); its origin the `changed` nodes in its scope
       // (`decompositionOrigin`). A stored identity without a record scopes
-      // itself alone. `scopeResolves` (DecompositionContentSource doc)
-      // defaults to true: an unflagged call names a current-graph node.
+      // itself alone.
       subtreeCoherenceItem: (
         scopeIdentity,
         scopeResolves = true,
+        scopeBaselineIdentity = null,
       ): GeneratedItem => {
-        const record = this.recordOfStored(scopeIdentity, scopeResolves);
-        const scope = this.generatedNodeOfStored(scopeIdentity, scopeResolves);
+        const record = this.recordOfStored(
+          scopeIdentity,
+          scopeResolves,
+          scopeBaselineIdentity,
+        );
+        const scope = this.generatedNodeOfStored(scopeIdentity, record);
         const chain = record === undefined ? [] : this.ancestorChain(record);
         const descendants =
           record === undefined
@@ -837,31 +876,36 @@ class PathBlocksComputation {
         };
       },
       // SPEC 10.7: the scope root's parent-consistency item — for its own
-      // text, context the child subtrees, blocked by the child items; its
-      // origin the `changed` nodes in its scope node's subtree, the scope
-      // node included when `changed` (`decompositionOrigin`).
+      // text, context the child subtrees (`scopeChildren`'s nodes, deleted
+      // children included), blocked by the child items, each reference
+      // carrying its child's node so it canonicalizes as that child item's
+      // scope does (GeneratedBlockerRef doc); its origin the `changed`
+      // nodes in its scope node's subtree, the scope node included when
+      // `changed` (`decompositionOrigin`).
       splitParentConsistencyItem: (
         scopeIdentity,
-        childIdentities,
+        children,
         scopeResolves = true,
+        scopeBaselineIdentity = null,
       ): GeneratedItem => {
-        const record = this.recordOfStored(scopeIdentity, scopeResolves);
-        const scope = this.generatedNodeOfStored(scopeIdentity, scopeResolves);
+        const record = this.recordOfStored(
+          scopeIdentity,
+          scopeResolves,
+          scopeBaselineIdentity,
+        );
+        const scope = this.generatedNodeOfStored(scopeIdentity, record);
         return {
           kind: "parent-consistency",
           scope,
-          // Child identities are enumerated from the current graph
-          // (DecompositionContentSource doc): current-side lookups.
-          context: childIdentities.map((identity) =>
-            this.generatedNodeOfStored(identity, true),
-          ),
+          context: [...children],
           origin: this.decompositionOrigin(record),
           reason:
             `review the own text of ${scope.identity} against its child ` +
             `subtrees — split from its subtree review (SPEC 10.7)`,
-          blockedBy: childIdentities.map((identity) => ({
+          blockedBy: children.map((child) => ({
             kind: "subtree-coherence",
-            scope: identity,
+            scope: child.identity,
+            scopeNode: child,
           })),
         };
       },

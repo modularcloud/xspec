@@ -312,8 +312,6 @@ export function buildSessionReadView(
   const expanded = expandDecompositions(
     generation.items,
     session.decompositions.map((decomposition) => decomposition.scope),
-    analysis.graph,
-    journal,
     generation.contentSource,
   );
   const stateInputs = generationStateInputs(analysis, generation);
