@@ -29,13 +29,20 @@
 // binding records no edge and falls under no condition (SPEC 4.5); its
 // value-level misuse is the consumer's TypeScript error, outside xspec's
 // validations. An identifier a spec module import binds that another
-// import of the same scope, or a value-level declaration of the module
-// scope, also binds roots no resolving chain (SPEC 2.4, 4.5), whether or
-// not either import is type-only: beside the collision's 14.15, its
-// chains report as unresolved (14.7) and a call through it as `text` is
-// a plain call. Imports binding one identifier in different scopes of the
-// file collide all the same (14.15), each scope's own binding rooting its
+// import of the same scope, or a value-level declaration of that scope,
+// also binds roots no resolving chain (SPEC 2.4, 4.5), whether or not
+// either import is type-only: beside the collision's 14.15, its chains
+// report as unresolved (14.7) and a call through it as `text` is a plain
+// call. Imports binding one identifier in different scopes of the file
+// collide all the same (14.15), each scope's own binding rooting its
 // chains there.
+//
+// An import declaration is a spec module import by its specifier alone
+// (SPEC 4), wherever it stands: TypeScript parses one in any statement
+// list — a namespace or module body, a function body, a block — and
+// reports its placement only in post-parse checks, which 14.20 excludes.
+// A nested one is validated as a top-level one is, and its bindings root
+// chains within the scope TypeScript's binder gives them (4.5).
 
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
@@ -122,6 +129,16 @@ export interface CodeImportBinding {
 export interface CodeImport {
   /** The declaration's own characters (finding locations, SPEC 6.5). */
   readonly range: ByteRange;
+  /**
+   * Whether the declaration is one of the file's top-level statements.
+   * SPEC 4 makes an import declaration a spec module import by its
+   * specifier alone, wherever it stands: TypeScript parses one in any
+   * statement list — a namespace or module body, a function body, a
+   * block — leaving its placement to post-parse checks outside 14.20. A
+   * nested one binds in the scope TypeScript gives it, while 6.5 places
+   * an added import among the top-level statements alone.
+   */
+  readonly topLevel: boolean;
   /** The declaration's exact text (SPEC 6.5 rewrites). */
   readonly text: string;
   /**
@@ -240,7 +257,8 @@ export interface CodeReference {
    * `text`, and `{ default as X }` bindings alike, as the language reads
    * them) that a local declaration shadows at the occurrence (SPEC 4.5):
    * each one TypeScript scoping, resolving it at value level at the
-   * chain's root, resolves to something other than that import binding.
+   * chain's root, resolves to something other than that import binding —
+   * a nested import's binding outside the scope it binds in included.
    * A `text(...)` call's callee stands in the root's scope — no scope
    * lies between a call's callee and its argument — so the set holds for
    * both. SPEC 6.5 "Reference spellings": a re-rooted spelling uses a
@@ -290,7 +308,10 @@ export interface CodeAnalysis {
   readonly text: string;
   /** Every named code unit in document order (SPEC 4.6). */
   readonly units: readonly CodeUnit[];
-  /** Every spec module import declaration, in document order (SPEC 4). */
+  /**
+   * Every spec module import declaration, in document order (SPEC 4) —
+   * the nested ones (`CodeImport.topLevel` false) included.
+   */
   readonly imports: readonly CodeImport[];
   /** Every extracted reference, in document order (SPEC 4.3, 4.5). */
   readonly references: readonly CodeReference[];
@@ -707,8 +728,8 @@ type TextBinding = Extract<TrackedBinding, { readonly kind: "text" }>;
 
 /**
  * SPEC 2.4, 4.5: an identifier a spec module import binds that another
- * import of the same scope, or a value-level declaration of the module
- * scope, also binds — whether or not either import is type-only (4.5:
+ * import of the same scope, or a value-level declaration of that scope,
+ * also binds — whether or not either import is type-only (4.5:
  * the type-only exemption reaches a chain the language roots at one
  * binding, and a colliding identifier roots it at none). The language
  * names no single binding, so a chain rooted here names no target: in a
@@ -756,9 +777,10 @@ interface BoundName {
 }
 
 /**
- * One module-scope non-import declaration binding a name at value level
- * (SPEC 2.4): a variable, function, class, or enum declaration, or a
- * namespace declaration binding a value.
+ * One non-import declaration binding a name at value level in a scope an
+ * import binds in (SPEC 2.4; `scopeValueDeclarations`): a variable,
+ * function, class, or enum declaration, or a namespace declaration
+ * binding a value.
  */
 interface ValueDeclaration {
   readonly name: string;
@@ -1042,30 +1064,17 @@ class CodeAnalyzer {
   // -- module linking (SPEC 4 → 14.15) --------------------------------------
 
   /**
-   * Validate the file's module-linking constructs (SPEC 4 → 14.15):
-   * import declarations (spec module imports and derived-path
-   * specifiers), export declarations with module specifiers, and
-   * `import X = require(…)` declarations among the top-level statements;
-   * then, wherever they stand, those declarations nested in a statement
-   * list, static-specifier dynamic `import()` calls, import types, and
-   * string-named module declarations (`scanNestedLinkingForms`). Fills
-   * the declaration map the use analysis resolves against.
+   * Validate the file's module-linking constructs (SPEC 4 → 14.15),
+   * wherever they stand, in document order (`scanLinkingForms`): import
+   * declarations (spec module imports and derived-path specifiers),
+   * export declarations with module specifiers, `import X = require(…)`
+   * declarations, static-specifier dynamic `import()` calls, import
+   * types, and string-named module declarations. Fills the declaration
+   * map the use analysis resolves against.
    */
   private scanModuleLinks(): void {
     const bound: BoundName[] = [];
-    for (const statement of this.sourceFile.statements) {
-      if (ts.isImportDeclaration(statement)) {
-        this.scanImportDeclaration(statement, bound);
-      } else if (
-        ts.isExportDeclaration(statement) &&
-        statement.moduleSpecifier !== undefined
-      ) {
-        this.scanExportDeclaration(statement);
-      } else if (ts.isImportEqualsDeclaration(statement)) {
-        this.scanImportEquals(statement, bound);
-      }
-    }
-    this.scanNestedLinkingForms(bound);
+    this.scanLinkingForms(bound);
     // SPEC 4/2.1/2.4 → 14.15: no import may bind an identifier already
     // bound by ANOTHER import in the same file, when either import is a
     // spec module import — wherever in the file either stands — and no
@@ -1084,12 +1093,29 @@ class CodeAnalyzer {
       if (entries === undefined) byName.set(entry.name, [entry]);
       else entries.push(entry);
     }
-    const declaredByName = new Map<string, ValueDeclaration[]>();
-    for (const declared of moduleValueDeclarations(this.sourceFile)) {
-      const entries = declaredByName.get(declared.name);
-      if (entries === undefined) declaredByName.set(declared.name, [declared]);
-      else entries.push(declared);
-    }
+    // SPEC 2.4: each scope's non-import declarations binding a name at
+    // value level, by name — gathered once per scope an import binds in.
+    const declaredInScope = new Map<
+      tst.Node,
+      ReadonlyMap<string, readonly ValueDeclaration[]>
+    >();
+    const scopeDeclarations = (
+      scope: tst.Node,
+      name: string,
+    ): readonly ValueDeclaration[] => {
+      let byDeclaredName = declaredInScope.get(scope);
+      if (byDeclaredName === undefined) {
+        const gathered = new Map<string, ValueDeclaration[]>();
+        for (const declared of scopeValueDeclarations(scope, this.sourceFile)) {
+          const entries = gathered.get(declared.name);
+          if (entries === undefined) gathered.set(declared.name, [declared]);
+          else entries.push(declared);
+        }
+        byDeclaredName = gathered;
+        declaredInScope.set(scope, byDeclaredName);
+      }
+      return byDeclaredName.get(name) ?? [];
+    };
     const distinctStatements = (
       entries: readonly BoundName[],
     ): tst.Statement[] => {
@@ -1100,6 +1126,17 @@ class CodeAnalyzer {
         }
       }
       return statements;
+    };
+    const distinctConstructs = (
+      declared: readonly ValueDeclaration[],
+    ): ValueDeclaration["construct"][] => {
+      const constructs: ValueDeclaration["construct"][] = [];
+      for (const entry of declared) {
+        if (!constructs.includes(entry.construct)) {
+          constructs.push(entry.construct);
+        }
+      }
+      return constructs;
     };
     for (const [name, entries] of byName) {
       const statements = distinctStatements(entries);
@@ -1113,25 +1150,25 @@ class CodeAnalyzer {
         if (group === undefined) byScope.set(entry.scope, [entry]);
         else group.push(entry);
       }
-      // SPEC 2.4: the import's binding being value-level (4), a
-      // non-import declaration binding the identifier at value level in
-      // the same scope collides with it — the module scope's declarations
-      // for a binding of the module scope.
-      const moduleEntries = byScope.get(this.sourceFile) ?? [];
-      const declared = moduleEntries.some((entry) => entry.valueLevelSpec)
-        ? (declaredByName.get(name) ?? [])
-        : [];
-      const constructs: ValueDeclaration["construct"][] = [];
-      for (const entry of declared) {
-        if (!constructs.includes(entry.construct)) {
-          constructs.push(entry.construct);
-        }
+      // SPEC 2.4, 14.15: the import's binding being value-level (4), a
+      // non-import declaration binding the identifier at value level "of
+      // the same scope" collides with it — the declarations of the scope
+      // the binding's import binds in, module scope or nested alike.
+      const declaredByScope = new Map<tst.Node, readonly ValueDeclaration[]>();
+      for (const [scope, group] of byScope) {
+        if (!group.some((entry) => entry.valueLevelSpec)) continue;
+        const declared = scopeDeclarations(scope, name);
+        if (declared.length > 0) declaredByScope.set(scope, declared);
       }
+      const constructs = distinctConstructs(
+        [...declaredByScope.values()].flat(),
+      );
       if (!importCollision && constructs.length === 0) continue;
       // The scopes in which the collision roots no chain (SPEC 2.4, 4.5):
       // two of the scope's own imports binding the identifier, either a
-      // spec module import, or the module scope's colliding declarations.
+      // spec module import, or the scope's colliding declarations.
       const rooting: {
+        readonly scope: tst.Node;
         readonly group: readonly BoundName[];
         readonly imports: number;
         readonly declared: readonly ValueDeclaration[];
@@ -1139,18 +1176,23 @@ class CodeAnalyzer {
       }[] = [];
       for (const [scope, group] of byScope) {
         const imports = distinctStatements(group).length;
-        const groupDeclared = scope === this.sourceFile ? declared : [];
+        const groupDeclared = declaredByScope.get(scope) ?? [];
         const groupImportCollision =
           imports >= 2 && group.some((entry) => entry.spec);
         if (!groupImportCollision && groupDeclared.length === 0) continue;
         rooting.push({
+          scope,
           group,
           imports: groupImportCollision ? imports : 0,
           declared: groupDeclared,
-          constructs: groupDeclared.length === 0 ? 0 : constructs.length,
+          constructs: distinctConstructs(groupDeclared).length,
         });
       }
       const scopes = byScope.size;
+      // Where the colliding declarations stand, as messages name it.
+      const declaredScopes = declaredByScope.size;
+      const moduleScopeOnly =
+        declaredScopes === 1 && declaredByScope.has(this.sourceFile);
       const message =
         constructs.length === 0
           ? `invalid import: the identifier ${JSON.stringify(name)} is ` +
@@ -1176,9 +1218,20 @@ class CodeAnalyzer {
             (constructs.length === 1
               ? `a value-level declaration`
               : `${String(constructs.length)} value-level declarations`) +
-            ` of the same module scope — the language names no single ` +
-            `binding, so no chain rooted at it` +
-            (scopes > 1 ? ` in the module scope` : ``) +
+            (moduleScopeOnly
+              ? ` of the same module scope`
+              : declaredScopes === 1
+                ? ` of the same scope`
+                : ` of the same scopes`) +
+            ` — the language names no single binding, so no chain rooted ` +
+            `at it` +
+            (scopes > 1
+              ? moduleScopeOnly
+                ? ` in the module scope`
+                : declaredScopes === 1
+                  ? ` in that scope`
+                  : ` in those scopes`
+              : ``) +
             ` resolves; rename the import binding or the declaration ` +
             `(SPEC 2.4, 4.5, 14.15)`;
       this.findings.push(
@@ -1206,6 +1259,10 @@ class CodeAnalyzer {
           entry.spec && entry.role !== null ? [entry.role] : [],
         );
         const text = roles.includes("text");
+        const sameScope =
+          scoped.scope === this.sourceFile
+            ? `the same module scope`
+            : `the same scope`;
         const binding: CollidingBinding = {
           kind: "colliding",
           node: roles.includes("node") || !text,
@@ -1217,9 +1274,9 @@ class CodeAnalyzer {
             (scoped.constructs === 0
               ? ``
               : scoped.constructs === 1
-                ? ` and a value-level declaration of the same module scope`
+                ? ` and a value-level declaration of ${sameScope}`
                 : ` and ${String(scoped.constructs)} value-level ` +
-                  `declarations of the same module scope`),
+                  `declarations of ${sameScope}`),
         };
         // Whichever symbol TypeScript resolves a use to — the first
         // import's, a later colliding import's own, the import's merged
@@ -1274,6 +1331,9 @@ class CodeAnalyzer {
    * the permitted bindings are the default export and the named `text`
    * export, each optionally aliased, optionally type-only (14.15). Any
    * other import declaration is checked against the derived-path rule.
+   * The rules are the same wherever the declaration stands (SPEC 4), a
+   * nested one's bindings registered for the uses inside the scope
+   * TypeScript gives them (`importBindingScope`, 4.5).
    */
   private scanImportDeclaration(
     statement: tst.ImportDeclaration,
@@ -1472,6 +1532,7 @@ class CodeAnalyzer {
     const quote = this.sourceFile.text[literal.getStart(this.sourceFile)];
     this.imports.push({
       range: this.rangeOf(statement),
+      topLevel: ts.isSourceFile(statement.parent),
       text: this.sourceFile.text.slice(
         statement.getStart(this.sourceFile),
         statement.getEnd(),
@@ -1627,36 +1688,50 @@ class CodeAnalyzer {
   }
 
   /**
-   * SPEC 4 → 14.15: the module-linking forms that stand anywhere, not only
-   * among the top-level statements — a dynamic `import()` with a static
-   * string-literal specifier, an import type (`import("…")` in a type,
-   * `typeof import("…")` included), and a string-named module declaration
+   * SPEC 4 → 14.15: every module-linking form of the file, wherever it
+   * stands, in document order — an import declaration, an export
+   * declaration with a module specifier, an `import X = require(…)`
+   * declaration, a dynamic `import()` with a static string-literal
+   * specifier, an import type (`import("…")` in a type, `typeof
+   * import("…")` included), and a string-named module declaration
    * (`declare module "…" { … }`, `declare` or not, an augmentation
-   * included) — found wherever they stand: type aliases, interfaces,
-   * annotations, type arguments, module bodies. Only their specifiers are
-   * judged here, never a position as value context: 4.5's type-level
-   * exemption stands, an import type is no value use, and none of these
-   * forms records an edge or an occurrence. A JSDoc comment is a comment
-   * (4, 14.20), which `forEachChild` never enters.
+   * included). The last three stand in type aliases, interfaces,
+   * annotations, type arguments, and module bodies alike: only their
+   * specifiers are judged here, never a position as value context —
+   * 4.5's type-level exemption stands, an import type is no value use,
+   * and none of these forms records an edge or an occurrence. A JSDoc
+   * comment is a comment (4, 14.20), which `forEachChild` never enters.
    *
    * SPEC 4 restricts no module-linking form to the top level, and
    * TypeScript parses import, export, and `import X = require(…)`
    * declarations in any statement list — a namespace or module body, a
    * function body, a block — leaving their placement to post-parse checks
    * outside 14.20, so a file holding one nested there is well-formed and
-   * the form is judged as its top-level twin is: an export declaration
-   * or `import X = require(…)` with a `.xspec` specifier is a 14.15
-   * located alike (14), the require form's binding masked by it; any
-   * other relative specifier is held to the derived-path rule and
+   * the form is judged as its top-level twin is: an import declaration
+   * whose specifier ends in `.xspec` is a spec module import (4), held
+   * to 2.1's specifier form and resolution, to designating a discovered
+   * spec source, and to 4's permitted bindings, its bindings rooting
+   * chains within the scope TypeScript gives them (4.5); an export
+   * declaration or `import X = require(…)` with a `.xspec` specifier is a
+   * 14.15 located alike (14), the require form's binding masked by it;
+   * any other relative specifier is held to the derived-path rule and
    * counted among the designated paths (6.5); and the bindings join the
    * collision rules, whose import–import collision is file-wide (14.15)
-   * though a collision roots no chain beyond its scope (2.4, 4.5). A
-   * nested import declaration whose specifier ends in `.xspec` — a spec
-   * module import (4) — is not scanned here.
+   * though a collision roots no chain beyond its scope (2.4, 4.5). The
+   * traversal visits the declarations in document order, so the file's
+   * spec module imports are recorded in that order (`CodeAnalysis.imports`).
    */
-  private scanNestedLinkingForms(bound: BoundName[]): void {
+  private scanLinkingForms(bound: BoundName[]): void {
     const visit = (node: tst.Node): void => {
-      if (ts.isImportTypeNode(node)) {
+      if (ts.isImportDeclaration(node)) {
+        this.scanImportDeclaration(node, bound);
+      } else if (ts.isExportDeclaration(node)) {
+        if (node.moduleSpecifier !== undefined) {
+          this.scanExportDeclaration(node);
+        }
+      } else if (ts.isImportEqualsDeclaration(node)) {
+        this.scanImportEquals(node, bound);
+      } else if (ts.isImportTypeNode(node)) {
         this.scanImportType(node);
       } else if (
         ts.isModuleDeclaration(node) &&
@@ -1668,24 +1743,6 @@ class CodeAnalyzer {
         node.expression.kind === ts.SyntaxKind.ImportKeyword
       ) {
         this.visitImportCall(node);
-      } else if (!ts.isSourceFile(node.parent)) {
-        // A declaration nested in a statement list; the top-level ones
-        // were scanned in scanModuleLinks.
-        if (ts.isExportDeclaration(node)) {
-          if (node.moduleSpecifier !== undefined) {
-            this.scanExportDeclaration(node);
-          }
-        } else if (ts.isImportEqualsDeclaration(node)) {
-          this.scanImportEquals(node, bound);
-        } else if (
-          ts.isImportDeclaration(node) &&
-          !(
-            ts.isStringLiteral(node.moduleSpecifier) &&
-            this.literalValue(node.moduleSpecifier).endsWith(XSPEC_SUFFIX)
-          )
-        ) {
-          this.scanImportDeclaration(node, bound);
-        }
       }
       ts.forEachChild(node, visit);
     };
@@ -2563,18 +2620,36 @@ function importBindingScope(declaration: tst.Node): tst.Node {
 
 /**
  * SPEC 2.4: every non-import declaration binding a name at value level in
- * the module scope, in document order — each name a variable declarator's
- * name or binding pattern binds, a named function, class, or enum
- * declaration, and a namespace declaration binding a value. A `var` in a
- * nested statement binds in the module scope too (JavaScript's hoisting);
- * a block-scoped declaration there binds in an inner scope, which shadows
- * instead (4.5), as does anything inside a function, class, or namespace.
- * Type-level declarations (interfaces, type aliases, namespaces binding no
- * value) bind nothing here.
+ * `scope` — a scope an import binds in (`importBindingScope`): the source
+ * file, a module declaration, a function-like, or a class static block —
+ * in document order, where TypeScript's binder declares the name (which
+ * binding roots a chain being the language's scoping question, 2.4, 4.5):
+ * among the statements of the scope's body, each name a variable
+ * declarator's name or binding pattern binds, a named function, class, or
+ * enum declaration, and a namespace declaration binding a value; and in a
+ * statement nested there — a block, a branch, a loop, a `try` part, a
+ * `switch` clause, a labeled statement — a `var` (JavaScript's hoisting),
+ * a namespace declaration binding a value (TypeScript's binder declares
+ * one in its container wherever it stands, its placement a post-parse
+ * check 14.20 excludes), and, outside strict mode code, a function
+ * declaration (which the binder declares in its container likewise, after
+ * ECMAScript's Annex B block-level functions). Any other declaration
+ * nested there binds in an inner scope, which shadows instead (4.5), as
+ * does anything inside a function, class, or namespace. Type-level
+ * declarations (interfaces, type aliases, namespaces binding no value)
+ * bind nothing here, and neither does a parameter: 2.4 names none among
+ * the declarations a spec module import's binding collides with (nor 14
+ * a location for one), and a parameter of the import's own scope shadows
+ * nothing (4.5: "Shadowing is an inner scope's"), so the import roots the
+ * chain.
  */
-function moduleValueDeclarations(
+function scopeValueDeclarations(
+  scope: tst.Node,
   sourceFile: tst.SourceFile,
 ): ValueDeclaration[] {
+  const body = scopeBody(scope);
+  if (body === undefined) return [];
+  const sloppy = !isStrictModeCode(body, sourceFile);
   const found: ValueDeclaration[] = [];
   const declarators = (list: tst.VariableDeclarationList): void => {
     for (const declarator of list.declarations) {
@@ -2587,11 +2662,36 @@ function moduleValueDeclarations(
   };
   const isVar = (list: tst.VariableDeclarationList): boolean =>
     (list.flags & ts.NodeFlags.BlockScoped) === 0;
+  // `declare module "m"` names a module, and `declare global` binds in the
+  // global scope — neither binds a name of the scope.
+  const valueNamespace = (statement: tst.ModuleDeclaration): void => {
+    if (
+      ts.isIdentifier(statement.name) &&
+      (statement.flags & ts.NodeFlags.GlobalAugmentation) === 0 &&
+      namespaceBindsValue(statement, new Map())
+    ) {
+      found.push({
+        name: statement.name.text,
+        declaration: statement,
+        construct: statement,
+      });
+    }
+  };
   const hoisted = (statement: tst.Statement | undefined): void => {
     if (statement === undefined) return;
     if (ts.isVariableStatement(statement)) {
       if (isVar(statement.declarationList)) {
         declarators(statement.declarationList);
+      }
+    } else if (ts.isModuleDeclaration(statement)) {
+      valueNamespace(statement);
+    } else if (ts.isFunctionDeclaration(statement)) {
+      if (sloppy && statement.name !== undefined) {
+        found.push({
+          name: statement.name.text,
+          declaration: statement,
+          construct: statement,
+        });
       }
     } else if (ts.isBlock(statement)) {
       for (const inner of statement.statements) hoisted(inner);
@@ -2629,7 +2729,7 @@ function moduleValueDeclarations(
       }
     }
   };
-  for (const statement of sourceFile.statements) {
+  for (const statement of body.statements) {
     if (ts.isVariableStatement(statement)) {
       declarators(statement.declarationList);
     } else if (
@@ -2649,24 +2749,78 @@ function moduleValueDeclarations(
         construct: statement,
       });
     } else if (ts.isModuleDeclaration(statement)) {
-      // `declare module "m"` names a module, and `declare global` binds
-      // in the global scope — neither binds a module-scope name.
-      if (
-        ts.isIdentifier(statement.name) &&
-        (statement.flags & ts.NodeFlags.GlobalAugmentation) === 0 &&
-        namespaceBindsValue(statement, new Map())
-      ) {
-        found.push({
-          name: statement.name.text,
-          declaration: statement,
-          construct: statement,
-        });
-      }
+      valueNamespace(statement);
     } else {
       hoisted(statement);
     }
   }
   return found;
+}
+
+/**
+ * The body whose statements a scope an import binds in holds
+ * (`importBindingScope`): the source file itself, a namespace's or
+ * string-named module's block — the innermost declaration's, for a dotted
+ * name — a function-like's block body, or a class static block's body;
+ * undefined where there is none.
+ */
+function scopeBody(
+  scope: tst.Node,
+): tst.SourceFile | tst.ModuleBlock | tst.Block | undefined {
+  if (ts.isSourceFile(scope)) return scope;
+  if (ts.isModuleDeclaration(scope)) {
+    return scope.body !== undefined && ts.isModuleBlock(scope.body)
+      ? scope.body
+      : undefined;
+  }
+  if (ts.isClassStaticBlockDeclaration(scope)) return scope.body;
+  if (ts.isFunctionLike(scope)) {
+    const body = (scope as { readonly body?: tst.Node }).body;
+    return body !== undefined && ts.isBlock(body) ? body : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Whether code at `node` is strict mode code, as TypeScript's binder judges
+ * it: all of a file TypeScript reads as a module (one holding a top-level
+ * import, export, or `export` modifier), everything inside a class, and
+ * everything under a statement list whose directive prologue — its
+ * leading statements each a string literal alone — holds a `"use strict"`
+ * or `'use strict'` directive spelled exactly: a script's, a namespace
+ * body's, or a function body's.
+ */
+function isStrictModeCode(node: tst.Node, sourceFile: tst.SourceFile): boolean {
+  if (ts.isExternalModule(sourceFile)) return true;
+  for (
+    let current: tst.Node | undefined = node;
+    current !== undefined;
+    current = current.parent
+  ) {
+    if (ts.isClassLike(current)) return true;
+    const statements =
+      ts.isSourceFile(current) || ts.isModuleBlock(current)
+        ? current.statements
+        : ts.isBlock(current) &&
+            (ts.isFunctionLike(current.parent) ||
+              ts.isClassStaticBlockDeclaration(current.parent))
+          ? current.statements
+          : undefined;
+    if (statements === undefined) continue;
+    for (const statement of statements) {
+      if (
+        !ts.isExpressionStatement(statement) ||
+        !ts.isStringLiteral(statement.expression)
+      ) {
+        break;
+      }
+      const spelled = statement.expression.getText(sourceFile);
+      if (spelled === `"use strict"` || spelled === `'use strict'`) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 /**

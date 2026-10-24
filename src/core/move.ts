@@ -317,6 +317,12 @@ export function planMoveFile(
   }
   for (const analysis of code) {
     for (const imported of analysis.imports) {
+      // Top-level declarations only, for now: rewriting a nested spec
+      // module import (SPEC 4, 6.5; `CodeImport.topLevel`) is not
+      // implemented yet.
+      if (!imported.topLevel) {
+        continue;
+      }
       if (imported.targetPath === originPath) {
         specifierEdit(
           analysis.path,
@@ -2543,7 +2549,14 @@ function composeMoveSection(
       former: number,
     ): { readonly importIndex: number; readonly name: string } | null => {
       for (const [importIndex, imported] of analysis.imports.entries()) {
-        if (!holdsTarget(imported) || !heldTimely(former, importIndex)) {
+        // Top-level declarations only, for now: holding a nested spec
+        // module import's binding (SPEC 4, 6.5; `CodeImport.topLevel`)
+        // is not implemented yet.
+        if (
+          !imported.topLevel ||
+          !holdsTarget(imported) ||
+          !heldTimely(former, importIndex)
+        ) {
           continue;
         }
         const binding = bindingsOf(imported).find(
@@ -2705,8 +2718,12 @@ function composeMoveSection(
         );
       }
     }
+    // Top-level declarations only, for now: removing a nested spec module
+    // import (SPEC 4, 6.5; `CodeImport.topLevel`) is not implemented yet,
+    // so one its last use leaves unused stays, unused (2.1).
     const removed = analysis.imports.filter(
-      (_, index) => usesBefore[index]! > 0 && usesAfter[index] === 0,
+      (imported, index) =>
+        imported.topLevel && usesBefore[index]! > 0 && usesAfter[index] === 0,
     );
     if (removed.length > 0) {
       codeRemovals.set(analysis.path, removed);
@@ -3099,15 +3116,17 @@ function composeMoveSection(
   // the file, as every edit of the rewrite leaves it, is well-formed under
   // the grammar its name selects (14.20) with each added line a top-level
   // import declaration (`admitsAddedCodeDeclarations`). Candidates are
-  // tried in a fixed order — after the line of the file's last spec-module
-  // import (a code file referencing the moved subtree always has one: its
-  // chains root at import bindings), the first removed import's line
-  // start, the file's start, then every other line start, every top-level
-  // statement's end, and every line's end — an offset at the start of a
-  // line, judged over the composed text, taken over any other: the one
-  // deterministic offset the preview reports (SPEC 6.5, 6.6), an addition
-  // at the end of a removal's range reading what that removal leaves
-  // (SPEC 6.5 "Composition and admissibility").
+  // tried in a fixed order — after the line of the file's last top-level
+  // spec module import (a code file referencing the moved subtree always
+  // holds a spec module import, its chains rooting at import bindings, but
+  // every one may stand nested, SPEC 4 — then this candidate is skipped:
+  // an added import is a top-level declaration), the first removed
+  // import's line start, the file's start, then every other line start,
+  // every top-level statement's end, and every line's end — an offset at
+  // the start of a line, judged over the composed text, taken over any
+  // other: the one deterministic offset the preview reports (SPEC 6.5,
+  // 6.6), an addition at the end of a removal's range reading what that
+  // removal leaves (SPEC 6.5 "Composition and admissibility").
   for (const analysis of code) {
     const bytes = encoder.encode(analysis.text);
     const removed = codeRemovals.get(analysis.path) ?? [];
@@ -3132,13 +3151,15 @@ function composeMoveSection(
     const composition = editsComposition(bytes, fileEdits);
     let content = composition.content;
     if (additions.length > 0) {
-      const anchor = analysis.imports[analysis.imports.length - 1];
-      if (anchor === undefined) {
+      if (analysis.imports.length === 0) {
         throw new Error(
           `xspec internal error: code file ${analysis.path} references the ` +
             `moved subtree but has no spec module import`,
         );
       }
+      // SPEC 6.5: an added import is a top-level declaration, so only a
+      // top-level spec module import anchors it — never a nested one.
+      const anchor = analysis.imports.findLast((imported) => imported.topLevel);
       // SPEC 6.5: each added declaration binds exactly the lacked
       // bindings, spelled `import X from "…"`, `import { text as Y } from
       // "…"`, or `import X, { text as Y } from "…"`, no statement
@@ -3160,7 +3181,9 @@ function composeMoveSection(
         composition,
         lines,
         [
-          offsetAfterLine(bytes, anchor.range.end),
+          ...(anchor === undefined
+            ? []
+            : [offsetAfterLine(bytes, anchor.range.end)]),
           ...(firstRemoved === undefined
             ? []
             : [lineStartBefore(bytes, firstRemoved.range.start)]),
