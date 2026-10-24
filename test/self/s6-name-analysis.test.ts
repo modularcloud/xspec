@@ -1,17 +1,21 @@
-// S-6 name-analysis vectors (TEST-SPEC 17 S-6; T6.5-22): the analysis behind
-// T6.5-22(a)'s universal assertion (test/helpers/oracles/name-analysis.ts) —
-// which names a receiving file declares, in any scope and at value or type
-// level, which it references, and which SPEC 6.5 bars there — passes this
-// fixed vector suite before any test that adds an import trusts it, P-5's
-// draws included. Each vector is a receiving file built from T6.5-22's
-// stagings with candidate names and the verdict the analysis must reach on
-// each, in both directions, hand-computed; no product is involved.
-// Certification reaches the analysis only through the violators that target
-// T6.5-22, so each class's verdict is checked here directly:
+// S-6 name-analysis vectors (TEST-SPEC 17 S-6; T6.5-22, T6.5-24(b), T6.5-9):
+// the analysis behind T6.5-22(a)'s universal assertion
+// (test/helpers/oracles/name-analysis.ts) — which names a receiving file
+// declares, in any scope and at value or type level, which it references,
+// and which SPEC 6.5 bars there — passes this fixed vector suite before any
+// test that adds an import trusts it, P-5's draws included. Each vector is a
+// receiving file built from T6.5-22's stagings with candidate names and the
+// verdict the analysis must reach on each, in both directions,
+// hand-computed; no product is involved. Certification reaches the analysis
+// only through the violators that target T6.5-22, so each class's verdict is
+// checked here directly:
 //   * counted — `helper` declared only in a function body and, separately,
-//     only as a type; `Record` in a type annotation; the undeclared global
-//     `test` of a call; `Foo` of `<Foo />`; `x` of `x.foo`; `t` of
-//     `{ text as t }`;
+//     only as a type; `T` bound only by an import declaration nested in a
+//     function body (`function f() { import T from "../specs/target.xspec" }`,
+//     T6.5-24(b)); `target` bound only by a parameter
+//     (`function f(target: unknown) {}`, T6.5-9's parameter run); `Record`
+//     in a type annotation; the undeclared global `test` of a call; `Foo` of
+//     `<Foo />`; `x` of `x.foo`; `t` of `{ text as t }`;
 //   * not counted — `div` of `<div />`, `foo` of `x.foo`, a label, and the
 //     `text` that `{ text as t }` spells for the other module;
 //   * barred in a TSX file, the factory name of each pragma T6.5-22(b)
@@ -29,7 +33,9 @@
 // spec source too where its grammar spells them: a spec source's names come
 // from its ESTree, a code source's from TypeScript's tree, two readings each
 // held to its own vectors. Every receiver is well-formed under its grammar
-// (S-9), as T6.5-22's are; the analysis reads no other file.
+// (S-9), as T6.5-22's are — the nested import's among them, TypeScript's
+// diagnostic confining imports to a file's top level being post-parse
+// (14.20); the analysis reads no other file.
 
 import { describe, expect, test } from "vitest";
 import { deriveMdx } from "../helpers/mdx-derivability.js";
@@ -208,6 +214,22 @@ const RECEIVERS: readonly Receiver[] = [
     name: "src/helper-type.ts",
     text: lines("type helper = number"),
     candidates: { helper: { declared: true } },
+  },
+  {
+    label:
+      "a .ts receiver binding T only by an import declaration nested in a function body (T6.5-24(b))",
+    kind: "typescript",
+    name: "src/nested-import.ts",
+    text: lines('function f() { import T from "../specs/target.xspec" }'),
+    candidates: { T: { declared: true }, f: { declared: true } },
+  },
+  {
+    label:
+      "a .ts receiver binding target only by a parameter (T6.5-9's parameter run)",
+    kind: "typescript",
+    name: "src/parameter.ts",
+    text: lines("function f(target: unknown) {}"),
+    candidates: { target: { declared: true }, f: { declared: true } },
   },
   {
     label: "a .ts receiver whose only mention of Record is a type annotation",
