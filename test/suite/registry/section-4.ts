@@ -98,9 +98,12 @@
 //   aside. Arm (b)'s "`query edges` reports one `embeds` edge": the whole
 //   workspace's dependency edges are compared with that one edge, the
 //   structural `contains` edges set aside as in T4-2's no-other-construct
-//   arm; its "one call occurrence" is the complete record set of
-//   `occurrences --file src/t.ts`, the record's every datum pinned from the
-//   bytes, its source's range included (SPEC 5.7, 1.7).
+//   arm; its "`occurrences` one call occurrence" is the complete record set
+//   of bare `occurrences` — the workspace's whole answer, its consulted
+//   domain the entire discovered set (SPEC 11.3), as T4.5-10(a) reads the
+//   same wording, `specs/NAME.mdx` holding no reference spelling — the
+//   record's every datum pinned from the bytes, its source's range included
+//   (SPEC 5.7, 1.7).
 
 import { Buffer } from "node:buffer";
 import { basename } from "node:path";
@@ -2760,8 +2763,10 @@ async function assertNestedLinkingArm(
  * (exit 0, `{"findings": []}`); the workspace's dependency edges — the spec
  * source's structural `contains` edges set aside (SPEC 5.2) — are exactly
  * the call's `embeds` edge from `src/t.ts#g` to `specs/NAME.mdx#a`; and
- * `occurrences --file src/t.ts` answers no finding and exactly the call's
- * record (5.7, 11.3).
+ * bare `occurrences` — the workspace's whole answer, its consulted domain
+ * the entire discovered set, `specs/NAME.mdx` included (11.3) — answers no
+ * finding and exactly the call's record (5.7), so a record or finding for
+ * any file but `src/t.ts` is seen too.
  */
 async function assertNestedTextArm(product: ProductBinding): Promise<void> {
   await withWorkspace(
@@ -2808,30 +2813,29 @@ async function assertNestedTextArm(product: ProductBinding): Promise<void> {
           `product resolving a callee through top-level imports alone`,
       );
 
-      const occLabel = `${context}: \`occurrences --file ${T4_6_TEXT_FILE}\``;
+      const occLabel = `${context}: bare \`occurrences\``;
       const report = decodeOccurrencesReport(
-        await runJson(
-          product,
-          workspace,
-          ["occurrences", "--file", T4_6_TEXT_FILE],
-          occLabel,
-        ),
+        await runJson(product, workspace, ["occurrences"], occLabel),
         occLabel,
       );
       assertSameJson(
         report.findings,
         [],
-        `${occLabel}: the valid workspace's answer carries no finding ` +
-          `(SPEC 11.3)`,
+        `${occLabel}: the valid workspace's whole answer carries no finding ` +
+          `— without \`--file\` the consulted domain is the entire ` +
+          `discovered set, \`specs/NAME.mdx\` and \`src/t.ts\` (SPEC 11.3, ` +
+          `11.2)`,
       );
       assertSameJson(
         report.occurrences.map(occurrenceTuple),
         [T4_6_TEXT_RECORD],
-        `${occLabel}: exactly the call's occurrence — spanning \`text(N.a)\`, ` +
-          `callee through closing parenthesis, kind \`embeds\`, its source ` +
-          `\`src/t.ts#g\` with the unit's own range (\`function\` through ` +
-          `the closing brace, the leading \`export\` excluded), its target ` +
-          `\`specs/NAME.mdx#a\` (SPEC 5.7, 4.6, 1.7)`,
+        `${occLabel}: the workspace's complete record set is exactly the ` +
+          `call's occurrence — spanning \`text(N.a)\`, callee through closing ` +
+          `parenthesis, kind \`embeds\`, its source \`src/t.ts#g\` with the ` +
+          `unit's own range (\`function\` through the closing brace, the ` +
+          `leading \`export\` excluded), its target \`specs/NAME.mdx#a\` — ` +
+          `and no record for any other file, \`specs/NAME.mdx\` holding no ` +
+          `reference spelling (SPEC 11.3, 5.7, 4.6, 1.7)`,
       );
     },
   );
@@ -2840,7 +2844,7 @@ async function assertNestedTextArm(product: ProductBinding): Promise<void> {
 const T4_6 = defineProductTest({
   id: "T4-6",
   title:
-    "nested module-linking forms and spec module imports — 4 judges each by construct wherever it stands, nested in a function body or a namespace body, each file S-9 well-formed and none compiled, every arm on a workspace of its own beside `specs/NAME.mdx` holding `a`: (a) an import of the missing `../specs/missing.xspec` and an import binding the named export `a`, each in a function body and in a namespace body, and (c) `import X = require(…)` and `export * from` of a `.xspec` specifier, each in a namespace body and in a function body, and `declare module` named by one in a namespace body, fail — `build` and `check` exit 1 with exactly one 14.15 per file, located byte-exactly at the declaration's own characters (the module declaration's `declare` included); (b) a nested `text` binding is its module's `text` export — `text(N.a)` beside `import N, { text }` in `g`'s body builds and checks finding-free, `query edges` holding exactly the call's `embeds` edge from `src/t.ts#g` to `specs/NAME.mdx#a` and `occurrences --file src/t.ts` exactly its record, source `src/t.ts#g`; (d) the side-effect import `import \"../specs/NAME.xspec.ts\"` nested in a function body, designating a derived-file path other than through `.xspec`, fails — exactly one 14.15 at [22, 53) — never the silence of a product examining a file's top-level statements alone, or judging derived-path designations there alone (SPEC 4, 1.7, 4.3, 4.5, 4.6, 5.7, 11.3, 14.15)",
+    "nested module-linking forms and spec module imports — 4 judges each by construct wherever it stands, nested in a function body or a namespace body, each file S-9 well-formed and none compiled, every arm on a workspace of its own beside `specs/NAME.mdx` holding `a`: (a) an import of the missing `../specs/missing.xspec` and an import binding the named export `a`, each in a function body and in a namespace body, and (c) `import X = require(…)` and `export * from` of a `.xspec` specifier, each in a namespace body and in a function body, and `declare module` named by one in a namespace body, fail — `build` and `check` exit 1 with exactly one 14.15 per file, located byte-exactly at the declaration's own characters (the module declaration's `declare` included); (b) a nested `text` binding is its module's `text` export — `text(N.a)` beside `import N, { text }` in `g`'s body builds and checks finding-free, `query edges` holding exactly the call's `embeds` edge from `src/t.ts#g` to `specs/NAME.mdx#a` and bare `occurrences`, the workspace's whole answer, exactly its record, source `src/t.ts#g`; (d) the side-effect import `import \"../specs/NAME.xspec.ts\"` nested in a function body, designating a derived-file path other than through `.xspec`, fails — exactly one 14.15 at [22, 53) — never the silence of a product examining a file's top-level statements alone, or judging derived-path designations there alone (SPEC 4, 1.7, 4.3, 4.5, 4.6, 5.7, 11.3, 14.15)",
   run: async (product) => {
     await assertNestedLinkingArm(
       product,
