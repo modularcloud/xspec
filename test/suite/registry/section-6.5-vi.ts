@@ -1,7 +1,8 @@
 // TEST-SPEC §6.5 (move), sixth part — SUITE-25 (continued): T6.5-24, nested
-// bindings: visibility and wholly-between timeliness; and T6.5-25, a
-// TypeScript declaration standing as another statement's body stays.
-// T6.5-1 … T6.5-10 are section-6.5.ts's business, T6.5-11
+// bindings: visibility and wholly-between timeliness; T6.5-25, a TypeScript
+// declaration standing as another statement's body stays; and T6.5-26,
+// TypeScript removal extents: decorators and modifiers, and what a removal
+// leaves. T6.5-1 … T6.5-10 are section-6.5.ts's business, T6.5-11
 // section-6.5-ii.ts's, T6.5-12 … T6.5-19 section-6.5-iii.ts's, T6.5-20 …
 // T6.5-22 section-6.5-iv.ts's, and T6.5-23 section-6.5-v.ts's; this module
 // keeps that file's edits bounded (the section-10.7-i/-ii precedent).
@@ -178,6 +179,69 @@
 // - None is compiled under H-2's channel: TypeScript's checker rejects a
 //   nested import declaration after parsing (T4.5-10). Every arm runs, the
 //   body failing once at the end, naming every arm that failed.
+//
+// SPEC 6.5 (Import edits): an import removal deletes the declaration's own
+// characters in place — in a TypeScript source from its first decorator or
+// modifier where it carries any (`@dec import …`, `export import …`,
+// `declare import …`, which TypeScript's parser admits and only its
+// post-parse grammar checks reject, 14.20), so that none is left to attach
+// to what follows — and lines left empty or whitespace-only purely by that
+// deletion are dropped with their line terminators (3). A removal changes
+// nothing beyond that extent: the comments and statements around a removed
+// TypeScript declaration stay as they stand, whatever they then mean to
+// TypeScript.
+//
+// T6.5-26's conservative operationalizations (noted per H-4):
+// - Its ten stagings are `S23Arm`s run by `runS23Arms`, as T6.5-24's and
+//   T6.5-25's are: one fresh workspace per staging (H-1) of records —
+//   T6.5-23's configuration and target (`specs/target.mdx` holding `z`),
+//   `specs/origin.mdx` holding `x` alone (a record of this test's own), and
+//   the staging's `src/c.ts`, TEST-SPEC's text exactly, each line ended by
+//   U+000A — under TEST-SPEC's `move specs/origin.mdx#x specs/target.mdx#y`.
+//   `src/c.ts` holds `import T from "../specs/target.xspec"`, visible,
+//   unshadowed, and timely for the moved marker `O.x`, so the marker is
+//   re-rooted to `T.y`, nothing is added, and `O`'s declaration, the marker
+//   its only use, is removed (`s26Arm`).
+// - Before the move: the premise `build --json` and, as the arm's `before`
+//   (no edge listed), `check --json`, each exactly `{"findings": []}` — the
+//   decorated, modified, and nested declarations well-formed, never 14.20,
+//   as T14-12 places that assertion here.
+// - After it, as for T6.5-24's held arms: exit 0 and the form-exact 12.7
+//   document; `src/c.ts` well-formed under S-9's judge and exactly the
+//   staged bytes with the removal's range deleted — a rewrite spelled `""`,
+//   T6.5-23 (h)'s expression of a removal — and the marker's span replaced
+//   by `T.y`: byte-composable exactly, no declaration added (T6.5-22(a)'s
+//   judgement reads none), no other byte changed (T6.5-7's discipline). The
+//   preview's entry for `src/c.ts` holds exactly one `reference-rewrite`,
+//   spanning the marker, exactly one `import-removal`, spanning the
+//   removal's range — from the first decorator or modifier (T6.6-4(b)) —
+//   and no `import-addition`; `query edges` from `src/c.ts#f` to
+//   `specs/target.mdx#y` of kind `references` answers exactly the marker's
+//   edge (the marker stands in `f` in every staging, 4.6); then
+//   `check --json` and `build --json` are clean.
+// - At module load each staging's pins are checked against the staged
+//   bytes: the declaration's own characters — from its first decorator or
+//   modifier where it carries any — once, where TEST-SPEC places them, and
+//   the removal's range, TEST-SPEC's, their line — its start through the
+//   next line's — holding nothing else but indentation before them and the
+//   line's U+000A after them (`s24RemovalRange`); the marker once, at the
+//   offset the staged bytes give (`s24Span` — TEST-SPEC states none). The
+//   form the removal and the rewrite compose (section-6.5-v.ts's
+//   `s23RewrittenForm`, the bytes `runS23Arm` asserts) is checked equal to
+//   the text TEST-SPEC spells for the file, and that text and the staged one
+//   are held to S-9's TypeScript judge (`s25AssertWellFormed`) — a mismatch
+//   a harness defect thrown at load, never a product verdict. Before any
+//   product is driven on a staging, `runS23Arm` judges its premises again.
+// - None is compiled under H-2's channel: TypeScript's checker rejects the
+//   decorators and modifiers of (a) through (c), (g), and (h) and the
+//   nested declarations of (f) and (h), and (d) and (e) assert bytes alone.
+//   Every staging runs, the body failing once at the end, naming every
+//   staging that failed.
+// - T6.6-4(b)'s clause that an `import-removal` spans a TypeScript
+//   declaration from its first decorator or modifier where it carries any
+//   is pinned by these previews; T6.6-4's own stagings (section-6.6.ts) hold
+//   no decorated or modified declaration — its arm (b) removes a spec
+//   source's import — so its body needs no change.
 
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -188,6 +252,7 @@ import { judgeTypeScript } from "../../helpers/ts-derivability.js";
 import {
   runS23Arms,
   s23ComposedForm,
+  s23RewrittenForm,
   type S23Arm,
   type S23Edge,
   type S23Span,
@@ -249,7 +314,9 @@ function s24StagedApp(key: string, text: string): StagedTs {
  * The byte span of `spelling` in `text` (UTF-8), TEST-SPEC's `stated` one: a
  * harness defect, thrown at module load, unless the spelling occurs exactly
  * once in the staged text, there. `test` names the registered test in the
- * error (T6.5-25's pins share this).
+ * error (T6.5-25's and T6.5-26's pins share this), and `whose` the stated
+ * span's source (T6.5-26's markers: the staged bytes', TEST-SPEC stating
+ * none).
  */
 function s24Span(
   key: string,
@@ -257,6 +324,7 @@ function s24Span(
   spelling: string,
   stated: S23Span,
   test = "T6.5-24",
+  whose = "TEST-SPEC's",
 ): S23Span {
   const bytes = Buffer.from(text, "utf8");
   const start = bytes.indexOf(spelling);
@@ -270,7 +338,7 @@ function s24Span(
   ) {
     throw new Error(
       `${test} ${key}: a harness defect — the staged ${S23_APP} must hold ` +
-        `\`${spelling}\` exactly once, at TEST-SPEC's ` +
+        `\`${spelling}\` exactly once, at ${whose} ` +
         `[${String(stated.start)}, ${String(stated.end)}); it is found ` +
         (start < 0
           ? "nowhere"
@@ -374,8 +442,9 @@ interface S24Offset {
   readonly offset: number;
 }
 
-/** A removal TEST-SPEC states ((c)): the declaration `declaration`, its own
- * characters at `own` on line `line`, removed with that line — `range`. */
+/** A removal TEST-SPEC states ((c), and each of T6.5-26's stagings): the
+ * declaration `declaration`, its own characters at `own` on line `line`,
+ * removed with that line — `range`. */
 interface S24Removal {
   readonly declaration: string;
   readonly own: S23Span;
@@ -389,32 +458,37 @@ interface S24Removal {
  * `own`, and `range` is their line — its start through the next line's —
  * holding nothing else but indentation before them and the line's U+000A
  * after them, the whitespace-only line their deletion leaves (6.5, 3).
+ * `test` names the registered test in the error (T6.5-26's removals share
+ * this).
  */
 function s24RemovalRange(
   key: string,
   text: string,
   starts: readonly number[],
   removal: S24Removal,
+  test = "T6.5-24",
 ): S23Span {
-  const own = s24Span(key, text, removal.declaration, removal.own);
+  const own = s24Span(key, text, removal.declaration, removal.own, test);
   const start = s24Stated(
     key,
     `the start of line ${String(removal.line)}, the removal's start`,
     starts[removal.line - 1],
     removal.range.start,
+    test,
   );
   const end = s24Stated(
     key,
     `the start of line ${String(removal.line + 1)}, the removal's end`,
     starts[removal.line],
     removal.range.end,
+    test,
   );
   const bytes = Buffer.from(text, "utf8");
   const indentation = bytes.subarray(start, own.start).toString("utf8");
   const rest = bytes.subarray(own.end, end).toString("utf8");
   if (!/^[ \t]*$/.test(indentation) || rest !== "\n") {
     throw new Error(
-      `T6.5-24 ${key}: a harness defect — the removal's range ` +
+      `${test} ${key}: a harness defect — the removal's range ` +
         `[${String(start)}, ${String(end)}) must hold the declaration's own ` +
         `characters [${String(own.start)}, ${String(own.end)}), indentation ` +
         `before them and the line's U+000A after them alone; it holds ` +
@@ -1432,5 +1506,464 @@ const T6_5_25 = defineProductTest({
   run: (product) => runS23Arms(product, "T6.5-25", S25_ARMS),
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-26 TypeScript removal extents: decorators and modifiers, and what a
+// removal leaves
+// ---------------------------------------------------------------------------
+
+// The origin (TEST-SPEC: `specs/origin.mdx` holding `x`): the moved section
+// alone, so that the marker is `O`'s only use, gone after the move.
+const S26_ORIGIN_X_ALONE: StagedMdx = stagedMdx(
+  "T6.5-26 specs/origin.mdx (the moved x alone)",
+  ['<S id="x">', "Origin x text.", "</S>", ""].join("\n"),
+);
+
+/** `f` of (a) through (e) and (g): the marker `O.x`, `O`'s only use, beside
+ * `T.z`. */
+const S26_F = "export function f() { O.x; T.z }";
+
+/** `O`'s declaration carrying a decorator ((a), and nested in (h)). */
+const S26_DECORATED = `@dec ${S23_IMPORT_O}`;
+
+/** The text TEST-SPEC spells for the file (a) through (c) and (g) leave. */
+const S26_TOP_LEVEL_LEFT = [
+  'import T from "../specs/target.xspec"',
+  "export function f() { T.y; T.z }",
+] as const;
+
+/** A staged `src/c.ts` of T6.5-26 (S-9's record, declared well-formed
+ * TypeScript). */
+function s26StagedApp(key: string, text: string): StagedTs {
+  return stagedTs(`T6.5-26 ${key} ${S23_APP}`, text, "well-formed", "ts");
+}
+
+/** A span in words, for diagnoses. */
+function s26Range(span: S23Span): string {
+  return `[${String(span.start)}, ${String(span.end)})`;
+}
+
+/** Why a staging's `src/c.ts` gains nothing and loses `O`'s declaration,
+ * for diagnoses: `extent` says where the removal runs, what stays, and what
+ * a deviating product leaves. */
+function s26Placement(extent: string): string {
+  return (
+    "`T`, held, visible, unshadowed, and timely for the moved marker " +
+    "`O.x`, re-roots it to `T.y`, so nothing is added, and `O`'s " +
+    `declaration, the marker its only use, is removed: ${extent}`
+  );
+}
+
+/**
+ * The module-load self-check of a staging: the form its removal and its
+ * rewrite compose (section-6.5-v.ts's `s23RewrittenForm`, the bytes
+ * `runS23Arm` asserts) is exactly `spelled`, the text TEST-SPEC spells for
+ * the file after the move; a harness defect otherwise.
+ */
+function s26AssertSpelledForm(arm: S23Arm, spelled: string): void {
+  const composed = s23RewrittenForm(arm);
+  if (Buffer.compare(composed, Buffer.from(spelled, "utf8")) !== 0) {
+    throw new Error(
+      `${arm.test} ${arm.key}: a harness defect — the form the removal and ` +
+        `the rewrite compose must be the text TEST-SPEC spells, ` +
+        `${JSON.stringify(spelled)}; it is ` +
+        JSON.stringify(composed.toString("utf8")),
+    );
+  }
+}
+
+/**
+ * A staging of T6.5-26 at module load: its `src/c.ts` record — `lines`,
+ * each ended by U+000A — beside T6.5-23's configuration and target and the
+ * test's `x`-alone origin, under T6.5-23's move; `O`'s declaration removed
+ * over TEST-SPEC's range (`removal`, cross-checked by `s24RemovalRange`), a
+ * rewrite spelled `""`, and the marker `O.x` (at `marker`, the staged
+ * bytes' offset, cross-checked by `s24Span`) rewritten to `T.y`, nothing
+ * added; before the move `check` clean; the preview's one
+ * `reference-rewrite` spanning the marker, its one `import-removal`
+ * spanning the removal's range, and no `import-addition` (which `runS23Arm`
+ * asserts wherever nothing is added); and after the move the marker's
+ * `references` edge from `src/c.ts#f`, the unit holding it in every
+ * staging (4.6), to `specs/target.mdx#y`. The composed form is held to
+ * `spelled`, the text TEST-SPEC spells for the file after the move
+ * (`s26AssertSpelledForm`), and that text and the staged one to S-9's
+ * TypeScript judge (`s25AssertWellFormed`).
+ */
+function s26Arm(spec: {
+  readonly key: string;
+  readonly lines: readonly string[];
+  readonly removal: S24Removal;
+  readonly marker: S23Span;
+  readonly placement: string;
+  readonly spelled: readonly string[];
+}): S23Arm {
+  const test = "T6.5-26";
+  const text = [...spec.lines, ""].join("\n");
+  const removal = s24RemovalRange(
+    spec.key,
+    text,
+    s24Starts(spec.lines),
+    spec.removal,
+    test,
+  );
+  const marker = s24Span(
+    spec.key,
+    text,
+    "O.x",
+    spec.marker,
+    test,
+    "the pinned",
+  );
+  const arm: S23Arm = {
+    test,
+    key: spec.key,
+    receiver: S23_APP,
+    kind: "typescript",
+    text,
+    staged: s26StagedApp(spec.key, text),
+    files: {
+      "xspec.config.ts": S23_CONFIG,
+      [S23_ORIGIN]: S26_ORIGIN_X_ALONE,
+      [S23_TARGET]: S23_TARGET_SOURCE,
+    },
+    argv: S23_ARGV,
+    rewrites: [
+      { ...removal, spelled: () => "" },
+      { ...marker, spelled: () => "T.y" },
+    ],
+    addition: undefined,
+    placement: spec.placement,
+    excluded: {},
+    preview: { rewrites: [marker], removals: [removal] },
+    edges: [s24MarkerEdge(`${S23_APP}#f`)],
+    before: { check: true, edges: [] },
+  };
+  const spelled = [...spec.spelled, ""].join("\n");
+  s26AssertSpelledForm(arm, spelled);
+  s25AssertWellFormed(arm, spelled);
+  return arm;
+}
+
+/**
+ * A top-level staging of (a) through (c) and (g): `src/c.ts` = `import T
+ * …`, U+000A, `declaration`, U+000A, `f`, U+000A — the declaration's own
+ * characters from `first`, its first decorator or modifier, at `own`, its
+ * line [38, `range.end`) removed — the file becoming exactly what TEST-SPEC
+ * spells for (a) through (c); `deviating` says what a product deleting from
+ * elsewhere leaves.
+ */
+function s26TopLevelArm(spec: {
+  readonly key: string;
+  readonly declaration: string;
+  readonly first: string;
+  readonly own: S23Span;
+  readonly range: S23Span;
+  readonly marker: S23Span;
+  readonly deviating: string;
+}): S23Arm {
+  return s26Arm({
+    key: spec.key,
+    lines: [S24_IMPORT_T, spec.declaration, S26_F],
+    removal: {
+      declaration: spec.declaration,
+      own: spec.own,
+      line: 2,
+      range: spec.range,
+    },
+    marker: spec.marker,
+    placement: s26Placement(
+      `the deletion starts at ${spec.first}, so that none is left to ` +
+        `attach to what follows — its own characters ${s26Range(spec.own)} ` +
+        "deleted and the line it empties dropped with its terminator, " +
+        `${s26Range(spec.range)} (6.5, 3), the marker becoming \`T.y\`; ` +
+        spec.deviating,
+    ),
+    spelled: S26_TOP_LEVEL_LEFT,
+  });
+}
+
+/** What a product deleting from `import` leaves in (a) through (c). */
+function s26FromImport(left: string): string {
+  return (
+    `a product deleting from \`import\` leaves ${left} — still parsing ` +
+    "(14.20), so that the post-move `check` passes — failing the byte " +
+    "contract and the preview's range"
+  );
+}
+
+/** What a product starting (g)'s deletion anywhere but the first of the
+ * declaration's decorator and modifier leaves. */
+const S26_G_DEVIATING =
+  "a product starting anywhere else — at the modifier nearest `import`, at " +
+  "the first modifier before any decorator, as TypeScript 5's separate " +
+  "decorator and modifier accessors invite, or at the first decorator " +
+  "before any modifier — leaves `@dec ` or `export ` above the function " +
+  "declaration in one of (g)'s stagings or the other, each still parsing " +
+  "(14.20), so that the post-move `check` passes, failing the byte contract " +
+  "and the preview's range";
+
+/** (e): `O`'s declaration heading the file, `comment` — a pragma or a
+ * triple-slash directive — between it and `T`'s. */
+function s26LeadingArm(spec: {
+  readonly comment: string;
+  readonly what: string;
+  readonly marker: S23Span;
+}): S23Arm {
+  return s26Arm({
+    key: `(e) with \`${spec.comment}\``,
+    lines: [S23_IMPORT_O, spec.comment, S24_IMPORT_T, S26_F],
+    removal: {
+      declaration: S23_IMPORT_O,
+      own: { start: 0, end: 37 },
+      line: 1,
+      range: { start: 0, end: 38 },
+    },
+    marker: spec.marker,
+    placement: s26Placement(
+      "`T` is timely, its declaration following `O`'s with nothing but a " +
+        "comment between (6.5); the removal's range is [0, 38), the " +
+        `declaration's line, and the ${spec.what} \`${spec.comment}\` ` +
+        "stays, now leading the file, where TypeScript reads pragmas and " +
+        "triple-slash directives (6.5: a removal changes nothing beyond its " +
+        "extent, whatever the comments around it then mean to TypeScript); " +
+        "a product deleting the comment with the declaration, as " +
+        "TypeScript's own edit utilities may, or keeping the declaration " +
+        `because its removal would bring the ${spec.what} to the file's ` +
+        "head, fails the byte contract and the preview's range",
+    ),
+    spelled: [
+      spec.comment,
+      'import T from "../specs/target.xspec"',
+      "export function f() { T.y; T.z }",
+    ],
+  });
+}
+
+/** T6.5-26's staged arms, in TEST-SPEC's order. */
+const S26_ARMS: readonly S23Arm[] = [
+  // (a) through (c): a decorated or modified declaration, a valid spec
+  // module import — no xspec condition reads a declaration's decorators or
+  // modifiers.
+  s26TopLevelArm({
+    key: "(a) `@dec import O …`",
+    declaration: S26_DECORATED,
+    first: "the decorator's `@`",
+    own: { start: 38, end: 80 },
+    range: { start: 38, end: 81 },
+    marker: { start: 103, end: 106 },
+    deviating: s26FromImport(
+      "`@dec ` decorating the function declaration after it",
+    ),
+  }),
+  s26TopLevelArm({
+    key: "(b) `export import O …`",
+    declaration: `export ${S23_IMPORT_O}`,
+    first: "its `export` modifier",
+    own: { start: 38, end: 82 },
+    range: { start: 38, end: 83 },
+    marker: { start: 105, end: 108 },
+    deviating: s26FromImport(
+      "`export ` exporting the function declaration after it",
+    ),
+  }),
+  s26TopLevelArm({
+    key: "(c) `declare import O …`",
+    declaration: `declare ${S23_IMPORT_O}`,
+    first: "its `declare` modifier",
+    own: { start: 38, end: 83 },
+    range: { start: 38, end: 84 },
+    marker: { start: 106, end: 109 },
+    deviating: s26FromImport(
+      "a stray `declare` above the function declaration",
+    ),
+  }),
+  // (d) a comment that comes to govern what followed the declaration,
+  // nothing added in its place.
+  s26Arm({
+    key: "(d)",
+    lines: [
+      S24_IMPORT_T,
+      "// @ts-expect-error",
+      S23_IMPORT_O,
+      'const n: number = "x"',
+      S26_F,
+    ],
+    removal: {
+      declaration: S23_IMPORT_O,
+      own: { start: 58, end: 95 },
+      line: 3,
+      range: { start: 58, end: 96 },
+    },
+    marker: { start: 140, end: 143 },
+    placement: s26Placement(
+      "the removal's range is [58, 96), the declaration's line alone (6.5, " +
+        "3), nothing added in its place, and the comment " +
+        "`// @ts-expect-error` above it stays, now governing the `const` " +
+        "line (6.5: a removal changes nothing beyond its extent, whatever " +
+        "the comments around it then mean to TypeScript); a product " +
+        "deleting the comment attached to the declaration along with it, " +
+        "as TypeScript's own edit utilities may, or keeping the declaration " +
+        "because its removal would change what the comment governs, fails " +
+        "the byte contract and the preview's range",
+    ),
+    spelled: [
+      'import T from "../specs/target.xspec"',
+      "// @ts-expect-error",
+      'const n: number = "x"',
+      "export function f() { T.y; T.z }",
+    ],
+  }),
+  // (e) comments that come to lead the file.
+  s26LeadingArm({
+    comment: "// @ts-nocheck",
+    what: "pragma",
+    marker: { start: 113, end: 116 },
+  }),
+  s26LeadingArm({
+    comment: '/// <reference lib="esnext" />',
+    what: "triple-slash directive",
+    marker: { start: 129, end: 132 },
+  }),
+  // (f) a string-literal statement that comes to head a function body's
+  // directive prologue.
+  s26Arm({
+    key: "(f)",
+    lines: [
+      S24_IMPORT_T,
+      "export function f() {",
+      `  ${S23_IMPORT_O}`,
+      '  "use strict"',
+      "  O.x",
+      "  T.z",
+      "}",
+    ],
+    removal: {
+      declaration: S23_IMPORT_O,
+      own: { start: 62, end: 99 },
+      line: 3,
+      range: { start: 60, end: 100 },
+    },
+    marker: { start: 117, end: 120 },
+    placement: s26Placement(
+      "`O`'s declaration, nested at the head of `f`'s body, binds in `f`'s " +
+        "scope (4.5, T4.5-10), where `T` is visible and timely, its " +
+        "declaration preceding `O`'s; the removal's range is [60, 100), the " +
+        "nested declaration's line with its indentation (6.5, 3), and the " +
+        'string-literal statement `"use strict"` stays, now heading the ' +
+        "body and so its directive prologue (6.5: a removal changes nothing " +
+        "beyond its extent); a product deleting the string-literal " +
+        "statement after the declaration along with it, or keeping the " +
+        'declaration because its removal would make `"use strict"` a ' +
+        "directive, fails the byte contract and the preview's range",
+    ),
+    spelled: [
+      'import T from "../specs/target.xspec"',
+      "export function f() {",
+      '  "use strict"',
+      "  T.y",
+      "  T.z",
+      "}",
+    ],
+  }),
+  // (g) a declaration carrying both a decorator and a modifier, which tells
+  // "first" apart from "only".
+  s26TopLevelArm({
+    key: "(g) `@dec export import O …`",
+    declaration: `@dec export ${S23_IMPORT_O}`,
+    first: "the decorator's `@`, the first of its decorator and modifier",
+    own: { start: 38, end: 87 },
+    range: { start: 38, end: 88 },
+    marker: { start: 110, end: 113 },
+    deviating: S26_G_DEVIATING,
+  }),
+  s26TopLevelArm({
+    key: "(g) `export @dec import O …`",
+    declaration: `export @dec ${S23_IMPORT_O}`,
+    first:
+      "its `export` modifier, the first of its modifier and decorator " +
+      "(TypeScript's parser admitting a decorator after a leading modifier " +
+      "as before it, 14.20)",
+    own: { start: 38, end: 87 },
+    range: { start: 38, end: 88 },
+    marker: { start: 110, end: 113 },
+    deviating: S26_G_DEVIATING,
+  }),
+  // (h) a decorated declaration nested in a function body.
+  s26Arm({
+    key: "(h)",
+    lines: [
+      S24_IMPORT_T,
+      "export function f() {",
+      `  ${S26_DECORATED}`,
+      "  O.x",
+      "  T.z",
+      "}",
+    ],
+    removal: {
+      declaration: S26_DECORATED,
+      own: { start: 62, end: 104 },
+      line: 3,
+      range: { start: 60, end: 105 },
+    },
+    marker: { start: 107, end: 110 },
+    placement: s26Placement(
+      "`O`'s decorated declaration, nested in `f`'s body, binds in `f`'s " +
+        "scope (4.5, T4.5-10), where `T` is visible and timely, its " +
+        "declaration preceding `O`'s; the deletion starts at the " +
+        "decorator's `@` — the extent rule reaching a declaration wherever " +
+        "it stands — its own characters [62, 104) deleted and the line they " +
+        "leave holding two spaces dropped with its terminator, [60, 105) " +
+        "(6.5, 3); a product starting a nested declaration's deletion at " +
+        "`import` leaves `  @dec ` on its line, before `T.y` and no " +
+        "declaration, so that the file no longer parses (14.20), failing " +
+        "the byte contract and the preview's range",
+    ),
+    spelled: [
+      'import T from "../specs/target.xspec"',
+      "export function f() {",
+      "  T.y",
+      "  T.z",
+      "}",
+    ],
+  }),
+];
+
+/**
+ * T6.5-26 (SUITE-25): 6.5's TypeScript removal extents — an import removal
+ * deletes the declaration from its first decorator or modifier where it
+ * carries any, so that none is left to attach to what follows, the lines it
+ * empties dropped with their terminators (3), and changes nothing beyond
+ * its extent, the comments and statements around the declaration staying
+ * whatever they then mean to TypeScript. Ten stagings, each the move of
+ * `specs/origin.mdx#x` (holding `x` alone) to `specs/target.mdx#y` over
+ * `src/c.ts` holding `import T from "../specs/target.xspec"`, the marker
+ * `O.x` re-rooted to `T.y`, nothing added, and `O`'s declaration removed:
+ * (a)–(c) `@dec import O …`, `export import O …`, and `declare import O …`
+ * between `T`'s declaration and `f`, the removal [38, 81), [38, 83), and
+ * [38, 84); (d) `// @ts-expect-error` above the declaration, staying to
+ * govern the `const` line, the removal [58, 96); (e) the declaration
+ * heading the file above `// @ts-nocheck`, and separately above
+ * `/// <reference lib="esnext" />`, which comes to lead it, the removal
+ * [0, 38); (f) the declaration nested at the head of `f`'s body above
+ * `"use strict"`, which comes to head its directive prologue, the removal
+ * [60, 100); (g) `@dec export import O …` and `export @dec import O …`,
+ * the removal [38, 88) in each, from the first of the decorator and
+ * modifier; (h) `@dec import O …` nested in `f`'s body, the removal
+ * [60, 105). Each file is asserted byte-equal to the staged bytes with the
+ * removal's range deleted and the marker rewritten, the preview's
+ * `import-removal` spanning that range (T6.6-4(b)'s decorator-and-modifier
+ * clause pinned here; T6.6-4's own stagings hold no decorated or modified
+ * declaration).
+ */
+const T6_5_26 = defineProductTest({
+  id: "T6.5-26",
+  title:
+    "TypeScript removal extents: decorators and modifiers, and what a removal leaves — ten stagings, each `move specs/origin.mdx#x specs/target.mdx#y` (`specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`) over `src/c.ts` holding `import T from \"../specs/target.xspec\"`, visible, unshadowed, and timely for the moved marker `O.x` — the marker re-rooted to `T.y`, nothing added, and `O`'s declaration, the marker its only use, removed — the workspace valid before the move, `build` and `check` clean, its decorated, modified, and nested declarations well-formed (never 14.20): (a)–(c) `src/c.ts` = `import T …`, U+000A, the declaration `@dec import O from \"../specs/origin.xspec\"`, `export import O …`, or `declare import O …`, U+000A, `export function f() { O.x; T.z }`, U+000A — the deletion starting at the `@`, `export`, or `declare`, the line it empties dropped with its terminator, the removal's range [38, 81), [38, 83), or [38, 84), the file becoming exactly `import T …`, U+000A, `export function f() { T.y; T.z }`, U+000A; (d) `// @ts-expect-error` above `import O …`, `const n: number = \"x\"` below it — the removal's range [58, 96), the declaration's line alone, the comment staying to govern the `const` line; (e) `import O …` heading the file above `// @ts-nocheck`, and separately above `/// <reference lib=\"esnext\" />`, then `import T …` — the removal's range [0, 38), the pragma or directive coming to lead the file; (f) `import O …` nested at the head of `f`'s body above `\"use strict\"` — the removal's range [60, 100), the line with its indentation, `\"use strict\"` coming to head the body's directive prologue; (g) (a)–(c)'s file with `@dec export import O …` and, separately, `export @dec import O …` — the deletion starting at the first of them, the removal's range [38, 88) in each, the file becoming exactly what (a)–(c) leave; (h) `  @dec import O …` nested in `f`'s body — its own characters [62, 104) deleted and the two-space line they leave dropped with its terminator, the removal's range [60, 105) — each move exiting 0 with the form-exact 12.7 document, `src/c.ts` after it well-formed (TypeScript 5.9.3's module and script readings) and exactly the staged bytes with the removal's range deleted and the marker's span replaced by `T.y`, no declaration added and no other byte changed, the preview's edits for `src/c.ts` exactly one `reference-rewrite` spanning the marker, one `import-removal` spanning the removal's range — from the first decorator or modifier (T6.6-4(b)) — and no `import-addition`, `check` and `build` clean after it, and `query edges` the marker's `references` edge from `src/c.ts#f` to `specs/target.mdx#y` (SPEC 6.5, 3, 4.5, 4.6, 5.2, 6.4, 6.6, 11.1, 12.7, 14.20)",
+  run: (product) => runS23Arms(product, "T6.5-26", S26_ARMS),
+});
+
 /** TEST-SPEC §6.5, sixth part, in canonical ID order (SUITE-25). */
-export const section65viTests: readonly ProductTestEntry[] = [T6_5_24, T6_5_25];
+export const section65viTests: readonly ProductTestEntry[] = [
+  T6_5_24,
+  T6_5_25,
+  T6_5_26,
+];

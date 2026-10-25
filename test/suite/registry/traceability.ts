@@ -497,6 +497,30 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // premise `build` and `check` and the judged post-move bytes (T14-12
   // places it here).
   "T6.5-25": ["6.5", "3", "4.5", "4.6", "5.2", "6.6", "11.1", "12.7", "14"],
+  // T6.5-26: 6.5's TypeScript removal extents — the declaration deleted
+  // from its first decorator or modifier where it carries any, the line it
+  // empties dropped with its terminator (3), nothing beyond that extent
+  // changed — asserted over the rewritten file's bytes, composed with the
+  // marker's prefix rewrite (6.4), the preview's `import-removal` and
+  // `reference-rewrite` edits (6.6), and the performed-operation document
+  // (12.7); (f)'s and (h)'s nested declarations binding in `f`'s scope
+  // (4.5), the marker's `references` edge (5.2) from `src/c.ts#f` (4.6)
+  // through `query edges` (11.1); its "14" the decorated, modified, and
+  // nested declarations' well-formedness, never 14.20, asserted by the
+  // clean premise `build` and `check` and the judged post-move bytes
+  // (T14-12 places it here).
+  "T6.5-26": [
+    "6.5",
+    "3",
+    "4.5",
+    "4.6",
+    "5.2",
+    "6.4",
+    "6.6",
+    "11.1",
+    "12.7",
+    "14",
+  ],
   "T6.6-2": ["6.6"],
   "T6.6-3": ["6.6", "6.5", "12.7", "14"],
   "T6.6-4": ["6.6", "6.5", "12.7"],

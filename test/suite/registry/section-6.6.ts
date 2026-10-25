@@ -241,7 +241,11 @@
 //   T6.6-5's business — asserted here, in JSON, only as the decode's
 //   success encoding (non-null beside `mapping` and `files`); the
 //   human-form check (the last bullet) asks the human report for every
-//   delta path the decoded document carries.
+//   delta path the decoded document carries. T6.6-4(b)'s clause that an
+//   `import-removal` spans a TypeScript declaration from its first
+//   decorator or modifier where it carries any is pinned by T6.5-26's
+//   previews (section-6.5-vi.ts): no staging here holds a decorated or
+//   modified declaration — arm (b)'s removed import stands in a spec source.
 // - T6.6-5 asserts the delta's content record-based, every expected set
 //   composed from the `recorded` set the inventory reports right after
 //   each premise build — before graph data is deleted or the configuration

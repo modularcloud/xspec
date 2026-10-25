@@ -147,17 +147,19 @@
 //   points) between `O`'s declaration and its line's terminator: 39 alone,
 //   the preview's `reference-rewrite` [61, 64) and no `import-removal`.
 //
-// The machinery is shared: section-6.5-vi.ts stages T6.5-24's and
-// T6.5-25's arms as `S23Arm`s over this module's configuration and spec
+// The machinery is shared: section-6.5-vi.ts stages T6.5-24's, T6.5-25's,
+// and T6.5-26's arms as `S23Arm`s over this module's configuration and spec
 // sources and runs them through `runS23Arms`, each arm naming its registered
 // test (`test`), which prefixes its diagnoses; its arms gaining a
 // declaration name it as an `S23Addition` (T6.5-24 (e)'s through an
 // `S23Spelling`), and its module-load self-checks compose their forms
-// through `s23ComposedForm`. T6.5-25's arms also state the workspace before
-// the move (`before`, an `S23Before`): after the premise `build`, and before
-// the preview, `check --json` exactly `{"findings": []}` and each `query
-// edges` answer exactly its edge (`s23AssertEdge`, its label then "before
-// the move"); no T6.5-23 or T6.5-24 arm sets it.
+// through `s23ComposedForm` — or, for T6.5-26's arms, which gain none,
+// through `s23RewrittenForm`, the bytes `s23AssertNothingAdded` asserts.
+// T6.5-25's and T6.5-26's arms also state the workspace before the move
+// (`before`, an `S23Before`): after the premise `build`, and before the
+// preview, `check --json` exactly `{"findings": []}` and each `query edges`
+// answer exactly its edge (`s23AssertEdge`, its label then "before the
+// move"; T6.5-26's arms list none); no T6.5-23 or T6.5-24 arm sets it.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -351,20 +353,22 @@ export interface S23Edge {
 
 /**
  * What TEST-SPEC states of the workspace before the move beyond the premise
- * `build` (T6.5-25): `check --json` exactly `{"findings": []}` where `check`
- * is set, and each `query edges` answer exactly its edge — asserted after the
- * premise `build` and before the preview and the real move.
+ * `build` (T6.5-25, T6.5-26): `check --json` exactly `{"findings": []}` where
+ * `check` is set, and each `query edges` answer exactly its edge — asserted
+ * after the premise `build` and before the preview and the real move.
  */
 export interface S23Before {
   readonly check: boolean;
   readonly edges: readonly S23Edge[];
 }
 
-/** One byte-asserted staging of T6.5-23 — or of T6.5-24 or T6.5-25, whose
- * module (section-6.5-vi.ts) stages their arms through this machinery. */
+/** One byte-asserted staging of T6.5-23 — or of T6.5-24, T6.5-25, or
+ * T6.5-26, whose module (section-6.5-vi.ts) stages their arms through this
+ * machinery. */
 export interface S23Arm {
-  /** The registered test the staging belongs to, `T6.5-23`, `T6.5-24`, or
-   * `T6.5-25`: with `key`, it names the staging in every diagnosis. */
+  /** The registered test the staging belongs to, `T6.5-23`, `T6.5-24`,
+   * `T6.5-25`, or `T6.5-26`: with `key`, it names the staging in every
+   * diagnosis. */
   readonly test: string;
   /** The entry's arm and staging, e.g. `(a) between two directives`. */
   readonly key: string;
@@ -399,7 +403,8 @@ export interface S23Arm {
   /** `query edges` answers after the move. */
   readonly edges?: readonly S23Edge[];
   /** What the workspace answers before the move beyond the premise `build`,
-   * where TEST-SPEC states it (T6.5-25); unasserted where undefined. */
+   * where TEST-SPEC states it (T6.5-25, T6.5-26); unasserted where
+   * undefined. */
   readonly before?: S23Before;
   /** (c): why the file compiles clean under standard tooling (H-2). */
   readonly compiles?: string;
@@ -538,6 +543,25 @@ export function s23ComposedForm(
     offset,
     declaration: s23Added(addition, ident),
   });
+}
+
+/**
+ * The receiver as `arm`'s rewrite alone leaves it, for a staging gaining no
+ * declaration: each rewrite's span replaced whole in pre-operation
+ * coordinates (6.6), every other byte kept (`s23Compose`). These are the
+ * bytes `s23AssertNothingAdded` asserts; T6.5-26's module-load self-checks
+ * hold them to the texts TEST-SPEC spells. A staging gaining a declaration
+ * composes its forms with one (`s23ComposedForm`).
+ */
+export function s23RewrittenForm(arm: S23Arm): Buffer {
+  if (arm.addition !== undefined) {
+    throw new Error(
+      `${s23Context(arm)}: a harness defect — a staging gaining a ` +
+        `declaration composes its forms with one (s23ComposedForm)`,
+    );
+  }
+  const pre = Buffer.from(arm.text, "utf8");
+  return s23Compose(pre, arm.rewrites, "") ?? Buffer.from(pre);
 }
 
 /** A placeholder identifier the premise check composes with. */
@@ -905,7 +929,7 @@ function s23AssertNothingAdded(
         `; the file reads ${JSON.stringify(after.text)}`,
     );
   }
-  const expected = s23Compose(pre, arm.rewrites, "") ?? Buffer.from(pre);
+  const expected = s23RewrittenForm(arm);
   if (Buffer.compare(expected, after.bytes) !== 0) {
     fail(
       `${context}: ${arm.receiver} after the move is exactly the staged ` +
