@@ -30,12 +30,12 @@
 // hooks, and `git submodule foreach` to its command), `GIT_WORK_TREE` and
 // `GIT_COMMON_DIR` relocate its parts, `GIT_OBJECT_DIRECTORY` and its kin
 // swap its stored data, configuration that `GIT_CONFIG_PARAMETERS` or the
-// `GIT_CONFIG_COUNT` pairs carry reconfigures it (a `core.worktree` moves
-// the work tree, and with it the workspace's prefix), and
-// `GIT_CEILING_DIRECTORIES` stops discovery short of it. So every git
-// spawned here runs without those variables — git's own list of the
-// variables local to the repository (`git rev-parse --local-env-vars`) and
-// the discovery controls, each compared case-insensitively — and with
+// `GIT_CONFIG_COUNT` pairs carry reconfigures it (`core.useReplaceRefs`
+// set false turns its replacement refs off, and with them the content
+// read), and `GIT_CEILING_DIRECTORIES` stops discovery short of it. So
+// every git spawned here runs without those variables — git's own list of
+// the variables local to the repository (`git rev-parse --local-env-vars`)
+// and the discovery controls, each compared case-insensitively — and with
 // discovery crossing filesystem boundaries (`GIT_DISCOVERY_ACROSS_FILESYSTEM`
 // set; git's default stops at one, while SPEC 6.3 names the repository by
 // containment alone): the baseline's repository, ref resolution, tree
