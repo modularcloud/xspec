@@ -206,6 +206,39 @@ export function currentChildren(
   }));
 }
 
+/**
+ * The node's descendants in the current graph, in document order (a
+ * pre-order walk over the children, the node itself excluded) — the scope
+ * nodes beneath a `subtree-coherence` scope root in the strategies without
+ * a baseline (SPEC 10.6: "as scope the node and all its current
+ * descendants"; SPEC 10.7's per-child items, "as in 10.5 and 10.6"), each
+ * with no baseline identity, as `currentAncestorChain`'s nodes. Empty for
+ * an absent node and for a leaf.
+ */
+export function currentDescendants(
+  graph: WorkspaceGraph,
+  identity: string,
+): GeneratedNode[] {
+  const node = graph.requirementNode(identity);
+  if (node === undefined) return [];
+  const descendants: GeneratedNode[] = [];
+  const stack = [...graph.childrenOf(node)].reverse();
+  while (stack.length > 0) {
+    const next = stack.pop();
+    if (next === undefined) break;
+    descendants.push({
+      identity: next.identity,
+      baselineIdentity: null,
+      deleted: false,
+    });
+    const children = graph.childrenOf(next);
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]);
+    }
+  }
+  return descendants;
+}
+
 /** One strategy-generated review item: the SPEC 10.2 content plus the
  * node-identity plumbing of `GeneratedNode`. */
 export interface GeneratedItem {
@@ -215,16 +248,23 @@ export interface GeneratedItem {
   readonly scope: GeneratedNode;
   /**
    * A `subtree-coherence` item's scope nodes beneath its scope root
-   * (SPEC 10.5: "scope: N and all descendants"), as the strategy's node
-   * relation gives them — in a baseline session over the links of 10.5
-   * (src/core/path-blocks.ts: present nodes under their current parents,
-   * deleted nodes under their baseline parents mapped through the
-   * journal), so a deleted descendant is among them and a node a journaled
-   * move took out of the subtree is not. Every `subtree-coherence` item a
-   * baseline session's generator or decomposition content source produces
-   * carries it, empty for a leaf; the recorded-baseline state's relevant
-   * hashes cover the scope root and these nodes
-   * (`computeBaselineRecordedState`). Omitted elsewhere.
+   * (SPEC 10.5: "scope: N and all descendants"; 10.6: "the node and all its
+   * current descendants"), as the strategy's node relation gives them — in
+   * a baseline session over the links of 10.5 (src/core/path-blocks.ts:
+   * present nodes under their current parents, deleted nodes under their
+   * baseline parents mapped through the journal), so a deleted descendant
+   * is among them and a node a journaled move took out of the subtree is
+   * not; in a session without a baseline the root's current descendants in
+   * document order (`currentDescendants`), none for a root that does not
+   * canonically resolve (SPEC 10.4). Every `subtree-coherence` item a
+   * generator or decomposition content source produces carries it, empty
+   * for a leaf: an item takes it as its stored scope wherever it is
+   * assigned the generated scope (`newItemFromGenerated`,
+   * `reassignedExistingItem`; SPEC 10.4: reads present `scope` as last
+   * assigned), and in a baseline session the recorded-baseline state's
+   * relevant hashes cover the scope root and these nodes
+   * (`computeBaselineRecordedState`). Omitted on every other kind, whose
+   * scope is its scope node alone.
    */
   readonly scopeDescendants?: readonly GeneratedNode[];
   readonly context: readonly GeneratedNode[];
@@ -1145,6 +1185,9 @@ function newItemFromGenerated(
     id,
     kind: generated.kind,
     scope: generated.scope.identity,
+    // SPEC 10.4, 10.2: the scope as assigned at entry — the generated
+    // scope nodes beneath the root (`generatedScopeDescendants`).
+    scopeDescendants: generatedScopeDescendants(generated),
     context: generated.context.map((node) => node.identity),
     reason: generated.reason,
     origin: generated.origin.map((node) => node.identity),
@@ -1166,12 +1209,24 @@ function newItemFromGenerated(
 }
 
 /**
+ * The scope nodes beneath a generated item's scope root, as the stored
+ * references an item takes with its scope (`ReviewItem.scopeDescendants`;
+ * SPEC 10.4: `scope` as last assigned) — the generated
+ * `subtree-coherence` item's `scopeDescendants`, in generated order; none
+ * for every other kind, whose scope is its scope node alone (SPEC 10.5).
+ */
+function generatedScopeDescendants(generated: GeneratedItem): string[] {
+  return (generated.scopeDescendants ?? []).map((node) => node.identity);
+}
+
+/**
  * An existing session item standing for a generated item of the same kind
  * and scope node — a re-derivation's matched item (SPEC 10.5) or a
  * `split`'s reused decomposition item (SPEC 10.7): it keeps its `id`,
  * status, note, and recorded state — `baseline`, `current`, and the
  * recorded context set, which only creation and a resolve write
- * (SPEC 10.2, 10.4) — and takes the generated scope, context, origin,
+ * (SPEC 10.2, 10.4) — and takes the generated scope (the scope root and
+ * the nodes beneath it, `generatedScopeDescendants`), context, origin,
  * reason, and `blockedBy` (the caller's, resolved to item ids). The
  * derivation-time text snapshots are rewritten per node of the item as
  * assigned that the current graph contains, never removed (SPEC 10.7: the
@@ -1187,6 +1242,7 @@ function reassignedExistingItem(
   return {
     ...existing,
     scope: generated.scope.identity,
+    scopeDescendants: generatedScopeDescendants(generated),
     context: generated.context.map((node) => node.identity),
     origin: generated.origin.map((node) => node.identity),
     reason: generated.reason,
@@ -1229,8 +1285,9 @@ export interface DerivedSessionItems {
  *
  * - a generated item whose kind and scope node match an existing item is
  *   that item — it keeps its `id`, `status`, `note`, and recorded state
- *   (`baseline`, `current`, and the recorded context set); its `context`,
- *   `origin`, and `reason` are updated from the generation, and 10.4
+ *   (`baseline`, `current`, and the recorded context set); its scope (the
+ *   nodes beneath the root included), `context`, `origin`, and `reason`
+ *   are updated from the generation, and 10.4
  *   alone, against that recorded state, decides whether it then reads
  *   `invalidated` (a node joining its scope, context, or origin has no
  *   recorded presence, so a changed origin by itself invalidates nothing,

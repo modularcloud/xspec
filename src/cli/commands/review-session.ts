@@ -55,9 +55,11 @@
 //
 // The payload renderers below fix the self-contained text payload of
 // SPEC 10.7 once, so `show`, `export`, and `next --json` can never disagree:
-// every scope, context, and origin node under its current identity — the
-// stored canonical reference's derived current spelling (SPEC 10.4, 6.3) —
-// and presence, source ranges for present requirement nodes, the recorded
+// every scope node (the scope as last assigned, `scopeNodes`, its root also
+// as `scope` with its text), context node, and origin node under its
+// current identity — the stored canonical reference's derived current
+// spelling (SPEC 10.4, 6.3) — and presence, source ranges for present
+// requirement nodes (and for a present code-location scope), the recorded
 // `baseline`/`current` states, and text per item kind — a present node's
 // text from the current graph, an absent node's from the most recent
 // recorded state containing it (the snapshots of the derivations and
@@ -90,6 +92,7 @@ import type {
 } from "../../core/review.js";
 import {
   isItemBlocked,
+  kindScopesCodeLocation,
   recordedStateToJson,
   sessionStrategy,
 } from "../../core/review.js";
@@ -782,6 +785,37 @@ function nodeStateJson(
 }
 
 /**
+ * One scope-set entry (SPEC 10.7: the payload presents every scope node
+ * under its current identity and presence (10.4) and, for a present graph
+ * node, its source range, 1.7; an absent node carries none): the stored
+ * reference surfaces as its derived current spelling (10.4, 6.3), presence
+ * judged by canonical resolution and a graph lookup — the scoped code
+ * location for a `code-impact` item's scope root, a requirement node
+ * otherwise — so a dangling reference presents absent even when a distinct
+ * node recaptured its spelling. No text: 10.7's scope text is the scope
+ * root's, which the item's `scope` member presents.
+ */
+function scopeSetEntryJson(
+  view: SessionReadView,
+  item: ReviewItem,
+  reference: string,
+): JsonObject {
+  const { spelling, resolves } = resolveReference(
+    view.analysis.journal.journal,
+    reference,
+  );
+  const graph = view.analysis.graph;
+  const range = !resolves
+    ? undefined
+    : kindScopesCodeLocation(item.kind) && reference === item.scope
+      ? graph.codeLocation(spelling)?.range
+      : graph.requirementNode(spelling)?.section.range;
+  return range === undefined
+    ? { node: spelling, present: false }
+    : { node: spelling, present: true, sourceRange: rangeJson(range) };
+}
+
+/**
  * One origin entry (SPEC 10.7): a before/after pair of the node's own text
  * — before from the item's baseline state (`originBeforeSide`), after from
  * the current graph; the absent side of the pair is presented absent, with
@@ -861,9 +895,12 @@ function originBeforeSide(
  * reported as resolved); `context` is the item's current context set
  * (`presentedContext`, SPEC 10.4), each node's payload — identity,
  * presence, range, text — over that set; `scope`, `origin`, `reason`, and
- * `blockedBy` present as last assigned; `baseline` and `current` report as
- * recorded, each node presented under its current identity
- * (`presentRecordedState`).
+ * `blockedBy` present as last assigned — the scope as two members: `scope`,
+ * the scope root with its 10.7 text, and `scopeNodes`, every node of the
+ * scope as last assigned (the root, then the stored nodes beneath it, SPEC
+ * 10.5, 10.6) with identity, presence, and range (`scopeSetEntryJson`);
+ * `baseline` and `current` report as recorded, each node presented under
+ * its current identity (`presentRecordedState`).
  */
 export function itemDocument(
   view: SessionReadView,
@@ -880,6 +917,10 @@ export function itemDocument(
     reason: item.reason,
     note: item.note,
     scope: nodeStateJson(view, item, item.scope, scopeSelection),
+    // SPEC 10.7: every scope node, the scope as last assigned (10.4).
+    scopeNodes: [item.scope, ...item.scopeDescendants].map((reference) =>
+      scopeSetEntryJson(view, item, reference),
+    ),
     context: presentedContext(view, item).map((reference) =>
       nodeStateJson(view, item, reference, contextTextSelection(item.kind)),
     ),
@@ -952,6 +993,12 @@ export function renderItemHuman(
     out += `  note: ${item.note}\n`;
   }
   out += renderNodeStateHuman("scope", document["scope"] as JsonObject);
+  // SPEC 10.7, 12.0: the scope set, laid out as the context is.
+  const scopeNodes = document["scopeNodes"] as readonly JsonObject[];
+  out += `  scopeNodes:${scopeNodes.length === 0 ? " (none)" : ""}\n`;
+  for (const state of scopeNodes) {
+    out += renderNodeStateHuman("  -", state);
+  }
   const contexts = document["context"] as readonly JsonObject[];
   out += `  context:${contexts.length === 0 ? " (none)" : ""}\n`;
   for (const state of contexts) {

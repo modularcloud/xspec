@@ -27,8 +27,10 @@
 // policy below).
 //
 // and each item carries exactly the fields of SPEC 10.2 — `id`, `kind`,
-// `scope`, `context`, `reason`, `origin`, `baseline`, `current`, `status`,
-// optional `note`, `blockedBy` — plus the recorded context set
+// `scope` (stored as its root, `scope`, and the scope nodes beneath the
+// root as last assigned, `scopeDescendants`, SPEC 10.4), `context`,
+// `reason`, `origin`, `baseline`, `current`, `status`, optional `note`,
+// `blockedBy` — plus the recorded context set
 // (`recordedContext`: the context nodes recorded with `current`, SPEC 10.4)
 // and the recorded text snapshots (`baselineTexts`, `derivedTexts`) that
 // keep items actionable after the referenced nodes are edited, moved, or
@@ -37,8 +39,9 @@
 // and the states under which mutating subcommands derived or resolved the
 // item with that node among its nodes).
 //
-// Identity policy: every stored node reference — an item's `scope`, its
-// `context` and `origin` entries, the node keys of `baseline`/`current` and
+// Identity policy: every stored node reference — an item's `scope` and
+// `scopeDescendants` entries, its `recordedContext`, `context`, and
+// `origin` entries, the node keys of `baseline`/`current` and
 // of `baselineTexts`/`derivedTexts`, and each recorded decomposition's
 // `scope` — is a canonical identity (SPEC 5.4) in the injective key
 // encoding of src/core/journal.ts (`<position>:<identity>`,
@@ -251,6 +254,17 @@ export interface ReviewItem {
    * (`code-impact`) under review.
    */
   readonly scope: string;
+  /**
+   * The scope nodes beneath the scope root, as last assigned (SPEC 10.4:
+   * reads present `scope` as last assigned — by `create`, a re-derivation
+   * (10.5), or a `split` (10.7); a resolve assigns the context alone), by
+   * identity, in generated order: a `subtree-coherence` item's scope is
+   * "N and all descendants" (SPEC 10.5, 10.6), so these are the
+   * descendants its strategy generated with it — in a baseline session
+   * over 10.5's links, deleted ones included. Empty for a leaf and for
+   * every other kind, whose scope is its scope node alone (SPEC 10.2).
+   */
+  readonly scopeDescendants: readonly string[];
   /** Nodes whose text frames the review (SPEC 10.2), by identity. */
   readonly context: readonly string[];
   /** Why the item exists — human-readable (SPEC 10.2). */
@@ -558,6 +572,7 @@ function itemToJson(item: ReviewItem): JsonObject {
     id: item.id,
     kind: item.kind,
     scope: item.scope,
+    scopeDescendants: [...item.scopeDescendants],
     context: [...item.context],
     reason: item.reason,
     origin: [...item.origin],
@@ -897,6 +912,7 @@ const ITEM_REQUIRED_KEYS = [
   "id",
   "kind",
   "scope",
+  "scopeDescendants",
   "context",
   "reason",
   "origin",
@@ -938,6 +954,12 @@ function parseItem(
 
   const scope = value["scope"];
   requireNonEmptyString(scope, `${where}.scope`, problems);
+  // SPEC 10.2, 10.4: the scope nodes beneath the root, as last assigned.
+  const scopeDescendants = parseIdentityList(
+    value["scopeDescendants"],
+    `${where}.scopeDescendants`,
+    problems,
+  );
 
   const context = parseIdentityList(
     value["context"],
@@ -1016,6 +1038,7 @@ function parseItem(
     id: id as string,
     kind: kind as ItemKind,
     scope: scope as string,
+    scopeDescendants,
     context,
     reason: reason as string,
     origin,
@@ -1335,6 +1358,9 @@ function checkCanonicalReferences(
   items.forEach((item, index) => {
     const where = `items[${String(index)}]`;
     check(item.scope, `${where}.scope`);
+    item.scopeDescendants.forEach((reference, at) => {
+      check(reference, `${where}.scopeDescendants[${String(at)}]`);
+    });
     item.context.forEach((reference, at) => {
       check(reference, `${where}.context[${String(at)}]`);
     });

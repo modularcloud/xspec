@@ -39,7 +39,11 @@ import type {
   GeneratedItem,
   GeneratedNode,
 } from "./review-derive.js";
-import { currentAncestorChain, currentChildren } from "./review-derive.js";
+import {
+  currentAncestorChain,
+  currentChildren,
+  currentDescendants,
+} from "./review-derive.js";
 
 /** The output of one coverage-session generator run (SPEC 10.7). */
 export interface CoverageSessionGeneration {
@@ -147,13 +151,22 @@ function coverageContentSource(
     // (SPEC 10.4) has none.
     scopeChildren: (scopeIdentity, scopeResolves = true): GeneratedNode[] =>
       scopeResolves ? currentChildren(graph, scopeIdentity) : [],
-    subtreeCoherenceItem: (scopeIdentity): GeneratedItem => ({
+    // A per-child item's scope is the child and all its current
+    // descendants (SPEC 10.7, "as in 10.5 and 10.6"), none beneath a stored
+    // scope that no longer canonically resolves (SPEC 10.4).
+    subtreeCoherenceItem: (
+      scopeIdentity,
+      scopeResolves = true,
+    ): GeneratedItem => ({
       kind: "subtree-coherence",
       scope: {
         identity: scopeIdentity,
         baselineIdentity: null,
         deleted: false,
       },
+      scopeDescendants: scopeResolves
+        ? currentDescendants(graph, scopeIdentity)
+        : [],
       context: currentAncestorChain(graph, scopeIdentity),
       origin: [],
       reason:
