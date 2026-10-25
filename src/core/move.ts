@@ -2723,9 +2723,18 @@ function composeMoveSection(
       }
     }
     // Nested spec module imports included (SPEC 4, 6.5: "an existing spec
-    // module import is removed exactly when …", wherever it stands).
+    // module import is removed exactly when …", wherever it stands) — save
+    // a declaration standing as another statement's body (an `if` branch,
+    // a `do`, `while`, `for`, `for…in`, `for…of`, `with`, or labeled
+    // statement's body, top level or nested), which stays, its bindings
+    // unused and no removal reported for it (6.6): its deletion would
+    // leave that statement no body (`do  while (c)` no longer parses) or
+    // have it take what follows as its body.
     const removed = analysis.imports.filter(
-      (_imported, index) => usesBefore[index]! > 0 && usesAfter[index] === 0,
+      (imported, index) =>
+        !imported.statementBody &&
+        usesBefore[index]! > 0 &&
+        usesAfter[index] === 0,
     );
     if (removed.length > 0) {
       codeRemovals.set(analysis.path, removed);
@@ -3129,12 +3138,16 @@ function composeMoveSection(
   // over any other: the one deterministic offset the preview reports (SPEC
   // 6.5, 6.6), an addition at the end of a removal's range reading what
   // that removal leaves (SPEC 6.5 "Composition and admissibility"). A
-  // removed nested import (SPEC 4) is deleted like a top-level one; one
-  // standing as another statement's body (`if (x) import A …;`) leaves
-  // that statement taking what follows as its body, or nothing — a case
-  // SPEC 6.5's removal rule leaves open: an addition the file needs is
-  // then admissible nowhere (14.20), and with none the post-move
-  // re-validation refuses an unparseable result.
+  // removed nested import (SPEC 4) is deleted like a top-level one. One
+  // standing as another statement's body (`if (x) import A …`, either
+  // branch of an `if`, or the body of a `do`, `while`, `for`, `for…in`,
+  // `for…of`, `with`, or labeled statement, wherever that statement
+  // stands) is never removed (SPEC 6.5 "Import edits": it stays, its
+  // bindings unused and no removal reported for it, 6.6), since its
+  // deletion would leave that statement no body; an addition the file
+  // needs then stands among the top-level statements as any other does,
+  // the one enclosing the kept declaration never standing between it and
+  // a spelling rooted there before (`timelyAt`).
   for (const analysis of code) {
     const bytes = encoder.encode(analysis.text);
     const removed = codeRemovals.get(analysis.path) ?? [];

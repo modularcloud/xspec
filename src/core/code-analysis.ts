@@ -39,10 +39,12 @@
 //
 // An import declaration is a spec module import by its specifier alone
 // (SPEC 4), wherever it stands: TypeScript parses one in any statement
-// list — a namespace or module body, a function body, a block — and
-// reports its placement only in post-parse checks, which 14.20 excludes.
-// A nested one is validated as a top-level one is, and its bindings root
-// chains within the scope TypeScript's binder gives them (4.5).
+// list — a namespace or module body, a function body, a block — and as
+// another statement's body (an `if` branch, a loop's or a labeled
+// statement's body), reporting its placement only in post-parse checks,
+// which 14.20 excludes. A nested one is validated as a top-level one is,
+// and its bindings root chains within the scope TypeScript's binder gives
+// them (4.5).
 
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
@@ -134,11 +136,24 @@ export interface CodeImport {
    * SPEC 4 makes an import declaration a spec module import by its
    * specifier alone, wherever it stands: TypeScript parses one in any
    * statement list — a namespace or module body, a function body, a
-   * block — leaving its placement to post-parse checks outside 14.20. A
-   * nested one binds in the scope TypeScript gives it, while 6.5 places
-   * an added import among the top-level statements alone.
+   * block — and as another statement's body (`statementBody`), leaving
+   * its placement to post-parse checks outside 14.20. A nested one binds
+   * in the scope TypeScript gives it, while 6.5 places an added import
+   * among the top-level statements alone.
    */
   readonly topLevel: boolean;
+  /**
+   * Whether the declaration stands as another statement's body, where
+   * TypeScript's parser admits one (SPEC 14.20): either branch of an `if`
+   * statement, or the body of a `do`, `while`, `for`, `for…in`, `for…of`,
+   * `with`, or labeled statement. Every other position the parser admits
+   * one in is a statement list — a source file, a block, a module block,
+   * a `case` or `default` clause. SPEC 6.5 "Import edits" keeps such a
+   * declaration whatever its bindings' uses, since its deletion would
+   * leave that statement no body (`if (c) ` no longer parsing, or taking
+   * what follows as its body).
+   */
+  readonly statementBody: boolean;
   /** The declaration's exact text (SPEC 6.5 rewrites). */
   readonly text: string;
   /**
@@ -1536,6 +1551,7 @@ class CodeAnalyzer {
     this.imports.push({
       range: this.rangeOf(statement),
       topLevel: ts.isSourceFile(statement.parent),
+      statementBody: standsAsStatementBody(statement),
       text: this.sourceFile.text.slice(
         statement.getStart(this.sourceFile),
         statement.getEnd(),
@@ -2619,6 +2635,28 @@ function importBindingScope(declaration: tst.Node): tst.Node {
     }
   }
   return declaration.getSourceFile();
+}
+
+/**
+ * SPEC 6.5 "Import edits", 14.20: whether a declaration stands as another
+ * statement's body rather than in a statement list — either branch of an
+ * `if` statement, or the body of a `do`, `while`, `for`, `for…in`,
+ * `for…of`, `with`, or labeled statement, the positions TypeScript's
+ * parser admits a declaration in beside a statement list (a source file,
+ * a block, a module block, a `case` or `default` clause).
+ */
+function standsAsStatementBody(declaration: tst.Node): boolean {
+  const parent = declaration.parent;
+  return (
+    ts.isIfStatement(parent) ||
+    ts.isDoStatement(parent) ||
+    ts.isWhileStatement(parent) ||
+    ts.isForStatement(parent) ||
+    ts.isForInStatement(parent) ||
+    ts.isForOfStatement(parent) ||
+    ts.isWithStatement(parent) ||
+    ts.isLabeledStatement(parent)
+  );
 }
 
 /**
