@@ -150,7 +150,9 @@
 // The machinery is shared: section-6.5-vi.ts stages T6.5-24's arms as
 // `S23Arm`s over this module's configuration and spec sources and runs them
 // through `runS23Arms`, each arm naming its registered test (`test`), which
-// prefixes its diagnoses.
+// prefixes its diagnoses; its arms gaining a declaration name it as an
+// `S23Addition` ((e)'s through an `S23Spelling`), and its module-load
+// self-checks compose their forms through `s23ComposedForm`.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -212,7 +214,7 @@ export const S23_ARGV = [
   "specs/target.mdx#y",
 ] as const;
 /** The target module's canonical relative specifier from `src/` (6.5). */
-const S23_TARGET_SPECIFIER = "../specs/target.xspec";
+export const S23_TARGET_SPECIFIER = "../specs/target.xspec";
 
 // One spec group and one code group (SPEC 7.1, 7.2): a staged-source record,
 // staged by every staging after the body's first invocation (S-9's timing
@@ -286,9 +288,10 @@ export interface S23Rewrite {
 /**
  * An added declaration's exact spelling other than `import <X> from "…"`
  * (SPEC 6.5's spellings: `import { text as Y } from "…"`, the named binding
- * `{ text }` where its identifier is `text` itself) — (k)'s.
+ * `{ text }` where its identifier is `text` itself) — (k)'s, and T6.5-24
+ * (e)'s.
  */
-interface S23Spelling {
+export interface S23Spelling {
   /** The declaration's characters, given the added binding's identifier. */
   readonly declaration: (ident: string) => string;
   /** The form in words, for diagnoses. */
@@ -299,7 +302,7 @@ interface S23Spelling {
 }
 
 /** The one declaration a staging's receiver gains (SPEC 6.5). */
-interface S23Addition {
+export interface S23Addition {
   /** Its module's canonical specifier, as 6.5 spells it from the receiver. */
   readonly specifier: string;
   /** Its spelling where it binds no module default — `undefined`: exactly
@@ -490,6 +493,31 @@ function s23Compose(
     Buffer.from(`${terminator}${addition.declaration}\n`, "utf8"),
     base.subarray(insertAt),
   ]);
+}
+
+/**
+ * The receiver as `arm`'s rewrite leaves it, its added declaration spelled
+ * for the identifier `ident` and inserted at `offset` (`s23Compose`, 6.5's
+ * line discipline) — `undefined` where the offset lies strictly inside a
+ * replaced span. T6.5-24's module-load self-checks hold it to the texts
+ * TEST-SPEC spells; a staging gaining no declaration has no such form.
+ */
+export function s23ComposedForm(
+  arm: S23Arm,
+  ident: string,
+  offset: number,
+): Buffer | undefined {
+  const addition = arm.addition;
+  if (addition === undefined) {
+    throw new Error(
+      `${s23Context(arm)}: a harness defect — a staging gaining no ` +
+        `declaration composes no form with one`,
+    );
+  }
+  return s23Compose(Buffer.from(arm.text, "utf8"), arm.rewrites, ident, {
+    offset,
+    declaration: s23Added(addition, ident),
+  });
 }
 
 /** A placeholder identifier the premise check composes with. */

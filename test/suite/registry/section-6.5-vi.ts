@@ -21,9 +21,13 @@
 // statement between them but import declarations — a top-level statement
 // standing between two declarations exactly when it lies wholly after the
 // one and before the other, never one enclosing either, such as the
-// function or namespace holding a nested import. A rooted spelling's edge
-// is attributed to the innermost named code unit enclosing it, or to the
-// file where none does (4.6).
+// function or namespace holding a nested import. Where no held binding is
+// eligible, a declaration is added at an admissible offset, binding an
+// identifier bound by no declaration already in the file, in any scope; an
+// import whose bindings lose their last use is removed with the lines its
+// deletion leaves empty or whitespace-only (3). A rooted spelling's edge is
+// attributed to the innermost named code unit enclosing it, or to the file
+// where none does (4.6).
 //
 // T6.5-24's conservative operationalizations (noted per H-4 — wording is
 // free, so only the stated observables are asserted):
@@ -32,20 +36,21 @@
 //   record (S-9's timing clause: every arm's workspace past the body's first
 //   is created after a product invocation) — T6.5-23's configuration (one
 //   spec group `specs/**/*.mdx`, one code group `src/**/*.ts`, emission
-//   disabled), `specs/origin.mdx` holding `x` and `w`, and
-//   `specs/target.mdx` holding `z`, the same records, beside the arm's
-//   `src/c.ts`, TEST-SPEC's text exactly, each line ended by U+000A — under
-//   TEST-SPEC's `move specs/origin.mdx#x specs/target.mdx#y`.
+//   disabled), `specs/origin.mdx` holding `x` and `w` (in (c) `x` alone, a
+//   record of its own), and `specs/target.mdx` holding `z`, the same
+//   records, beside the arm's `src/c.ts`, TEST-SPEC's text exactly, each
+//   line ended by U+000A — under TEST-SPEC's `move specs/origin.mdx#x
+//   specs/target.mdx#y`.
 // - Per arm: `build --json` clean over the staging (the premise: the
-//   workspace valid before the move, its nested import declaration
+//   workspace valid before the move, its nested import declarations
 //   well-formed, never 14.20, as T14-12 places that assertion here); the
 //   `--preview --json` twin taken first (a preview modifies nothing, 6.6);
 //   the real move with `--json`, exit 0 and the form-exact 12.7
 //   performed-operation document; `src/c.ts` after it a plain file of valid
 //   UTF-8 that TypeScript 5.9.3 accepts both as module code and as script
 //   code (S-9's judge, `judgeTypeScript`, held as an assertion on the
-//   product's bytes); `query edges` for the arm's edge; then `check --json`
-//   and `build --json`, each exactly `{"findings": []}`.
+//   product's bytes); `query edges` for each of the arm's edges; then
+//   `check --json` and `build --json`, each exactly `{"findings": []}`.
 // - Arms (a), (f), (g), and (h) re-root the moved spelling at a held nested
 //   binding and add nothing: T6.5-22(a)'s judgement reads no added
 //   declaration, and the file is exactly the staged bytes with the
@@ -60,9 +65,52 @@
 //   `references` edge from `src/c.ts#f` ((a)), from `src/c.ts#f.h` ((g):
 //   the arrow function `h` in `f`, a named unit, 4.6), or from `src/c.ts#N`
 //   ((h)); the call's `embeds` edge from `src/c.ts#g` ((f)).
-// - Before any product is driven on an arm, the staged text and the form the
-//   rewrite alone composes are held to the same TypeScript judge (S-9: a
-//   form it rejects is a harness defect, never a product verdict).
+// - Arms (b) through (e) find no held binding eligible and gain one
+//   declaration of the target module: the file is exactly the staged bytes
+//   composed in pre-operation coordinates (6.6) — the spelling's span
+//   replaced by `<X>.y` (in (e) the call's by `<Y>(T.y)`), in (c) `O`'s
+//   nested declaration removed with its line, a rewrite spelled `""` over
+//   TEST-SPEC's [22, 62) (T6.5-23 (h)'s expression of a removal), and the
+//   declaration inserted under 6.5's line discipline at an admissible
+//   offset TEST-SPEC names: 38 in (b) and (d), 70 in (c), 53 or 91 in (e)
+//   (6.5's latitude between those two). It is value-blind in the
+//   identifier alone, read from the one declaration the file gained, and
+//   byte-exact in every other character (T6.5-8's discipline). The
+//   identifier is judged by T6.5-22(a)'s judgement (with the subprocess
+//   driver's hook, one code path), whose S-6 name analysis of the
+//   pre-operation file counts every declaration in any scope, so the
+//   nested `T` and `tt` bar those names: TEST-SPEC's "never `T`" and "never
+//   `tt`". (b), (c), and (d) add exactly `import <X> from
+//   "../specs/target.xspec"`; (e) adds exactly `import { text as <Y> } from
+//   "../specs/target.xspec"`, or `import { text } from …` where the fresh
+//   identifier is `text` itself, with no default binding (an
+//   `S23Spelling`). The preview's entry for `src/c.ts` holds exactly one
+//   `reference-rewrite`, spanning the spelling ([38, 41), [64, 67),
+//   [114, 117), [91, 97)), the one `import-addition` zero-length at the
+//   offset the bytes name (T6.6-4(b)), and exactly the `import-removal`
+//   edits listed: (c)'s [22, 62), none elsewhere. `query edges` answers
+//   each listed edge exactly: the marker's `references` edge to
+//   `specs/target.mdx#y` from `src/c.ts` ((b): a top-level statement's
+//   spelling is attributed to the file, 4.6) or from `src/c.ts#f` ((c),
+//   (d)), with, in (b), `T.z`'s from `src/c.ts#f` to `specs/target.mdx#z`;
+//   in (e), the call's `embeds` edge from `src/c.ts` and `tt(T.z)`'s from
+//   `src/c.ts#g` to `specs/target.mdx#z`. Those kept spellings' edges are
+//   asserted after the move: "as before the move", the premise build having
+//   found the staging valid.
+// - At module load each pinned construct is checked against the staged
+//   bytes — the spelling's span, (d)'s `const q = 1` at [38, 49), (c)'s
+//   nested declaration's own characters at [24, 61) and its line, the
+//   removal's [22, 62), holding nothing else but its two-space indentation
+//   and its terminator, and each admissible offset as the start of the line
+//   TEST-SPEC names — and each admissible offset's form, composed with a
+//   placeholder identifier (in (e) with `text` too), is checked equal to the
+//   text TEST-SPEC spells for the file: a mismatch is a harness defect
+//   thrown at load, never a product verdict.
+// - Before any product is driven on an arm, the staged text and the form
+//   the rewrite alone composes — or, where a declaration is added, each
+//   admissible offset's composed form, a placeholder in the identifier's
+//   place — are held to the same TypeScript judge (S-9: a form it rejects is
+//   a harness defect, never a product verdict).
 // - None is compiled under H-2's channel: TypeScript's checker rejects a
 //   nested import declaration after parsing (T4.5-10), so each arm observes
 //   xspec's surfaces alone.
@@ -74,12 +122,15 @@
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import {
   runS23Arms,
+  s23ComposedForm,
   type S23Arm,
   type S23Edge,
   type S23Span,
+  type S23Spelling,
   S23_APP,
   S23_ARGV,
   S23_CONFIG,
@@ -88,6 +139,7 @@ import {
   S23_ORIGIN_SOURCE,
   S23_TARGET,
   S23_TARGET_SOURCE,
+  S23_TARGET_SPECIFIER,
 } from "./section-6.5-v.js";
 
 // ---------------------------------------------------------------------------
@@ -97,9 +149,34 @@ import {
 /** The moved node's identity after the move. */
 const S24_MOVED = "specs/target.mdx#y";
 
+/** The kept node `T.z` and `tt(T.z)` designate in (b) and (e). */
+const S24_KEPT = "specs/target.mdx#z";
+
 /** `T`'s declaration of the target module, nested two spaces deep in the
- * function or namespace holding it ((a), (g), (h)). */
+ * function or namespace holding it ((a), (b), (d), (g), (h)). */
 const S24_NESTED_IMPORT_T = '  import T from "../specs/target.xspec"';
+
+/** The origin module's declaration binding its default and its `text` as
+ * `t` ((e), (f)). */
+const S24_IMPORT_O_T = 'import O, { text as t } from "../specs/origin.xspec"';
+
+/** `T`'s top-level declaration of the target module ((e), (f)). */
+const S24_IMPORT_T = 'import T from "../specs/target.xspec"';
+
+/** `tt`'s declaration of the target module's `text`, nested in `g` ((e),
+ * (f)). */
+const S24_NESTED_IMPORT_TT =
+  '  import { text as tt } from "../specs/target.xspec"';
+
+/** A placeholder identifier the module-load self-checks compose with. */
+const S24_PLACEHOLDER = "X";
+
+// (c)'s origin: the moved section `x` alone, so that no use of `O` remains
+// after the move and its declaration is removed.
+const S24_ORIGIN_X_ALONE: StagedMdx = stagedMdx(
+  "T6.5-24 (c) specs/origin.mdx (the moved x alone)",
+  ['<S id="x">', "Origin x text.", "</S>", ""].join("\n"),
+);
 
 /** A staged `src/c.ts` of T6.5-24 (S-9's record, declared well-formed
  * TypeScript). */
@@ -138,6 +215,37 @@ function s24Span(
     );
   }
   return { start, end };
+}
+
+/** Each line's start in `lines` joined by U+000A with a final U+000A, then
+ * the file's end, in bytes. */
+function s24Starts(lines: readonly string[]): readonly number[] {
+  const starts: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    starts.push(offset);
+    offset += Buffer.byteLength(line, "utf8") + 1;
+  }
+  starts.push(offset);
+  return starts;
+}
+
+/** `actual`, failing as a harness defect at module load unless it is
+ * TEST-SPEC's `stated` offset of `what`. */
+function s24Stated(
+  key: string,
+  what: string,
+  actual: number | undefined,
+  stated: number,
+): number {
+  if (actual !== stated) {
+    throw new Error(
+      `T6.5-24 ${key}: a harness defect — ${what} lies at ` +
+        `${String(actual)} in the staged text, not at TEST-SPEC's ` +
+        String(stated),
+    );
+  }
+  return stated;
 }
 
 /** The moved marker's `references` edge after the move, from `from`, the
@@ -194,6 +302,218 @@ function s24HeldArm(spec: {
   };
 }
 
+/** An admissible offset TEST-SPEC names for an added declaration: the start
+ * of line `line` of the staged text. */
+interface S24Offset {
+  readonly line: number;
+  readonly offset: number;
+}
+
+/** A removal TEST-SPEC states ((c)): the declaration `declaration`, its own
+ * characters at `own` on line `line`, removed with that line — `range`. */
+interface S24Removal {
+  readonly declaration: string;
+  readonly own: S23Span;
+  readonly line: number;
+  readonly range: S23Span;
+}
+
+/**
+ * The removal's range, TEST-SPEC's `range`: a harness defect, thrown at
+ * module load, unless the declaration's own characters occur once, at
+ * `own`, and `range` is their line — its start through the next line's —
+ * holding nothing else but indentation before them and the line's U+000A
+ * after them, the whitespace-only line their deletion leaves (6.5, 3).
+ */
+function s24RemovalRange(
+  key: string,
+  text: string,
+  starts: readonly number[],
+  removal: S24Removal,
+): S23Span {
+  const own = s24Span(key, text, removal.declaration, removal.own);
+  const start = s24Stated(
+    key,
+    `the start of line ${String(removal.line)}, the removal's start`,
+    starts[removal.line - 1],
+    removal.range.start,
+  );
+  const end = s24Stated(
+    key,
+    `the start of line ${String(removal.line + 1)}, the removal's end`,
+    starts[removal.line],
+    removal.range.end,
+  );
+  const bytes = Buffer.from(text, "utf8");
+  const indentation = bytes.subarray(start, own.start).toString("utf8");
+  const rest = bytes.subarray(own.end, end).toString("utf8");
+  if (!/^[ \t]*$/.test(indentation) || rest !== "\n") {
+    throw new Error(
+      `T6.5-24 ${key}: a harness defect — the removal's range ` +
+        `[${String(start)}, ${String(end)}) must hold the declaration's own ` +
+        `characters [${String(own.start)}, ${String(own.end)}), indentation ` +
+        `before them and the line's U+000A after them alone; it holds ` +
+        `${JSON.stringify(indentation)} before and ${JSON.stringify(rest)} after`,
+    );
+  }
+  return { start, end };
+}
+
+/**
+ * The module-load self-check of an arm gaining a declaration: at each
+ * admissible offset, the form `s23ComposedForm` composes — with the
+ * placeholder identifier and every identifier the declaration's spelling
+ * treats apart — is exactly the text TEST-SPEC spells for the file,
+ * `spelledForm`'s lines each ended by U+000A; a harness defect otherwise.
+ */
+function s24AssertSpelledForms(
+  arm: S23Arm,
+  offsets: readonly number[],
+  spelledForm: (ident: string, offset: number) => readonly string[],
+): void {
+  const idents = [S24_PLACEHOLDER, ...(arm.addition?.spelled?.also ?? [])];
+  for (const ident of idents) {
+    for (const offset of offsets) {
+      const composed = s23ComposedForm(arm, ident, offset);
+      const spelled = Buffer.from(
+        [...spelledForm(ident, offset), ""].join("\n"),
+        "utf8",
+      );
+      if (composed === undefined || Buffer.compare(composed, spelled) !== 0) {
+        throw new Error(
+          `T6.5-24 ${arm.key}: a harness defect — the form composed at ` +
+            `offset ${String(offset)} with the identifier \`${ident}\` ` +
+            `must be the text TEST-SPEC spells, ` +
+            `${JSON.stringify(spelled.toString("utf8"))}; it is ` +
+            (composed === undefined
+              ? "none, the offset lying inside a replaced span"
+              : JSON.stringify(composed.toString("utf8"))),
+        );
+      }
+    }
+  }
+}
+
+/**
+ * An arm whose `src/c.ts` gains a declaration of the target module ((b)
+ * through (e)), at module load: its record — `lines`, each ended by U+000A
+ * — beside T6.5-23's configuration, the origin (`origin`, else T6.5-23's
+ * `x` and `w`), and T6.5-23's target, under T6.5-23's move; the spelling's
+ * span (TEST-SPEC's, cross-checked) rewritten as `rewritten` spells it for
+ * the added binding's identifier; `removal`, where given, a rewrite spelled
+ * `""` over TEST-SPEC's range (cross-checked); the declaration —
+ * `import <X> from "../specs/target.xspec"`, or as `spelled` spells it — at
+ * TEST-SPEC's admissible offsets, each cross-checked as its line's start;
+ * the preview's one `reference-rewrite` spanning the spelling and exactly
+ * the listed `import-removal` (the `import-addition` parity `runS23Arm`
+ * asserts wherever a declaration is added); and the edges after the move.
+ * Each admissible offset's composed form is held to TEST-SPEC's spelling of
+ * the file (`s24AssertSpelledForms`).
+ */
+function s24AddedArm(spec: {
+  readonly key: string;
+  readonly lines: readonly string[];
+  readonly origin?: StagedMdx;
+  readonly spelling: string;
+  readonly span: S23Span;
+  readonly rewritten: (ident: string) => string;
+  readonly pinned?: readonly {
+    readonly spelling: string;
+    readonly span: S23Span;
+  }[];
+  readonly removal?: S24Removal;
+  readonly spelled?: S23Spelling;
+  readonly offsets: readonly S24Offset[];
+  readonly why: string;
+  readonly placement: string;
+  readonly excluded: Readonly<Record<number, string>>;
+  readonly edges: readonly S23Edge[];
+  readonly spelledForm: (ident: string, offset: number) => readonly string[];
+}): S23Arm {
+  const text = [...spec.lines, ""].join("\n");
+  const span = s24Span(spec.key, text, spec.spelling, spec.span);
+  for (const pin of spec.pinned ?? []) {
+    s24Span(spec.key, text, pin.spelling, pin.span);
+  }
+  const starts = s24Starts(spec.lines);
+  const offsets = spec.offsets.map(({ line, offset }) =>
+    s24Stated(
+      spec.key,
+      `the start of line ${String(line)}, an admissible offset`,
+      starts[line - 1],
+      offset,
+    ),
+  );
+  const removal =
+    spec.removal === undefined
+      ? undefined
+      : s24RemovalRange(spec.key, text, starts, spec.removal);
+  const arm: S23Arm = {
+    test: "T6.5-24",
+    key: spec.key,
+    receiver: S23_APP,
+    kind: "typescript",
+    text,
+    staged: s24StagedApp(spec.key, text),
+    files: {
+      "xspec.config.ts": S23_CONFIG,
+      [S23_ORIGIN]: spec.origin ?? S23_ORIGIN_SOURCE,
+      [S23_TARGET]: S23_TARGET_SOURCE,
+    },
+    argv: S23_ARGV,
+    rewrites: [
+      ...(removal === undefined ? [] : [{ ...removal, spelled: () => "" }]),
+      { ...span, spelled: spec.rewritten },
+    ],
+    addition: {
+      specifier: S23_TARGET_SPECIFIER,
+      ...(spec.spelled === undefined ? {} : { spelled: spec.spelled }),
+      offsets,
+      why: spec.why,
+    },
+    placement: spec.placement,
+    excluded: spec.excluded,
+    preview: {
+      rewrites: [span],
+      removals: removal === undefined ? [] : [removal],
+    },
+    edges: spec.edges,
+  };
+  s24AssertSpelledForms(arm, offsets, spec.spelledForm);
+  return arm;
+}
+
+/** Why offset 0 is excluded: no statement's end precedes it (6.5). */
+const S24_NO_STATEMENT_BEFORE =
+  "offset 0 — no statement's end precedes it (6.5)";
+
+/** Why a mid-line admissible offset loses to the line-start one. */
+function s24MidLine(where: string, lineStart: string): string {
+  return (
+    `${where} — admissible, but mid-line, while ${lineStart} is ` +
+    "admissible, taken over any other (6.5's preference)"
+  );
+}
+
+/** Why an offset is excluded as untimely: `between` lies wholly between the
+ * declaration of the binding the spelling was rooted at and it. */
+function s24Untimely(where: string, between: string): string {
+  return (
+    `${where} — untimely, ${between} lying wholly between it and the ` +
+    "declaration of the binding the spelling was rooted at (6.5: an added " +
+    "binding is declared at or before that binding, or after it with no " +
+    "top-level statement between them but import declarations)"
+  );
+}
+
+/** Why an offset inside a function's body is excluded. */
+function s24Inside(where: string, unit: string, more = ""): string {
+  return (
+    `${where} — inside the statement \`${unit}\`, where a declaration is ` +
+    `no top-level one (6.5; T6.5-23(n))${more}`
+  );
+}
+
 // (a) a held nested binding, visible and timely.
 const S24_A = s24HeldArm({
   key: "(a)",
@@ -221,15 +541,352 @@ const S24_A = s24HeldArm({
     "of line 2 and writes `<X>.y`",
 });
 
+// (b) the same binding invisible to a spelling outside its scope.
+const S24_B = s24AddedArm({
+  key: "(b)",
+  lines: [
+    S23_IMPORT_O,
+    "O.x",
+    "O.w",
+    "export function f() {",
+    S24_NESTED_IMPORT_T,
+    "  T.z",
+    "}",
+  ],
+  spelling: "O.x",
+  span: { start: 38, end: 41 },
+  rewritten: (ident) => `${ident}.y`,
+  offsets: [{ line: 2, offset: 38 }],
+  why:
+    "`T`'s scope is `f`'s (4.5: a nested import's binding is visible only " +
+    "within its own scope), so `T` is ineligible for the top-level marker " +
+    "`O.x`, and the file holds no other binding of the target module, so " +
+    "one declaration of it is added, binding `<X>`, never `T` (bound by a " +
+    "declaration already in the file, in `f`'s scope); `O` keeps its use " +
+    "by `O.w`",
+  placement:
+    "the start of line 2, offset 38, the only line-start admissible offset " +
+    "— the end of line 1, admissible too, is mid-line, and every later " +
+    "offset is untimely, `O.x` standing between — the marker becoming " +
+    "`<X>.y`, and `O.w`, `f`, and `f`'s body unchanged; a product picking a " +
+    "held binding by module or by name alone writes `T.y` at top level, " +
+    "rooted at nothing there (T4.5-10(c)), and one binding `T` at top " +
+    "level makes the pair 14.15 reports, whatever scope each declares it " +
+    "in (T4.5-10(d))",
+  excluded: {
+    0: S24_NO_STATEMENT_BEFORE,
+    37: s24MidLine(
+      "the end of line 1, `O`'s declaration's end",
+      "the start of line 2",
+    ),
+    41: s24Untimely("the end of `O.x`", "the statement `O.x`"),
+    42: s24Untimely("the start of line 3", "the statement `O.x`"),
+    46: s24Untimely("the start of line 4", "the statements `O.x` and `O.w`"),
+    68: s24Inside(
+      "the start of line 5",
+      "f",
+      ", and untimely besides, `O.x` and `O.w` standing between",
+    ),
+    108: s24Inside(
+      "the start of line 6",
+      "f",
+      ", and untimely besides, `O.x` and `O.w` standing between",
+    ),
+    114: s24Inside(
+      "the start of line 7",
+      "f",
+      ", and untimely besides, `O.x` and `O.w` standing between",
+    ),
+    116: s24Untimely("the file's end", "the statements `O.x`, `O.w`, and `f`"),
+  },
+  edges: [
+    s24MarkerEdge(S23_APP),
+    {
+      from: `${S23_APP}#f`,
+      to: S24_KEPT,
+      kind: "references",
+      what: "the kept spelling `T.z`",
+    },
+  ],
+  spelledForm: (ident) => [
+    'import O from "../specs/origin.xspec"',
+    `import ${ident} from "../specs/target.xspec"`,
+    `${ident}.y`,
+    "O.w",
+    "export function f() {",
+    '  import T from "../specs/target.xspec"',
+    "  T.z",
+    "}",
+  ],
+});
+
+// (c) an added declaration timely directly after the function holding the
+// replaced nested binding, that binding's declaration removed with its line.
+const S24_C = s24AddedArm({
+  key: "(c)",
+  lines: [
+    "export function f() {",
+    `  ${S23_IMPORT_O}`,
+    "  O.x",
+    "}",
+    "export const k = 1",
+  ],
+  origin: S24_ORIGIN_X_ALONE,
+  spelling: "O.x",
+  span: { start: 64, end: 67 },
+  rewritten: (ident) => `${ident}.y`,
+  removal: {
+    declaration: S23_IMPORT_O,
+    own: { start: 24, end: 61 },
+    line: 2,
+    range: { start: 22, end: 62 },
+  },
+  offsets: [{ line: 5, offset: 70 }],
+  why:
+    "the marker is rooted at the nested `O`, and the file holds no binding " +
+    "of the target module, so one declaration of it is added; `O`'s " +
+    "declaration, its last use gone, is removed from `f`'s body with its " +
+    "line — its own characters [24, 61) deleted and the line they leave " +
+    "holding two spaces dropped with its terminator, [22, 62) (6.5, 3)",
+  placement:
+    "the start of line 5, offset 70, the only line-start admissible offset " +
+    "— every offset inside `f` lies inside a statement, a declaration there " +
+    "being no top-level one (T6.5-23(n)); offset 70 follows `f`'s end and " +
+    "is timely, `f` enclosing `O`'s declaration and so not standing between " +
+    "it and the added one (6.5), while every later offset is untimely, " +
+    "`export const k = 1` lying wholly between them; `f`'s end, 69, " +
+    "admissible too, is mid-line — the marker becoming `<X>.y`; a product " +
+    "counting the enclosing `f` as standing between finds no admissible " +
+    "offset and refuses the move (`refused-invalid-rewrite`), one placing " +
+    "the declaration inside `f`'s body or after `export const k = 1` fails " +
+    "the byte contract, and so does one deleting the nested declaration's " +
+    "own characters alone, which leaves the two-space line behind",
+  excluded: {
+    0:
+      "offset 0 — `f` is the file's first statement, so no statement's end " +
+      "precedes it (6.5)",
+    22: s24Inside(
+      "the start of line 2, the removal's start",
+      "f",
+      ": a product placing the declaration in `f`'s body fails",
+    ),
+    62: s24Inside(
+      "the start of line 3, the removal's end",
+      "f",
+      ": a product placing the declaration in `f`'s body fails",
+    ),
+    68: s24Inside("the start of line 4", "f"),
+    69: s24MidLine("`f`'s end, 69", "the start of line 5"),
+    88: s24Untimely(
+      "the end of `export const k = 1`",
+      "the statement `export const k = 1`",
+    ),
+    89: s24Untimely("the file's end", "the statement `export const k = 1`"),
+  },
+  edges: [s24MarkerEdge(`${S23_APP}#f`)],
+  spelledForm: (ident) => [
+    "export function f() {",
+    `  ${ident}.y`,
+    "}",
+    `import ${ident} from "../specs/target.xspec"`,
+    "export const k = 1",
+  ],
+});
+
+// (d) a held nested binding, visible but untimely: a top-level statement
+// lying wholly between the replaced binding's declaration and the held
+// one's.
+const S24_D = s24AddedArm({
+  key: "(d)",
+  lines: [
+    S23_IMPORT_O,
+    "const q = 1",
+    "export function f() {",
+    S24_NESTED_IMPORT_T,
+    "  O.x",
+    "  O.w",
+    "  T.z",
+    "}",
+  ],
+  spelling: "O.x",
+  span: { start: 114, end: 117 },
+  rewritten: (ident) => `${ident}.y`,
+  pinned: [{ spelling: "const q = 1", span: { start: 38, end: 49 } }],
+  offsets: [{ line: 2, offset: 38 }],
+  why:
+    "`T` is visible at the marker `O.x`, both standing in `f`'s scope, but " +
+    "untimely — the statement `const q = 1`, [38, 49), lies wholly after " +
+    "`O`'s declaration and before `T`'s (6.5) — so `T` is ineligible, and " +
+    "the file holds no other binding of the target module, so one " +
+    "declaration of it is added, binding `<X>`, never `T`; `O` keeps its " +
+    "use by `O.w`",
+  placement:
+    "the start of line 2, offset 38, the only line-start admissible offset " +
+    "— the end of line 1, admissible too, is mid-line; the start of line 3 " +
+    "and every later offset outside `f` are untimely, `const q = 1` " +
+    "standing between, and every offset inside `f` lies inside a statement " +
+    "(T6.5-23(n)) — `const q = 1` staying below the added line and the " +
+    "marker's span [114, 117) becoming `<X>.y`, every other byte unchanged; " +
+    "a product judging timeliness for top-level held bindings alone " +
+    "re-roots the marker to `T.y` and adds nothing",
+  excluded: {
+    0: S24_NO_STATEMENT_BEFORE,
+    37: s24MidLine(
+      "the end of line 1, `O`'s declaration's end",
+      "the start of line 2",
+    ),
+    49: s24Untimely("the end of `const q = 1`", "the statement `const q = 1`"),
+    50: s24Untimely("the start of line 3", "the statement `const q = 1`"),
+    72: s24Inside("the start of line 4", "f"),
+    112: s24Inside("the start of line 5", "f"),
+    118: s24Inside("the start of line 6", "f"),
+    124: s24Inside("the start of line 7", "f"),
+    130: s24Inside("the start of line 8", "f"),
+    132: s24Untimely("the file's end", "the statements `const q = 1` and `f`"),
+  },
+  edges: [s24MarkerEdge(`${S23_APP}#f`)],
+  spelledForm: (ident) => [
+    'import O from "../specs/origin.xspec"',
+    `import ${ident} from "../specs/target.xspec"`,
+    "const q = 1",
+    "export function f() {",
+    '  import T from "../specs/target.xspec"',
+    `  ${ident}.y`,
+    "  O.w",
+    "  T.z",
+    "}",
+  ],
+});
+
+/** (e)'s added declaration: the target module's `text` alone (6.5's
+ * spellings), with no default binding. */
+const S24_TEXT_SPELLING: S23Spelling = {
+  declaration: (ident) =>
+    ident === "text"
+      ? `import { text } from "${S23_TARGET_SPECIFIER}"`
+      : `import { text as ${ident} } from "${S23_TARGET_SPECIFIER}"`,
+  form:
+    `\`import { text as <Y> } from "${S23_TARGET_SPECIFIER}"\`, or ` +
+    `\`import { text } from "${S23_TARGET_SPECIFIER}"\` where the fresh ` +
+    "identifier is `text` itself, binding the target module's `text` " +
+    "alone — no default binding",
+  also: ["text"],
+};
+
+// (e) visibility on the callee side: a nested `text` binding invisible at
+// the call.
+const S24_E = s24AddedArm({
+  key: "(e)",
+  lines: [
+    S24_IMPORT_O_T,
+    S24_IMPORT_T,
+    "t(O.x)",
+    "O.w",
+    "export function g() {",
+    S24_NESTED_IMPORT_TT,
+    "  tt(T.z)",
+    "}",
+  ],
+  spelling: "t(O.x)",
+  span: { start: 91, end: 97 },
+  rewritten: (ident) => `${ident}(T.y)`,
+  spelled: S24_TEXT_SPELLING,
+  offsets: [
+    { line: 2, offset: 53 },
+    { line: 3, offset: 91 },
+  ],
+  why:
+    "the call, its target carried into the target module, is rewritten " +
+    "whole (6.5) — its argument re-rooted at `T`, visible and timely, its " +
+    "declaration directly following `O`'s — while `tt`, the file's only " +
+    "`text` binding of the target module, is declared in `g`'s scope and " +
+    "so invisible at the top-level call, so a declaration binding that " +
+    "module's `text` alone is added, binding `<Y>`, never `tt` (bound by a " +
+    "declaration already in the file, in `g`'s scope); `O` keeps its use " +
+    "by `O.w`",
+  placement:
+    "the start of line 2 or of line 3 (offset 53 or 91), the two " +
+    "line-start admissible offsets, both timely for the callee, only the " +
+    "import declaration of `T` lying between `t`'s declaration and the " +
+    "latter (6.5's latitude between them) — the call's occurrence span " +
+    "[91, 97) becoming exactly `<Y>(T.y)`, and no other byte changing; a " +
+    "product picking a held `text` binding by module and checking only " +
+    "shadowing at the call writes `tt(T.y)` and adds nothing — `tt` bound " +
+    "nowhere at top level, so the post-move `check` reports the call " +
+    "(14.18, T4.5-10(g))",
+  excluded: {
+    0: S24_NO_STATEMENT_BEFORE,
+    52: s24MidLine(
+      "the end of line 1, `t`'s declaration's end",
+      "the start of line 2 or of line 3",
+    ),
+    90: s24MidLine(
+      "the end of line 2, `T`'s declaration's end",
+      "the start of line 2 or of line 3",
+    ),
+    97: s24Untimely("the end of `t(O.x)`", "the statement `t(O.x)`"),
+    98: s24Untimely("the start of line 4", "the statement `t(O.x)`"),
+    102: s24Untimely(
+      "the start of line 5",
+      "the statements `t(O.x)` and `O.w`",
+    ),
+    124: s24Inside("the start of line 6", "g"),
+    177: s24Inside("the start of line 7", "g"),
+    187: s24Inside("the start of line 8", "g"),
+    189: s24Untimely(
+      "the file's end",
+      "the statements `t(O.x)`, `O.w`, and `g`",
+    ),
+  },
+  edges: [
+    { from: S23_APP, to: S24_MOVED, kind: "embeds", what: "the call" },
+    {
+      from: `${S23_APP}#g`,
+      to: S24_KEPT,
+      kind: "embeds",
+      what: "the kept call `tt(T.z)`",
+    },
+  ],
+  spelledForm: (ident, offset) => {
+    const added =
+      ident === "text"
+        ? 'import { text } from "../specs/target.xspec"'
+        : `import { text as ${ident} } from "../specs/target.xspec"`;
+    const origin = 'import O, { text as t } from "../specs/origin.xspec"';
+    const target = 'import T from "../specs/target.xspec"';
+    const head =
+      offset === 53
+        ? [origin, added, target]
+        : offset === 91
+          ? [origin, target, added]
+          : undefined;
+    if (head === undefined) {
+      throw new Error(
+        `T6.5-24 (e): a harness defect — TEST-SPEC spells no form at ` +
+          `offset ${String(offset)}`,
+      );
+    }
+    return [
+      ...head,
+      `${ident}(T.y)`,
+      "O.w",
+      "export function g() {",
+      '  import { text as tt } from "../specs/target.xspec"',
+      "  tt(T.z)",
+      "}",
+    ];
+  },
+});
+
 // (f) the callee side's control: the nested `text` binding visible and
 // timely at the call.
 const S24_F = s24HeldArm({
   key: "(f)",
   lines: [
-    'import O, { text as t } from "../specs/origin.xspec"',
-    'import T from "../specs/target.xspec"',
+    S24_IMPORT_O_T,
+    S24_IMPORT_T,
     "export function g() {",
-    '  import { text as tt } from "../specs/target.xspec"',
+    S24_NESTED_IMPORT_TT,
     "  t(O.x)",
     "  tt(T.z)",
     "}",
@@ -312,25 +969,43 @@ const S24_H = s24HeldArm({
 });
 
 /** T6.5-24's staged arms, in TEST-SPEC's order. */
-const S24_ARMS: readonly S23Arm[] = [S24_A, S24_F, S24_G, S24_H];
+const S24_ARMS: readonly S23Arm[] = [
+  S24_A,
+  S24_B,
+  S24_C,
+  S24_D,
+  S24_E,
+  S24_F,
+  S24_G,
+  S24_H,
+];
 
 /**
  * T6.5-24 (SUITE-25): 6.5's eligibility of a held binding for a moved
  * spelling — visible at the occurrence, a nested import's binding only
  * within its own scope (4.5), and, in a TypeScript source, timely under the
  * wholly-between rule, a statement enclosing a nested declaration never
- * standing between it and another. Its arms (a), (f), (g), and (h) each
- * hold a nested binding visible and timely at the moved spelling, which is
+ * standing between it and another. Arms (a), (f), (g), and (h) each hold a
+ * nested binding visible and timely at the moved spelling, which is
  * re-rooted at it, nothing added: (a) `T` imported in the function holding
  * the marker, (f) a call's callee re-rooted at a nested `text` binding, (g)
  * the marker in an arrow function nested in `T`'s scope, (h) the holding
- * container a namespace. Its arms (b) through (e), where the file gains a
- * declaration, are not staged yet.
+ * container a namespace. Arms (b) through (e) each find no held binding
+ * eligible and gain one declaration of the target module, its fresh
+ * identifier never one a nested declaration binds: (b) the nested `T`
+ * invisible at a top-level marker, the declaration added at 38; (c) the
+ * marker rooted at a nested `O` whose declaration, its last use gone, is
+ * removed with its line over [22, 62), the declaration added at 70,
+ * directly after the function holding it; (d) the nested `T` visible but
+ * untimely, `const q = 1` lying wholly between, the declaration added at
+ * 38; (e) the callee side, the nested `tt` invisible at a top-level call,
+ * which gains `import { text as <Y> } …` (or `import { text } …`) at 53 or
+ * 91.
  */
 const T6_5_24 = defineProductTest({
   id: "T6.5-24",
   title:
-    "nested bindings: visibility and wholly-between timeliness — arms (a), (f), (g), and (h), each `move specs/origin.mdx#x specs/target.mdx#y` over `src/c.ts` (`specs/origin.mdx` holding `x` and `w`, `specs/target.mdx` holding `z`), the workspace valid before the move, its nested import declaration well-formed (never 14.20), and a held nested binding visible and timely at the moved spelling, which is re-rooted at it, nothing added, `O`'s declaration kept by `O.w`: (a) `import O from \"../specs/origin.xspec\"` above `export function f() {` holding `import T from \"../specs/target.xspec\"`, `O.x`, `O.w`, and `T.z` — `T` visible at the marker and timely, `f` enclosing its declaration and so standing between nothing — the file's one change the marker's span [102, 105) replaced by `T.y`, and `query edges` the marker's `references` edge from `src/c.ts#f` to `specs/target.mdx#y`; (f) the callee side: `t(O.x)` in `g`, beside `g`'s nested `import { text as tt } from \"../specs/target.xspec\"`, below `import O, { text as t } …` and `import T …`, `O.w` after `g` — the call's span [168, 174) replaced by `tt(T.y)`, and the call's `embeds` edge from `src/c.ts#g`; (g) (a) with the marker in the arrow function `h` in `f`, a scope nested within `T`'s — [120, 123) replaced by `T.y`, the edge from `src/c.ts#f.h`; (h) (a) with `namespace N {` in `export function f() {`'s place — [94, 97) replaced by `T.y`, the edge from `src/c.ts#N` — each move exiting 0, `src/c.ts` after it well-formed (TypeScript 5.9.3's module and script readings) and byte-composable exactly, no declaration added, the preview's one `reference-rewrite` spanning the replaced span and no `import-addition` or `import-removal`, and `check` and `build` clean after it (SPEC 6.5, 2.4, 4.5, 4.6, 5.2, 6.6, 11.1, 12.7, 14.20)",
+    "nested bindings: visibility and wholly-between timeliness — arms (a) through (h), each `move specs/origin.mdx#x specs/target.mdx#y` over `src/c.ts` (`specs/origin.mdx` holding `x` and `w`, in (c) `x` alone, and `specs/target.mdx` holding `z`), the workspace valid before the move, its nested import declarations well-formed (never 14.20): (a) `import O from \"../specs/origin.xspec\"` above `export function f() {` holding `import T from \"../specs/target.xspec\"`, `O.x`, `O.w`, and `T.z` — `T` visible at the marker and timely, `f` enclosing its declaration and so standing between nothing — the marker re-rooted at `T`, nothing added, the file's one change the marker's span [102, 105) replaced by `T.y`, and `query edges` the marker's `references` edge from `src/c.ts#f` to `specs/target.mdx#y`; (b) `T` invisible outside its scope: `import O …`, `O.x`, and `O.w` above `f` holding `import T …` and `T.z` — the file gains `import <X> from \"../specs/target.xspec\"` at offset 38, the start of line 2, `<X>` never `T`, the marker's span [38, 41) becoming `<X>.y`, every other byte unchanged, the preview's `reference-rewrite` spanning [38, 41), and the marker's `references` edge from `src/c.ts` beside `T.z`'s from `src/c.ts#f` to `specs/target.mdx#z`; (c) an added declaration timely directly after the function holding the replaced nested binding: `f` holding `import O …` and `O.x`, then `export const k = 1` — `O`'s declaration removed with its line over [22, 62), the declaration added at 70, the start of line 5, the file becoming exactly `export function f() {`, `  <X>.y`, `}`, `import <X> from \"../specs/target.xspec\"`, `export const k = 1`, the preview's `reference-rewrite` spanning [64, 67) and its one `import-removal` spanning [22, 62), and the marker's edge from `src/c.ts#f`; (d) a held nested binding visible but untimely: (a) with `const q = 1` between `O`'s declaration and `f` — the declaration added at 38, `<X>` never `T`, the marker's span [114, 117) becoming `<X>.y`, the preview's `reference-rewrite` spanning [114, 117), and the marker's edge from `src/c.ts#f`; (e) the callee side: `t(O.x)` at top level below `import O, { text as t } …` and `import T …`, `g` holding `import { text as tt } from \"../specs/target.xspec\"` and `tt(T.z)` — `tt` invisible at the call, the file gains exactly `import { text as <Y> } from \"../specs/target.xspec\"` (or `import { text } …` where the fresh identifier is `text`), `<Y>` never `tt`, at offset 53 or 91, the call's span [91, 97) becoming `<Y>(T.y)`, the preview's `reference-rewrite` spanning [91, 97), and the call's `embeds` edge from `src/c.ts` beside `tt(T.z)`'s from `src/c.ts#g` to `specs/target.mdx#z`; (f) the callee side's control: `t(O.x)` in `g`, beside `g`'s nested `import { text as tt } …`, `O.w` after `g` — the call re-rooted at `tt` and `T`, nothing added, its span [168, 174) replaced by `tt(T.y)`, and the call's `embeds` edge from `src/c.ts#g`; (g) (a) with the marker in the arrow function `h` in `f`, a scope nested within `T`'s — [120, 123) replaced by `T.y`, nothing added, the edge from `src/c.ts#f.h`; (h) (a) with `namespace N {` in `export function f() {`'s place — [94, 97) replaced by `T.y`, nothing added, the edge from `src/c.ts#N` — each move exiting 0, `src/c.ts` after it well-formed (TypeScript 5.9.3's module and script readings) and byte-composable exactly, value-blind in an added declaration's fresh identifier alone, `O`'s declaration kept by `O.w` but in (c), the preview's edits for `src/c.ts` exactly those listed — the one `import-addition` at the offset the real operation used where the file gains a declaration (T6.6-4(b)), none elsewhere, and no `import-removal` but (c)'s — and `check` and `build` clean after it (SPEC 6.5, 2.4, 3, 4.5, 4.6, 5.2, 6.6, 11.1, 12.7, 14.20)",
   run: (product) => runS23Arms(product, "T6.5-24", S24_ARMS),
 });
 
