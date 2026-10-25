@@ -779,8 +779,8 @@ interface BoundName {
 /**
  * One non-import declaration binding a name at value level in a scope an
  * import binds in (SPEC 2.4; `scopeValueDeclarations`): a variable,
- * function, class, or enum declaration, or a namespace declaration
- * binding a value.
+ * function, class, or enum declaration, a parameter, where that scope is
+ * a function's (2.4, 4.5), or a namespace declaration binding a value.
  */
 interface ValueDeclaration {
   readonly name: string;
@@ -789,6 +789,7 @@ interface ValueDeclaration {
   /** The construct binding the name, as a 14.15 locates it (SPEC 14, 1.7). */
   readonly construct:
     | tst.VariableDeclaration
+    | tst.ParameterDeclaration
     | tst.FunctionDeclaration
     | tst.ClassDeclaration
     | tst.EnumDeclaration
@@ -1296,11 +1297,13 @@ class CodeAnalyzer {
    * SPEC 14, 1.7: the construct binding a colliding declaration's name —
    * a variable declarator by its own characters, its name or binding
    * pattern through its initializer, the enclosing statement excluded; a
-   * function, class, enum, or namespace declaration by its own
-   * characters, a decorator list included and a leading `export` or
-   * `export default`, with whatever separates it from the construct's
-   * first token, excluded — only what leads, so `@dec export class C {}`
-   * spans whole from its `@`.
+   * parameter, function, class, enum, or namespace declaration by its own
+   * characters, its decorators and modifiers included (a parameter's `...`
+   * too, so `@dec private readonly P: number` spans from its `@` and
+   * `...R: number[]` from its `...`, a binding pattern and an initializer
+   * whole) and a leading `export` or `export default`, with whatever
+   * separates it from the construct's first token, excluded — only what
+   * leads, so `@dec export class C {}` spans whole from its `@`.
    */
   private collidingConstructRange(
     construct: ValueDeclaration["construct"],
@@ -2624,24 +2627,28 @@ function importBindingScope(declaration: tst.Node): tst.Node {
  * file, a module declaration, a function-like, or a class static block —
  * in document order, where TypeScript's binder declares the name (which
  * binding roots a chain being the language's scoping question, 2.4, 4.5):
- * among the statements of the scope's body, each name a variable
- * declarator's name or binding pattern binds, a named function, class, or
- * enum declaration, and a namespace declaration binding a value; and in a
- * statement nested there — a block, a branch, a loop, a `try` part, a
- * `switch` clause, a labeled statement — a `var` (JavaScript's hoisting),
- * a namespace declaration binding a value (TypeScript's binder declares
- * one in its container wherever it stands, its placement a post-parse
- * check 14.20 excludes), and, outside strict mode code, a function
- * declaration (which the binder declares in its container likewise, after
- * ECMAScript's Annex B block-level functions). Any other declaration
- * nested there binds in an inner scope, which shadows instead (4.5), as
- * does anything inside a function, class, or namespace. Type-level
- * declarations (interfaces, type aliases, namespaces binding no value)
- * bind nothing here, and neither does a parameter: 2.4 names none among
- * the declarations a spec module import's binding collides with (nor 14
- * a location for one), and a parameter of the import's own scope shadows
- * nothing (4.5: "Shadowing is an inner scope's"), so the import roots the
- * chain.
+ * for a function-like scope, first each name its parameters bind — 2.4's
+ * "a parameter, where that scope is a function's (4.5)": a parameter's
+ * name, or each name its binding pattern binds, the parameter the
+ * construct 14 locates — save a `this` parameter, which binds no name an
+ * import can; then, among the statements of the scope's body, each name a
+ * variable declarator's name or binding pattern binds, a named function,
+ * class, or enum declaration, and a namespace declaration binding a value;
+ * and in a statement nested there — a block, a branch, a loop, a `try`
+ * part, a `switch` clause, a labeled statement — a `var` (JavaScript's
+ * hoisting), a namespace declaration binding a value (TypeScript's binder
+ * declares one in its container wherever it stands, its placement a
+ * post-parse check 14.20 excludes), and, outside strict mode code, a
+ * function declaration (which the binder declares in its container
+ * likewise, after ECMAScript's Annex B block-level functions). Any other
+ * declaration nested there binds in an inner scope, which shadows instead
+ * (4.5) — a catch clause's parameter among them, bound in the catch
+ * clause's scope — as does anything inside a function, class, or
+ * namespace, an inner function's parameters included, while an enclosing
+ * function's parameters belong to an enclosing scope, which the import
+ * shadows (4.5: "Shadowing is an inner scope's"). Type-level declarations
+ * (interfaces, type aliases, namespaces binding no value, type
+ * parameters) bind nothing here.
  */
 function scopeValueDeclarations(
   scope: tst.Node,
@@ -2651,6 +2658,23 @@ function scopeValueDeclarations(
   if (body === undefined) return [];
   const sloppy = !isStrictModeCode(body, sourceFile);
   const found: ValueDeclaration[] = [];
+  // SPEC 2.4: "a parameter, where that scope is a function's (4.5)" — the
+  // parameters precede the body in document order. TypeScript's binder
+  // declares an identifier-named parameter as itself and a binding
+  // pattern's names as its elements, in the function's own locals, where
+  // it declares the function body's imports too.
+  if (ts.isFunctionLike(scope)) {
+    for (const parameter of scope.parameters) {
+      if (ts.isIdentifier(parameter.name) && parameter.name.text === "this") {
+        continue;
+      }
+      const names: [string, tst.Node][] = [];
+      bindingNames(parameter.name, parameter, names);
+      for (const [name, declaration] of names) {
+        found.push({ name, declaration, construct: parameter });
+      }
+    }
+  }
   const declarators = (list: tst.VariableDeclarationList): void => {
     for (const declarator of list.declarations) {
       const names: [string, tst.Node][] = [];
@@ -2825,8 +2849,8 @@ function isStrictModeCode(node: tst.Node, sourceFile: tst.SourceFile): boolean {
 
 /**
  * Every identifier a binding name binds, with the declaration node
- * TypeScript binds it to: the declarator for a plain name, the binding
- * element for a name inside a binding pattern.
+ * TypeScript binds it to: the declarator or parameter for a plain name,
+ * the binding element for a name inside a binding pattern.
  */
 function bindingNames(
   name: tst.BindingName,
