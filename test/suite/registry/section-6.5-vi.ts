@@ -1,9 +1,10 @@
 // TEST-SPEC §6.5 (move), sixth part — SUITE-25 (continued): T6.5-24, nested
-// bindings: visibility and wholly-between timeliness. T6.5-1 … T6.5-10 are
-// section-6.5.ts's business, T6.5-11 section-6.5-ii.ts's, T6.5-12 …
-// T6.5-19 section-6.5-iii.ts's, T6.5-20 … T6.5-22 section-6.5-iv.ts's, and
-// T6.5-23 section-6.5-v.ts's; this module keeps that file's edits bounded
-// (the section-10.7-i/-ii precedent).
+// bindings: visibility and wholly-between timeliness; and T6.5-25, a
+// TypeScript declaration standing as another statement's body stays.
+// T6.5-1 … T6.5-10 are section-6.5.ts's business, T6.5-11
+// section-6.5-ii.ts's, T6.5-12 … T6.5-19 section-6.5-iii.ts's, T6.5-20 …
+// T6.5-22 section-6.5-iv.ts's, and T6.5-23 section-6.5-v.ts's; this module
+// keeps that file's edits bounded (the section-10.7-i/-ii precedent).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -118,12 +119,72 @@
 //   fails once at the end, naming every arm that failed, so one product
 //   failure hides no other arm's verdict. A harness error — anything but a
 //   diagnosed assertion failure, a hang included — propagates at once.
+//
+// SPEC 6.5 (Import edits): in a TypeScript source an import declaration
+// standing as another statement's body, where TypeScript's parser admits one
+// (14.20) — either branch of an `if` statement, or the body of a `do`,
+// `while`, `for`, `for…in`, `for…of`, `with`, or labeled statement — stays,
+// its bindings unused and no removal reported for it (6.6), since its
+// deletion would leave that statement no body.
+//
+// T6.5-25's conservative operationalizations (noted per H-4):
+// - Its ten arms are `S23Arm`s run by `runS23Arms`, as T6.5-24's are: one
+//   fresh workspace per arm (H-1) of records — T6.5-23's configuration and
+//   target (`specs/target.mdx` holding `z`), `specs/origin.mdx` holding `x`
+//   alone (TEST-SPEC: holding `x`; a record of this test's own), and the
+//   arm's `src/c.ts`, TEST-SPEC's text exactly, each line ended by U+000A —
+//   under TEST-SPEC's `move specs/origin.mdx#x specs/target.mdx#y`. Nine
+//   top-level arms (`s25TopLevelArm`) stage one statement each, holding
+//   `import O from "../specs/origin.xspec"` as its body, above `O.x`; the
+//   tenth, `(nested)`, stages `export function f() {`, `  if (c) import O
+//   from "../specs/origin.xspec"`, `  O.x`, `}`.
+// - Before the move (the arm's `before`, asserted after the premise `build
+//   --json` clean and before the preview): `check --json` exactly
+//   `{"findings": []}` — the statement-body declaration well-formed, never
+//   14.20, as T14-12 places that assertion here — and `query edges --from
+//   <unit> --to specs/origin.mdx#x --kinds references` exactly the marker's
+//   edge, the marker rooted at the declaration, which binds in the file's
+//   scope, or in `f`'s (4.5): from `src/c.ts` (a top-level spelling is
+//   attributed to the file, 4.6), in the nested arm from `src/c.ts#f`.
+// - After it, as for T6.5-24's arms gaining a declaration: exit 0 and the
+//   form-exact 12.7 document; `src/c.ts` well-formed under S-9's judge and
+//   exactly the staged bytes composed in pre-operation coordinates (6.6) —
+//   the marker's span replaced by `<X>.y` and `import <X> from
+//   "../specs/target.xspec"` inserted under 6.5's line discipline at the one
+//   admissible offset TEST-SPEC names, the start of line 2 (in the nested
+//   arm the file's end, 77) — so the declaration stays in place
+//   byte-for-byte and nothing else changes; value-blind in `<X>` alone, read
+//   from the one declaration the file gained (T6.5-22(a)'s judgement reads
+//   top-level declarations alone, so the kept one is never read as added)
+//   and judged by T6.5-22(a)'s judgement, which bars `O`. The preview's entry
+//   for `src/c.ts` holds exactly one `reference-rewrite`, spanning the
+//   marker, the one `import-addition`, zero-length at that offset
+//   (T6.6-4(b)), and no `import-removal`; `query edges` answers the marker's
+//   `references` edge from the same unit to `specs/target.mdx#y`; then
+//   `check --json` and `build --json` are clean. A product deleting the
+//   declaration fails the byte contract — and, in the `do` arm, the
+//   post-move well-formedness check too (`do  while (c)`, 14.20).
+// - At module load each arm's pins are checked against the staged bytes:
+//   the declaration's own characters once, inside its statement (TEST-SPEC's
+//   [31, 68) in the nested arm), the marker once, at the start of line 2
+//   (TEST-SPEC's [71, 74) in the nested arm, and its `}` at [75, 76), `f`'s
+//   end 76), and the admissible offset as its line's start; the form
+//   composed at that offset with a placeholder identifier is checked equal
+//   to the text TEST-SPEC spells for the file (`s24AssertSpelledForms`), and
+//   that text and the staged one are held to S-9's TypeScript judge,
+//   `judgeTypeScript` (`s25AssertWellFormed`) — a mismatch a harness defect
+//   thrown at load, never a product verdict. Before any product is driven on
+//   an arm, `runS23Arm` judges its premises again.
+// - None is compiled under H-2's channel: TypeScript's checker rejects a
+//   nested import declaration after parsing (T4.5-10). Every arm runs, the
+//   body failing once at the end, naming every arm that failed.
 
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
+import { judgeTypeScript } from "../../helpers/ts-derivability.js";
 import {
   runS23Arms,
   s23ComposedForm,
@@ -187,13 +248,15 @@ function s24StagedApp(key: string, text: string): StagedTs {
 /**
  * The byte span of `spelling` in `text` (UTF-8), TEST-SPEC's `stated` one: a
  * harness defect, thrown at module load, unless the spelling occurs exactly
- * once in the staged text, there.
+ * once in the staged text, there. `test` names the registered test in the
+ * error (T6.5-25's pins share this).
  */
 function s24Span(
   key: string,
   text: string,
   spelling: string,
   stated: S23Span,
+  test = "T6.5-24",
 ): S23Span {
   const bytes = Buffer.from(text, "utf8");
   const start = bytes.indexOf(spelling);
@@ -206,7 +269,7 @@ function s24Span(
     end !== stated.end
   ) {
     throw new Error(
-      `T6.5-24 ${key}: a harness defect — the staged ${S23_APP} must hold ` +
+      `${test} ${key}: a harness defect — the staged ${S23_APP} must hold ` +
         `\`${spelling}\` exactly once, at TEST-SPEC's ` +
         `[${String(stated.start)}, ${String(stated.end)}); it is found ` +
         (start < 0
@@ -231,16 +294,18 @@ function s24Starts(lines: readonly string[]): readonly number[] {
 }
 
 /** `actual`, failing as a harness defect at module load unless it is
- * TEST-SPEC's `stated` offset of `what`. */
+ * TEST-SPEC's `stated` offset of `what` — `test` naming the registered test
+ * in the error (T6.5-25's pins share this). */
 function s24Stated(
   key: string,
   what: string,
   actual: number | undefined,
   stated: number,
+  test = "T6.5-24",
 ): number {
   if (actual !== stated) {
     throw new Error(
-      `T6.5-24 ${key}: a harness defect — ${what} lies at ` +
+      `${test} ${key}: a harness defect — ${what} lies at ` +
         `${String(actual)} in the staged text, not at TEST-SPEC's ` +
         String(stated),
     );
@@ -360,11 +425,12 @@ function s24RemovalRange(
 }
 
 /**
- * The module-load self-check of an arm gaining a declaration: at each
- * admissible offset, the form `s23ComposedForm` composes — with the
- * placeholder identifier and every identifier the declaration's spelling
- * treats apart — is exactly the text TEST-SPEC spells for the file,
- * `spelledForm`'s lines each ended by U+000A; a harness defect otherwise.
+ * The module-load self-check of an arm gaining a declaration (T6.5-24's or
+ * T6.5-25's, its `test` naming it in the error): at each admissible offset,
+ * the form `s23ComposedForm` composes — with the placeholder identifier and
+ * every identifier the declaration's spelling treats apart — is exactly the
+ * text TEST-SPEC spells for the file, `spelledForm`'s lines each ended by
+ * U+000A; a harness defect otherwise.
  */
 function s24AssertSpelledForms(
   arm: S23Arm,
@@ -381,7 +447,7 @@ function s24AssertSpelledForms(
       );
       if (composed === undefined || Buffer.compare(composed, spelled) !== 0) {
         throw new Error(
-          `T6.5-24 ${arm.key}: a harness defect — the form composed at ` +
+          `${arm.test} ${arm.key}: a harness defect — the form composed at ` +
             `offset ${String(offset)} with the identifier \`${ident}\` ` +
             `must be the text TEST-SPEC spells, ` +
             `${JSON.stringify(spelled.toString("utf8"))}; it is ` +
@@ -1009,5 +1075,362 @@ const T6_5_24 = defineProductTest({
   run: (product) => runS23Arms(product, "T6.5-24", S24_ARMS),
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-25 A TypeScript declaration standing as another statement's body stays
+// ---------------------------------------------------------------------------
+
+/** The node the marker designates before the move. */
+const S25_ORIGIN_NODE = "specs/origin.mdx#x";
+
+// The origin (TEST-SPEC: `specs/origin.mdx` holding `x`): the moved section
+// alone, so that the marker is `O`'s only use, gone after the move.
+const S25_ORIGIN_X_ALONE: StagedMdx = stagedMdx(
+  "T6.5-25 specs/origin.mdx (the moved x alone)",
+  ['<S id="x">', "Origin x text.", "</S>", ""].join("\n"),
+);
+
+/** A staged `src/c.ts` of T6.5-25 (S-9's record, declared well-formed
+ * TypeScript). */
+function s25StagedApp(key: string, text: string): StagedTs {
+  return stagedTs(`T6.5-25 ${key} ${S23_APP}`, text, "well-formed", "ts");
+}
+
+/** Why each arm's `src/c.ts` gains its declaration while `O`'s stays (SPEC
+ * 6.5). */
+const S25_WHY =
+  "the marker is rooted at `O`, whose declaration, standing as another " +
+  "statement's body, binds in the scope holding that statement (4.5), and " +
+  "the file holds no binding of the target module, so one declaration of " +
+  "it is added, binding `<X>`, never `O` (bound by a declaration already in " +
+  "the file); `O`'s declaration, its bindings unused after the move, stays " +
+  "in place, no removal reported for it (6.5, 6.6: its deletion would leave " +
+  "that statement no body)";
+
+/** The marker's `references` edge before the move, from `from`, the unit
+ * holding it or the file (4.6). */
+function s25OriginEdge(from: string): S23Edge {
+  return {
+    from,
+    to: S25_ORIGIN_NODE,
+    kind: "references",
+    what: "the marker",
+  };
+}
+
+/**
+ * The module-load S-9 check of an arm: its staged text and `spelled`, the
+ * file TEST-SPEC spells after the move with a placeholder in `<X>`'s place,
+ * are text TypeScript 5.9.3 accepts both as module code and as script code
+ * (`judgeTypeScript`); a harness defect, thrown at load, otherwise.
+ */
+function s25AssertWellFormed(arm: S23Arm, spelled: string): void {
+  for (const form of [
+    { what: "the staged text", text: arm.text },
+    { what: "the file TEST-SPEC spells after the move", text: spelled },
+  ]) {
+    const verdict = judgeTypeScript(form.text, arm.receiver);
+    if (verdict.verdict !== "well-formed") {
+      throw new Error(
+        `${arm.test} ${arm.key}: a harness defect — ${form.what} must be ` +
+          `text TypeScript 5.9.3 accepts both as module code and as script ` +
+          `code (S-9); its verdict is ${JSON.stringify(verdict)}; the text ` +
+          `reads ${JSON.stringify(form.text)}`,
+      );
+    }
+  }
+}
+
+/**
+ * An arm of T6.5-25 at module load: its `src/c.ts` record — `lines`, each
+ * ended by U+000A — beside T6.5-23's configuration and target and the
+ * `x`-alone origin, under T6.5-23's move; `O`'s declaration's own characters
+ * at `declaration` and the marker `O.x` at `marker` (each cross-checked:
+ * once, there; `pinned` likewise), the declaration kept byte-for-byte — no
+ * rewrite touches it — and the marker rewritten to `<X>.y`; `import <X> from
+ * "../specs/target.xspec"` added at the one admissible offset TEST-SPEC
+ * names, cross-checked as its line's start; the preview's one
+ * `reference-rewrite` spanning the marker and no `import-removal` (the
+ * `import-addition` parity `runS23Arm` asserts); before the move, `check`
+ * clean and the marker's `references` edge from `unit` to
+ * `specs/origin.mdx#x`, and after it the same unit's to
+ * `specs/target.mdx#y`. The form composed at the offset is held to the text
+ * TEST-SPEC spells (`s24AssertSpelledForms`), and that text and the staged
+ * one to S-9's TypeScript judge (`s25AssertWellFormed`).
+ */
+function s25Arm(spec: {
+  readonly key: string;
+  readonly lines: readonly string[];
+  readonly declaration: S23Span;
+  readonly marker: S23Span;
+  readonly pinned?: readonly {
+    readonly spelling: string;
+    readonly span: S23Span;
+  }[];
+  readonly offset: S24Offset;
+  readonly unit: string;
+  readonly placement: string;
+  readonly excluded: Readonly<Record<number, string>>;
+  readonly spelledForm: (ident: string) => readonly string[];
+}): S23Arm {
+  const test = "T6.5-25";
+  const text = [...spec.lines, ""].join("\n");
+  s24Span(spec.key, text, S23_IMPORT_O, spec.declaration, test);
+  const marker = s24Span(spec.key, text, "O.x", spec.marker, test);
+  for (const pin of spec.pinned ?? []) {
+    s24Span(spec.key, text, pin.spelling, pin.span, test);
+  }
+  const offset = s24Stated(
+    spec.key,
+    `the start of line ${String(spec.offset.line)}, the admissible offset`,
+    s24Starts(spec.lines)[spec.offset.line - 1],
+    spec.offset.offset,
+    test,
+  );
+  const arm: S23Arm = {
+    test,
+    key: spec.key,
+    receiver: S23_APP,
+    kind: "typescript",
+    text,
+    staged: s25StagedApp(spec.key, text),
+    files: {
+      "xspec.config.ts": S23_CONFIG,
+      [S23_ORIGIN]: S25_ORIGIN_X_ALONE,
+      [S23_TARGET]: S23_TARGET_SOURCE,
+    },
+    argv: S23_ARGV,
+    rewrites: [{ ...marker, spelled: (ident) => `${ident}.y` }],
+    addition: {
+      specifier: S23_TARGET_SPECIFIER,
+      offsets: [offset],
+      why: S25_WHY,
+    },
+    placement: spec.placement,
+    excluded: spec.excluded,
+    preview: { rewrites: [marker], removals: [] },
+    edges: [s24MarkerEdge(spec.unit)],
+    before: { check: true, edges: [s25OriginEdge(spec.unit)] },
+  };
+  s24AssertSpelledForms(arm, [offset], spec.spelledForm);
+  s25AssertWellFormed(
+    arm,
+    [...spec.spelledForm(S24_PLACEHOLDER), ""].join("\n"),
+  );
+  return arm;
+}
+
+/** What a product deleting the declaration leaves in every top-level arm
+ * but the `do` arm. */
+const S25_BODY_TAKEN =
+  "the statement taking the added declaration as its body — the file still " +
+  "parsing, the marker still rooted (4.5: that declaration binds in the " +
+  "file's scope), `check` clean — behind a reported success";
+
+/**
+ * A top-level arm: `src/c.ts` = `statement`, U+000A, `O.x`, U+000A, the
+ * declaration standing as the statement's body; the marker at the start of
+ * line 2, where the declaration is added — the only line-start admissible
+ * offset — and the edges from `src/c.ts` (a top-level spelling is attributed
+ * to the file, 4.6). `removed` is what a product deleting the declaration
+ * leaves, for diagnoses.
+ */
+function s25TopLevelArm(spec: {
+  readonly key: string;
+  readonly statement: string;
+  readonly removed: string;
+}): S23Arm {
+  const length = Buffer.byteLength(spec.statement, "utf8");
+  const own = Buffer.from(spec.statement, "utf8").indexOf(S23_IMPORT_O);
+  const line2 = length + 1;
+  const excluded: Record<number, string> = {};
+  for (let inside = 1; inside < length; inside += 1) {
+    excluded[inside] =
+      `inside the statement \`${spec.statement}\`, which a declaration ` +
+      "there would split (6.5: an admissible offset lies inside none of the " +
+      "file's statements)";
+  }
+  excluded[0] =
+    `offset 0 — the start of the statement \`${spec.statement}\`, the ` +
+    "file's first, so no statement's end precedes it (6.5)";
+  excluded[length] = s24MidLine(
+    "the statement's end, the end of line 1",
+    "the start of line 2",
+  );
+  excluded[line2 + 3] = s24Untimely("the end of `O.x`", "the statement `O.x`");
+  excluded[line2 + 4] = s24Untimely("the file's end", "the statement `O.x`");
+  return s25Arm({
+    key: spec.key,
+    lines: [spec.statement, "O.x"],
+    declaration: {
+      start: own,
+      end: own + Buffer.byteLength(S23_IMPORT_O, "utf8"),
+    },
+    marker: { start: line2, end: line2 + 3 },
+    offset: { line: 2, offset: line2 },
+    unit: S23_APP,
+    placement:
+      `the start of line 2, offset ${String(line2)}, the only line-start ` +
+      `admissible offset — it follows the end of the statement ` +
+      `\`${spec.statement}\` and is timely, that statement enclosing \`O\`'s ` +
+      "declaration and so not standing between it and the added one (6.5), " +
+      "while offset 0 follows no statement's end, every offset inside the " +
+      "statement lies inside one, and the file's end is untimely, `O.x` " +
+      "standing between — `O`'s declaration staying in place byte-for-byte, " +
+      "its binding unused and no removal reported for it (6.5: its deletion " +
+      "would leave the statement no body), and the marker becoming `<X>.y`; " +
+      `a product removing the declaration fails the byte contract, ` +
+      spec.removed,
+    excluded,
+    spelledForm: (ident) => [
+      spec.statement,
+      `import ${ident} from "../specs/target.xspec"`,
+      `${ident}.y`,
+    ],
+  });
+}
+
+/** The nested arm's `src/c.ts` lines (TEST-SPEC). */
+const S25_NESTED_LINES = [
+  "export function f() {",
+  '  if (c) import O from "../specs/origin.xspec"',
+  "  O.x",
+  "}",
+] as const;
+
+/** Why each offset of the nested arm but the file's end is excluded. */
+function s25NestedExcluded(): Readonly<Record<number, string>> {
+  const excluded: Record<number, string> = {};
+  for (let inside = 1; inside < 76; inside += 1) {
+    excluded[inside] =
+      "inside the statement `f`, where a declaration is no top-level one " +
+      "(6.5; T6.5-23(n))";
+  }
+  excluded[0] =
+    "offset 0 — `f` is the file's first statement, so no statement's end " +
+    "precedes it (6.5)";
+  excluded[22] = s24Inside("the start of line 2", "f");
+  excluded[31] = s24Inside(
+    "the start of `O`'s declaration, 31",
+    "f",
+    ", and inside the statement `if (c) …` besides, which a declaration " +
+      "there would split",
+  );
+  excluded[68] = s24Inside("the end of the `if` statement, 68", "f");
+  excluded[69] = s24Inside("the start of line 3", "f");
+  excluded[75] = s24Inside("the start of line 4", "f");
+  excluded[76] = s24MidLine("`f`'s end, 76", "the file's end, 77");
+  return excluded;
+}
+
+// The nested arm: the rule reaches a statement-body declaration wherever the
+// statement holding it stands (6.5).
+const S25_NESTED = s25Arm({
+  key: "(nested)",
+  lines: S25_NESTED_LINES,
+  declaration: { start: 31, end: 68 },
+  marker: { start: 71, end: 74 },
+  pinned: [{ spelling: "}", span: { start: 75, end: 76 } }],
+  offset: { line: 5, offset: 77 },
+  unit: `${S23_APP}#f`,
+  placement:
+    "the file's end, offset 77, the only line-start admissible offset — it " +
+    "follows `f`'s end and is timely, `f` enclosing the replaced " +
+    "declaration and so not standing between it and the added one (6.5, " +
+    "T6.5-24(c)), while offset 0 follows no statement's end and every other " +
+    "line start lies inside `f` (`f`'s end, 76, admissible too, is " +
+    "mid-line) — `O`'s declaration [31, 68), binding in `f`'s scope (4.5, " +
+    "T4.5-10), staying in place byte-for-byte, its binding unused and no " +
+    "removal reported for it, and the marker [71, 74) becoming `<X>.y`; a " +
+    "product applying the rule to top-level statements alone deletes the " +
+    "declaration, leaving `  if (c) ` on its line to take `<X>.y` as its " +
+    "body — the file still parsing, the marker still rooted, `check` clean " +
+    "— failing the byte contract behind a reported success",
+  excluded: s25NestedExcluded(),
+  spelledForm: (ident) => [
+    "export function f() {",
+    '  if (c) import O from "../specs/origin.xspec"',
+    `  ${ident}.y`,
+    "}",
+    `import ${ident} from "../specs/target.xspec"`,
+  ],
+});
+
+/** T6.5-25's staged arms, in TEST-SPEC's order. */
+const S25_ARMS: readonly S23Arm[] = [
+  s25TopLevelArm({
+    key: "(if)",
+    statement: 'if (c) import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  s25TopLevelArm({
+    key: "(else)",
+    statement: 'if (c) {} else import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  s25TopLevelArm({
+    key: "(do)",
+    statement: 'do import O from "../specs/origin.xspec"; while (c)',
+    removed:
+      "leaving `do  while (c)` before the added line — the `;`, the " +
+      "declaration's own terminator, deleted with it — text that no longer " +
+      "parses (14.20)",
+  }),
+  s25TopLevelArm({
+    key: "(while)",
+    statement: 'while (c) import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  s25TopLevelArm({
+    key: "(for)",
+    statement: 'for (; c; ) import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  s25TopLevelArm({
+    key: "(for-in)",
+    statement: 'for (const k in o) import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  s25TopLevelArm({
+    key: "(for-of)",
+    statement: 'for (const k of o) import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  s25TopLevelArm({
+    key: "(with)",
+    statement: 'with (o) import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  s25TopLevelArm({
+    key: "(labeled)",
+    statement: 'l: import O from "../specs/origin.xspec"',
+    removed: S25_BODY_TAKEN,
+  }),
+  S25_NESTED,
+];
+
+/**
+ * T6.5-25 (SUITE-25): 6.5 keeps an import declaration standing as another
+ * statement's body — either branch of an `if` statement, or the body of a
+ * `do`, `while`, `for`, `for…in`, `for…of`, `with`, or labeled statement —
+ * its bindings unused and no removal reported for it (6.6), since its
+ * deletion would leave that statement no body. Nine top-level arms, one per
+ * position, each `src/c.ts` = the statement, U+000A, `O.x`, U+000A: before
+ * the move `build` and `check` clean and the marker's edge from `src/c.ts`
+ * to `specs/origin.mdx#x` recorded; after it the declaration in place
+ * byte-for-byte, the marker `<X>.y`, rooted at `import <X> from
+ * "../specs/target.xspec"` added at the start of line 2, the preview's one
+ * `reference-rewrite`, its `import-addition` there, and no `import-removal`,
+ * and the marker's edge from `src/c.ts` to `specs/target.mdx#y`. A tenth,
+ * nested arm holds the `if` statement in `f`: the declaration [31, 68) kept,
+ * the marker [71, 74) rewritten, the declaration added at the file's end,
+ * 77, the edges from `src/c.ts#f`.
+ */
+const T6_5_25 = defineProductTest({
+  id: "T6.5-25",
+  title:
+    'a TypeScript declaration standing as another statement\'s body stays — one arm per position, each `move specs/origin.mdx#x specs/target.mdx#y` (`specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`) over `src/c.ts` = the statement, U+000A, `O.x`, U+000A, the statement in turn `if (c) import O from "../specs/origin.xspec"`, `if (c) {} else import O from "../specs/origin.xspec"`, `do import O from "../specs/origin.xspec"; while (c)`, `while (c) import O from "../specs/origin.xspec"`, `for (; c; ) import O from "../specs/origin.xspec"`, `for (const k in o) import O from "../specs/origin.xspec"`, `for (const k of o) import O from "../specs/origin.xspec"`, `with (o) import O from "../specs/origin.xspec"`, and `l: import O from "../specs/origin.xspec"` — before the move `build` and `check` clean, the statement-body declaration well-formed (never 14.20) and binding in the file\'s scope, and `query edges` the marker\'s `references` edge from `src/c.ts` to `specs/origin.mdx#x`; each move exiting 0, `src/c.ts` after it well-formed (TypeScript 5.9.3\'s module and script readings) and exactly the statement, U+000A, `import <X> from "../specs/target.xspec"`, U+000A, `<X>.y`, U+000A — the declaration kept in place byte-for-byte, its binding unused, the added declaration at the start of line 2, value-blind in `<X>` alone, never `O` — the preview\'s edits for `src/c.ts` exactly one `reference-rewrite` spanning `O.x`, the one `import-addition` at the start of line 2 (T6.6-4(b)), and no `import-removal`, `check` and `build` clean after it, and `query edges` the marker\'s `references` edge from `src/c.ts` to `specs/target.mdx#y`; and a nested arm over `export function f() {`, `  if (c) import O from "../specs/origin.xspec"`, `  O.x`, `}` — before the move `build` and `check` clean and the marker\'s edge from `src/c.ts#f` to `specs/origin.mdx#x` — the declaration [31, 68) kept byte-for-byte and the declaration added at the file\'s end, 77, the file becoming exactly `export function f() {`, `  if (c) import O from "../specs/origin.xspec"`, `  <X>.y`, `}`, `import <X> from "../specs/target.xspec"`, the preview\'s one `reference-rewrite` spanning [71, 74), its `import-addition` at 77, and no `import-removal`, `check` and `build` clean after it, and the marker\'s edge from `src/c.ts#f` to `specs/target.mdx#y` (SPEC 6.5, 3, 4.5, 4.6, 5.2, 6.6, 11.1, 12.7, 14.20)',
+  run: (product) => runS23Arms(product, "T6.5-25", S25_ARMS),
+});
+
 /** TEST-SPEC §6.5, sixth part, in canonical ID order (SUITE-25). */
-export const section65viTests: readonly ProductTestEntry[] = [T6_5_24];
+export const section65viTests: readonly ProductTestEntry[] = [T6_5_24, T6_5_25];

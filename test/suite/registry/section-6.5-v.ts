@@ -147,12 +147,17 @@
 //   points) between `O`'s declaration and its line's terminator: 39 alone,
 //   the preview's `reference-rewrite` [61, 64) and no `import-removal`.
 //
-// The machinery is shared: section-6.5-vi.ts stages T6.5-24's arms as
-// `S23Arm`s over this module's configuration and spec sources and runs them
-// through `runS23Arms`, each arm naming its registered test (`test`), which
-// prefixes its diagnoses; its arms gaining a declaration name it as an
-// `S23Addition` ((e)'s through an `S23Spelling`), and its module-load
-// self-checks compose their forms through `s23ComposedForm`.
+// The machinery is shared: section-6.5-vi.ts stages T6.5-24's and
+// T6.5-25's arms as `S23Arm`s over this module's configuration and spec
+// sources and runs them through `runS23Arms`, each arm naming its registered
+// test (`test`), which prefixes its diagnoses; its arms gaining a
+// declaration name it as an `S23Addition` (T6.5-24 (e)'s through an
+// `S23Spelling`), and its module-load self-checks compose their forms
+// through `s23ComposedForm`. T6.5-25's arms also state the workspace before
+// the move (`before`, an `S23Before`): after the premise `build`, and before
+// the preview, `check --json` exactly `{"findings": []}` and each `query
+// edges` answer exactly its edge (`s23AssertEdge`, its label then "before
+// the move"); no T6.5-23 or T6.5-24 arm sets it.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -333,8 +338,9 @@ export interface S23PreviewExpectation {
   readonly removals?: readonly S23Span[];
 }
 
-/** A `query edges` answer after the move: exactly this edge between its two
- * graph nodes, of its kind (SPEC 11.1, 5.2, 4.6). */
+/** A `query edges` answer after the move — or, in an arm's `before`, before
+ * it: exactly this edge between its two graph nodes, of its kind (SPEC 11.1,
+ * 5.2, 4.6). */
 export interface S23Edge {
   readonly from: string;
   readonly to: string;
@@ -343,11 +349,22 @@ export interface S23Edge {
   readonly what: string;
 }
 
-/** One byte-asserted staging of T6.5-23 — or of T6.5-24, whose module
- * (section-6.5-vi.ts) stages its arms through this machinery. */
+/**
+ * What TEST-SPEC states of the workspace before the move beyond the premise
+ * `build` (T6.5-25): `check --json` exactly `{"findings": []}` where `check`
+ * is set, and each `query edges` answer exactly its edge — asserted after the
+ * premise `build` and before the preview and the real move.
+ */
+export interface S23Before {
+  readonly check: boolean;
+  readonly edges: readonly S23Edge[];
+}
+
+/** One byte-asserted staging of T6.5-23 — or of T6.5-24 or T6.5-25, whose
+ * module (section-6.5-vi.ts) stages their arms through this machinery. */
 export interface S23Arm {
-  /** The registered test the staging belongs to, `T6.5-23` or `T6.5-24`:
-   * with `key`, it names the staging in every diagnosis. */
+  /** The registered test the staging belongs to, `T6.5-23`, `T6.5-24`, or
+   * `T6.5-25`: with `key`, it names the staging in every diagnosis. */
   readonly test: string;
   /** The entry's arm and staging, e.g. `(a) between two directives`. */
   readonly key: string;
@@ -381,6 +398,9 @@ export interface S23Arm {
   readonly preview?: S23PreviewExpectation;
   /** `query edges` answers after the move. */
   readonly edges?: readonly S23Edge[];
+  /** What the workspace answers before the move beyond the premise `build`,
+   * where TEST-SPEC states it (T6.5-25); unasserted where undefined. */
+  readonly before?: S23Before;
   /** (c): why the file compiles clean under standard tooling (H-2). */
   readonly compiles?: string;
 }
@@ -992,13 +1012,15 @@ function s23AssertPreview(
   }
 }
 
-/** `query edges` after the move answers exactly the arm's edge between its
- * two graph nodes, of its kind (SPEC 11.1, 5.2, 4.6). */
+/** `query edges` after the move — or, `when` `before`, before it (an arm's
+ * `before`, T6.5-25) — answers exactly the arm's edge between its two graph
+ * nodes, of its kind (SPEC 11.1, 5.2, 4.6). */
 async function s23AssertEdge(
   product: ProductBinding,
   workspace: TestWorkspace,
   edge: S23Edge,
   context: string,
+  when: "before" | "after" = "after",
 ): Promise<void> {
   const argv = [
     "query",
@@ -1010,7 +1032,7 @@ async function s23AssertEdge(
     "--kinds",
     edge.kind,
   ];
-  const label = `${context}: \`${argv.join(" ")}\` after the move`;
+  const label = `${context}: \`${argv.join(" ")}\` ${when} the move`;
   assertEdgeSetEqual(
     decodeEdgesReport(
       await runJson(
@@ -1023,7 +1045,8 @@ async function s23AssertEdge(
     ),
     [{ from: edge.from, to: edge.to, kind: edge.kind }],
     `${label}: exactly ${edge.what}'s \`${edge.kind}\` edge from ` +
-      `${edge.from} to ${edge.to} (SPEC 6.5, 5.2, 4.6, 11.1)`,
+      `${edge.from} to ${edge.to} (SPEC ${when === "after" ? "6.5" : "4.5"}, ` +
+      `5.2, 4.6, 11.1)`,
   );
 }
 
@@ -1055,6 +1078,20 @@ async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
               compiles,
           ),
       );
+    }
+    if (arm.before !== undefined) {
+      if (arm.before.check) {
+        await expectFindingFreeReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          `${context}: premise \`check --json\` over the staging — clean: a ` +
+            `valid workspace, its files well-formed (SPEC 12.2, 6.5, 14.20)`,
+        );
+      }
+      for (const edge of arm.before.edges) {
+        await s23AssertEdge(product, workspace, edge, context, "before");
+      }
     }
     const preview =
       arm.addition !== undefined || arm.preview !== undefined

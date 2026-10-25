@@ -485,6 +485,18 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "12.7",
     "14",
   ],
+  // T6.5-25: 6.5's kept statement-body declaration — its bindings unused,
+  // no removal reported for it (6.6) — and the declaration added at the one
+  // line-start admissible offset under 6.5's line discipline (3's
+  // terminators), asserted over the rewritten file's bytes, the preview's
+  // edits, and the performed-operation document (12.7); the marker rooted at
+  // the declaration, which binds in the scope holding its statement (4.5),
+  // its `references` edge (5.2) from the file or `f` (4.6) through `query
+  // edges` (11.1) before the move and after it; its "14" the statement-body
+  // declarations' well-formedness, never 14.20, asserted by the clean
+  // premise `build` and `check` and the judged post-move bytes (T14-12
+  // places it here).
+  "T6.5-25": ["6.5", "3", "4.5", "4.6", "5.2", "6.6", "11.1", "12.7", "14"],
   "T6.6-2": ["6.6"],
   "T6.6-3": ["6.6", "6.5", "12.7", "14"],
   "T6.6-4": ["6.6", "6.5", "12.7"],
