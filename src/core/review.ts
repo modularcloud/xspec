@@ -261,8 +261,11 @@ export interface ReviewItem {
    * identity, in generated order: a `subtree-coherence` item's scope is
    * "N and all descendants" (SPEC 10.5, 10.6), so these are the
    * descendants its strategy generated with it — in a baseline session
-   * over 10.5's links, deleted ones included. Empty for a leaf and for
-   * every other kind, whose scope is its scope node alone (SPEC 10.2).
+   * over 10.5's links, deleted ones included. `current` records the
+   * relevant hashes over the scope root and these nodes, at creation and
+   * at each resolve (SPEC 10.4, src/core/review-state.ts). Empty for a
+   * leaf and for every other kind, whose scope is its scope node alone
+   * (SPEC 10.2).
    */
   readonly scopeDescendants: readonly string[];
   /** Nodes whose text frames the review (SPEC 10.2), by identity. */

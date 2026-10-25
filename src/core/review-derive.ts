@@ -261,10 +261,12 @@ export interface GeneratedItem {
    * for a leaf: an item takes it as its stored scope wherever it is
    * assigned the generated scope (`newItemFromGenerated`,
    * `reassignedExistingItem`; SPEC 10.4: reads present `scope` as last
-   * assigned), and in a baseline session the recorded-baseline state's
-   * relevant hashes cover the scope root and these nodes
-   * (`computeBaselineRecordedState`). Omitted on every other kind, whose
-   * scope is its scope node alone.
+   * assigned); the item's `current` state covers the scope root and the
+   * nodes so stored, at creation and at each resolve (review-state.ts
+   * `computeRecordedState`), and in a baseline session the
+   * recorded-baseline state's relevant hashes cover the scope root and
+   * these nodes (`computeBaselineRecordedState`). Omitted on every other
+   * kind, whose scope is its scope node alone.
    */
   readonly scopeDescendants?: readonly GeneratedNode[];
   readonly context: readonly GeneratedNode[];
@@ -1156,12 +1158,14 @@ function resolvedTextTable(
 
 /**
  * One new session item from a generated item (SPEC 10.2): status
- * `unresolved`, `current` computed against the current graph, with the
- * generated context as its recorded context set (SPEC 10.4), so read-time
- * invalidation finds every recorded node and the context set holding (a
- * freshly created item is never born invalidated), `baseline` against the
- * recorded-baseline side — or the current graph's values at this moment
- * for a session without one — and the SPEC 10.7 text snapshots.
+ * `unresolved`, `current` computed against the current graph over the
+ * generated scope (the root and the scope nodes beneath it), context, and
+ * origin, with the generated context as its recorded context set
+ * (SPEC 10.4), so read-time invalidation finds every recorded node and the
+ * context set holding (a freshly created item is never born invalidated),
+ * `baseline` against the recorded-baseline side — or the current graph's
+ * values at this moment for a session without one — and the SPEC 10.7
+ * text snapshots.
  * `blockedBy` is the caller's: the generated item's blocker references,
  * resolved to item ids.
  */
@@ -1172,10 +1176,16 @@ function newItemFromGenerated(
   current: CurrentDerivationSide,
   baseline: BaselineDerivationSide | undefined,
 ): ReviewItem {
+  // SPEC 10.4, 10.2: the scope as assigned at entry — the generated scope
+  // nodes beneath the root (`generatedScopeDescendants`) — which `current`
+  // is recorded over, as every resolve records it over the scope as last
+  // assigned.
+  const scopeDescendants = generatedScopeDescendants(generated);
   const currentState = computeRecordedState(
     {
       kind: generated.kind,
       scope: generated.scope.identity,
+      scopeDescendants,
       context: generated.context.map((node) => node.identity),
       origin: generated.origin.map((node) => node.identity),
     },
@@ -1185,9 +1195,7 @@ function newItemFromGenerated(
     id,
     kind: generated.kind,
     scope: generated.scope.identity,
-    // SPEC 10.4, 10.2: the scope as assigned at entry — the generated
-    // scope nodes beneath the root (`generatedScopeDescendants`).
-    scopeDescendants: generatedScopeDescendants(generated),
+    scopeDescendants,
     context: generated.context.map((node) => node.identity),
     reason: generated.reason,
     origin: generated.origin.map((node) => node.identity),
@@ -1771,10 +1779,12 @@ export interface ResolveItemArgs {
  * resolved item is re-resolved the same way. The current context set is
  * the one reads compute and present (`currentContextSets` over the same
  * expanded generation, else the item's `context` as last assigned), and
- * `current` is recorded over the item's scope, that context, and its
- * origin, that context becoming its recorded context set, so a read of the
- * same workspace finds the recorded context set equal to the current one
- * (SPEC 10.4). Resolving with `no-change` or `skipped` never re-derives:
+ * `current` is recorded over the item's scope as last assigned (the root
+ * and the scope nodes beneath it, `scopeDescendants` — never the current
+ * graph's subtree, which may hold nodes authored since), that context, and
+ * its origin, that context becoming its recorded context set, so a read of
+ * the same workspace finds the recorded context set equal to the current
+ * one (SPEC 10.4). Resolving with `no-change` or `skipped` never re-derives:
  * the item is assigned and recorded as it stands. When the status is `updated`, the session is re-derived at
  * resolve time (SPEC 10.5, for every strategy) — the expanded generation
  * merged under the re-derivation rules, with the item in the session
@@ -1804,7 +1814,10 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
   // node, whether the node is present — the context nodes so recorded
   // forming its recorded context set, which is thus the context a read of
   // the same workspace presents". Scope, origin, reason, and blockedBy
-  // stay as last assigned: the resolve itself assigns the context alone.
+  // stay as last assigned: the resolve itself assigns the context alone,
+  // and records the relevant hashes over the scope as last assigned (the
+  // root and its `scopeDescendants`), so a node authored beneath the scope
+  // root since that assignment gets no entry.
   // SPEC 10.7: the state this resolve records the item under is among the
   // states an absent node's text comes from ("derived or resolved the item
   // with that node among its nodes"), so the item as assigned snapshots its

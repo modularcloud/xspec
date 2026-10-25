@@ -9,25 +9,30 @@
 //
 // The per-kind relevant hashes (SPEC 10.4):
 //
-// - `subtree-coherence` — subtreeHash and metadataHash of each scope node.
-//   The scope is the root and all its descendants (10.5, 10.6), so the
-//   scope-node set is derived from the graph the state is recorded
-//   against: a present root contributes itself and every current
-//   descendant, an absent root contributes itself alone. In a baseline
-//   session the scope also holds the deleted nodes linked beneath the root
-//   (10.5's links, src/core/path-blocks.ts), which no current-graph walk
-//   reaches: each is `changed` (5.6), so it lies in the item's origin as
-//   last assigned, and its presence — the absent marker — is recorded
-//   through that role (the recorded-baseline state takes the generator's
-//   scope set, review-derive.ts `computeBaselineRecordedState`). The
-//   check judges the recorded nodes alone (below): a descendant added
-//   since the record has no entry and surfaces through the root's
-//   recorded subtreeHash (SPEC 5.5: it changes whenever a node in the
-//   subtree is added, removed, or reordered), a removed one through its
-//   own recorded presence and the root's subtreeHash, while a
-//   metadata-only edit on a descendant, which changes no subtreeHash
-//   (SPEC 5.5), still invalidates through that scope node's recorded
-//   metadataHash.
+// - `subtree-coherence` — subtreeHash and metadataHash of each scope node:
+//   the scope root and the scope nodes beneath it as last assigned
+//   (`ItemStateSpec.scopeDescendants`, the item's stored scope), never a
+//   walk of the graph the state is recorded against. SPEC 10.4: a resolve
+//   records "its relevant hashes per the list above" while `scope` stays
+//   as last assigned — by `create`, a re-derivation (10.5), or a `split`
+//   (10.7) — an `updated` resolve recording against the item as
+//   re-derived. The scope is "N and all descendants" (10.5, 10.6) as its
+//   strategy generated it: in a baseline session over 10.5's links
+//   (src/core/path-blocks.ts), so a deleted descendant is a scope node
+//   (absent, recorded with the explicit absent marker) and a node a
+//   journaled move took out of the subtree is not; in a session without
+//   a baseline, the root's current descendants at that assignment. The
+//   check judges the recorded nodes alone (below): a node authored
+//   beneath the root since the scope was last assigned is no scope node
+//   of the item, and one a re-derivation joined to it since `current`
+//   was last written has no recorded presence until a resolve records it
+//   (10.4) — either way it has no entry and surfaces only through the
+//   root's recorded subtreeHash (SPEC 5.5: it changes whenever a node in
+//   the subtree is added, removed, or reordered), so a metadata-only edit
+//   on it, which changes no subtreeHash (SPEC 5.5), invalidates nothing.
+//   A removed scope node surfaces through its own recorded presence and
+//   the root's subtreeHash, and a metadata-only edit on a recorded scope
+//   node through that node's recorded metadataHash.
 // - `parent-consistency` — ownHash and metadataHash of the scope node;
 //   subtreeHash of each context node (the branch children, 10.5).
 // - `dependency-consistency` — ownHash and metadataHash of the scope node;
@@ -90,9 +95,11 @@
 // status, and by itself invalidates nothing, while a spelling vacated by a
 // manual deletion (SPEC 6.6) and later recaptured by a journaled rename
 // denotes two distinct canonical identities that never collide. The state
-// computation here keys its result canonically — descendants and impact
-// targets enumerated from the current graph are canonicalized against the
-// full current journal — and judges presence by canonical resolution
+// computation here keys its result canonically — every node it records is
+// a stored canonical reference: the item's scope (the root and the nodes
+// beneath it), context, and origin entries, and the caller-supplied
+// impact targets (review-derive.ts canonicalizes every generated node,
+// `canonicalizeGeneration`) — and judges presence by canonical resolution
 // (SPEC 10.4: "a node is absent when it is deleted or its identity ceases
 // to resolve through the journal"): a recorded node is present iff its
 // canonical identity still resolves through the journal
@@ -114,7 +121,7 @@
 // each resolve, 10.2), and reads judge each recorded node against a fresh
 // run of it over the current graph.
 
-import type { RequirementNode, WorkspaceGraph } from "./graph.js";
+import type { WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
 import type { CanonicalIdentity, Journal } from "./journal.js";
 import {
@@ -164,12 +171,21 @@ export interface ReviewStateInputs {
 
 /**
  * The item fields the state computation reads (SPEC 10.4): the kind and the
- * scope, context, and origin nodes, each a stored canonical reference
- * (module header). `ReviewItem` satisfies this shape.
+ * scope — its root and the scope nodes beneath it — context, and origin
+ * nodes, each a stored canonical reference (module header). `ReviewItem`
+ * satisfies this shape, its scope as last assigned (SPEC 10.4).
  */
 export interface ItemStateSpec {
   readonly kind: ItemKind;
+  /** The scope node — a `subtree-coherence` item's scope root. */
   readonly scope: string;
+  /**
+   * The scope nodes beneath the scope root (`ReviewItem.scopeDescendants`:
+   * a `subtree-coherence` item's scope is "N and all descendants",
+   * SPEC 10.5, 10.6, as its strategy generated it); empty for a leaf and
+   * for every other kind, whose scope is its scope node alone.
+   */
+  readonly scopeDescendants: readonly string[];
   readonly context: readonly string[];
   readonly origin: readonly string[];
 }
@@ -178,10 +194,15 @@ export interface ItemStateSpec {
  * Compute the SPEC 10.4 recorded state of one item against `inputs`: the
  * item's relevant hashes per the kind table (module header) and, for every
  * scope, context, and origin node, whether the node is present — an absent
- * node's hashes recorded as the explicit absent marker. This is the value
- * the mutating subcommands record (item creation and each resolve, 10.2);
- * reads judge each node it records against the current graph
- * (`recordedNodesHold`).
+ * node's hashes recorded as the explicit absent marker. The nodes are the
+ * item's as given — its scope (the root and `scopeDescendants`), context,
+ * and origin, plus a `code-impact` item's impact targets from `inputs` —
+ * so `inputs` supplies each node's presence and hash values, never which
+ * nodes are recorded: a node of `inputs`' graph beneath the scope root that
+ * the item's scope does not hold gets no entry. This is the value the
+ * mutating subcommands record (item creation and each resolve, 10.2: a
+ * resolve over the scope as last assigned, SPEC 10.4); reads judge each
+ * node it records against the current graph (`recordedNodesHold`).
  */
 export function computeRecordedState(
   item: ItemStateSpec,
@@ -204,6 +225,9 @@ export function computeRecordedState(
   // SPEC 10.4: presence is recorded for every scope, context, and origin
   // node, whatever hashes the kind's table assigns them.
   record(item.scope);
+  for (const identity of item.scopeDescendants) {
+    record(identity);
+  }
   for (const identity of item.context) {
     record(identity);
   }
@@ -214,9 +238,12 @@ export function computeRecordedState(
   switch (item.kind) {
     case "subtree-coherence": {
       // SPEC 10.4: subtreeHash and metadataHash of each scope node — the
-      // root and all current descendants (10.5), derived from the graph.
-      for (const reference of scopeSubtreeReferences(inputs, item.scope)) {
-        record(reference, "subtreeHash", "metadataHash");
+      // root and the scope nodes beneath it as given (the scope as last
+      // assigned, module header), an absent one recorded with the absent
+      // marker (`recordedNodeState`).
+      record(item.scope, "subtreeHash", "metadataHash");
+      for (const identity of item.scopeDescendants) {
+        record(identity, "subtreeHash", "metadataHash");
       }
       break;
     }
@@ -263,44 +290,6 @@ export function computeRecordedState(
     nodes[identity] = recordedNodeState(item, identity, names, inputs);
   }
   return { nodes };
-}
-
-/**
- * The scope-node references of a `subtree-coherence` item (SPEC 10.5: the
- * root and all descendants), in document order: the stored scope reference
- * canonically resolved to a current node, the subtree derived from the
- * graph the state is computed against, and each member canonicalized
- * against the full journal (module header). A root that does not resolve
- * to a current node — deleted, or its identity ceased to resolve
- * (SPEC 10.4) even though its derived spelling is borne by a distinct
- * recaptured node — has no descendants and contributes its stored
- * reference alone.
- */
-function scopeSubtreeReferences(
-  inputs: ReviewStateInputs,
-  scope: string,
-): string[] {
-  const resolution = resolveReference(inputs.journal, scope);
-  const root = resolution.resolves
-    ? inputs.graph.requirementNode(resolution.spelling)
-    : undefined;
-  if (root === undefined) {
-    return [scope];
-  }
-  const references: string[] = [];
-  const stack: RequirementNode[] = [root];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (node === undefined) {
-      break;
-    }
-    references.push(canonicalKeyOfCurrent(inputs.journal, node.identity));
-    const children = inputs.graph.childrenOf(node);
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      stack.push(children[index]);
-    }
-  }
-  return references;
 }
 
 /** One node's recorded state (SPEC 10.4): presence judged by canonical
