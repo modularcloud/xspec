@@ -309,11 +309,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // T4.5-10: 4.5's scope of an import declaration — the file's at top
   // level, a nested one's the innermost function, class static block, or
   // namespace or module declaration enclosing it, never a block's —
-  // resolved as the language's scoping question (2.4); each rooted marker's
-  // `references` edge attributed to its enclosing unit or file (4.6), and
-  // its occurrence record (5.7), the source's unit range pinned (1.7), read
-  // through `occurrences` (11.3).
-  "T4.5-10": ["4.5", "1.7", "2.4", "4.6", "5.7", "11.3"],
+  // resolved as the language's scoping question (2.4), the scopes nested
+  // in it included; each rooted marker's `references` edge, and the
+  // `embeds` edge of a call through a nested `text` binding (4.3),
+  // attributed to its enclosing unit or file (4.6), and its occurrence
+  // record (5.7), the source's range pinned (1.7), read through
+  // `occurrences` (11.3), which answers on the failing workspaces too
+  // (11.2); the cross-scope collisions (condition 15) and the invisible
+  // `text` binding's unsanctioned use (condition 18) are 14's findings.
+  "T4.5-10": ["4.5", "1.7", "2.4", "4.3", "4.6", "5.7", "11.2", "11.3", "14"],
   "T4.6-1": ["4.6"],
   "T4.6-2": ["4.6"],
   // T4.6-3: its one-file and declaration-file arms' occurrence records

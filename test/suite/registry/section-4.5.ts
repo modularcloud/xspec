@@ -2198,8 +2198,13 @@ const T4_5_8_COLLIDING_STAGINGS: readonly SameScopeArmStaging[] =
 const T4_5_8_CONTROL_STAGINGS: readonly SameScopeArmStaging[] =
   T4_5_8_CONTROL_ARMS.map((arm) => ({ arm, staged: stageSameScopeArm(arm) }));
 
-/** A finding's locations as JSON-safe `[file, start, end]` tuples (12.7 order). */
-function locationTuples(finding: Finding): readonly (readonly unknown[])[] {
+/**
+ * A finding's locations as JSON-safe `[file, start, end]` tuples (12.7
+ * order). Exported for T4.5-10's failing arms (section-4.5-ii.ts).
+ */
+export function locationTuples(
+  finding: Finding,
+): readonly (readonly unknown[])[] {
   return finding.locations.map((location) => [
     location.file,
     location.range.start,
