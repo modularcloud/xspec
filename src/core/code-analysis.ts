@@ -1093,7 +1093,9 @@ class CodeAnalyzer {
     this.scanLinkingForms(bound);
     // SPEC 4/2.1/2.4 → 14.15: no import may bind an identifier already
     // bound by ANOTHER import in the same file, when either import is a
-    // spec module import — wherever in the file either stands — and no
+    // spec module import (an import declaration whose specifier ends in
+    // `.xspec`; an `import X = require(…)` declaration never is one,
+    // `scanImportEquals`) — wherever in the file either stands — and no
     // spec module import's value-level binding may share its identifier
     // with a value-level declaration of its own scope: one condition the
     // declarations jointly violate, ONE finding per collided identifier,
@@ -1600,7 +1602,9 @@ class CodeAnalyzer {
   /**
    * SPEC 4 → 14.15: an `import X = require(…)` declaration with a
    * `.xspec` specifier is invalid. Other require specifiers are checked
-   * against the derived-path rule. The entity-name form
+   * against the derived-path rule. Whatever its specifier, the form is no
+   * spec module import, its binding tracked for the collision rules as a
+   * non-spec import's (SPEC 4, 2.4, 4.5, 14.15). The entity-name form
    * (`import X = A.B`) is a use of `A`, handled in the use walk.
    */
   private scanImportEquals(
@@ -1613,13 +1617,20 @@ class CodeAnalyzer {
     if (expression === undefined || !ts.isStringLiteral(expression)) return;
     // SPEC 2.4: the specifier is read as spelled.
     const specifier = this.literalValue(expression);
-    const spec = specifier.endsWith(XSPEC_SUFFIX);
-    // Not a spec module import (SPEC 4: only an import declaration is
-    // one), so no binding here is one a declaration collides with (2.4).
+    const xspecSpecifier = specifier.endsWith(XSPEC_SUFFIX);
+    // Never a spec module import, whatever its specifier (SPEC 4: an
+    // import declaration is the only form through which a TypeScript file
+    // consumes a spec module; a `.xspec` specifier makes this form invalid
+    // instead, 14.15). So its binding collides with another import only
+    // where that one is a spec module import (14.15: "when either import
+    // is a spec module import"), the pair rooting no chain within one
+    // scope (2.4, 4.5) — beside a non-spec import or another require form
+    // it makes no collision — and no value-level declaration collides
+    // with it (2.4: a spec module import's value-level binding alone).
     bound.push({
       name: statement.name.text,
       declaration: statement,
-      spec,
+      spec: false,
       valueLevelSpec: false,
       role: null,
       statement,
@@ -1628,7 +1639,7 @@ class CodeAnalyzer {
     // SPEC 14: located by its own characters, a leading `export` (`export
     // import X = require(…)`) and what separates it excluded, as in 1.7.
     const range = this.declarationRange(statement);
-    if (spec) {
+    if (xspecSpecifier) {
       this.addFindingAt(
         15,
         range,
