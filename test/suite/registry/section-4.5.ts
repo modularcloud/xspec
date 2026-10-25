@@ -1,4 +1,5 @@
-// TEST-SPEC §4.5 (dependency markers) — SUITE-15: T4.5-1 … T4.5-9.
+// TEST-SPEC §4.5 (dependency markers) — SUITE-15: T4.5-1 … T4.5-9. T4.5-10
+// is section-4.5-ii.ts's business, which keeps this file's edits bounded.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -1422,9 +1423,10 @@ const T4_5_4_CALLEE_STAGED = stageOffendingStatement(
 /**
  * An occurrence record's every datum (SPEC 5.7) as one JSON-safe tuple —
  * file, own range, kind, source (identity plus range, or the unavailability
- * marker), target — so whole records compare key-order-free.
+ * marker), target — so whole records compare key-order-free. Exported for
+ * section-4.5-ii.ts's record pins.
  */
-function occurrenceTuple(record: OccurrenceRecord): readonly unknown[] {
+export function occurrenceTuple(record: OccurrenceRecord): readonly unknown[] {
   const source =
     "unavailable" in record.source
       ? "(source unavailable)"

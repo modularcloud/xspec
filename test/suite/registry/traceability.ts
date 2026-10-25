@@ -306,6 +306,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // collides with (2.4's "the import's binding being value-level (4)").
   "T4.5-8": ["4.5", "1.7", "2.1", "2.4", "4", "5.7", "14"],
   "T4.5-9": ["4.5", "2.4", "5.7", "11.2", "14"],
+  // T4.5-10: 4.5's scope of an import declaration — the file's at top
+  // level, a nested one's the innermost function, class static block, or
+  // namespace or module declaration enclosing it, never a block's —
+  // resolved as the language's scoping question (2.4); each rooted marker's
+  // `references` edge attributed to its enclosing unit or file (4.6), and
+  // its occurrence record (5.7), the source's unit range pinned (1.7), read
+  // through `occurrences` (11.3).
+  "T4.5-10": ["4.5", "1.7", "2.4", "4.6", "5.7", "11.3"],
   "T4.6-1": ["4.6"],
   "T4.6-2": ["4.6"],
   // T4.6-3: its one-file and declaration-file arms' occurrence records
