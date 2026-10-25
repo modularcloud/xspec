@@ -23,11 +23,14 @@
 // multisets, order-free, with ranges consulted only for the duplicates'
 // distinctness.
 //
-// Fixture sharing: the four workspaces staged here are ALSO T11.3-1's ground
-// (TEST-SPEC §11.3 "over the T5.7-* fixtures"; registry/section-11.3.ts
-// imports the exported staging constants and expectation tables, never
-// copies them, so the two sections cannot drift apart). The exported unit
-// tables carry an order contract stated at each table.
+// Fixture sharing: four workspaces staged here — T5.7-1's, T5.7-2's span
+// fixture, T5.7-3's, and T5.7-4's first (its collision and nested-scope
+// workspaces, and T5.7-2's token-bound ones, are this module's alone) —
+// are ALSO T11.3-1's ground (TEST-SPEC §11.3 "over the T5.7-* fixtures";
+// registry/section-11.3.ts imports the exported staging constants and
+// expectation tables, never copies them, so the two sections cannot drift
+// apart). The exported unit tables carry an order contract stated at each
+// table.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -53,8 +56,10 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { t4510StagedText, t4511StagedText } from "./section-4.5-ii.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -1603,8 +1608,28 @@ const T5_7_3 = defineProductTest({
 // colliding `text` identifier (T4.5-9), and a cross-module call whose
 // argument does not resolve or is not static beside the resolving one
 // that records its occurrence (T4.4-1) — are staged in a second workspace
-// of their own (below the expected table), so the exported table this
-// workspace pins, which T11.3-1 expands by position, is untouched.
+// of their own (below the expected table), and its nested-scope classes —
+// which binding of which scope roots a chain or binds a callee (4.5), each
+// staging a cited arm's of T4.5-10 or T4.5-11 — in a third (below the
+// second), so the exported table this workspace pins, which T11.3-1
+// expands by position, is untouched. The nested-scope classes that record
+// nothing: a chain rooted at an identifier an import and a value-level
+// declaration of the import's own scope both bind, a parameter included
+// where that scope is a function's (T4.5-11 (a), (b)); a chain rooted at
+// an identifier two imports of one scope bind (T4.5-11 (c)); a chain
+// spelled where no binding of its identifier is visible, outside a nested
+// import's scope (T4.5-10 (c)) or the importing file (T4.5-10 (f)); a call
+// whose callee no visible `text` binding binds (T4.5-10 (g)); a call
+// through a `text` identifier colliding in the import's own scope
+// (T4.5-11 (e)) — each beside the findings its arm gives it. Those that
+// record: a nested import rooting its own scope's chain though a
+// declaration of an enclosing scope binds the identifier too (T4.5-11
+// (h)); an inner scope's import rooting that scope's chain though an outer
+// scope's import binds it too (T4.5-10 (d)); imports of distinct scopes,
+// each rooting its own (T4.5-11 (d)); and a `text` binding a declaration
+// or import of another scope also binds, each call left to its own
+// scope's binding — a spec module's `text` call recording its occurrence
+// beside any collision finding (T4.5-11 (h), (i)).
 
 export const NO_OCC_SPARE_SOURCE = '<S id="sp">\nSpare text.\n</S>\n';
 export const NO_OCC_SPARE_FILE = "specs/SPARE.mdx";
@@ -2446,10 +2471,682 @@ async function assertCollisionClassesRecordNothing(
   }
 }
 
+// ---------------------------------------------------------------------------
+// T5.7-4 (third workspace) — the nested-scope classes
+// ---------------------------------------------------------------------------
+
+// The entry's nested-scope classes (SPEC 5.7, 2.4, 4.5, 11.2, 14), staged in
+// one workspace, one code file per staging. Each file's text is a cited
+// arm's staging of T4.5-10 or T4.5-11 exactly — read from section-4.5-ii.ts
+// (`t4510StagedText`, `t4511StagedText`), never re-spelled — under a path of
+// its own: most of those arms name their file `src/c.ts`, while T4.5-10
+// (c)'s `src/after-function.ts`, (d)'s `src/x.ts`, and (f)'s `src/p.ts` and
+// `src/q.ts` keep the names their arms give them.
+//
+// - Recording nothing, each beside the findings its arm gives it:
+//   `src/param.ts` (T4.5-11 (a), the parameter `SPEC: number` of the
+//   function whose body holds the import: 14.15 locating the parameter and
+//   the import, 14.7 for `SPEC.a` and for `text(SPEC.b)`, its callee the
+//   top-level `text`, its argument rooted at the colliding identifier);
+//   `src/body-const.ts` (T4.5-11 (b), `const SPEC = 1` of the function's
+//   body beside the block-nested import, which declares its binding in the
+//   function's scope: 14.15 locating the declarator and the import, 14.7
+//   for `SPEC.a`); `src/blocks.ts` (T4.5-11 (c), two imports nested in
+//   separate blocks of one function, sharing its scope: 14.15 locating
+//   both, 14.7 for `SPEC.a`); `src/after-function.ts` (T4.5-10 (c), the
+//   chain after the function holding the import, outside the import's
+//   scope: no finding); `src/p.ts` and `src/q.ts` (T4.5-10 (f), scripts
+//   both, `q.ts`'s chain outside the file whose bare block holds the
+//   import: no finding); `src/hidden-text.ts` (T4.5-10 (g), the top-level
+//   `text(SPEC.a)` beside `g`'s nested `text` import, whose binding is
+//   `g`'s: 14.18 at `SPEC.a`); and `src/text-param.ts` and
+//   `src/text-local.ts` (T4.5-11 (e)'s two stagings, `text` bound by `g`'s
+//   import and by its parameter `text: unknown` or a function declaration
+//   of its body: 14.15 locating both declarations, 14.18 at `SPEC.a`).
+// - Recording: `src/enclosing.ts` (T4.5-11 (h), `g`'s import beside the
+//   top-level `const SPEC = 1`: no finding, `SPEC.a`'s record from
+//   `src/enclosing.ts#g`, and none for the top-level `SPEC.b`, rooted at the
+//   `const`); `src/x.ts` (T4.5-10 (d), a top-level import and one nested in
+//   a block of `g` binding `A`: 14.15 locating both, `g`'s marker's record
+//   from `src/x.ts#g` to `specs/A.mdx#a.b` and the top-level one's from
+//   `src/x.ts` to `specs/B.mdx#a.b`); `src/siblings.ts` (T4.5-11 (d), the
+//   imports of sibling functions: 14.15 locating both, one record from each
+//   function); `src/text-enclosing.ts` (T4.5-11 (h)'s callee side, `g`'s
+//   import of A's `text` beside a top-level `function text`: no finding,
+//   the call's `embeds` record from `src/text-enclosing.ts#g`); and
+//   `src/text-pair.ts` and `src/text-mirror.ts` (T4.5-11 (i)'s two
+//   stagings, a spec module import and a non-spec import binding `text` in
+//   different scopes: 14.15 locating both, the spec module's `text` call
+//   recording its `embeds` occurrence — `g`'s in the first, the top-level
+//   one in the mirror, whose call in `g`, the non-spec `text`'s, records
+//   nothing beside its 14.18 at `SPEC.a`).
+//
+// `specs/A.mdx` and `specs/B.mdx` — one staged-source record staged at both
+// paths — each hold `a`, its child `a.b`, and `b`, so every chain a staging
+// spells names a node of either module (T4.5-10's `a.b`, T4.5-11's `a` and
+// `b`): a spelling that records nothing does so for how it is rooted or
+// called alone. As in T4.5-10 and T4.5-11, no file is compiled under H-2's
+// channel (TypeScript's checker rejects a nested import declaration after
+// parsing), and no `src/t.ts` is staged: T4.5-11 (i)'s `"./t"` names no
+// staged module. The three scripts — `src/after-function.ts`, `src/p.ts`,
+// and `src/q.ts` — declare no file-level name in common, and
+// `src/after-function.ts`'s top-level `A.a.b` lies outside `p.ts`'s
+// import's scope as `src/q.ts`'s does (4.5: an import's scope at widest its
+// own file's).
+//
+// The findings are asserted file by file first — each file's condition
+// multiset exact, every deviating file named at once, so a product failing
+// a class names that class's file — then each finding is pinned to its file
+// and, in location order, to exactly one location per construct it
+// locates, within the construct's window (`byteWindow`, as the collision
+// workspace pins its findings; the byte-exact ranges are T4.5-10's and
+// T4.5-11's own business). Every construct is found in its file's text at
+// module load, spelled there exactly once, each finding's windows disjoint
+// and in 12.7's location order — a mismatch a harness defect thrown at
+// load, never a product verdict.
+
+/** One finding a nested-scope staging gives: its condition and constructs. */
+interface NestedScopeFinding {
+  readonly condition: "14.7" | "14.15" | "14.18";
+  /**
+   * The constructs the finding locates, in 12.7's location order, each
+   * spelled exactly once in the staging's text: a colliding declaration by
+   * its own characters (14, T14-11), an unresolved chain or call at the
+   * span its occurrence would occupy (5.7), a node passed to another
+   * function as the binding's identifier extended by its chain (14).
+   */
+  readonly at: readonly string[];
+}
+
+/** One code file of the nested-scope workspace, and what it gives. */
+interface NestedScopeStaging {
+  /** The workspace-relative path the text is staged at, under `src/`. */
+  readonly file: string;
+  /** The arm whose staging the text is (record names and diagnostics). */
+  readonly cited: string;
+  /** The class the file stages (record names and diagnostics). */
+  readonly what: string;
+  /** The cited staging's text, exactly. */
+  readonly text: string;
+  /** Every finding the file gives, in 12.7's order. */
+  readonly findings: readonly NestedScopeFinding[];
+  /** Every record the file's spellings give. */
+  readonly units: readonly OccurrenceUnit[];
+}
+
+/** The import nested in a function's body or block, spelled with no `;`. */
+const NESTED_IMPORT = 'import SPEC from "../specs/A.xspec"';
+/** T4.5-11 (c)'s and (d)'s second import of `SPEC`, from `specs/B.mdx`. */
+const NESTED_IMPORT_B = 'import SPEC from "../specs/B.xspec"';
+/** The import of A's default binding and its `text` (T4.5-11 (e), (h), (i)). */
+const NESTED_TEXT_IMPORT = 'import SPEC, { text } from "../specs/A.xspec"';
+/** T4.5-11 (i)'s non-spec import of `text`. */
+const NESTED_NON_SPEC_TEXT_IMPORT = 'import { text } from "./t"';
+
+const NESTED_SCOPE_STAGINGS: readonly NestedScopeStaging[] = [
+  {
+    file: "src/param.ts",
+    cited: "T4.5-11 (a)",
+    what: "chains rooted at `SPEC`, which the nested import and its function's parameter `SPEC: number` both bind",
+    text: t4511StagedText("(a) `SPEC: number`"),
+    findings: [
+      { condition: "14.7", at: ["SPEC.a"] },
+      { condition: "14.7", at: ["text(SPEC.b)"] },
+      { condition: "14.15", at: ["SPEC: number", NESTED_IMPORT] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/body-const.ts",
+    cited: "T4.5-11 (b)",
+    what: "a chain rooted at `SPEC`, which the block-nested import and `const SPEC = 1` of its function's body both bind",
+    text: t4511StagedText("(b) `const SPEC = 1`"),
+    findings: [
+      { condition: "14.7", at: ["SPEC.a"] },
+      { condition: "14.15", at: ["SPEC = 1", NESTED_IMPORT] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/blocks.ts",
+    cited: "T4.5-11 (c)",
+    what: "a chain rooted at `SPEC`, which imports nested in two blocks of one function both bind",
+    text: t4511StagedText("(c)"),
+    findings: [
+      { condition: "14.7", at: ["SPEC.a"] },
+      { condition: "14.15", at: [NESTED_IMPORT, NESTED_IMPORT_B] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/after-function.ts",
+    cited: "T4.5-10 (c)",
+    what: "a chain after the function whose body holds the import, outside the import's scope",
+    text: t4510StagedText("(c)", "src/after-function.ts"),
+    findings: [],
+    units: [],
+  },
+  {
+    file: "src/p.ts",
+    cited: "T4.5-10 (f)",
+    what: "a script whose bare block holds the import of `A`, binding in its own file's scope alone",
+    text: t4510StagedText("(f)", "src/p.ts"),
+    findings: [],
+    units: [],
+  },
+  {
+    file: "src/q.ts",
+    cited: "T4.5-10 (f)",
+    what: "a script's chain, outside the file whose import binds `A`",
+    text: t4510StagedText("(f)", "src/q.ts"),
+    findings: [],
+    units: [],
+  },
+  {
+    file: "src/hidden-text.ts",
+    cited: "T4.5-10 (g)",
+    what: "a top-level call whose callee no visible `text` binding binds, `g`'s nested `text` import being `g`'s",
+    text: t4510StagedText("(g)", "src/c.ts"),
+    findings: [{ condition: "14.18", at: ["SPEC.a"] }],
+    units: [],
+  },
+  {
+    file: "src/text-param.ts",
+    cited: "T4.5-11 (e)",
+    what: "a call through `text`, which `g`'s import and its parameter `text: unknown` both bind",
+    text: t4511StagedText("(e) parameter `text: unknown`"),
+    findings: [
+      { condition: "14.15", at: ["text: unknown", NESTED_TEXT_IMPORT] },
+      { condition: "14.18", at: ["SPEC.a"] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/text-local.ts",
+    cited: "T4.5-11 (e)",
+    what: "a call through `text`, which `g`'s import and `function text(x: unknown) {}` of its body both bind",
+    text: t4511StagedText("(e) `function text(x: unknown) {}`"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [NESTED_TEXT_IMPORT, "function text(x: unknown) {}"],
+      },
+      { condition: "14.18", at: ["SPEC.a"] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/enclosing.ts",
+    cited: "T4.5-11 (h)",
+    what: "`g`'s import rooting `g`'s chain though the top-level `const SPEC = 1` binds `SPEC` too",
+    text: t4511StagedText("(h) top-level `const SPEC = 1`"),
+    findings: [],
+    units: [
+      {
+        what: "`SPEC.a` in `g`, rooted at `g`'s import (T4.5-11 (h))",
+        file: "src/enclosing.ts",
+        kind: "references",
+        source: "src/enclosing.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/x.ts",
+    cited: "T4.5-10 (d)",
+    what: "the import nested in a block of `g` rooting `g`'s chain though the top-level import binds `A` too",
+    text: t4510StagedText("(d)", "src/x.ts"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [
+          'import A from "../specs/B.xspec"',
+          'import A from "../specs/A.xspec"',
+        ],
+      },
+    ],
+    units: [
+      {
+        what: "`A.a.b` in `g`, rooted at `g`'s nested import (T4.5-10 (d))",
+        file: "src/x.ts",
+        kind: "references",
+        source: "src/x.ts#g",
+        target: "specs/A.mdx#a.b",
+        count: 1,
+      },
+      {
+        what: "the top-level `A.a.b`, rooted at the top-level import (T4.5-10 (d))",
+        file: "src/x.ts",
+        kind: "references",
+        source: "src/x.ts",
+        target: "specs/B.mdx#a.b",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/siblings.ts",
+    cited: "T4.5-11 (d)",
+    what: "the imports of the sibling functions `g` and `h`, each rooting its own function's chain",
+    text: t4511StagedText("(d)"),
+    findings: [{ condition: "14.15", at: [NESTED_IMPORT, NESTED_IMPORT_B] }],
+    units: [
+      {
+        what: "`SPEC.a` in `g`, rooted at `g`'s import (T4.5-11 (d))",
+        file: "src/siblings.ts",
+        kind: "references",
+        source: "src/siblings.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+      {
+        what: "`SPEC.b` in `h`, rooted at `h`'s import (T4.5-11 (d))",
+        file: "src/siblings.ts",
+        kind: "references",
+        source: "src/siblings.ts#h",
+        target: "specs/B.mdx#b",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/text-enclosing.ts",
+    cited: "T4.5-11 (h)",
+    what: "`g`'s import binding its call's callee though the top-level `function text(x: unknown) {}` binds `text` too",
+    text: t4511StagedText("(h) callee side"),
+    findings: [],
+    units: [
+      {
+        what: "`text(SPEC.a)` in `g`, A's `text` call (T4.5-11 (h))",
+        file: "src/text-enclosing.ts",
+        kind: "embeds",
+        source: "src/text-enclosing.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/text-pair.ts",
+    cited: "T4.5-11 (i)",
+    what: "`g`'s import of A's `text` binding its call's callee though the top-level non-spec import binds `text` too",
+    text: t4511StagedText("(i) top-level non-spec `text`"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [NESTED_NON_SPEC_TEXT_IMPORT, NESTED_TEXT_IMPORT],
+      },
+    ],
+    units: [
+      {
+        what: "`text(SPEC.a)` in `g`, A's `text` call (T4.5-11 (i))",
+        file: "src/text-pair.ts",
+        kind: "embeds",
+        source: "src/text-pair.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/text-mirror.ts",
+    cited: "T4.5-11 (i)",
+    what: "the top-level import of A's `text` binding the top-level call's callee, `g`'s non-spec import the callee of `g`'s call",
+    text: t4511StagedText("(i) mirror"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [NESTED_TEXT_IMPORT, NESTED_NON_SPEC_TEXT_IMPORT],
+      },
+      { condition: "14.18", at: ["SPEC.a"] },
+    ],
+    units: [
+      {
+        what: "the top-level `text(SPEC.b)`, A's `text` call (T4.5-11 (i))",
+        file: "src/text-mirror.ts",
+        kind: "embeds",
+        source: "src/text-mirror.ts",
+        target: "specs/A.mdx#b",
+        count: 1,
+      },
+    ],
+  },
+];
+
+/** One expected finding of the nested-scope workspace, located from the bytes. */
+interface LaidOutNestedScopeFinding {
+  readonly condition: string;
+  readonly file: string;
+  /** What the finding reports (failure diagnostics). */
+  readonly what: string;
+  /** One window per located construct, in 12.7's location order. */
+  readonly windows: readonly { readonly start: number; readonly end: number }[];
+}
+
+/**
+ * A construct's end-widened byte window (`byteWindow`) in a staging's text,
+ * which must spell it exactly once — thrown otherwise, a harness defect of
+ * the table above, never a product verdict.
+ */
+function nestedScopeWindow(
+  staging: NestedScopeStaging,
+  construct: string,
+): { readonly start: number; readonly end: number } {
+  const at = staging.text.indexOf(construct);
+  if (at === -1 || staging.text.lastIndexOf(construct) !== at) {
+    throw new Error(
+      `T5.7-4 fixture self-check: the nested-scope workspace's ` +
+        `${staging.file} (${staging.cited}) must spell \`${construct}\` ` +
+        `exactly once (harness bug)`,
+    );
+  }
+  return byteWindow(staging.text.slice(0, at), construct);
+}
+
+// The table's module-load self-check (a mismatch is a harness defect — fix
+// the table — never a product verdict): each path its own under `src/`,
+// none `src/t.ts` (T4.5-11 (i)'s `"./t"` names no staged module), each
+// file's findings in 12.7's order (conditions in numeric order), each
+// unit's file the staging's own and its source that file or a unit within
+// it.
+{
+  const files = NESTED_SCOPE_STAGINGS.map((staging) => staging.file);
+  const conditionNumber = (condition: string): number =>
+    Number(condition.slice("14.".length));
+  const broken = NESTED_SCOPE_STAGINGS.filter(
+    (staging) =>
+      !staging.file.startsWith("src/") ||
+      staging.file === "src/t.ts" ||
+      staging.findings.some(
+        (finding, index) =>
+          index > 0 &&
+          conditionNumber(finding.condition) <
+            conditionNumber(staging.findings[index - 1]!.condition),
+      ) ||
+      staging.units.some(
+        (unit) =>
+          unit.file !== staging.file ||
+          (unit.source !== staging.file &&
+            !unit.source.startsWith(`${staging.file}#`)),
+      ),
+  );
+  if (new Set(files).size !== files.length || broken.length > 0) {
+    throw new Error(
+      `T5.7-4 fixture self-check: the nested-scope workspace's files must ` +
+        `be distinct paths under src/, none src/t.ts, each listing its ` +
+        `findings in 12.7's order and its units from its own file; the ` +
+        `table gives ${JSON.stringify(files)}, the stagings at ` +
+        `${JSON.stringify(broken.map((staging) => staging.file))} broken ` +
+        `(harness bug)`,
+    );
+  }
+}
+
+/**
+ * Every expected finding, located from the exact bytes at module load: each
+ * construct's window found in its staging's text, the windows of one
+ * finding disjoint and in 12.7's location order (file bytes, then start,
+ * then end; one file here).
+ */
+const NESTED_SCOPE_FINDINGS: readonly LaidOutNestedScopeFinding[] =
+  NESTED_SCOPE_STAGINGS.flatMap((staging) =>
+    staging.findings.map((finding): LaidOutNestedScopeFinding => {
+      const windows = finding.at.map((construct) =>
+        nestedScopeWindow(staging, construct),
+      );
+      if (
+        windows.some(
+          (window, index) =>
+            index > 0 && window.start < windows[index - 1]!.end,
+        )
+      ) {
+        throw new Error(
+          `T5.7-4 fixture self-check: the nested-scope workspace's ` +
+            `${staging.file} must list the constructs its ` +
+            `${finding.condition} locates in 12.7's location order, their ` +
+            `windows disjoint — ${JSON.stringify(finding.at)} give ` +
+            `${JSON.stringify(windows)} (harness bug)`,
+        );
+      }
+      return {
+        condition: finding.condition,
+        file: staging.file,
+        what:
+          `${finding.condition} at ` +
+          finding.at.map((construct) => `\`${construct}\``).join(" and ") +
+          ` in ${staging.file} (${staging.cited}: ${staging.what})`,
+        windows,
+      };
+    }),
+  );
+
+/** Each staged code file's expected condition multiset, sorted. */
+const NESTED_SCOPE_CONDITIONS_BY_FILE: ReadonlyMap<string, readonly string[]> =
+  new Map(
+    NESTED_SCOPE_STAGINGS.map((staging) => [
+      staging.file,
+      staging.findings.map((finding) => finding.condition).sort(),
+    ]),
+  );
+
+/**
+ * Per condition, the expected findings in (file, first-location start)
+ * order — `findingsInSourceOrder`'s.
+ */
+const NESTED_SCOPE_FINDINGS_BY_CONDITION: ReadonlyMap<
+  string,
+  readonly LaidOutNestedScopeFinding[]
+> = new Map(
+  [...new Set(NESTED_SCOPE_FINDINGS.map((finding) => finding.condition))].map(
+    (condition) => [
+      condition,
+      NESTED_SCOPE_FINDINGS.filter(
+        (finding) => finding.condition === condition,
+      ).sort((a, b) =>
+        a.file !== b.file
+          ? a.file < b.file
+            ? -1
+            : 1
+          : a.windows[0]!.start - b.windows[0]!.start,
+      ),
+    ],
+  ),
+);
+
+/**
+ * The complete expected record multiset: the recording classes' eight
+ * records — `src/enclosing.ts`'s one, `src/x.ts`'s two, `src/siblings.ts`'s
+ * two, and the `text` calls of `src/text-enclosing.ts`, `src/text-pair.ts`,
+ * and `src/text-mirror.ts` (its top-level call's alone) — and nothing for
+ * any other spelling.
+ */
+const NESTED_SCOPE_UNITS: readonly OccurrenceUnit[] =
+  NESTED_SCOPE_STAGINGS.flatMap((staging) => staging.units);
+
+// The nested-scope workspace is created after the entry workspace's
+// invocations: every file is a staged-source record (S-9's timing clause),
+// each code file's the cited staging's text exactly, and `specs/A.mdx` and
+// `specs/B.mdx` one record staged at both paths.
+const NESTED_SCOPE_SPEC_SOURCE = stagedMdx(
+  "T5.7-4 nested-scope workspace specs/A.mdx and specs/B.mdx — `a`, its child `a.b`, and `b`",
+  '<S id="a">\nAlpha behavior.\n<S id="a.b">\nBeta behavior.\n</S>\n</S>\n\n<S id="b">\nGamma behavior.\n</S>\n',
+);
+const NESTED_SCOPE_CODE_FILES: Readonly<Record<string, StagedTs>> =
+  Object.fromEntries(
+    NESTED_SCOPE_STAGINGS.map((staging) => [
+      staging.file,
+      stagedTs(
+        `T5.7-4 nested-scope workspace ${staging.file} — ${staging.cited}'s staging: ${staging.what}`,
+        staging.text,
+      ),
+    ]),
+  );
+
+/** A decoded finding's condition and locations (failure diagnostics). */
+function renderNestedScopeFinding(finding: Finding): string {
+  const condition = finding.condition ?? finding.code ?? "(code-less)";
+  const locations = finding.locations.map(
+    (location) =>
+      `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+      `${String(location.range.end)})`,
+  );
+  return `${condition} at ${locations.length === 0 ? "no location" : locations.join(" and ")}`;
+}
+
+/**
+ * The nested-scope workspace's findings: file by file first — each file's
+ * condition multiset exact (a file no staging gives a finding, a spec
+ * source among them, holding none), every deviating file named at once
+ * with its class and the findings it got — then every finding pinned to
+ * its file and, in location order, to exactly one location per construct
+ * it locates, within the construct's window (as `assertCollisionFindings`
+ * pins its findings).
+ */
+function assertNestedScopeFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  const byFile = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const first = finding.locations[0];
+    const file =
+      first === undefined ? "(no location)" : renderPathValue(first.file);
+    byFile.set(file, [...(byFile.get(file) ?? []), finding]);
+  }
+  const deviations: string[] = [];
+  for (const file of [
+    ...new Set([...NESTED_SCOPE_CONDITIONS_BY_FILE.keys(), ...byFile.keys()]),
+  ].sort()) {
+    const expected = NESTED_SCOPE_CONDITIONS_BY_FILE.get(file) ?? [];
+    const got = byFile.get(file) ?? [];
+    const gotConditions = got
+      .map((finding) => finding.condition ?? finding.code ?? "(code-less)")
+      .sort();
+    if (JSON.stringify(gotConditions) !== JSON.stringify(expected)) {
+      const staging = NESTED_SCOPE_STAGINGS.find(
+        (candidate) => candidate.file === file,
+      );
+      deviations.push(
+        `${file} (${
+          staging === undefined
+            ? "no staging gives it a finding"
+            : `${staging.cited}: ${staging.what}`
+        }) — expected [${expected.join(", ")}], got [${
+          got.length === 0
+            ? "none"
+            : got.map(renderNestedScopeFinding).join("; ")
+        }]`,
+      );
+    }
+  }
+  if (deviations.length > 0) {
+    fail(
+      `${context}: each file's findings are exactly those its class gives ` +
+        `(SPEC 14, 2.4, 4.5) — 14.15 for every pair of declarations binding ` +
+        `one identifier in an import's own scope and for every two imports ` +
+        `binding one identifier whatever their scopes, 14.7 for a chain ` +
+        `rooted at an identifier colliding in its scope, 14.18 for a node ` +
+        `passed to a call no visible spec module \`text\` binding binds — ` +
+        `and nothing else; deviating: ${deviations.join(" | ")}`,
+    );
+  }
+  for (const [condition, expectations] of NESTED_SCOPE_FINDINGS_BY_CONDITION) {
+    // Each file's condition multiset is pinned above, so each expectation
+    // has its finding.
+    const actual = findingsInSourceOrder(findings, condition);
+    expectations.forEach((expectation, index) => {
+      assertFindingLocatesExactly(
+        actual[index]!,
+        expectation.windows.map((window) => ({
+          file: expectation.file,
+          window,
+        })),
+        `${context}: the ${expectation.what} locates ` +
+          (expectation.windows.length === 1
+            ? "its one construct"
+            : "every colliding declaration, one location each,") +
+          ` within the construct's window and nothing else (SPEC 14, 1.7)`,
+      );
+    });
+  }
+}
+
+/**
+ * The third workspace: `build --json` pins the staging premise, then a bare
+ * `occurrences` (exit 1, the domain's findings accompanying, SPEC 11.2)
+ * reports records for exactly the recording classes' spellings — a chain
+ * rooted at its own scope's import though another scope's declaration or
+ * import binds the identifier too, and a spec module's `text` call left to
+ * its own scope's binding — and none for a chain rooted at an identifier
+ * colliding in an import's own scope, a chain or call where no binding of
+ * its identifier is visible, or a call through a colliding `text`.
+ */
+async function assertNestedScopeClassesRecord(
+  product: ProductBinding,
+): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+      "specs/A.mdx": NESTED_SCOPE_SPEC_SOURCE,
+      "specs/B.mdx": NESTED_SCOPE_SPEC_SOURCE,
+      ...NESTED_SCOPE_CODE_FILES,
+    },
+  });
+  try {
+    const buildContext =
+      "T5.7-4 nested-scope workspace `build --json` (staging premise)";
+    assertNestedScopeFindings(
+      await buildFindings(product, workspace, buildContext),
+      buildContext,
+    );
+
+    const context = "T5.7-4 nested-scope workspace `occurrences`";
+    const result = await expectExit(
+      product,
+      workspace,
+      ["occurrences"],
+      1,
+      `${context} — an answer carrying any finding exits 1, the full ` +
+        `answer document still emitted (SPEC 11.2, 11.3)`,
+    );
+    const report = decodeOccurrencesReport(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertNestedScopeFindings(report.findings, context);
+    assertSameJson(
+      report.occurrences.map(renderOccurrenceUnit).sort(),
+      expectedUnitMultiset(NESTED_SCOPE_UNITS),
+      `${context}: the complete (file, [kind], source -> target) record ` +
+        `multiset — exactly the recording classes' eight records (SPEC 5.7, ` +
+        `4.5, 11.2): \`src/enclosing.ts\`'s marker in \`g\`, rooted at ` +
+        `\`g\`'s import though a declaration of an enclosing scope binds ` +
+        `\`SPEC\` too (T4.5-11 (h)); \`src/x.ts\`'s marker in \`g\`, rooted ` +
+        `at \`g\`'s nested import, and its top-level marker, rooted at the ` +
+        `top-level import (T4.5-10 (d)); \`src/siblings.ts\`'s markers, each ` +
+        `rooted at its own function's import (T4.5-11 (d)); and the spec ` +
+        `module \`text\` calls each left to its own scope's binding — ` +
+        `\`src/text-enclosing.ts\`'s and \`src/text-pair.ts\`'s in \`g\`, ` +
+        `\`src/text-mirror.ts\`'s at top level (T4.5-11 (h), (i)) — and no ` +
+        `record for a chain rooted at an identifier an import and a ` +
+        `value-level declaration of its own scope both bind, a parameter ` +
+        `included (T4.5-11 (a), (b)), or two imports of one scope bind ` +
+        `(T4.5-11 (c)), a chain spelled outside a nested import's scope or ` +
+        `the importing file (T4.5-10 (c), (f)), a call whose callee no ` +
+        `visible \`text\` binding binds (T4.5-10 (g)) or the non-spec ` +
+        `\`text\` binds (T4.5-11 (i)), or a call through a \`text\` ` +
+        `identifier colliding in the import's own scope (T4.5-11 (e))`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
 const T5_7_4 = defineProductTest({
   id: "T5.7-4",
   title:
-    "constructs that record no edge record no occurrence — an import declaration (binding used and unused), a type-only binding's marker-shaped uses and a call through a type-only `text` binding (its condition-18 finding beside it; a `type` modifier on the named binding and, separately, on the declaration), a chain rooted at a shadowing local declaration, a chain rooted at an identifier an import and a same-scope value-level declaration both bind (its collision and unresolved findings beside it), a chain rooted at an identifier two imports bind, type-only or not (both value-level, in a spec source and in a code source, and one type-only; its collision and unresolved findings beside it), a call through a colliding `text` identifier, a cross-module call whose argument does not resolve or is not static (the resolving cross-module call recording its occurrence beside its condition-11 finding), a dynamic reference spelling and unresolving ones (each also its finding, 14.8/14.5–14.7) — so `occurrences` reports records for exactly the resolving spellings, never a record with an unavailable target, the unresolved spelling's position reaching consumers only through its finding's range (the MDX embedding form's spanning its full braced container), the answer carrying the domain's findings, exit 1 (SPEC 5.7, 2.1, 2.4, 4, 4.4, 4.5, 11.2, 11.3, 14)",
+    "constructs that record no edge record no occurrence — an import declaration (binding used and unused), a type-only binding's marker-shaped uses and a call through a type-only `text` binding (its condition-18 finding beside it; a `type` modifier on the named binding and, separately, on the declaration), a chain rooted at a shadowing local declaration, a chain rooted at an identifier an import and a value-level declaration of the import's own scope both bind (at top level, and a nested import beside its function's parameter or a declaration of its function's body; its collision and unresolved findings beside it), a chain rooted at an identifier two imports of one scope bind, type-only or not (both value-level, in a spec source, in a code source, and nested in two blocks of one function, and one type-only; its collision and unresolved findings beside it), a chain spelled where no binding of its identifier is visible (after the function holding a nested import, and in a script beside another script's block-nested import), a call whose callee no visible `text` binding binds (a nested import's `text` called at top level; its condition-18 finding beside it), a call through a colliding `text` identifier (at top level, and in a function beside its parameter or a function declaration of its body binding `text`), a cross-module call whose argument does not resolve or is not static (the resolving cross-module call recording its occurrence beside its condition-11 finding), a dynamic reference spelling and unresolving ones (each also its finding, 14.8/14.5–14.7) — while a nested import roots its own scope's chain though a declaration of an enclosing scope binds the identifier too, an inner scope's import roots that scope's chain though an outer scope's import binds it too, and imports of sibling functions each root their own (each pair's collision finding beside the records), and a `text` binding another scope's declaration or import also binds leaves each call to its own scope's binding, a spec module's `text` call recording its occurrence beside any collision finding — so `occurrences` reports records for exactly the resolving spellings, never a record with an unavailable target, the unresolved spelling's position reaching consumers only through its finding's range (the MDX embedding form's spanning its full braced container), the answer carrying the domain's findings, exit 1 (SPEC 5.7, 2.1, 2.4, 4, 4.4, 4.5, 11.2, 11.3, 14)",
   run: async (product) => {
     assertNoOccContainerRange();
 
@@ -2520,6 +3217,10 @@ const T5_7_4 = defineProductTest({
     // cross-module classes beside resolving controls (SPEC 5.7, 2.1, 2.4,
     // 4, 4.4, 4.5).
     await assertCollisionClassesRecordNothing(product);
+
+    // The third workspace: the entry's nested-scope classes, each file a
+    // cited staging of T4.5-10 or T4.5-11 (SPEC 5.7, 2.4, 4.5, 11.2, 14).
+    await assertNestedScopeClassesRecord(product);
   },
 });
 

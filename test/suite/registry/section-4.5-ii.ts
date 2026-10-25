@@ -831,9 +831,10 @@ const T4_5_10_E: T4510FailingStaging = (() => {
 // scope and resolve `q.ts`'s `A` to `p.ts`'s import: under 4.5 that import
 // binds in `p.ts`'s scope alone, so `q.ts`'s chain is rooted at nothing.
 const T4_5_10_F_IMPORTING_FILE = "src/p.ts";
+const T4_5_10_F_IMPORTING_TEXT = '{ import A from "../specs/A.xspec" }\n';
 const T4_5_10_F_IMPORTING_SOURCE = stagedTs(
   "T4.5-10 (f) src/p.ts — a script whose bare block holds the import of `A`",
-  '{ import A from "../specs/A.xspec" }\n',
+  T4_5_10_F_IMPORTING_TEXT,
 );
 const T4_5_10_F: LaidOutT4510Staging<T4510Staging> = layOutT4510Staging("f", {
   file: "src/q.ts",
@@ -952,6 +953,57 @@ const T4_5_10_H: {
     ],
   };
 })();
+
+/**
+ * Every T4.5-10 code source as its arm stages it, by arm (keyed as
+ * `T4_5_10_ARMS` keys it) and then path: the texts of the tables above,
+ * never re-spelled (`t4510StagedText`).
+ */
+const T4_5_10_CODE_TEXTS: Readonly<
+  Record<string, Readonly<Record<string, string>>>
+> = {
+  "(a)": { [T4_5_10_A.staging.file]: T4_5_10_A.staging.text },
+  "(b)": Object.fromEntries(
+    T4_5_10_B.map(({ staging }) => [staging.file, staging.text]),
+  ),
+  "(c)": Object.fromEntries(
+    T4_5_10_C.map(({ staging }) => [staging.file, staging.text]),
+  ),
+  "(d)": { [T4_5_10_D_FILE]: T4_5_10_D_TEXT },
+  "(e)": { [T4_5_10_E_FILE]: T4_5_10_E_TEXT },
+  "(f)": {
+    [T4_5_10_F_IMPORTING_FILE]: T4_5_10_F_IMPORTING_TEXT,
+    [T4_5_10_F.staging.file]: T4_5_10_F.staging.text,
+  },
+  "(g)": { [T4_5_10_G_FILE]: T4_5_10_G_TEXT },
+  "(g) twin": { [T4_5_10_G_FILE]: T4_5_10_G_TWIN_TEXT },
+  "(h)": { [T4_5_10_H_FILE]: T4_5_10_H_TEXT },
+};
+
+/**
+ * The exact text T4.5-10's arm `arm` (keyed as `T4_5_10_ARMS` keys it:
+ * `(c)`, `(g) twin`) stages at `file` — exported for T5.7-4's nested-scope
+ * workspace (section-5.7.ts), which restages it under a path of its own,
+ * never re-spelled. Throws for a code source the arm does not stage there
+ * (a harness defect of the caller's table).
+ */
+export function t4510StagedText(arm: string, file: string): string {
+  const text = T4_5_10_CODE_TEXTS[arm]?.[file];
+  if (text === undefined) {
+    throw new Error(
+      `T4.5-10 restaging: arm ${arm} stages no code source at ${file}; the ` +
+        `arms stage ${JSON.stringify(
+          Object.fromEntries(
+            Object.entries(T4_5_10_CODE_TEXTS).map(([key, files]) => [
+              key,
+              Object.keys(files),
+            ]),
+          ),
+        )} (harness bug)`,
+    );
+  }
+  return text;
+}
 
 /** The `files` of a workspace holding `specs/A.mdx` and the given stagings. */
 function t4510Files(
@@ -2912,6 +2964,26 @@ const T4_5_11_STAGINGS: readonly LaidOutT4511Staging[] = [
   ...T4_5_11_H,
   ...T4_5_11_I,
 ].map(layOutT4511Staging);
+
+/**
+ * The exact `src/c.ts` text of the T4.5-11 staging keyed `key` — its arm
+ * first, as each staging's `key` spells it (`(c)`, `(h) callee side`) —
+ * exported for T5.7-4's nested-scope workspace (section-5.7.ts), which
+ * restages it under a path of its own, never re-spelled. Throws for a key
+ * no staging carries (a harness defect of the caller's table).
+ */
+export function t4511StagedText(key: string): string {
+  const laid = T4_5_11_STAGINGS.find(({ staging }) => staging.key === key);
+  if (laid === undefined) {
+    throw new Error(
+      `T4.5-11 restaging: no staging is keyed ${JSON.stringify(key)}; the ` +
+        `keys are ${JSON.stringify(
+          T4_5_11_STAGINGS.map(({ staging }) => staging.key),
+        )} (harness bug)`,
+    );
+  }
+  return laid.staging.text;
+}
 
 /** The `files` of a staging's workspace: both spec sources and `src/c.ts`. */
 function t4511Files(source: StagedTs): Record<string, InitialFileContents> {
