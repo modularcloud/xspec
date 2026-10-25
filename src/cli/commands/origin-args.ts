@@ -12,29 +12,31 @@
 // naming discovered spec sources".
 //
 // Existence and kind are judged over every discovered file, as 11.4's
-// operand membership is. A discovered file whose own path 14.19 rejects —
-// one containing `#` or U+FFFD, or a spec-group file without the `.mdx`
-// extension or holding a character 7.1 bars — is a discovered source of
-// its kind all the same (SPEC 11.2, 14.19). A spec-kind one is a spec
-// source by kind: it passes the file check, and the old ID is judged over
-// its spelled identities, its structure being parse-local though none of
-// its node identities is defined (SPEC 11.2). A code-kind one is a
-// wrong-kind operand like any other discovered code source. SPEC 12.0: a
-// bare `<file>` operand is a whole path — `#` has no delimiter role in it —
-// so `rename specs/a#b.mdx …` names the discovered file of that invalid
-// path, while `move`'s operands are classified by spelling (SPEC 6.5), the
-// file part of each holding no `#`. A workspace discovering such an origin
-// fails `build`'s validations (its 14.19 finding at least), so once the
-// argument checks pass, the invalid-workspace refusal of 6.4 follows
-// (exit 1), no refusal reason evaluated.
+// operand membership is — through ./discovered-file.ts, the judgement the
+// gated reads' identity checks share (SPEC 12.0). A discovered file whose
+// own path 14.19 rejects — one containing `#` or U+FFFD, or a spec-group
+// file without the `.mdx` extension or holding a character 7.1 bars — is
+// a discovered source of its kind all the same (SPEC 11.2, 14.19). A
+// spec-kind one is a spec source by kind: it passes the file check, and
+// the old ID is judged over its spelled identities, its structure being
+// parse-local though none of its node identities is defined (SPEC 11.2).
+// A code-kind one is a wrong-kind operand like any other discovered code
+// source. SPEC 12.0: a bare `<file>` operand is a whole path — `#` has no
+// delimiter role in it — so `rename specs/a#b.mdx …` names the discovered
+// file of that invalid path, while `move`'s operands are classified by
+// spelling (SPEC 6.5), the file part of each holding no `#`. A workspace
+// discovering such an origin fails `build`'s validations (its 14.19
+// finding at least), so once the argument checks pass, the
+// invalid-workspace refusal of 6.4 follows (exit 1), no refusal reason
+// evaluated.
 //
 // Comparison is byte-wise against the discovered paths (SPEC 12.0, 1.5): an
 // argument value is valid UTF-8 free of U+FFFD (the parser's malformed-value
 // check), so it never names a non-UTF-8 or U+FFFD-bearing path.
 
 import type { SpecFileAnalysis } from "../../core/graph.js";
-import { pathTextKey } from "../../core/path-text.js";
 import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
+import { judgeDiscoveredFile } from "./discovered-file.js";
 
 /** How the discovered set classifies an origin `<file>` (SPEC 6.4, 6.5). */
 export type OriginFileJudgement =
@@ -71,38 +73,22 @@ export function judgeOriginFile(
   analysis: WorkspaceAnalysis,
   file: string,
 ): OriginFileJudgement {
-  const { classification } = analysis;
-  if (classification.specSources.some((source) => source.path === file)) {
-    return {
-      kind: "spec",
-      pathValid: true,
-      parsed:
-        analysis.specs.find((spec) => spec.document.path === file) ?? null,
-    };
+  const judged = judgeDiscoveredFile(analysis, file);
+  switch (judged.kind) {
+    case "unknown":
+      return { kind: "unknown" };
+    case "code":
+      // SPEC 6.4: a discovered code source, valid path or not, is the
+      // wrong-kind operand — judged like existence, before any content
+      // question.
+      return { kind: "wrong-kind" };
+    case "spec":
+      return {
+        kind: "spec",
+        pathValid: judged.pathValid,
+        parsed: judged.parsed,
+      };
   }
-  if (classification.codeSources.some((source) => source.path === file)) {
-    return { kind: "wrong-kind" };
-  }
-  // SPEC 14.19, 11.2: a discovered file whose own path is invalid, matched
-  // by its exact bytes (`pathTextKey`).
-  const key = pathTextKey(file);
-  const invalid = classification.invalidSources.find(
-    (source) => pathTextKey(source.path) === key,
-  );
-  if (invalid === undefined) {
-    return { kind: "unknown" };
-  }
-  if (invalid.kind === "code") {
-    return { kind: "wrong-kind" };
-  }
-  return {
-    kind: "spec",
-    pathValid: false,
-    parsed:
-      analysis.invalidPathSpecs.find(
-        (spec) => pathTextKey(spec.document.file) === key,
-      ) ?? null,
-  };
 }
 
 /**
