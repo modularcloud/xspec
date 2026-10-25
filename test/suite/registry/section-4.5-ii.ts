@@ -1,7 +1,8 @@
 // TEST-SPEC §4.5 (dependency markers), second part — SUITE-15 (continued):
 // T4.5-10, the scope a nested import declaration declares its bindings in
-// and the chains it roots. T4.5-1 … T4.5-9 are section-4.5.ts's business;
-// this module keeps that file's edits bounded (the section-6.5-v
+// and the chains it roots, and T4.5-11, the collisions in an import's own
+// scope (its own section below). T4.5-1 … T4.5-9 are section-4.5.ts's
+// business; this module keeps that file's edits bounded (the section-6.5-v
 // precedent).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
@@ -26,8 +27,9 @@
 // module's `text` call (4.3, 4.5): a node passed to a call whose callee no
 // visible `text` binding binds is used outside the sanctioned forms (14.18).
 //
-// Conservative operationalizations (noted per H-4 — wording is free, so only
-// the stated observables are asserted):
+// T4.5-10's conservative operationalizations (noted per H-4 — wording is
+// free, so only the stated observables are asserted; T4.5-11's stand at its
+// own section):
 // - T4.5-10's arms each stage a workspace of their own (H-1), (g)'s two
 //   stagings one each: `specs/A.mdx` holding `a` and its child `a.b` — in
 //   (d) beside `specs/B.mdx` holding the same — the arm's code sources
@@ -494,9 +496,21 @@ const T4_5_10_C: readonly LaidOutT4510Staging<T4510Staging>[] = (
 ).map((staging) => layOutT4510Staging("c", staging));
 
 /** A byte range of a staged text, start-inclusive, end-exclusive (SPEC 1.7). */
-interface T4510Range {
+interface ByteRange {
   readonly start: number;
   readonly end: number;
+}
+
+/**
+ * Where a construct stands among its spelling's occurrences in a staged
+ * text: the text spells it exactly `count` times (default 1), the construct
+ * being occurrence `nth` (0-based, in text order; default 0), and — where
+ * TEST-SPEC pins the construct's range — that pin.
+ */
+interface ConstructPlacement {
+  readonly count?: number;
+  readonly nth?: number;
+  readonly pinned?: ByteRange;
 }
 
 /**
@@ -504,23 +518,16 @@ interface T4510Range {
  * bytes (SPEC 1.7): occurrence `nth` (0-based, in text order) of `spelling`,
  * which the text must spell exactly `count` times, and — where TEST-SPEC
  * pins the construct's range — that pin checked against it. A mismatch is a
- * harness defect, thrown at module load (the tables below), never a product
+ * harness defect of `test`'s tables, thrown at module load, never a product
  * verdict.
  */
-function t4510ConstructRange(
+function constructRange(
+  test: string,
   where: string,
   text: string,
   spelling: string,
-  {
-    count = 1,
-    nth = 0,
-    pinned,
-  }: {
-    readonly count?: number;
-    readonly nth?: number;
-    readonly pinned?: T4510Range;
-  } = {},
-): T4510Range {
+  { count = 1, nth = 0, pinned }: ConstructPlacement = {},
+): ByteRange {
   const indices: number[] = [];
   for (
     let at = text.indexOf(spelling);
@@ -532,7 +539,7 @@ function t4510ConstructRange(
   const index = indices[nth];
   if (indices.length !== count || index === undefined) {
     throw new Error(
-      `T4.5-10 fixture self-check: ${where} must spell \`${spelling}\` ` +
+      `${test} fixture self-check: ${where} must spell \`${spelling}\` ` +
         `exactly ${String(count)} time(s), the pinned construct its ` +
         `occurrence #${String(nth + 1)}; the text spells it ` +
         `${String(indices.length)} time(s) (harness bug)`,
@@ -545,13 +552,23 @@ function t4510ConstructRange(
     (pinned.start !== range.start || pinned.end !== range.end)
   ) {
     throw new Error(
-      `T4.5-10 fixture self-check: ${where}'s \`${spelling}\` must lie at ` +
+      `${test} fixture self-check: ${where}'s \`${spelling}\` must lie at ` +
         `TEST-SPEC's [${String(pinned.start)}, ${String(pinned.end)}); the ` +
         `staged bytes place it at [${String(range.start)}, ` +
         `${String(range.end)}) (harness bug)`,
     );
   }
   return range;
+}
+
+/** `constructRange` for T4.5-10's tables (the tables below). */
+function t4510ConstructRange(
+  where: string,
+  text: string,
+  spelling: string,
+  placement: ConstructPlacement = {},
+): ByteRange {
+  return constructRange("T4.5-10", where, text, spelling, placement);
 }
 
 /** Throw unless a staged text's structure `holds` (a harness defect). */
@@ -562,14 +579,14 @@ function t4510SelfCheck(holds: boolean, what: string): void {
 }
 
 /** A whole-file code location's range: the entire file (SPEC 1.7). */
-function t4510WholeFile(text: string): T4510Range {
+function t4510WholeFile(text: string): ByteRange {
   return { start: 0, end: Buffer.byteLength(text, "utf8") };
 }
 
 /** A finding location as a JSON-safe `[file, start, end]` tuple (12.7). */
 function t4510Location(
   file: string,
-  range: T4510Range,
+  range: ByteRange,
 ): readonly [string, number, number] {
   return [file, range.start, range.end];
 }
@@ -581,10 +598,10 @@ function t4510Location(
  */
 function t4510Record(
   file: string,
-  range: T4510Range,
+  range: ByteRange,
   kind: "references" | "embeds",
   source: string,
-  sourceRange: T4510Range,
+  sourceRange: ByteRange,
   target: string,
 ): readonly unknown[] {
   return [
@@ -1394,5 +1411,867 @@ const T4_5_10 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T4.5-11
+// ---------------------------------------------------------------------------
+
+// SPEC 2.4, 4.5, 14.15: a spec module import's binding collides with another
+// import, or — the binding being value-level (4) — with a value-level
+// non-import declaration, of the import's own scope: for a nested import,
+// that of the innermost function, class static block, or namespace or
+// module declaration enclosing it, a function's scope holding its
+// parameters too (2.4), while a declaration of an inner scope — a block's,
+// a catch clause's — shadows the binding instead. A chain rooted at a
+// colliding identifier names no target — no edge, no occurrence (5.7) — and
+// is an unresolved reference (14.7); the condition-15 finding locates every
+// colliding declaration (14, T14-11): an import declaration by its own
+// characters, a variable declarator by its own characters — its name or
+// binding pattern through its initializer, the enclosing statement excluded
+// — and a parameter, function, or class declaration by its own characters,
+// its decorators and modifiers included.
+//
+// T4.5-11's conservative operationalizations (noted per H-4 — wording is
+// free, so only the stated observables are asserted):
+// - Each staging is a workspace of its own (H-1) holding exactly the files
+//   TEST-SPEC names: `T4_5_11_CONFIG` (one spec group, one code group,
+//   emission disabled, as T4.5-10's), `specs/A.mdx` and `specs/B.mdx` — one
+//   staged-source record at both paths — each holding the sibling sections
+//   `a` and `b`, so that either module's binding alone would resolve every
+//   chain, and the code source `src/c.ts`, TEST-SPEC's text exactly: the
+//   lines it lists, each ended by U+000A, no declaration spelling a `;`.
+//   Every file is a staged-source record (S-9's timing clause: every
+//   staging's workspace past the body's first is created after a product
+//   invocation), each code text accepted by TypeScript 5.9.3 both as module
+//   code and as script code (S-9's judge), and none is compiled under H-2's
+//   channel: TypeScript's checker rejects a nested import declaration after
+//   parsing (T4.5-10), so each staging observes xspec's surfaces alone.
+// - A failing staging — (a)'s five parameter forms, (b)'s three body
+//   declarations and its inner block's `var` — runs `build --json` and
+//   `check --json`, each exiting 1 with exactly the staging's findings, the
+//   complete set in 12.7's order: condition 7 per unresolved spelling,
+//   located at the span its occurrence would occupy (14, 5.7) — the
+//   marker's bare chain, a `text(...)` call callee through closing
+//   parenthesis — then the one condition-15 finding locating the colliding
+//   declaration and the import, each by its own characters (the import,
+//   spelling no `;`, ending at its closing quote), in 12.7's within-finding
+//   order (file bytes, then start, then end); every finding concerns no
+//   path. `check`'s nothing set aside (T4.5-10's reading of 14.10, the
+//   module header). `query edges` is gated on a failing workspace (13.3) and
+//   is not made: `occurrences --file src/c.ts`, answering on it (11.2),
+//   exits 1 with the same findings beside no record — TEST-SPEC's "no edge
+//   and no occurrence".
+// - A valid staging — (a)'s contrast, and (b)'s contrast and catch clause —
+//   runs `build --json` and `check --json`, each exactly `{"findings": []}`
+//   (exit 0), then `query edges`, its dependency edges (the spec sources'
+//   structural `contains` edges set aside, 5.2) compared with exactly the
+//   one edge TEST-SPEC names: `src/c.ts` holds every spelling, so "`SPEC.a`
+//   recording no edge" is that set's.
+// - Every construct a finding locates is found in the staged bytes at
+//   module load, its spelling occurring exactly once in the text, and each
+//   staging's expected findings, and each finding's locations, are checked
+//   to stand in 12.7's order — a mismatch a harness defect thrown at load,
+//   never a product verdict.
+// - Every staging runs; each one's diagnosed failure is collected and the
+//   body fails once at the end, naming every staging that failed (T4.5-10's
+//   discipline), so one product failure hides no other staging's verdict. A
+//   harness error — anything but a diagnosed assertion failure, a hang
+//   included — propagates at once.
+
+// One spec group plus one code group (SPEC 7.2), emission disabled, as
+// T4.5-10's: the TypeScript files under `src/` are discovered code sources,
+// so `build` analyzes their imports and markers (4, 4.5). A staged-source
+// record (S-9's timing clause).
+const T4_5_11_CONFIG = stagedTs(
+  "T4.5-11 xspec.config.ts — one spec group and one code group, every staging's workspace",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`,
+);
+
+// `specs/A.mdx` and `specs/B.mdx`, each the sibling sections `a` and `b` —
+// one staged-source record staged at both paths (S-9's timing clause) — so
+// that either module's binding alone would resolve every staged chain, and
+// a colliding staging's chains are unresolved for the collision alone.
+const T4_5_11_SPEC_SOURCE = stagedMdx(
+  "T4.5-11 specs/A.mdx and specs/B.mdx — sibling sections `a` and `b`, every staging's two spec sources",
+  '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
+);
+
+/** Every staging's code source. */
+const T4_5_11_FILE = "src/c.ts";
+
+/**
+ * The import every colliding (a) and (b) staging nests in its function's,
+ * or constructor's, body or a block of it — spelled without `;`, so its own
+ * characters end at its closing quote.
+ */
+const T4_5_11_IMPORT = 'import SPEC from "../specs/A.xspec"';
+
+/** The marker-shaped chain every (a) and (b) staging spells once. */
+const T4_5_11_MARKER = "SPEC.a";
+
+/** A code text: `lines`, each ended by U+000A (TEST-SPEC's spelling). */
+function t4511Text(...lines: readonly string[]): string {
+  return lines.map((line) => `${line}\n`).join("");
+}
+
+/**
+ * One parameter form T4.5-11 (a) stages colliding with the import nested in
+ * its function's or constructor's body (SPEC 2.4: a function's scope holds
+ * its parameters). Exported for T14-11's colliding-parameter arm
+ * (section-14.ts), which restages these texts.
+ */
+export interface CollidingParameterForm {
+  /** What the form is (record names and diagnostics). */
+  readonly name: string;
+  /**
+   * T4.5-11 (a)'s `src/c.ts` for the form, exactly — TEST-SPEC's lines,
+   * each ended by U+000A: the function or constructor whose body holds
+   * `import SPEC from "../specs/A.xspec"` (no `;`) and the marker `SPEC.a`.
+   */
+  readonly text: string;
+  /**
+   * The `function` or `constructor` line declaring the parameter: exactly
+   * one line of `text`, its indentation included.
+   */
+  readonly line: string;
+  /**
+   * The parameter's located characters (SPEC 14: a parameter by its own
+   * characters, its decorators and modifiers included — its initializer,
+   * `...`, and binding pattern too), spelled exactly once in `line` and in
+   * `text`.
+   */
+  readonly construct: string;
+  /**
+   * The spellings of `text` the colliding identifier roots, in text order,
+   * each an unresolved reference (14.7) located at the span its occurrence
+   * would occupy (14, 5.7) — the marker's bare chain, a `text(...)` call
+   * callee through closing parenthesis — and each spelled exactly once in
+   * `text`.
+   */
+  readonly chains: readonly string[];
+}
+
+/**
+ * T4.5-11 (a)'s five colliding parameter forms, in TEST-SPEC's order: a name
+ * with a type annotation (the staging that also calls the top-level
+ * `text`), a constructor parameter property located from its `@`, and a
+ * parameter spelled beyond a name and a type annotation — an initializer, a
+ * rest parameter, and a binding pattern, each whole.
+ */
+export const T4_5_11_COLLIDING_PARAMETER_FORMS: Readonly<
+  Record<
+    "annotated" | "property" | "initializer" | "rest" | "pattern",
+    CollidingParameterForm
+  >
+> = {
+  annotated: {
+    name: "the parameter `SPEC: number` of `g`, `SPEC.a` and `text(SPEC.b)` in its body beside the top-level `import { text }`",
+    text: t4511Text(
+      'import { text } from "../specs/A.xspec"',
+      "export function g(SPEC: number) {",
+      '  import SPEC from "../specs/A.xspec"',
+      "  SPEC.a",
+      "  text(SPEC.b)",
+      "}",
+    ),
+    line: "export function g(SPEC: number) {",
+    construct: "SPEC: number",
+    chains: [T4_5_11_MARKER, "text(SPEC.b)"],
+  },
+  property: {
+    name: "the constructor parameter property `@dec private readonly SPEC: number` of `C`, `SPEC.a` in the constructor's body",
+    text: t4511Text(
+      "export class C {",
+      "  constructor(@dec private readonly SPEC: number) {",
+      '    import SPEC from "../specs/A.xspec"',
+      "    SPEC.a",
+      "  }",
+      "}",
+    ),
+    line: "  constructor(@dec private readonly SPEC: number) {",
+    construct: "@dec private readonly SPEC: number",
+    chains: [T4_5_11_MARKER],
+  },
+  initializer: {
+    name: "the parameter `SPEC = 1` of `g`, `SPEC.a` in its body",
+    text: t4511Text(
+      "export function g(SPEC = 1) {",
+      '  import SPEC from "../specs/A.xspec"',
+      "  SPEC.a",
+      "}",
+    ),
+    line: "export function g(SPEC = 1) {",
+    construct: "SPEC = 1",
+    chains: [T4_5_11_MARKER],
+  },
+  rest: {
+    name: "the rest parameter `...SPEC: number[]` of `g`, `SPEC.a` in its body",
+    text: t4511Text(
+      "export function g(...SPEC: number[]) {",
+      '  import SPEC from "../specs/A.xspec"',
+      "  SPEC.a",
+      "}",
+    ),
+    line: "export function g(...SPEC: number[]) {",
+    construct: "...SPEC: number[]",
+    chains: [T4_5_11_MARKER],
+  },
+  pattern: {
+    name: "the binding-pattern parameter `{ SPEC }` of `g`, `SPEC.a` in its body",
+    text: t4511Text(
+      "export function g({ SPEC }) {",
+      '  import SPEC from "../specs/A.xspec"',
+      "  SPEC.a",
+      "}",
+    ),
+    line: "export function g({ SPEC }) {",
+    construct: "{ SPEC }",
+    chains: [T4_5_11_MARKER],
+  },
+};
+
+// The forms' module-load self-check (a mismatch is a harness defect — fix
+// the table — never a product verdict): each `line` exactly one line of its
+// `text`, its `construct` spelled once in the line and once in the text,
+// and the text holding the nested import and every chain once each.
+for (const [key, form] of Object.entries(T4_5_11_COLLIDING_PARAMETER_FORMS)) {
+  const lines = form.text.split("\n");
+  const once = (haystack: string, needle: string): boolean =>
+    haystack.includes(needle) &&
+    haystack.indexOf(needle) === haystack.lastIndexOf(needle);
+  if (
+    !form.text.endsWith("\n") ||
+    lines.filter((line) => line === form.line).length !== 1 ||
+    !once(form.line, form.construct) ||
+    !once(form.text, form.construct) ||
+    !once(form.text, T4_5_11_IMPORT) ||
+    form.chains.some((chain) => !once(form.text, chain))
+  ) {
+    throw new Error(
+      `T4.5-11 fixture self-check: the ${key} parameter form must hold its ` +
+        `line once, its construct \`${form.construct}\` once in the line and ` +
+        `in the text, and the nested import and each chain once in a text ` +
+        `ending in U+000A — fix T4_5_11_COLLIDING_PARAMETER_FORMS (harness ` +
+        `bug)`,
+    );
+  }
+}
+
+/**
+ * One finding a failing T4.5-11 staging reports: its numbered condition and
+ * the constructs it locates, each spelled exactly once in the staged text,
+ * listed in 12.7's within-finding order (one file: start, then end).
+ */
+interface T4511Finding {
+  readonly condition: "14.7" | "14.15";
+  readonly at: readonly string[];
+}
+
+/** One T4.5-11 staging: `src/c.ts` and the outcome TEST-SPEC gives it. */
+interface T4511Staging {
+  /** The staging's key, its arm first: `(a) …` or `(b) …` (diagnostics). */
+  readonly key: string;
+  /** What the staging stages (its record's name and diagnostics). */
+  readonly what: string;
+  /** `src/c.ts`, TEST-SPEC's text exactly. */
+  readonly text: string;
+  /**
+   * Why the outcome is what it is, and what a product failing the staging
+   * reports instead (diagnostics).
+   */
+  readonly why: string;
+  /**
+   * A failing staging's findings, in 12.7's order (numbered conditions in
+   * numeric order, then by locations); or a valid staging's dependency
+   * edges, the complete set `query edges` answers beside the spec sources'
+   * `contains` edges.
+   */
+  readonly outcome:
+    | { readonly kind: "failing"; readonly findings: readonly T4511Finding[] }
+    | { readonly kind: "valid"; readonly edges: readonly GraphEdge[] };
+}
+
+// Arm (a): a parameter collides with an import nested in its function's —
+// or constructor's — body, a function's scope holding its parameters (2.4):
+// the five forms of `T4_5_11_COLLIDING_PARAMETER_FORMS`, each reporting
+// 14.15 at the parameter and the import and 14.7 for each chain the
+// colliding identifier roots (the annotated form's `text(SPEC.b)` among
+// them, its callee the top-level `text`); and the contrast, the same
+// parameter beside a top-level import, which it shadows (a declaration of
+// an inner scope, 2.4): no finding, `SPEC.a` rooted at the parameter and
+// recording no edge (T4.5-4's outcome), the top-level `SPEC.b` its
+// `references` edge from the file.
+const T4_5_11_A_MISLOCATIONS: Readonly<
+  Record<keyof typeof T4_5_11_COLLIDING_PARAMETER_FORMS, string>
+> = {
+  annotated: "",
+  property:
+    ", nor the range of one starting the parameter at its name, its " +
+    "decorator and modifiers excluded",
+  initializer:
+    ", nor the range of one ending the parameter at its name, its " +
+    "initializer excluded",
+  rest:
+    ", nor the range of one starting the parameter at its name, its `...` " +
+    "excluded",
+  pattern: ", nor the range of one locating the pattern's element `SPEC` alone",
+};
+const T4_5_11_A: readonly T4511Staging[] = [
+  ...(["annotated", "property", "initializer", "rest", "pattern"] as const).map(
+    (formKey): T4511Staging => {
+      const form = T4_5_11_COLLIDING_PARAMETER_FORMS[formKey];
+      return {
+        key: `(a) \`${form.construct}\``,
+        what: form.name,
+        text: form.text,
+        why:
+          `a function's scope holds its parameters (SPEC 2.4), so the ` +
+          `parameter \`${form.construct}\` and the import nested in its ` +
+          `body bind \`SPEC\` in one scope — the 14.15 locating the ` +
+          `parameter whole, by its own characters, and the import (14, ` +
+          `T14-11) — and each chain \`SPEC\` roots there is unresolved ` +
+          `(14.7)` +
+          (form.chains.length > 1
+            ? `, the call's among them: its callee the top-level \`text\`, ` +
+              `its argument rooted at the colliding identifier`
+            : "") +
+          ` — never the silence of a product ignoring parameters, which ` +
+          `roots the chains at the nested import, records their ` +
+          `occurrences, and exits 0` +
+          T4_5_11_A_MISLOCATIONS[formKey],
+        outcome: {
+          kind: "failing",
+          findings: [
+            ...form.chains.map((chain): T4511Finding => ({
+              condition: "14.7",
+              at: [chain],
+            })),
+            { condition: "14.15", at: [form.construct, T4_5_11_IMPORT] },
+          ],
+        },
+      };
+    },
+  ),
+  {
+    key: "(a) contrast",
+    what: "the parameter `SPEC: number` of `g` beside the top-level `import SPEC`, `SPEC.a` in `g` and `SPEC.b` after it",
+    text: t4511Text(
+      'import SPEC from "../specs/A.xspec"',
+      "export function g(SPEC: number) {",
+      "  SPEC.a",
+      "}",
+      "SPEC.b",
+    ),
+    why:
+      "the parameter, a declaration of `g`'s scope — inner to the file's — " +
+      "shadows the top-level import instead of colliding with it (SPEC " +
+      "2.4, 4.5): `SPEC.a` is rooted at the parameter, recording no edge " +
+      "(T4.5-4's outcome), and `SPEC.b` at the import, recording its " +
+      "`references` edge from the file (4.6) — never the 14.15 of a product " +
+      "reading every same-named parameter as a collision",
+    outcome: {
+      kind: "valid",
+      edges: [{ from: T4_5_11_FILE, to: "specs/A.mdx#b", kind: "references" }],
+    },
+  },
+];
+
+// Arm (b): a declaration of the function's own body collides with the
+// block-nested import, which declares its binding in the function's scope,
+// never the block's (4.5) — a `const` declarator, a function declaration,
+// a class declaration — and so does a `var` in an inner block, which the
+// language declares in the enclosing function's scope (TypeScript 5.9.3's
+// binder declaring it and the import in `g`'s one scope); the contrasts —
+// a declaration in the inner block holding the import, the block's, and a
+// catch clause's parameter, the catch clause's — shadow instead: no
+// finding, the chain each roots recording no edge, and `SPEC.b`, rooted at
+// the import, recording its `references` edge from `src/c.ts#g`.
+const T4_5_11_B_BODY_DECLARATIONS: readonly {
+  readonly statement: string;
+  readonly construct: string;
+  readonly what: string;
+}[] = [
+  {
+    statement: "const SPEC = 1",
+    construct: "SPEC = 1",
+    what: "the declarator `SPEC = 1`, the `const` excluded",
+  },
+  {
+    statement: "function SPEC() {}",
+    construct: "function SPEC() {}",
+    what: "the function declaration by its own characters",
+  },
+  {
+    statement: "class SPEC {}",
+    construct: "class SPEC {}",
+    what: "the class declaration by its own characters",
+  },
+];
+const T4_5_11_B: readonly T4511Staging[] = [
+  ...T4_5_11_B_BODY_DECLARATIONS.map(
+    ({ statement, construct, what }): T4511Staging => ({
+      key: `(b) \`${statement}\``,
+      what: `\`${statement}\` in \`g\`'s body beside the import nested in a block of \`g\`, \`SPEC.a\` after the block`,
+      text: t4511Text(
+        "export function g() {",
+        `  ${statement}`,
+        "  {",
+        '    import SPEC from "../specs/A.xspec"',
+        "  }",
+        "  SPEC.a",
+        "}",
+      ),
+      why:
+        `the block-nested import declares its binding in \`g\`'s scope ` +
+        `(SPEC 4.5: never a block's), where \`${statement}\` stands, so ` +
+        `both bind \`SPEC\` in one scope — the 14.15 locating ${what} and ` +
+        `the import (14, 1.7, T14-11) — and \`SPEC.a\` is unresolved ` +
+        `(14.7) — never the silence of a product scoping imports to ` +
+        `blocks, which finds \`SPEC.a\` rooted at the local`,
+      outcome: {
+        kind: "failing",
+        findings: [
+          { condition: "14.7", at: [T4_5_11_MARKER] },
+          { condition: "14.15", at: [construct, T4_5_11_IMPORT] },
+        ],
+      },
+    }),
+  ),
+  {
+    key: "(b) inner block's `var SPEC = 1`",
+    what: "`var SPEC = 1` in an inner block of `g` beside `g`'s import, `SPEC.a` after it",
+    text: t4511Text(
+      "export function g() {",
+      "  {",
+      "    var SPEC = 1",
+      "  }",
+      '  import SPEC from "../specs/A.xspec"',
+      "  SPEC.a",
+      "}",
+    ),
+    why:
+      "a `var` in an inner block is declared in the enclosing function's " +
+      "scope, never the block's — TypeScript 5.9.3's binder declaring it " +
+      "and the import in `g`'s one scope (SPEC 2.4, 4.5) — so both bind " +
+      "`SPEC` there: the 14.15 locating the declarator `SPEC = 1`, the " +
+      "`var` excluded, and the import (14, 1.7, T14-11), and `SPEC.a` " +
+      "unresolved (14.7) — never the silence of a product scoping every " +
+      "declaration by its textual block, which finds the `var` shadowing " +
+      "within its block alone and `SPEC.a` rooted at the import, recording " +
+      "its edge",
+    outcome: {
+      kind: "failing",
+      findings: [
+        { condition: "14.7", at: [T4_5_11_MARKER] },
+        { condition: "14.15", at: ["SPEC = 1", T4_5_11_IMPORT] },
+      ],
+    },
+  },
+  {
+    key: "(b) contrast",
+    what: "`const SPEC = 1` and the import in one inner block of `g`, `SPEC.a` in the block and `SPEC.b` after it",
+    text: t4511Text(
+      "export function g() {",
+      "  {",
+      "    const SPEC = 1",
+      '    import SPEC from "../specs/A.xspec"',
+      "    SPEC.a",
+      "  }",
+      "  SPEC.b",
+      "}",
+    ),
+    why:
+      "the declaration in the inner block holding the import shadows " +
+      "instead — the import's binding belongs to `g`'s scope and the " +
+      "`const` to the block's (SPEC 4.5, 2.4) — so the chain inside the " +
+      "block is rooted at the local, recording no edge, and the chain after " +
+      "the block at the import, recording its `references` edge from " +
+      "`src/c.ts#g` (4.6) — never the 14.15 of a product judging a " +
+      "collision by the block the declarations stand in",
+    outcome: {
+      kind: "valid",
+      edges: [
+        {
+          from: `${T4_5_11_FILE}#g`,
+          to: "specs/A.mdx#b",
+          kind: "references",
+        },
+      ],
+    },
+  },
+  {
+    key: "(b) catch parameter",
+    what: "`g`'s import beside `try {} catch (SPEC) { … }`, `SPEC.a` in the catch clause and `SPEC.b` after it",
+    text: t4511Text(
+      "export function g() {",
+      '  import SPEC from "../specs/A.xspec"',
+      "  try {} catch (SPEC) {",
+      "    SPEC.a",
+      "  }",
+      "  SPEC.b",
+      "}",
+    ),
+    why:
+      "a catch clause's parameter belongs to the catch clause's scope, " +
+      "inner to `g`'s, and shadows the import there (SPEC 2.4, 4.5): " +
+      "`SPEC.a` is rooted at the catch parameter, recording no edge, and " +
+      "`SPEC.b` at the import, recording its `references` edge from " +
+      "`src/c.ts#g` (4.6) — never the 14.15 and 14.7 of a product counting " +
+      "a catch parameter among the function's own parameters or variables",
+    outcome: {
+      kind: "valid",
+      edges: [
+        {
+          from: `${T4_5_11_FILE}#g`,
+          to: "specs/A.mdx#b",
+          kind: "references",
+        },
+      ],
+    },
+  },
+];
+
+/** A located finding: its condition and `[file, start, end]` per location. */
+type LocatedT4511Finding = readonly [
+  string,
+  readonly (readonly [string, number, number])[],
+];
+
+/** A staging laid out at module load, its text a staged-source record. */
+interface LaidOutT4511Staging {
+  readonly staging: T4511Staging;
+  readonly source: StagedTs;
+  /**
+   * A failing staging's findings, located from the exact bytes, in 12.7's
+   * order; empty for a valid staging.
+   */
+  readonly findings: readonly LocatedT4511Finding[];
+  /** The located findings, rendered with their spellings (diagnostics). */
+  readonly rendered: string;
+}
+
+/**
+ * 12.7's findings order over one file's located findings: numbered
+ * condition in numeric order, then locations element-wise (start, then
+ * end), a proper prefix first. Negative where `a` sorts first.
+ */
+function compareT4511Findings(
+  a: LocatedT4511Finding,
+  b: LocatedT4511Finding,
+): number {
+  const conditionNumber = (condition: string): number =>
+    Number(condition.slice("14.".length));
+  const byCondition = conditionNumber(a[0]) - conditionNumber(b[0]);
+  if (byCondition !== 0) return byCondition;
+  for (let index = 0; index < Math.min(a[1].length, b[1].length); index += 1) {
+    const [, aStart, aEnd] = a[1][index]!;
+    const [, bStart, bEnd] = b[1][index]!;
+    if (aStart !== bStart) return aStart - bStart;
+    if (aEnd !== bEnd) return aEnd - bEnd;
+  }
+  return a[1].length - b[1].length;
+}
+
+/**
+ * Lay out one staging: register its text as a staged-source record and, for
+ * a failing staging, locate every construct its findings name from the
+ * exact bytes (`constructRange`: each spelled exactly once), checking that
+ * each finding's locations and the findings themselves stand in 12.7's
+ * order — a mismatch a harness defect, thrown. It registers a record, so it
+ * runs at module load only (`T4_5_11_STAGINGS`).
+ */
+function layOutT4511Staging(staging: T4511Staging): LaidOutT4511Staging {
+  const where = `staging ${staging.key}'s ${T4_5_11_FILE}`;
+  const findings: LocatedT4511Finding[] = [];
+  const rendered: string[] = [];
+  if (staging.outcome.kind === "failing") {
+    for (const finding of staging.outcome.findings) {
+      const ranges = finding.at.map((spelling) => ({
+        spelling,
+        range: constructRange("T4.5-11", where, staging.text, spelling),
+      }));
+      const located: LocatedT4511Finding = [
+        finding.condition,
+        ranges.map(({ range }) => [T4_5_11_FILE, range.start, range.end]),
+      ];
+      const inOrder = located[1].every(
+        ([, start, end], index) =>
+          index === 0 ||
+          start > located[1][index - 1]![1] ||
+          (start === located[1][index - 1]![1] &&
+            end > located[1][index - 1]![2]),
+      );
+      const previous = findings[findings.length - 1];
+      if (
+        !inOrder ||
+        (previous !== undefined && compareT4511Findings(previous, located) >= 0)
+      ) {
+        throw new Error(
+          `T4.5-11 fixture self-check: ${where} must list its findings, and ` +
+            `each finding's locations, in 12.7's order — the ` +
+            `${finding.condition} at ${finding.at.join(" and ")} stands out ` +
+            `of order (harness bug)`,
+        );
+      }
+      findings.push(located);
+      rendered.push(
+        `${finding.condition} at ` +
+          ranges
+            .map(
+              ({ spelling, range }) =>
+                `\`${spelling}\` [${String(range.start)}, ` +
+                `${String(range.end)})`,
+            )
+            .join(" and "),
+      );
+    }
+  }
+  return {
+    staging,
+    source: stagedTs(
+      `T4.5-11 ${staging.key} ${T4_5_11_FILE} — ${staging.what}`,
+      staging.text,
+    ),
+    findings,
+    rendered: rendered.join("; "),
+  };
+}
+
+/**
+ * T4.5-11's stagings in TEST-SPEC's order, each on a workspace of its own,
+ * laid out at module load (S-9's timing clause).
+ */
+const T4_5_11_STAGINGS: readonly LaidOutT4511Staging[] = [
+  ...T4_5_11_A,
+  ...T4_5_11_B,
+].map(layOutT4511Staging);
+
+/** The `files` of a staging's workspace: both spec sources and `src/c.ts`. */
+function t4511Files(source: StagedTs): Record<string, InitialFileContents> {
+  return {
+    "specs/A.mdx": T4_5_11_SPEC_SOURCE,
+    "specs/B.mdx": T4_5_11_SPEC_SOURCE,
+    [T4_5_11_FILE]: source,
+  };
+}
+
+/**
+ * Assert a failing staging's report carries exactly its findings — the
+ * complete set, in 12.7's order — each concerning no path (SPEC 12.7, 14),
+ * its locations byte-exact in 12.7's within-finding order.
+ */
+function assertT4511Findings(
+  findings: readonly Finding[],
+  laid: LaidOutT4511Staging,
+  context: string,
+): void {
+  const why = `${laid.rendered} — ${laid.staging.why}`;
+  assertSameJson(
+    findings.map((finding) => finding.condition ?? finding.code),
+    laid.findings.map(([condition]) => condition),
+    `${context}: exactly these findings, in 12.7's order — numbered ` +
+      `conditions in numeric order, then by location — and nothing beside ` +
+      `them: ${why}`,
+  );
+  findings.forEach((finding, index) => {
+    if (finding.path !== null) {
+      fail(
+        `${context}: finding #${String(index + 1)} ` +
+          `(${String(finding.condition ?? finding.code)}) locates in ` +
+          `source, so it concerns no path — \`path\` is null for located ` +
+          `conditions (SPEC 12.7, 14); got ${renderPathValue(finding.path)} ` +
+          `(message: ${JSON.stringify(finding.message)})`,
+      );
+    }
+  });
+  assertSameJson(
+    findings.map((finding) => [
+      finding.condition ?? finding.code,
+      locationTuples(finding),
+    ]),
+    laid.findings,
+    `${context}: each finding's locations as \`[file, start, end]\` byte ` +
+      `offsets, end-exclusive, in 12.7's within-finding order (file bytes, ` +
+      `then start, then end) — each 14.7 at the span its occurrence would ` +
+      `occupy, the marker's bare chain or a \`text(...)\` call callee ` +
+      `through closing parenthesis (SPEC 14, 5.7), the 14.15 at every ` +
+      `colliding declaration by its own characters (14, 1.7, T14-11): ${why}`,
+  );
+}
+
+/**
+ * A failing staging, on a workspace of its own: `build --json` and `check
+ * --json` each exit 1 with exactly the staging's findings — `check`'s
+ * nothing set aside (module header) — and `occurrences --file src/c.ts`,
+ * answering on the failing workspace (SPEC 11.2), exits 1 with those
+ * findings beside no record (5.7, 11.3).
+ */
+async function runT4511FailingStaging(
+  product: ProductBinding,
+  laid: LaidOutT4511Staging,
+): Promise<void> {
+  const { staging } = laid;
+  await withWorkspace(T4_5_11_CONFIG, t4511Files(laid.source), async (ws) => {
+    const context = `T4.5-11 ${staging.key} over ${staging.what}`;
+    const expected =
+      `the staging's findings are exit-1 outcomes (SPEC 12.0, 14): ` +
+      `${laid.rendered} — ${staging.why}`;
+    const buildContext = `${context}: \`build --json\``;
+    assertT4511Findings(
+      await runFindingsReport(
+        product,
+        ws,
+        ["build", "--json"],
+        1,
+        `${buildContext} — ${expected}`,
+      ),
+      laid,
+      buildContext,
+    );
+    const checkContext = `${context}: \`check --json\``;
+    assertT4511Findings(
+      await runFindingsReport(
+        product,
+        ws,
+        ["check", "--json"],
+        1,
+        `${checkContext} — \`check\` performs all build validations and ` +
+          `exits 1 on the findings (SPEC 12.2): ${laid.rendered}`,
+      ),
+      laid,
+      checkContext,
+    );
+    const argv = ["occurrences", "--file", T4_5_11_FILE];
+    const occContext = `${context}: \`${argv.join(" ")}\``;
+    const report = decodeOccurrencesReport(
+      parseJsonStdout(
+        await expectExit(
+          product,
+          ws,
+          argv,
+          1,
+          `${occContext} — the answer carries the domain's findings, so ` +
+            `exit 1 with the full answer document (SPEC 11.2, 11.3)`,
+        ),
+        `${occContext} — a single JSON document is the only output form ` +
+          `(SPEC 11)`,
+      ),
+      occContext,
+    );
+    assertT4511Findings(
+      report.findings,
+      laid,
+      `${occContext}: the code file's findings accompany the answer (SPEC ` +
+        `11.2, 11.3)`,
+    );
+    assertSameJson(
+      report.occurrences.map(occurrenceTuple),
+      [],
+      `${occContext}: no record — a chain rooted at the colliding ` +
+        `identifier names no target, recording no edge and no occurrence, ` +
+        `its position reported by its finding alone (SPEC 2.4, 5.7, 11.2) ` +
+        `— never the record of a product rooting it at the nested import`,
+    );
+  });
+}
+
+/**
+ * A valid staging, on a workspace of its own: `build` and `check` finding-
+ * free, and the dependency edges exactly the staging's.
+ */
+async function runT4511ValidStaging(
+  product: ProductBinding,
+  laid: LaidOutT4511Staging,
+  edges: readonly GraphEdge[],
+): Promise<void> {
+  const { staging } = laid;
+  await withWorkspace(T4_5_11_CONFIG, t4511Files(laid.source), async (ws) => {
+    const context = `T4.5-11 ${staging.key} over ${staging.what}`;
+    await expectCleanBuildAndCheck(product, ws, context, staging.why);
+    assertEdgeSetEqual(
+      await queryDependencyEdges(product, ws, context),
+      edges,
+      `${context}: \`query edges\` — the workspace's dependency edges are ` +
+        `exactly ` +
+        edges
+          .map(
+            (edge) =>
+              `\`${edge.kind}\` from \`${edge.from}\` to \`${edge.to}\``,
+          )
+          .join(", ") +
+        `, \`SPEC.a\` recording none: ${staging.why}`,
+    );
+  });
+}
+
+/**
+ * T4.5-11, collisions in the import's own scope (SPEC 2.4, 4.5, 14.15): a
+ * spec module import's binding collides with another import, or with a
+ * value-level non-import declaration, of the import's own scope — for a
+ * nested import the innermost function, class static block, or namespace or
+ * module declaration enclosing it, a function's scope holding its
+ * parameters too — while a declaration of an inner scope shadows it. Each
+ * staging on a workspace of its own beside `specs/A.mdx` and `specs/B.mdx`
+ * each holding `a` and `b`, every file S-9 well-formed and none compiled
+ * (the section's operationalizations): (a) each colliding parameter form —
+ * `SPEC: number` (beside a top-level `import { text }`, `text(SPEC.b)` in
+ * the body), the constructor parameter property `@dec private readonly
+ * SPEC: number`, `SPEC = 1`, `...SPEC: number[]`, and `{ SPEC }` — beside
+ * the import nested in its body reports 14.15 at the parameter, whole, and
+ * the import, and 14.7 for each chain the identifier roots, exit 1, no
+ * record; the parameter beside a top-level import shadows it — no finding,
+ * `SPEC.b`'s edge alone; (b) `const SPEC = 1`, `function SPEC() {}`, and
+ * `class SPEC {}` in `g`'s body beside its block-nested import, and an
+ * inner block's `var SPEC = 1` beside its import, each report 14.15 at the
+ * declaration (a declarator by its own characters) and the import and 14.7
+ * for `SPEC.a`, exit 1, no record; a `const` in the block holding the
+ * import, and a catch clause's parameter, shadow — no finding, `SPEC.b`'s
+ * edge from `src/c.ts#g` alone. Every staging runs, the diagnosed failures
+ * collected.
+ */
+const T4_5_11 = defineProductTest({
+  id: "T4.5-11",
+  title:
+    "collisions in the import's own scope — a spec module import's binding collides with another import, or with a value-level non-import declaration, of the import's own scope, for a nested import that of the innermost function, class static block, or namespace or module declaration enclosing it, a function's scope holding its parameters too, while a declaration of an inner scope shadows it instead; each staging on a workspace of its own, its code source `src/c.ts` beside `specs/A.mdx` and `specs/B.mdx` each holding `a` and `b`, every file S-9 well-formed and none compiled: (a) a parameter — `export function g(SPEC: number) {` holding `import SPEC from \"../specs/A.xspec\"`, `SPEC.a`, and `text(SPEC.b)` beside the top-level `import { text } from \"../specs/A.xspec\"` — `build --json` and `check --json` exit 1 with exactly 14.7 at `SPEC.a` [114, 120), 14.7 at the call `text(SPEC.b)` [123, 135), and 14.15 at the parameter `SPEC: number` [58, 70) and the nested import [76, 111), and `occurrences --file src/c.ts` exit 1 with those findings beside no record; likewise the constructor parameter property `@dec private readonly SPEC: number`, located from its `@`, [31, 65), and the parameters `SPEC = 1` [18, 26), `...SPEC: number[]` [18, 35), and `{ SPEC }` [18, 26), each whole, each with 14.7 at `SPEC.a`; and the contrast, the parameter beside a top-level `import SPEC`, shadowing it — `build` and `check` exit 0 with no finding and `query edges` exactly `SPEC.b`'s `references` edge from `src/c.ts` to `specs/A.mdx#b`, none for `SPEC.a`; (b) a declaration of the function's own body — `const SPEC = 1` (the declarator `SPEC = 1` located, [30, 38)), `function SPEC() {}` [24, 42), or `class SPEC {}` [24, 37) beside `g`'s import nested in a block — and an inner block's `var SPEC = 1` (the declarator, [34, 42)) beside `g`'s import, each exactly 14.7 at `SPEC.a` and 14.15 at the declaration and the import, exit 1, no record; the contrasts, `const SPEC = 1` in the inner block holding the import and a catch clause's parameter `SPEC`, each shadowing — no finding, exit 0, `query edges` exactly `SPEC.b`'s `references` edge from `src/c.ts#g` to `specs/A.mdx#b`, none for `SPEC.a`; every finding's locations byte-exact and concerning no path; never the silence of a product ignoring parameters, scoping imports to blocks, or scoping every declaration by its textual block, nor the range of one locating a parameter from its name through its type annotation, nor the 14.15 of one reading every same-named parameter, a declaration of the import's own block, or a catch parameter as colliding (SPEC 4.5, 1.7, 2.4, 4.6, 5.7, 11.2, 11.3, 14)",
+  run: async (product) => {
+    const failures: string[] = [];
+    for (const laid of T4_5_11_STAGINGS) {
+      const { outcome } = laid.staging;
+      try {
+        await (outcome.kind === "failing"
+          ? runT4511FailingStaging(product, laid)
+          : runT4511ValidStaging(product, laid, outcome.edges));
+      } catch (error) {
+        if (!(error instanceof HarnessAssertionError)) throw error;
+        // A failure diagnosed outside the staging's own assertions — the
+        // subprocess driver's, say — is named by its staging too.
+        const context = `T4.5-11 ${laid.staging.key}`;
+        failures.push(
+          error.message.startsWith(context)
+            ? error.message
+            : `${context}: ${error.message}`,
+        );
+      }
+    }
+    if (failures.length > 0) {
+      fail(
+        `T4.5-11: ${String(failures.length)} of ` +
+          `${String(T4_5_11_STAGINGS.length)} staging workspaces failed, ` +
+          `each diagnosed:\n` +
+          failures.map((failure) => `* ${failure}`).join("\n"),
+      );
+    }
+  },
+});
+
 /** TEST-SPEC §4.5, second part, in canonical ID order (SUITE-15). */
-export const section45iiTests: readonly ProductTestEntry[] = [T4_5_10];
+export const section45iiTests: readonly ProductTestEntry[] = [T4_5_10, T4_5_11];

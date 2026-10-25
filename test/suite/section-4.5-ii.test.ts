@@ -1,5 +1,5 @@
-// TEST-SPEC §4.5 second part (SUITE-15 continued, T4.5-10): thin Vitest
-// wrapper over the registered bodies — the identical bodies the
+// TEST-SPEC §4.5 second part (SUITE-15 continued, T4.5-10 and T4.5-11): thin
+// Vitest wrapper over the registered bodies — the identical bodies the
 // certification runner executes against fixture products (C-2 "one code
 // path"). Expected to fail as diagnosed assertion failures until the product
 // conforms (H-8).
