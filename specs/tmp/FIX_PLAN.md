@@ -56,44 +56,6 @@ Written in Phase 9 on 2026-10-24 at head `155956f` (branch `claude/xspec-ui-apis
 
 **Finishing a task.** When the change is verified locally — its self files and the whole self project green (admin files left out), certification unchanged, `npm run typecheck` and `npm run format:check` exiting 0, its suite tests run against the built product with their verdicts recorded — commit and push, keeping the task in this file with a one-line status naming the pushed commit and the verdicts. Then wait in the foreground for `harness-self` on that head. When it is green, a follow-up commit removes the task from this file (recording the job's verdict in its message) and is pushed; the commit that removes the last task deletes this file with `git rm` (`specs/tmp/.gitkeep` stays), and if that deletion is refused, stop and report the refusal verbatim. If anything is red, fix it within the task, or replace the task with precise remainder tasks.
 
-## Task 49 — T4.5-10 registered, arms (a), (b), (c), and (f): where a nested import roots chains (TEST-SPEC T4.5-10; SPEC 4.5, 2.4, 4.6, 5.7; finding A4, first part)
-
-**Requirement.** T4.5-10 (new; read it whole): an import declaration declares its bindings in its own scope. For a top-level declaration that is the file's; for a nested one it is the scope of the innermost function, class static block, or namespace or module declaration enclosing it, never a block's. Each arm stages a workspace of its own, its files together under `src/`, with `specs/A.mdx` holding `a` and its child `a.b`. Every file is S-9 well-formed (TypeScript's diagnostic confining imports to a file's top level being post-parse), and none is compiled under H-2's channel.
-- (a) SPEC.md's example. `src/g.ts` = `function g() { { import A from "../specs/A.xspec"; } A.a.b; }`, U+000A: `build` and `check` exit 0; `query edges` reports one `references` edge from `src/g.ts#g` to `specs/A.mdx#a.b`; `occurrences` reports one marker occurrence spanning `A.a.b`, its source `src/g.ts#g`.
-- (b) Each container, one file each, all in the arm's one workspace; on it `build` and `check` exit 0, and each marker records its `references` edge to `specs/A.mdx#a.b` from the location named (`query edges`). The containers, with the location each edge comes from:
-  - a function body, `function g() { import A from "../specs/A.xspec"; A.a.b }` → `path#g`;
-  - an arrow function, `const h = () => { { import A from "../specs/A.xspec" } A.a.b }` → `path#h`;
-  - a method, `class C { m() { { import A from "../specs/A.xspec" } A.a.b } }` → `path#C.m`;
-  - a static block, `class C { static { { import A from "../specs/A.xspec" } A.a.b } }` → `path#C`;
-  - a namespace, `namespace N { { import A from "../specs/A.xspec" } A.a.b }` → `path#N`;
-  - its legacy spelling, `module M { import A from "../specs/A.xspec"; A.a.b }` → `path#M`;
-  - a string-named module declaration, `declare module "m" { import A from "../specs/A.xspec"; A.a.b }` → `path`;
-  - a top-level `if` block, `if (c) { import A from "../specs/A.xspec" }`, U+000A, `A.a.b`, U+000A → `path`;
-  - a bare block, `{ import A from "../specs/A.xspec" }`, U+000A, `A.a.b`, U+000A → `path`;
-  - a chain preceding the import, `function g() { A.a.b; import A from "../specs/A.xspec" }` → `path#g`.
-  The if-block and bare-block files are scripts sharing one workspace, and each roots its chain at its own import.
-- (c) The visibility boundary, one file each, in one workspace:
-  - after the function: `function g() { import A from "../specs/A.xspec" }`, U+000A, `A.a.b`, U+000A;
-  - in a sibling function: `function g() { import A from "../specs/A.xspec" }` beside `function h() { A.a.b }`;
-  - in a method of the class whose static block holds the import: `class C { static { import A from "../specs/A.xspec" } m() { A.a.b } }`;
-  - in a second declaration of the namespace: `namespace N { import A from "../specs/A.xspec" }`, U+000A, `namespace N { A.a.b }`;
-  - after a string-named module declaration holding it: `declare module "m" { import A from "../specs/A.xspec" }`, U+000A, `A.a.b`, U+000A;
-  - the same undeclared: `module "m" { import A from "../specs/A.xspec" }`, U+000A, `A.a.b`, U+000A.
-  No binding of `A` is visible at any of these chains: no edge, no occurrence, no finding; `build` and `check` exit 0, and `query edges` lists no edge from the chain's location.
-- (f) The file boundary. `src/p.ts` = `{ import A from "../specs/A.xspec" }`, U+000A, and `src/q.ts` = `A.a.b`, U+000A, both scripts: `build` and `check` exit 0; `query edges` lists no edge from `src/q.ts`; `occurrences --file src/q.ts` lists no record.
-
-**Gap.** T4.5-10 is not registered anywhere, and no harness staging puts a spec module import in a nested body.
-
-**Change.**
-- Create `test/suite/registry/section-4.5-ii.ts` (exporting `section45iiTests`), its wrapper `test/suite/section-4.5-ii.test.ts`, and its manifest spread after `section45Tests` (`section-4.5.ts` is about 3,300 lines; T4.5-11 joins T4.5-10 here, Tasks 51–53).
-- Register T4.5-10 there with its H-7 row (at least `"4.5"`, `"2.4"`, `"4.6"`, and `"5.7"`; Task 50 adds `"11.2"` and `"14"` with its failing-workspace arms).
-- Stage the four arms as above, name the files yourself, and assert each arm on its workspace. Assert edges as the complete set from each named location; for (b) and (c) the workspace's complete edge set may serve. Assert occurrences, where an arm states them, as the complete record set for the file, each record's span and source as TEST-SPEC names them, pinned from the bytes.
-- Write the doc comment and the `title` for these four arms; Task 50 extends both.
-
-**Verification.** S-1, S-9, and the self project green. Against the built product: `section-4.5-ii.test.ts -t 'T4.5-10 '`, with its verdict and time recorded. Per AGENTS.md's bullet beginning "Hand-probing SPEC 4's nested spec module imports", the product scopes nested imports as T4.5-10 does, so it may pass. If so, red-check (b) with a stand-in dropping one container's edge from `query edges --json`, and (c) or (f) with one adding a well-formed `references` edge from a boundary file.
-
-**Status (2026-10-25).** Implemented and pushed in the commit whose subject is `sdg(phase-9): register T4.5-10 with arms (a), (b), (c), and (f) (FIX_PLAN Task 49)`, the one adding this paragraph: the new `test/suite/registry/section-4.5-ii.ts` (exporting `section45iiTests`, spread after `section45Tests` in `index.ts`, wrapper `test/suite/section-4.5-ii.test.ts`) registers T4.5-10 with its H-7 row (`"4.5"`, `"1.7"`, `"2.4"`, `"4.6"`, `"5.7"`, `"11.3"`), its four arms on workspaces of their own under the `T4_5_10_CONFIG` and `T4_5_10_SPEC_SOURCE` records, every code file a record laid out by `layOutT4510Staging` (TEST-SPEC's texts exactly, the chain spelled once, checked at module load); (a) pins the workspace's one dependency edge and bare `occurrences`' one record (`T4_5_10_A_RECORD`, from the bytes, through `occurrenceTuple`, now exported from `section-4.5.ts`), (b) the complete dependency-edge set (one per `T4_5_10_B` file, from TEST-SPEC's location), (c) no dependency edge and no record, (f) no edge from `src/q.ts` and no record in `occurrences --file src/q.ts`; every arm runs, diagnosed failures collected into one; AGENTS.md gains the T4.5-10 bullet. Locally: S-1 and S-9 green; the self project 40 files, 5099 tests, all passed (324.16 s, admin files left out), certification 171 PASS / 48 FAIL / 0 error / 0 hang over 39 run lines; `npm run typecheck` and `npm run format:check` exit 0. Against the built product T4.5-10 passes (4.7 s of test, 11.4 s with start-up). Red check through a stand-in (eight modes): dropping (b)'s `src/static-block.ts#C` edge, adding a `references` edge from `src/sibling-function.ts#h` ((c)) or from `src/q.ts` ((f)), adding a record to (c)'s `occurrences` or (f)'s `occurrences --file src/q.ts`, or starting (a)'s source range at 15 each fails diagnosed at that arm's assertion, (b)'s drop with (f)'s addition fails once naming both arms, and the pass-through passes. Awaiting `harness-self` on the pushed head.
-
 ## Task 50 — T4.5-10 arms (d), (e), (g), and (h): cross-scope pairs, the callee side, and nested scopes (TEST-SPEC T4.5-10; SPEC 4.5, 2.4, 14.15, 14.18, 5.7, 11.2; finding A4, second part). Depends on Task 49.
 
 **Requirement.** T4.5-10 (read it whole):
