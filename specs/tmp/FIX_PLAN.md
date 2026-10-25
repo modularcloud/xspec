@@ -57,7 +57,7 @@ VERIFY's 12 failures at `891fbc0`, all on `suite-linux` (locally and in CI run 1
 | T5.7-4 | section-5.7 | 63 | passes since Task 63 (local 2.0 s; CI run 1686) |
 | T14-11 | section-14 | 63 | passes since Task 63 (local 15.7 s; CI run 1686) |
 | T12.0-15 | section-12.0-iv | 63 (first); 65 must keep it passing | passes since Task 63, every family (local 551.9 s; CI run 1686) |
-| T6.5-25 | section-6.5-vi | 64 | "10 of 10 stagings failed" |
+| T6.5-25 | section-6.5-vi | 64 | passes since Task 64 (local 26.3 s; CI run 1688) |
 | T10.4-8 | section-10.4 | 65 | arm (b): item-5's payload must present every node of its scope (`specs/N.mdx#N.b`) — no `scopeNodes` member |
 | T10.5-5 | section-10.5 | 65 | item-1's payload (`specs/M.mdx#n`): no `scopeNodes` member |
 | T10.5-8 | section-10.5 | 65 | item-1's payload (`specs/R.mdx`): no `scopeNodes` member |
@@ -65,24 +65,6 @@ VERIFY's 12 failures at `891fbc0`, all on `suite-linux` (locally and in CI run 1
 | T10.6-3 | section-10.6 | 65 | item-3's payload (`specs/R.mdx#p.a`): no `scopeNodes` member |
 | T10.7-9 | section-10.7-ii | 65 | arm (f): item-1's payload (`specs/P.mdx#P`): no `scopeNodes` member |
 | P-16 | section-16-p16 | 65 | falsified at seed 271828183, trial 1 of 6: no `scopeNodes` member |
-
-## Task 64 — A TypeScript import declaration standing as another statement's body stays (SPEC 6.5, 6.6; A2)
-
-**Requirement.** SPEC 6.5 "Import edits": an existing spec module import is removed exactly when an occurrence used a binding of its before the rewrite and none uses any binding of its after it, except "that in a TypeScript source a declaration standing as another statement's body, where TypeScript's parser admits one (14.20) — either branch of an `if` statement, or the body of a `do`, `while`, `for`, `for…in`, `for…of`, `with`, or labeled statement — stays, its bindings unused and no removal reported for it (6.6), since its deletion would leave that statement no body: the file would no longer parse, or the statement would take what follows as its body." The rule holds wherever the statement stands, top level or nested (TEST-SPEC T6.5-25).
-
-**Observed** (A2, at `891fbc0`; each a section move of `specs/origin.mdx#x` to `specs/target.mdx#y`, `specs/origin.mdx` holding `x` and `specs/target.mdx` holding `z`, each line of `src/c.ts` ending in U+000A):
-1. `src/c.ts` = `if (c) import O from "../specs/origin.xspec"`, `O.x`: the move and its `--preview` exit 1 `refused-invalid-rewrite` (identities `["src/c.ts"]`, locations `specs/origin.mdx` [0, 17) and `src/c.ts` [45, 48)); expected exit 0, the file becoming the unchanged `if` line, `import <X> from "../specs/target.xspec"`, `<X>.y`, the preview for `src/c.ts` one `reference-rewrite` [45, 48) and one `import-addition` at 45, no `import-removal`. T6.5-25's other eight positions behave alike.
-2. `import T from "../specs/target.xspec"`, `if (c) import O from "../specs/origin.xspec"`, `O.x`, `T.z`: exit 0 with an `import-removal` [45, 82), leaving `if (c) `, `T.y`, `T.z` — the `if` silently takes `T.y` as its body; expected the `if` line kept byte for byte and no `import-removal`.
-3. `export function f() {`, `  if (c) import O from "../specs/origin.xspec"`, `  O.x`, `}`: exit 0 with an `import-removal` [31, 68), leaving `  if (c) ` above `  target.y`; expected [31, 68) kept, a `reference-rewrite` [71, 74), an `import-addition` at 77 (the file's end), and no `import-removal`.
-
-**Location.** The removal decision in `src/core/move.ts` — `const removed = analysis.imports.filter((_imported, index) => usesBefore[index]! > 0 && usesAfter[index] === 0)` after the comment "Nested spec module imports included" (near line 2728), feeding `codeRemovals` — and the code-file loop's comment near line 3131 ("… a case SPEC 6.5's removal rule leaves open …"), which SPEC now closes. `CodeImport` (`src/core/code-analysis.ts`) records `topLevel` (`ts.isSourceFile(statement.parent)`, set in `scanImportDeclaration` near line 1535) but not whether a nested declaration stands in a statement list.
-
-**Change.**
-- Record on each `CodeImport` whether the declaration stands as another statement's body: its parent an `IfStatement` (either branch), `DoStatement`, `WhileStatement`, `ForStatement`, `ForInStatement`, `ForOfStatement`, `WithStatement`, or `LabeledStatement`. Every other place TypeScript's parser admits one is a statement list (a source file, a block, a module block, a `case` or `default` clause).
-- Leave such a declaration out of `removed`: it is never deleted, its bindings stay (unused), and no `import-removal` is previewed or performed for it. The rest of the plan runs as before over the file with the declaration in place — re-rooting through a held or an added binding, fresh names (which avoid every identifier the file spells), and the addition's placement among the top-level statements (T6.5-25: the only admissible line start follows the enclosing statement's end).
-- Rewrite the comment near line 3131 to state the rule (SPEC 6.5), and the part of `AGENTS.md`'s bullet beginning "Hand-probing moves over nested spec module imports" that records the statement-body case as the SPEC 6.5 gap logged on 2026-10-24 (SPEC now rules it, and `specs/tmp/SPEC-PROBLEMS.md` no longer exists).
-
-**Verification.** T6.5-25 (section-6.5-vi) whole, all 10 stagings. By hand: the three cases above, `--preview` and performed, each reaching exactly the expected bytes and preview, `check` clean afterward. Regressions: `section-6.5`, `section-6.5-ii`, `section-6.5-iii`, `section-6.5-iv`, `section-6.5-v`, `section-6.5-vi`, `section-6.6`, `section-16-p5-p6`.
 
 ## Task 65 — Store each item's scope as last assigned and present every scope node as `scopeNodes` (SPEC 10.7, 10.4, 10.2, 10.5, 10.6, 12.0; B1, first part)
 
