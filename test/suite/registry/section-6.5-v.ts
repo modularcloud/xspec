@@ -146,6 +146,11 @@
 // - (p) stages each of U+0020, U+0009, U+000B, and U+000C (built from code
 //   points) between `O`'s declaration and its line's terminator: 39 alone,
 //   the preview's `reference-rewrite` [61, 64) and no `import-removal`.
+//
+// The machinery is shared: section-6.5-vi.ts stages T6.5-24's arms as
+// `S23Arm`s over this module's configuration and spec sources and runs them
+// through `runS23Arms`, each arm naming its registered test (`test`), which
+// prefixes its diagnoses.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -194,21 +199,25 @@ import {
 // T6.5-23 Statement boundaries, the directive prologue, and timeliness
 // ---------------------------------------------------------------------------
 
-const S23_ORIGIN = "specs/origin.mdx";
-const S23_TARGET = "specs/target.mdx";
+export const S23_ORIGIN = "specs/origin.mdx";
+export const S23_TARGET = "specs/target.mdx";
 const S23_C_SPEC = "specs/c.mdx";
 /** The receiving file of every staging below but (g)'s. */
-const S23_APP = "src/c.ts";
+export const S23_APP = "src/c.ts";
 /** The arms' move (TEST-SPEC: "a section move of `specs/origin.mdx#x` to
  * `specs/target.mdx#y`"). */
-const S23_ARGV = ["move", "specs/origin.mdx#x", "specs/target.mdx#y"] as const;
+export const S23_ARGV = [
+  "move",
+  "specs/origin.mdx#x",
+  "specs/target.mdx#y",
+] as const;
 /** The target module's canonical relative specifier from `src/` (6.5). */
 const S23_TARGET_SPECIFIER = "../specs/target.xspec";
 
 // One spec group and one code group (SPEC 7.1, 7.2): a staged-source record,
 // staged by every staging after the body's first invocation (S-9's timing
 // clause).
-const S23_CONFIG = stagedTs(
+export const S23_CONFIG = stagedTs(
   "T6.5-23 xspec.config.ts — one spec group and one code group globbing src/**/*.ts",
   `import { defineConfig } from "xspec"
 
@@ -225,7 +234,7 @@ export default defineConfig({
 
 // The origin: the moved section `x` and the kept `w`, each alone on its
 // lines.
-const S23_ORIGIN_SOURCE: StagedMdx = stagedMdx(
+export const S23_ORIGIN_SOURCE: StagedMdx = stagedMdx(
   "T6.5-23 specs/origin.mdx (the moved x, the kept w)",
   [
     '<S id="x">',
@@ -241,7 +250,7 @@ const S23_ORIGIN_SOURCE: StagedMdx = stagedMdx(
 
 // The target: an existing discovered source holding `z` ((o)'s target), so
 // the move inserts the re-identified `y` into it.
-const S23_TARGET_SOURCE: StagedMdx = stagedMdx(
+export const S23_TARGET_SOURCE: StagedMdx = stagedMdx(
   "T6.5-23 specs/target.mdx (z)",
   ['<S id="z">', "Target z text.", "</S>", ""].join("\n"),
 );
@@ -253,7 +262,7 @@ const S23_C_SOURCE: StagedMdx = stagedMdx(
 );
 
 /** The origin module's declaration, `O`'s, at [0, 37) where it heads a line. */
-const S23_IMPORT_O = 'import O from "../specs/origin.xspec"';
+export const S23_IMPORT_O = 'import O from "../specs/origin.xspec"';
 
 /** `f` (TEST-SPEC): the marker `O.x` on the moved node, `O.w` on a kept one. */
 const S23_F = "export function f() { O.x; O.w }";
@@ -267,7 +276,7 @@ const S23_LSEP = String.fromCodePoint(0x2028);
 
 /** One span of the receiving file the rewrite replaces, in pre-operation
  * coordinates (6.6) — zero-length for an insertion ((g)'s moved text). */
-interface S23Rewrite {
+export interface S23Rewrite {
   readonly start: number;
   readonly end: number;
   /** The replacement's characters, given the added binding's identifier. */
@@ -303,7 +312,7 @@ interface S23Addition {
 }
 
 /** A span a preview edit covers, pre-operation bytes (SPEC 6.6, 12.7). */
-interface S23Span {
+export interface S23Span {
   readonly start: number;
   readonly end: number;
 }
@@ -316,14 +325,14 @@ interface S23Span {
  * TEST-SPEC names no span) and its `import-removal` edits (their exact
  * spans), each unasserted where undefined — T6.6-4's and T6.6-3's business.
  */
-interface S23PreviewExpectation {
+export interface S23PreviewExpectation {
   readonly rewrites?: number | readonly S23Span[];
   readonly removals?: readonly S23Span[];
 }
 
 /** A `query edges` answer after the move: exactly this edge between its two
  * graph nodes, of its kind (SPEC 11.1, 5.2, 4.6). */
-interface S23Edge {
+export interface S23Edge {
   readonly from: string;
   readonly to: string;
   readonly kind: EdgeKind;
@@ -331,8 +340,12 @@ interface S23Edge {
   readonly what: string;
 }
 
-/** One byte-asserted staging of T6.5-23. */
-interface S23Arm {
+/** One byte-asserted staging of T6.5-23 — or of T6.5-24, whose module
+ * (section-6.5-vi.ts) stages its arms through this machinery. */
+export interface S23Arm {
+  /** The registered test the staging belongs to, `T6.5-23` or `T6.5-24`:
+   * with `key`, it names the staging in every diagnosis. */
+  readonly test: string;
   /** The entry's arm and staging, e.g. `(a) between two directives`. */
   readonly key: string;
   /** The receiving file — the one whose post-move bytes the arm composes. */
@@ -367,6 +380,11 @@ interface S23Arm {
   readonly edges?: readonly S23Edge[];
   /** (c): why the file compiles clean under standard tooling (H-2). */
   readonly compiles?: string;
+}
+
+/** The staging's name in diagnoses: its test's ID and its key. */
+function s23Context(arm: S23Arm): string {
+  return `${arm.test} ${arm.key}`;
 }
 
 /** The added declaration (6.5's exact spelling) binding `ident` to the
@@ -517,7 +535,7 @@ function s23AssertPremises(arm: S23Arm): void {
   if (addition === undefined) {
     if (arm.deriving !== undefined) {
       throw new Error(
-        `T6.5-23 ${arm.key}: a harness defect — a staging gaining no ` +
+        `${s23Context(arm)}: a harness defect — a staging gaining no ` +
           `declaration names no offset of one`,
       );
     }
@@ -540,7 +558,7 @@ function s23AssertPremises(arm: S23Arm): void {
         });
         if (composed === undefined) {
           throw new Error(
-            `T6.5-23 ${arm.key}: a harness defect — the ${judged} offset ` +
+            `${s23Context(arm)}: a harness defect — the ${judged} offset ` +
               `${String(offset)} lies inside a replaced span`,
           );
         }
@@ -555,7 +573,7 @@ function s23AssertPremises(arm: S23Arm): void {
       const distinct = new Set(admissible.map((form) => form.toString("hex")));
       if (distinct.size !== addition.offsets.length) {
         throw new Error(
-          `T6.5-23 ${arm.key}: a harness defect — two admissible offsets ` +
+          `${s23Context(arm)}: a harness defect — two admissible offsets ` +
             `compose the same bytes${named}, so the bytes cannot name the ` +
             `offset used`,
         );
@@ -566,7 +584,7 @@ function s23AssertPremises(arm: S23Arm): void {
     const malformed = s23Malformed(arm, form.bytes);
     if (malformed !== undefined) {
       throw new Error(
-        `T6.5-23 ${arm.key}: a harness defect — ${form.what} is ` +
+        `${s23Context(arm)}: a harness defect — ${form.what} is ` +
           `${malformed}; the text reads ` +
           JSON.stringify(Buffer.from(form.bytes).toString("utf8")),
       );
@@ -983,7 +1001,7 @@ async function s23AssertEdge(
 
 /** One staging in its own fresh workspace (see the notes). */
 async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
-  const context = `T6.5-23 ${arm.key}`;
+  const context = s23Context(arm);
   const moveLabel = arm.argv.join(" ");
   s23AssertPremises(arm);
   const workspace = await TestWorkspace.create({
@@ -1107,6 +1125,50 @@ async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
   }
 }
 
+/**
+ * A registered body over `arms`, every one `test`'s: each staging runs in its
+ * own fresh workspace (`runS23Arm`), each one's diagnosed failure is
+ * collected, and the body fails once at the end, naming every staging that
+ * failed; a harness error — anything but a diagnosed assertion failure, a
+ * hang included — propagates at once.
+ */
+export async function runS23Arms(
+  product: ProductBinding,
+  test: string,
+  arms: readonly S23Arm[],
+): Promise<void> {
+  const failures: string[] = [];
+  for (const arm of arms) {
+    if (arm.test !== test) {
+      throw new Error(
+        `${test}: a harness defect — the staging ${s23Context(arm)} is ` +
+          `run by ${test}'s body`,
+      );
+    }
+    try {
+      await runS23Arm(product, arm);
+    } catch (error) {
+      if (!(error instanceof HarnessAssertionError)) throw error;
+      // A failure diagnosed outside the staging's own assertions — the
+      // subprocess driver's T6.5-22(a) hook, say — is named by its
+      // staging too.
+      const context = s23Context(arm);
+      failures.push(
+        error.message.startsWith(`${context}:`)
+          ? error.message
+          : `${context}: ${error.message}`,
+      );
+    }
+  }
+  if (failures.length > 0) {
+    fail(
+      `${test}: ${String(failures.length)} of ${String(arms.length)} ` +
+        `stagings failed, each diagnosed:\n` +
+        failures.map((failure) => `* ${failure}`).join("\n"),
+    );
+  }
+}
+
 /** A staged `src/c.ts` (S-9's record, declared well-formed TypeScript). */
 function s23StagedApp(key: string, text: string): StagedTs {
   return stagedTs(`T6.5-23 ${key} ${S23_APP}`, text, "well-formed", "ts");
@@ -1132,6 +1194,7 @@ function s23Arm(spec: {
   readonly compiles?: string;
 }): S23Arm {
   return {
+    test: "T6.5-23",
     key: spec.key,
     receiver: S23_APP,
     kind: "typescript",
@@ -1503,6 +1566,7 @@ function s23FArm(spec: {
   const text = [...spec.lines, ""].join("\n");
   const addition = spec.addition;
   return {
+    test: "T6.5-23",
     key: spec.key,
     receiver: S23_APP,
     kind: "typescript",
@@ -1714,6 +1778,7 @@ const S23_G_TEXT = [
 const S23_G_CLOSE = Buffer.from(S23_G_TEXT, "utf8").lastIndexOf("</S>");
 
 const S23_G: S23Arm = {
+  test: "T6.5-23",
   key: "(g)",
   receiver: S23_G_RECEIVER,
   kind: "spec-source",
@@ -1831,6 +1896,7 @@ function s23RemovalArm(spec: {
   }
   const marker = s23Marker(text, spec.key);
   return {
+    test: "T6.5-23",
     key: spec.key,
     receiver: S23_APP,
     kind: "typescript",
@@ -2007,6 +2073,7 @@ function s23KArm(spec: {
   const text = [...spec.lines, ""].join("\n");
   const call = s23Marker(text, spec.key, S23_K_CALL, spec.rewritten);
   return {
+    test: "T6.5-23",
     key: spec.key,
     receiver: S23_APP,
     kind: "typescript",
@@ -2216,6 +2283,7 @@ function s23LmArm(spec: {
     34,
   );
   return {
+    test: "T6.5-23",
     key: spec.key,
     receiver: S23_APP,
     kind: "typescript",
@@ -2460,6 +2528,7 @@ const S23_O_REFERENCE = s23Marker(S23_O_TEXT, "(o)", "O.x", () => "T.y");
 s23Stated("(o)", "the reference `O.x`", S23_O_REFERENCE.start, 45);
 
 const S23_O: S23Arm = {
+  test: "T6.5-23",
   key: "(o)",
   receiver: S23_O_RECEIVER,
   kind: "spec-source",
@@ -2600,32 +2669,7 @@ const T6_5_23 = defineProductTest({
   id: "T6.5-23",
   title:
     'statement boundaries, the directive prologue, and timeliness — arms (a) through (p), each a section move: in (a) through (e) `move specs/origin.mdx#x specs/target.mdx#y`, whose receiver `src/c.ts` (`import O from "../specs/origin.xspec"` beside `f` = `export function f() { O.x; O.w }`) gains exactly `import <X> from "../specs/target.xspec"`, value-blind in `<X>` alone, at an admissible offset, the marker rewritten in place to `<X>.y`, every other byte as staged: (a) after a `"use client"` prologue at the start of line 2 or 3, never offset 0, and between two directives (`"use client"`, then `"use strict"; import O … // note`), no line start admissible, at offset 26, 27, 64, or 65; (b) under `// @ts-nocheck` and under `/// <reference lib="esnext" />` at the start of line 3, never above the directive; (c) at the start of line 2, before a `// @ts-expect-error` comment, never between it and the statement it governs, the file compiling clean under standard tooling, under both of H-2\'s configurations, before and after the move; (d) after a trailing `// note` mid-line at 37 or 38, and after U+00A0 or U+2028 at 37 alone (1.4\'s whitespace, 3\'s terminators); (e) after a `;` terminating `O`\'s declaration across a line at the start of line 3, never inside the declaration, and in 6.5\'s own shape (one call statement across two lines) at one of six mid-line offsets, never at the start of line 3; (f) timeliness under `move specs/A.mdx#m specs/B.mdx#m`: 6.5\'s example (`import A …`, `A.m`, `A.k`, `import B …`, `B.b`), `B` untimely for the marker, gains `import <X> from "../specs/B.xspec"` at the start of line 2, the marker written `<X>.m`, and `query edges` reports the marker\'s `references` edge from `src/c.ts` to `specs/B.mdx#m`; its control (`import B …` on line 2) is re-rooted to `B.m`, nothing added; with `type T = number` or `import Z = require("./z")` interposed between the two declarations `B` is untimely and the declaration is added at offset 33; with `import type { T } from "./t"` or `import "./p"` interposed `B` stays timely, the marker re-rooted to `B.m`, nothing added, the preview one `reference-rewrite` and no `import-addition` or `import-removal`; the precedence branch at a distance (`import B …`, `B.b`, `import A …`, `A.m`, `A.k`) re-rooted to `B.m`, nothing added, the preview\'s one `reference-rewrite` spanning [70, 73), and the marker\'s edge reported; (g) the spec-source side of the split rule: a target whose first two lines are one declaration of one ESM block (`import K from "./k.xspec"`, `;`), receiving T6.5-13(h)\'s moved text into `p.n`, gains `import <X> from "./x.xspec"` at offset 0, the empty line\'s start, or the file\'s end, never at the start of line 2, which derives yet splits the declaration; (h) a removed declaration\'s place: with `f` = `export function f() { O.x }`, `O`\'s declaration losing its last use and removed with its line over [0, 38), the added line stands at the removal\'s end, offset 38, the file becoming exactly `import <X> from "../specs/target.xspec"`, U+000A, `export function f() { <X>.y }`, U+000A, the preview one `reference-rewrite` spanning the marker, one `import-removal` spanning [0, 38), and the `import-addition` at 38, never 0, and `query edges` the marker\'s `references` edge from `src/c.ts#f` to `specs/target.mdx#y`; (i) that file headed by `// note` or by `// @ts-expect-error`: the added line at the removal\'s end, 46 or 58, the comment then preceding it; (j) `"use client"` after the removed declaration: the added line at 38, the string-literal statement staying no directive; (k) a callee\'s timeliness under (f)\'s move: `ta(A.m)`, below `import A, { text as ta } …` and `import B …` and above `import { text as tb } …`, rewritten whole to `<Y>(B.m)`, the file gaining exactly `import { text as <Y> } from "../specs/B.xspec"` (or `import { text } …`) at offset 49 or 82, the preview one `reference-rewrite` spanning the call and no `import-removal`, and `query edges` the call\'s `embeds` edge from `src/c.ts` to `specs/B.mdx#m`; its control, `import { text as tb } …` on line 2, re-rooted at both existing bindings, `tb(B.m)`, nothing added; (l) under (f)\'s move, two declarations of one module (`import A1 …`, `A1.m`, `import A2 …`, `A2.m.c`, `A1.k`, `A2.k`): one added `import <X> from "../specs/B.xspec"` at offset 34, timely for both markers, which become `<X>.m` and `<X>.m.c`, the preview two `reference-rewrite` edits and no `import-removal`, and `query edges` the markers\' `references` edges from `src/c.ts` to `specs/B.mdx#m` and `specs/B.mdx#m.c`; (m) the same with `import B …` after `A1.m` and `B.b` last: the declaration added at 34 for `A1.m` alone, `A2.m.c` re-rooted at the timely `B` as `B.m.c`; (n) (d)\'s file with `f` spread over lines, or with `namespace N {` in its place: at 37 or 38, never at a line start inside the body; (o) a spec source (`import O …`, `<S id="p" d={O.x} />`, `import T …`, `<S id="q" d={T.z} />`): `O.x` re-rooted at the later-declared `T`, nothing added, `O`\'s declaration removed with its line, the preview one `reference-rewrite` spanning [45, 48) and one `import-removal` spanning [0, 31), and `query edges` `p`\'s `depends` edge to `specs/target.mdx#y`; (p) U+0020, U+0009, U+000B, or U+000C between `O`\'s declaration and its line\'s terminator: at the start of line 2, 39, the preview one `reference-rewrite` spanning [61, 64) and no `import-removal` — each move exiting 0, every receiver well-formed after it (TypeScript 5.9.3\'s module and script readings; the stock MDX 3 grammar), the preview\'s one `import-addition` at the offset the real operation used wherever a declaration is added (T6.6-4(b)), and `check` and `build` clean after it (SPEC 6.5, 1.4, 3, 4, 4.6, 5.2, 6.4, 6.6, 11.1, 12.7, 14.20)',
-  run: async (product) => {
-    const failures: string[] = [];
-    for (const arm of S23_ARMS) {
-      try {
-        await runS23Arm(product, arm);
-      } catch (error) {
-        if (!(error instanceof HarnessAssertionError)) throw error;
-        // A failure diagnosed outside the staging's own assertions — the
-        // subprocess driver's T6.5-22(a) hook, say — is named by its
-        // staging too.
-        const context = `T6.5-23 ${arm.key}`;
-        failures.push(
-          error.message.startsWith(`${context}:`)
-            ? error.message
-            : `${context}: ${error.message}`,
-        );
-      }
-    }
-    if (failures.length > 0) {
-      fail(
-        `T6.5-23: ${String(failures.length)} of ${String(S23_ARMS.length)} ` +
-          `stagings failed, each diagnosed:\n` +
-          failures.map((failure) => `* ${failure}`).join("\n"),
-      );
-    }
-  },
+  run: (product) => runS23Arms(product, "T6.5-23", S23_ARMS),
 });
 
 /** TEST-SPEC §6.5, fifth part, in canonical ID order (SUITE-25). */

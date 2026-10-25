@@ -459,6 +459,17 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "12.7",
     "14",
   ],
+  // T6.5-24: 6.5's eligibility of a held binding for a moved spelling —
+  // visible at the occurrence, a nested import's binding within its own
+  // scope alone (4.5), resolved as the language's scoping question (2.4),
+  // and timely, a statement enclosing a nested declaration never standing
+  // between — asserted over the rewritten file's bytes, the preview's edits
+  // and the performed-operation document (6.6, 12.7), and each moved
+  // spelling's `references` or `embeds` edge (5.2) from its enclosing unit
+  // (4.6) through `query edges` (11.1); its "14" the nested import
+  // declarations' well-formedness, never 14.20, asserted by the clean
+  // premise `build` and the judged post-move bytes (T14-12 places it here).
+  "T6.5-24": ["6.5", "2.4", "4.5", "4.6", "5.2", "6.6", "11.1", "12.7", "14"],
   "T6.6-2": ["6.6"],
   "T6.6-3": ["6.6", "6.5", "12.7", "14"],
   "T6.6-4": ["6.6", "6.5", "12.7"],
