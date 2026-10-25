@@ -61,8 +61,11 @@
 //   load against TEST-SPEC's ([102, 105), [168, 174), [120, 123), and
 //   [94, 97)), a mismatch a harness defect thrown at load, never a product
 //   verdict. The preview's entry for `src/c.ts` holds exactly one
-//   `reference-rewrite`, spanning it, and no `import-addition` or
-//   `import-removal`. `query edges --from <unit> --to specs/target.mdx#y
+//   `reference-rewrite`, spanning it, no `import-addition` or
+//   `import-removal`, and no edit of any other class — TEST-SPEC's "exactly
+//   those listed", every arm's preview expectation `exact`
+//   (section-6.5-v.ts's `S23PreviewExpectation`), asserted after the
+//   listed classes. `query edges --from <unit> --to specs/target.mdx#y
 //   --kinds <kind>` answers exactly the spelling's edge: the marker's
 //   `references` edge from `src/c.ts#f` ((a)), from `src/c.ts#f.h` ((g):
 //   the arrow function `h` in `f`, a named unit, 4.6), or from `src/c.ts#N`
@@ -89,8 +92,9 @@
 //   `S23Spelling`). The preview's entry for `src/c.ts` holds exactly one
 //   `reference-rewrite`, spanning the spelling ([38, 41), [64, 67),
 //   [114, 117), [91, 97)), the one `import-addition` zero-length at the
-//   offset the bytes name (T6.6-4(b)), and exactly the `import-removal`
-//   edits listed: (c)'s [22, 62), none elsewhere. `query edges` answers
+//   offset the bytes name (T6.6-4(b)), exactly the `import-removal` edits
+//   listed — (c)'s [22, 62), none elsewhere — and no edit of any other
+//   class (`exact`, as for the held arms). `query edges` answers
 //   each listed edge exactly: the marker's `references` edge to
 //   `specs/target.mdx#y` from `src/c.ts` ((b): a top-level statement's
 //   spelling is attributed to the file, 4.6) or from `src/c.ts#f` ((c),
@@ -160,7 +164,10 @@
 //   and judged by T6.5-22(a)'s judgement, which bars `O`. The preview's entry
 //   for `src/c.ts` holds exactly one `reference-rewrite`, spanning the
 //   marker, the one `import-addition`, zero-length at that offset
-//   (T6.6-4(b)), and no `import-removal`; `query edges` answers the marker's
+//   (T6.6-4(b)), no `import-removal`, and no edit of any other class
+//   (`exact`, as for T6.5-24's arms: the byte contract pins every change to
+//   the file to those edits, and SPEC 6.6 reports every edit the operation
+//   makes, each under one class); `query edges` answers the marker's
 //   `references` edge from the same unit to `specs/target.mdx#y`; then
 //   `check --json` and `build --json` are clean. A product deleting the
 //   declaration fails the byte contract — and, in the `do` arm, the
@@ -215,7 +222,8 @@
 //   preview's entry for `src/c.ts` holds exactly one `reference-rewrite`,
 //   spanning the marker, exactly one `import-removal`, spanning the
 //   removal's range — from the first decorator or modifier (T6.6-4(b)) —
-//   and no `import-addition`; `query edges` from `src/c.ts#f` to
+//   no `import-addition`, and no edit of any other class (`exact`, as for
+//   T6.5-24's and T6.5-25's arms); `query edges` from `src/c.ts#f` to
 //   `specs/target.mdx#y` of kind `references` answers exactly the marker's
 //   edge (the marker stands in `f` in every staging, 4.6); then
 //   `check --json` and `build --json` are clean.
@@ -399,8 +407,9 @@ function s24MarkerEdge(from: string): S23Edge {
  * sources, under T6.5-23's move; the spelling's span (TEST-SPEC's,
  * cross-checked) replaced by `rewritten`; the preview's one
  * `reference-rewrite` spanning it and no `import-removal` (and no
- * `import-addition`, which `runS23Arm` asserts wherever nothing is added);
- * and the spelling's edge after the move.
+ * `import-addition`, which `runS23Arm` asserts wherever nothing is added),
+ * the expectation `exact` — no edit of any other class; and the spelling's
+ * edge after the move.
  */
 function s24HeldArm(spec: {
   readonly key: string;
@@ -430,7 +439,7 @@ function s24HeldArm(spec: {
     addition: undefined,
     placement: spec.placement,
     excluded: {},
-    preview: { rewrites: [span], removals: [] },
+    preview: { rewrites: [span], removals: [], exact: true },
     edges: [spec.edge],
   };
 }
@@ -546,7 +555,8 @@ function s24AssertSpelledForms(
  * TEST-SPEC's admissible offsets, each cross-checked as its line's start;
  * the preview's one `reference-rewrite` spanning the spelling and exactly
  * the listed `import-removal` (the `import-addition` parity `runS23Arm`
- * asserts wherever a declaration is added); and the edges after the move.
+ * asserts wherever a declaration is added), the expectation `exact` — no
+ * edit of any other class; and the edges after the move.
  * Each admissible offset's composed form is held to TEST-SPEC's spelling of
  * the file (`s24AssertSpelledForms`).
  */
@@ -616,6 +626,7 @@ function s24AddedArm(spec: {
     preview: {
       rewrites: [span],
       removals: removal === undefined ? [] : [removal],
+      exact: true,
     },
     edges: spec.edges,
   };
@@ -1145,7 +1156,7 @@ const S24_ARMS: readonly S23Arm[] = [
 const T6_5_24 = defineProductTest({
   id: "T6.5-24",
   title:
-    "nested bindings: visibility and wholly-between timeliness — arms (a) through (h), each `move specs/origin.mdx#x specs/target.mdx#y` over `src/c.ts` (`specs/origin.mdx` holding `x` and `w`, in (c) `x` alone, and `specs/target.mdx` holding `z`), the workspace valid before the move, its nested import declarations well-formed (never 14.20): (a) `import O from \"../specs/origin.xspec\"` above `export function f() {` holding `import T from \"../specs/target.xspec\"`, `O.x`, `O.w`, and `T.z` — `T` visible at the marker and timely, `f` enclosing its declaration and so standing between nothing — the marker re-rooted at `T`, nothing added, the file's one change the marker's span [102, 105) replaced by `T.y`, and `query edges` the marker's `references` edge from `src/c.ts#f` to `specs/target.mdx#y`; (b) `T` invisible outside its scope: `import O …`, `O.x`, and `O.w` above `f` holding `import T …` and `T.z` — the file gains `import <X> from \"../specs/target.xspec\"` at offset 38, the start of line 2, `<X>` never `T`, the marker's span [38, 41) becoming `<X>.y`, every other byte unchanged, the preview's `reference-rewrite` spanning [38, 41), and the marker's `references` edge from `src/c.ts` beside `T.z`'s from `src/c.ts#f` to `specs/target.mdx#z`; (c) an added declaration timely directly after the function holding the replaced nested binding: `f` holding `import O …` and `O.x`, then `export const k = 1` — `O`'s declaration removed with its line over [22, 62), the declaration added at 70, the start of line 5, the file becoming exactly `export function f() {`, `  <X>.y`, `}`, `import <X> from \"../specs/target.xspec\"`, `export const k = 1`, the preview's `reference-rewrite` spanning [64, 67) and its one `import-removal` spanning [22, 62), and the marker's edge from `src/c.ts#f`; (d) a held nested binding visible but untimely: (a) with `const q = 1` between `O`'s declaration and `f` — the declaration added at 38, `<X>` never `T`, the marker's span [114, 117) becoming `<X>.y`, the preview's `reference-rewrite` spanning [114, 117), and the marker's edge from `src/c.ts#f`; (e) the callee side: `t(O.x)` at top level below `import O, { text as t } …` and `import T …`, `g` holding `import { text as tt } from \"../specs/target.xspec\"` and `tt(T.z)` — `tt` invisible at the call, the file gains exactly `import { text as <Y> } from \"../specs/target.xspec\"` (or `import { text } …` where the fresh identifier is `text`), `<Y>` never `tt`, at offset 53 or 91, the call's span [91, 97) becoming `<Y>(T.y)`, the preview's `reference-rewrite` spanning [91, 97), and the call's `embeds` edge from `src/c.ts` beside `tt(T.z)`'s from `src/c.ts#g` to `specs/target.mdx#z`; (f) the callee side's control: `t(O.x)` in `g`, beside `g`'s nested `import { text as tt } …`, `O.w` after `g` — the call re-rooted at `tt` and `T`, nothing added, its span [168, 174) replaced by `tt(T.y)`, and the call's `embeds` edge from `src/c.ts#g`; (g) (a) with the marker in the arrow function `h` in `f`, a scope nested within `T`'s — [120, 123) replaced by `T.y`, nothing added, the edge from `src/c.ts#f.h`; (h) (a) with `namespace N {` in `export function f() {`'s place — [94, 97) replaced by `T.y`, nothing added, the edge from `src/c.ts#N` — each move exiting 0, `src/c.ts` after it well-formed (TypeScript 5.9.3's module and script readings) and byte-composable exactly, value-blind in an added declaration's fresh identifier alone, `O`'s declaration kept by `O.w` but in (c), the preview's edits for `src/c.ts` exactly those listed — the one `import-addition` at the offset the real operation used where the file gains a declaration (T6.6-4(b)), none elsewhere, and no `import-removal` but (c)'s — and `check` and `build` clean after it (SPEC 6.5, 2.4, 3, 4.5, 4.6, 5.2, 6.6, 11.1, 12.7, 14.20)",
+    "nested bindings: visibility and wholly-between timeliness — arms (a) through (h), each `move specs/origin.mdx#x specs/target.mdx#y` over `src/c.ts` (`specs/origin.mdx` holding `x` and `w`, in (c) `x` alone, and `specs/target.mdx` holding `z`), the workspace valid before the move, its nested import declarations well-formed (never 14.20): (a) `import O from \"../specs/origin.xspec\"` above `export function f() {` holding `import T from \"../specs/target.xspec\"`, `O.x`, `O.w`, and `T.z` — `T` visible at the marker and timely, `f` enclosing its declaration and so standing between nothing — the marker re-rooted at `T`, nothing added, the file's one change the marker's span [102, 105) replaced by `T.y`, and `query edges` the marker's `references` edge from `src/c.ts#f` to `specs/target.mdx#y`; (b) `T` invisible outside its scope: `import O …`, `O.x`, and `O.w` above `f` holding `import T …` and `T.z` — the file gains `import <X> from \"../specs/target.xspec\"` at offset 38, the start of line 2, `<X>` never `T`, the marker's span [38, 41) becoming `<X>.y`, every other byte unchanged, the preview's `reference-rewrite` spanning [38, 41), and the marker's `references` edge from `src/c.ts` beside `T.z`'s from `src/c.ts#f` to `specs/target.mdx#z`; (c) an added declaration timely directly after the function holding the replaced nested binding: `f` holding `import O …` and `O.x`, then `export const k = 1` — `O`'s declaration removed with its line over [22, 62), the declaration added at 70, the start of line 5, the file becoming exactly `export function f() {`, `  <X>.y`, `}`, `import <X> from \"../specs/target.xspec\"`, `export const k = 1`, the preview's `reference-rewrite` spanning [64, 67) and its one `import-removal` spanning [22, 62), and the marker's edge from `src/c.ts#f`; (d) a held nested binding visible but untimely: (a) with `const q = 1` between `O`'s declaration and `f` — the declaration added at 38, `<X>` never `T`, the marker's span [114, 117) becoming `<X>.y`, the preview's `reference-rewrite` spanning [114, 117), and the marker's edge from `src/c.ts#f`; (e) the callee side: `t(O.x)` at top level below `import O, { text as t } …` and `import T …`, `g` holding `import { text as tt } from \"../specs/target.xspec\"` and `tt(T.z)` — `tt` invisible at the call, the file gains exactly `import { text as <Y> } from \"../specs/target.xspec\"` (or `import { text } …` where the fresh identifier is `text`), `<Y>` never `tt`, at offset 53 or 91, the call's span [91, 97) becoming `<Y>(T.y)`, the preview's `reference-rewrite` spanning [91, 97), and the call's `embeds` edge from `src/c.ts` beside `tt(T.z)`'s from `src/c.ts#g` to `specs/target.mdx#z`; (f) the callee side's control: `t(O.x)` in `g`, beside `g`'s nested `import { text as tt } …`, `O.w` after `g` — the call re-rooted at `tt` and `T`, nothing added, its span [168, 174) replaced by `tt(T.y)`, and the call's `embeds` edge from `src/c.ts#g`; (g) (a) with the marker in the arrow function `h` in `f`, a scope nested within `T`'s — [120, 123) replaced by `T.y`, nothing added, the edge from `src/c.ts#f.h`; (h) (a) with `namespace N {` in `export function f() {`'s place — [94, 97) replaced by `T.y`, nothing added, the edge from `src/c.ts#N` — each move exiting 0, `src/c.ts` after it well-formed (TypeScript 5.9.3's module and script readings) and byte-composable exactly, value-blind in an added declaration's fresh identifier alone, `O`'s declaration kept by `O.w` but in (c), the preview's edits for `src/c.ts` exactly those listed — the one `import-addition` at the offset the real operation used where the file gains a declaration (T6.6-4(b)), none elsewhere, no `import-removal` but (c)'s, and no edit of any other class — and `check` and `build` clean after it (SPEC 6.5, 2.4, 3, 4.5, 4.6, 5.2, 6.6, 11.1, 12.7, 14.20)",
   run: (product) => runS23Arms(product, "T6.5-24", S24_ARMS),
 });
 
@@ -1224,7 +1235,8 @@ function s25AssertWellFormed(arm: S23Arm, spelled: string): void {
  * "../specs/target.xspec"` added at the one admissible offset TEST-SPEC
  * names, cross-checked as its line's start; the preview's one
  * `reference-rewrite` spanning the marker and no `import-removal` (the
- * `import-addition` parity `runS23Arm` asserts); before the move, `check`
+ * `import-addition` parity `runS23Arm` asserts), the expectation `exact` —
+ * no edit of any other class; before the move, `check`
  * clean and the marker's `references` edge from `unit` to
  * `specs/origin.mdx#x`, and after it the same unit's to
  * `specs/target.mdx#y`. The form composed at the offset is held to the text
@@ -1281,7 +1293,7 @@ function s25Arm(spec: {
     },
     placement: spec.placement,
     excluded: spec.excluded,
-    preview: { rewrites: [marker], removals: [] },
+    preview: { rewrites: [marker], removals: [], exact: true },
     edges: [s24MarkerEdge(spec.unit)],
     before: { check: true, edges: [s25OriginEdge(spec.unit)] },
   };
@@ -1493,8 +1505,9 @@ const S25_ARMS: readonly S23Arm[] = [
  * to `specs/origin.mdx#x` recorded; after it the declaration in place
  * byte-for-byte, the marker `<X>.y`, rooted at `import <X> from
  * "../specs/target.xspec"` added at the start of line 2, the preview's one
- * `reference-rewrite`, its `import-addition` there, and no `import-removal`,
- * and the marker's edge from `src/c.ts` to `specs/target.mdx#y`. A tenth,
+ * `reference-rewrite` and its `import-addition` there, with no
+ * `import-removal` and no other edit, and the marker's edge from `src/c.ts`
+ * to `specs/target.mdx#y`. A tenth,
  * nested arm holds the `if` statement in `f`: the declaration [31, 68) kept,
  * the marker [71, 74) rewritten, the declaration added at the file's end,
  * 77, the edges from `src/c.ts#f`.
@@ -1502,7 +1515,7 @@ const S25_ARMS: readonly S23Arm[] = [
 const T6_5_25 = defineProductTest({
   id: "T6.5-25",
   title:
-    'a TypeScript declaration standing as another statement\'s body stays — one arm per position, each `move specs/origin.mdx#x specs/target.mdx#y` (`specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`) over `src/c.ts` = the statement, U+000A, `O.x`, U+000A, the statement in turn `if (c) import O from "../specs/origin.xspec"`, `if (c) {} else import O from "../specs/origin.xspec"`, `do import O from "../specs/origin.xspec"; while (c)`, `while (c) import O from "../specs/origin.xspec"`, `for (; c; ) import O from "../specs/origin.xspec"`, `for (const k in o) import O from "../specs/origin.xspec"`, `for (const k of o) import O from "../specs/origin.xspec"`, `with (o) import O from "../specs/origin.xspec"`, and `l: import O from "../specs/origin.xspec"` — before the move `build` and `check` clean, the statement-body declaration well-formed (never 14.20) and binding in the file\'s scope, and `query edges` the marker\'s `references` edge from `src/c.ts` to `specs/origin.mdx#x`; each move exiting 0, `src/c.ts` after it well-formed (TypeScript 5.9.3\'s module and script readings) and exactly the statement, U+000A, `import <X> from "../specs/target.xspec"`, U+000A, `<X>.y`, U+000A — the declaration kept in place byte-for-byte, its binding unused, the added declaration at the start of line 2, value-blind in `<X>` alone, never `O` — the preview\'s edits for `src/c.ts` exactly one `reference-rewrite` spanning `O.x`, the one `import-addition` at the start of line 2 (T6.6-4(b)), and no `import-removal`, `check` and `build` clean after it, and `query edges` the marker\'s `references` edge from `src/c.ts` to `specs/target.mdx#y`; and a nested arm over `export function f() {`, `  if (c) import O from "../specs/origin.xspec"`, `  O.x`, `}` — before the move `build` and `check` clean and the marker\'s edge from `src/c.ts#f` to `specs/origin.mdx#x` — the declaration [31, 68) kept byte-for-byte and the declaration added at the file\'s end, 77, the file becoming exactly `export function f() {`, `  if (c) import O from "../specs/origin.xspec"`, `  <X>.y`, `}`, `import <X> from "../specs/target.xspec"`, the preview\'s one `reference-rewrite` spanning [71, 74), its `import-addition` at 77, and no `import-removal`, `check` and `build` clean after it, and the marker\'s edge from `src/c.ts#f` to `specs/target.mdx#y` (SPEC 6.5, 3, 4.5, 4.6, 5.2, 6.6, 11.1, 12.7, 14.20)',
+    'a TypeScript declaration standing as another statement\'s body stays — one arm per position, each `move specs/origin.mdx#x specs/target.mdx#y` (`specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`) over `src/c.ts` = the statement, U+000A, `O.x`, U+000A, the statement in turn `if (c) import O from "../specs/origin.xspec"`, `if (c) {} else import O from "../specs/origin.xspec"`, `do import O from "../specs/origin.xspec"; while (c)`, `while (c) import O from "../specs/origin.xspec"`, `for (; c; ) import O from "../specs/origin.xspec"`, `for (const k in o) import O from "../specs/origin.xspec"`, `for (const k of o) import O from "../specs/origin.xspec"`, `with (o) import O from "../specs/origin.xspec"`, and `l: import O from "../specs/origin.xspec"` — before the move `build` and `check` clean, the statement-body declaration well-formed (never 14.20) and binding in the file\'s scope, and `query edges` the marker\'s `references` edge from `src/c.ts` to `specs/origin.mdx#x`; each move exiting 0, `src/c.ts` after it well-formed (TypeScript 5.9.3\'s module and script readings) and exactly the statement, U+000A, `import <X> from "../specs/target.xspec"`, U+000A, `<X>.y`, U+000A — the declaration kept in place byte-for-byte, its binding unused, the added declaration at the start of line 2, value-blind in `<X>` alone, never `O` — the preview\'s edits for `src/c.ts` exactly one `reference-rewrite` spanning `O.x` and the one `import-addition` at the start of line 2 (T6.6-4(b)), with no `import-removal` and no edit of any other class, `check` and `build` clean after it, and `query edges` the marker\'s `references` edge from `src/c.ts` to `specs/target.mdx#y`; and a nested arm over `export function f() {`, `  if (c) import O from "../specs/origin.xspec"`, `  O.x`, `}` — before the move `build` and `check` clean and the marker\'s edge from `src/c.ts#f` to `specs/origin.mdx#x` — the declaration [31, 68) kept byte-for-byte and the declaration added at the file\'s end, 77, the file becoming exactly `export function f() {`, `  if (c) import O from "../specs/origin.xspec"`, `  <X>.y`, `}`, `import <X> from "../specs/target.xspec"`, the preview\'s edits for `src/c.ts` exactly one `reference-rewrite` spanning [71, 74) and its `import-addition` at 77, with no `import-removal` and no edit of any other class, `check` and `build` clean after it, and the marker\'s edge from `src/c.ts#f` to `specs/target.mdx#y` (SPEC 6.5, 3, 4.5, 4.6, 5.2, 6.6, 11.1, 12.7, 14.20)',
   run: (product) => runS23Arms(product, "T6.5-25", S25_ARMS),
 });
 
@@ -1581,7 +1594,8 @@ function s26AssertSpelledForm(arm: S23Arm, spelled: string): void {
  * added; before the move `check` clean; the preview's one
  * `reference-rewrite` spanning the marker, its one `import-removal`
  * spanning the removal's range, and no `import-addition` (which `runS23Arm`
- * asserts wherever nothing is added); and after the move the marker's
+ * asserts wherever nothing is added), the expectation `exact` — no edit of
+ * any other class; and after the move the marker's
  * `references` edge from `src/c.ts#f`, the unit holding it in every
  * staging (4.6), to `specs/target.mdx#y`. The composed form is held to
  * `spelled`, the text TEST-SPEC spells for the file after the move
@@ -1633,7 +1647,7 @@ function s26Arm(spec: {
     addition: undefined,
     placement: spec.placement,
     excluded: {},
-    preview: { rewrites: [marker], removals: [removal] },
+    preview: { rewrites: [marker], removals: [removal], exact: true },
     edges: [s24MarkerEdge(`${S23_APP}#f`)],
     before: { check: true, edges: [] },
   };
@@ -1952,12 +1966,12 @@ const S26_ARMS: readonly S23Arm[] = [
  * removal's range deleted and the marker rewritten, the preview's
  * `import-removal` spanning that range (T6.6-4(b)'s decorator-and-modifier
  * clause pinned here; T6.6-4's own stagings hold no decorated or modified
- * declaration).
+ * declaration) beside its one `reference-rewrite`, and no other edit.
  */
 const T6_5_26 = defineProductTest({
   id: "T6.5-26",
   title:
-    "TypeScript removal extents: decorators and modifiers, and what a removal leaves — ten stagings, each `move specs/origin.mdx#x specs/target.mdx#y` (`specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`) over `src/c.ts` holding `import T from \"../specs/target.xspec\"`, visible, unshadowed, and timely for the moved marker `O.x` — the marker re-rooted to `T.y`, nothing added, and `O`'s declaration, the marker its only use, removed — the workspace valid before the move, `build` and `check` clean, its decorated, modified, and nested declarations well-formed (never 14.20): (a)–(c) `src/c.ts` = `import T …`, U+000A, the declaration `@dec import O from \"../specs/origin.xspec\"`, `export import O …`, or `declare import O …`, U+000A, `export function f() { O.x; T.z }`, U+000A — the deletion starting at the `@`, `export`, or `declare`, the line it empties dropped with its terminator, the removal's range [38, 81), [38, 83), or [38, 84), the file becoming exactly `import T …`, U+000A, `export function f() { T.y; T.z }`, U+000A; (d) `// @ts-expect-error` above `import O …`, `const n: number = \"x\"` below it — the removal's range [58, 96), the declaration's line alone, the comment staying to govern the `const` line; (e) `import O …` heading the file above `// @ts-nocheck`, and separately above `/// <reference lib=\"esnext\" />`, then `import T …` — the removal's range [0, 38), the pragma or directive coming to lead the file; (f) `import O …` nested at the head of `f`'s body above `\"use strict\"` — the removal's range [60, 100), the line with its indentation, `\"use strict\"` coming to head the body's directive prologue; (g) (a)–(c)'s file with `@dec export import O …` and, separately, `export @dec import O …` — the deletion starting at the first of them, the removal's range [38, 88) in each, the file becoming exactly what (a)–(c) leave; (h) `  @dec import O …` nested in `f`'s body — its own characters [62, 104) deleted and the two-space line they leave dropped with its terminator, the removal's range [60, 105) — each move exiting 0 with the form-exact 12.7 document, `src/c.ts` after it well-formed (TypeScript 5.9.3's module and script readings) and exactly the staged bytes with the removal's range deleted and the marker's span replaced by `T.y`, no declaration added and no other byte changed, the preview's edits for `src/c.ts` exactly one `reference-rewrite` spanning the marker, one `import-removal` spanning the removal's range — from the first decorator or modifier (T6.6-4(b)) — and no `import-addition`, `check` and `build` clean after it, and `query edges` the marker's `references` edge from `src/c.ts#f` to `specs/target.mdx#y` (SPEC 6.5, 3, 4.5, 4.6, 5.2, 6.4, 6.6, 11.1, 12.7, 14.20)",
+    "TypeScript removal extents: decorators and modifiers, and what a removal leaves — ten stagings, each `move specs/origin.mdx#x specs/target.mdx#y` (`specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`) over `src/c.ts` holding `import T from \"../specs/target.xspec\"`, visible, unshadowed, and timely for the moved marker `O.x` — the marker re-rooted to `T.y`, nothing added, and `O`'s declaration, the marker its only use, removed — the workspace valid before the move, `build` and `check` clean, its decorated, modified, and nested declarations well-formed (never 14.20): (a)–(c) `src/c.ts` = `import T …`, U+000A, the declaration `@dec import O from \"../specs/origin.xspec\"`, `export import O …`, or `declare import O …`, U+000A, `export function f() { O.x; T.z }`, U+000A — the deletion starting at the `@`, `export`, or `declare`, the line it empties dropped with its terminator, the removal's range [38, 81), [38, 83), or [38, 84), the file becoming exactly `import T …`, U+000A, `export function f() { T.y; T.z }`, U+000A; (d) `// @ts-expect-error` above `import O …`, `const n: number = \"x\"` below it — the removal's range [58, 96), the declaration's line alone, the comment staying to govern the `const` line; (e) `import O …` heading the file above `// @ts-nocheck`, and separately above `/// <reference lib=\"esnext\" />`, then `import T …` — the removal's range [0, 38), the pragma or directive coming to lead the file; (f) `import O …` nested at the head of `f`'s body above `\"use strict\"` — the removal's range [60, 100), the line with its indentation, `\"use strict\"` coming to head the body's directive prologue; (g) (a)–(c)'s file with `@dec export import O …` and, separately, `export @dec import O …` — the deletion starting at the first of them, the removal's range [38, 88) in each, the file becoming exactly what (a)–(c) leave; (h) `  @dec import O …` nested in `f`'s body — its own characters [62, 104) deleted and the two-space line they leave dropped with its terminator, the removal's range [60, 105) — each move exiting 0 with the form-exact 12.7 document, `src/c.ts` after it well-formed (TypeScript 5.9.3's module and script readings) and exactly the staged bytes with the removal's range deleted and the marker's span replaced by `T.y`, no declaration added and no other byte changed, the preview's edits for `src/c.ts` exactly one `reference-rewrite` spanning the marker and one `import-removal` spanning the removal's range — from the first decorator or modifier (T6.6-4(b)) — with no `import-addition` and no edit of any other class, `check` and `build` clean after it, and `query edges` the marker's `references` edge from `src/c.ts#f` to `specs/target.mdx#y` (SPEC 6.5, 3, 4.5, 4.6, 5.2, 6.4, 6.6, 11.1, 12.7, 14.20)",
   run: (product) => runS23Arms(product, "T6.5-26", S26_ARMS),
 });
 

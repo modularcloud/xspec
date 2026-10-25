@@ -58,7 +58,8 @@
 //   offset the real operation used.
 // - The preview parity (T6.6-4(b)): the preview's entry for `src/c.ts` holds
 //   exactly one `import-addition` edit, zero-length, at that offset. The
-//   entry's other edits are T6.6-4's and T6.6-3's business, unasserted here.
+//   entry's other edits are T6.6-4's and T6.6-3's business, unasserted here
+//   (no T6.5-23 arm sets the preview expectation's `exact`; see below).
 // - `check --json`, then `build --json`, exactly `{"findings": []}` after the
 //   move.
 // - (c)'s standard-tooling compile (H-2): under each of H-2's two
@@ -160,6 +161,15 @@
 // preview, `check --json` exactly `{"findings": []}` and each `query edges`
 // answer exactly its edge (`s23AssertEdge`, its label then "before the
 // move"; T6.5-26's arms list none); no T6.5-23 or T6.5-24 arm sets it.
+// Every one of section-6.5-vi.ts's arms — and only those — sets its preview
+// expectation's `exact` (`S23PreviewExpectation`): after the checks above,
+// `s23AssertPreview` asserts that the receiver's entry holds the listed
+// `reference-rewrite` and `import-removal` edits and the `import-addition`
+// parity's one edit, where a declaration is added, and no edit of any other
+// 12.7 class (T6.5-24's "exactly those listed"; SPEC 6.6). T6.5-23's arms
+// leave it unset — some of its receivers are spec sources ((g), (o)), where
+// edits of other classes are legitimate — so their entries' other edits stay
+// T6.6-4's and T6.6-3's business.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -333,11 +343,25 @@ export interface S23Span {
  * where the receiver gains a declaration; none where it gains none: its
  * `reference-rewrite` edits (their exact spans, or their count where
  * TEST-SPEC names no span) and its `import-removal` edits (their exact
- * spans), each unasserted where undefined — T6.6-4's and T6.6-3's business.
+ * spans), each unasserted where undefined; and, where `exact` is set, that
+ * the entry holds those edits and no other — no edit of any other 12.7 class
+ * (SPEC 6.6: the preview reports every edit the operation would make, each
+ * classed as exactly one class). Unset, the entry's other edits are T6.6-4's
+ * and T6.6-3's business, unasserted here.
  */
 export interface S23PreviewExpectation {
   readonly rewrites?: number | readonly S23Span[];
   readonly removals?: readonly S23Span[];
+  /**
+   * The entry is complete: it holds the listed `reference-rewrite` spans,
+   * the listed `import-removal` spans, and the one `import-addition` where
+   * the receiver gains a declaration (none where it gains none), and nothing
+   * beyond them (T6.5-24: the preview's edits for `src/c.ts` "exactly those
+   * listed"). Set by section-6.5-vi.ts's arms alone; it needs `rewrites` as
+   * spans and `removals` given — a harness defect otherwise, thrown before
+   * any product is driven (`s23AssertPremises`).
+   */
+  readonly exact?: true;
 }
 
 /** A `query edges` answer after the move — or, in an arm's `before`, before
@@ -596,9 +620,23 @@ function s23Malformed(arm: S23Arm, bytes: Uint8Array): string | undefined {
  * TEST-SPEC states derives at an inadmissible offset are well-formed text of
  * the receiver's kind (14.20; S-9's judges), and the admissible offsets
  * compose pairwise distinct bytes, so the product's bytes name the one it
- * used.
+ * used; and a complete preview expectation (`exact`) lists its
+ * `reference-rewrite` edits by span and gives its `import-removal` edits, so
+ * that the edits beyond those listed are defined.
  */
 function s23AssertPremises(arm: S23Arm): void {
+  const expected = arm.preview;
+  if (
+    expected?.exact === true &&
+    (typeof expected.rewrites !== "object" || expected.removals === undefined)
+  ) {
+    throw new Error(
+      `${s23Context(arm)}: a harness defect — a complete preview ` +
+        `expectation (\`exact\`) lists the \`reference-rewrite\` edits by ` +
+        `span and gives the \`import-removal\` edits, or the edits beyond ` +
+        `those listed are undefined`,
+    );
+  }
   const pre = Buffer.from(arm.text, "utf8");
   const forms: { readonly what: string; readonly bytes: Uint8Array }[] = [
     { what: "the staged text", bytes: pre },
@@ -963,11 +1001,21 @@ function s23Spans(spans: readonly S23Span[]): string {
     .join(", ");
 }
 
+/** The edits of one class a complete preview expectation lists, in words,
+ * for diagnoses. */
+function s23ListedOfClass(cls: string, spans: readonly S23Span[]): string {
+  if (spans.length === 0) return `no \`${cls}\``;
+  return spans.length === 1
+    ? `one \`${cls}\` spanning ${s23Spans(spans)}`
+    : `${String(spans.length)} \`${cls}\` edits spanning ${s23Spans(spans)}`;
+}
+
 /**
  * The preview's entry for the receiver against the real operation (SPEC
  * 6.6: a preview reports exactly the real operation's edits; T6.6-4(b)):
  * the `import-addition` parity, then whatever the arm's preview expectation
- * states.
+ * states — its `reference-rewrite` and `import-removal` edits and, where it
+ * is `exact`, last, that the entry holds no edit beyond those listed.
  */
 function s23AssertPreview(
   arm: S23Arm,
@@ -1033,6 +1081,49 @@ function s23AssertPreview(
         ` (SPEC 6.6, 6.5, 12.7: the real operation's removals); the ` +
         `preview's edits: ${JSON.stringify(entry.edits)}`,
     );
+  }
+  if (
+    arm.preview?.exact === true &&
+    typeof wanted === "object" &&
+    removals !== undefined
+  ) {
+    // The checks above pin the entry's `import-addition`,
+    // `reference-rewrite`, and `import-removal` edits to exactly those
+    // listed (`s23AssertPremises` holds a complete expectation to spans and
+    // removals given), so an edit beyond them is one of another 12.7 class.
+    const listedClasses: readonly PreviewEditClass[] = [
+      "reference-rewrite",
+      "import-addition",
+      "import-removal",
+    ];
+    const extras = entry.edits.filter(
+      (edit) => !listedClasses.includes(edit.class),
+    );
+    if (extras.length > 0) {
+      const additionAt = additions[0]?.range.start;
+      const listed = [
+        s23ListedOfClass("reference-rewrite", wanted),
+        arm.addition === undefined || additionAt === undefined
+          ? "no `import-addition`"
+          : `the one \`import-addition\`, at ${String(additionAt)}`,
+        `and ${s23ListedOfClass("import-removal", removals)}`,
+      ].join(", ");
+      fail(
+        `${label} reports exactly the edits listed — ${listed} — and no ` +
+          `edit of any other class (TEST-SPEC T6.5-24: "exactly those ` +
+          `listed"; SPEC 6.6, 12.7: a preview reports every edit the ` +
+          `operation would make, each classed as exactly one class), yet it ` +
+          `also reports ` +
+          extras
+            .map(
+              (edit) =>
+                `\`${edit.class}\` [${String(edit.range.start)}, ` +
+                `${String(edit.range.end)})`,
+            )
+            .join(", ") +
+          `; the preview's edits: ${JSON.stringify(entry.edits)}`,
+      );
+    }
   }
 }
 
