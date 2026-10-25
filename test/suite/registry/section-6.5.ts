@@ -387,11 +387,11 @@ export default defineConfig({
 // One spec group plus one code group (SPEC 7.2), for T6.5-5's wrong-kind
 // origin arms: the staged code source is discovered, so a code-source origin
 // operand is a wrong-kind usage error in either form (SPEC 6.5, 6.4, 12.0).
-// A staged-source record: T6.5-5's ordering arm stages it in a workspace
-// created after a product invocation, as T6.6-3 does through
-// MOVE_USAGE_CONFIG (S-9's timing clause).
+// A staged-source record: T6.5-5's ordering arm and T6.5-9's parameter run
+// stage it in a workspace created after a product invocation, as T6.6-3
+// does through MOVE_USAGE_CONFIG (S-9's timing clause).
 const SPEC_AND_CODE_CONFIG = stagedTs(
-  "T6.5-5/T6.6-3 xspec.config.ts — one spec group and one code group, the usage-error fixtures'",
+  "T6.5-5/T6.5-9/T6.6-3 xspec.config.ts — one spec group and one code group, the usage-error fixtures' and T6.5-9's code arm's",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -6326,13 +6326,19 @@ const A8_TS_MOVED_LINES: readonly string[] = [
 const A8_CODE_LINE_1 = 'import O from "../specs/origin.xspec"';
 
 /**
+ * Line 2 of `src/c.ts`: `f`'s head, its parameter list empty (T6.5-9's
+ * parameter run fills it, `a9ParamCode`).
+ */
+const A8_CODE_F_HEAD = "function f() {";
+
+/**
  * `src/c.ts` around its one variable part, the marker on the moved node
  * (`O.x` before the move, `<fresh>.y` after): the origin import on line 1,
  * then a function `f` holding that marker and `O.w` on the unmoved `w` —
  * both attributed to `f` (4.6). The origin import keeps `O.w` and stays.
  */
 function a8Code(marker: string): readonly string[] {
-  return [A8_CODE_LINE_1, "function f() {", `  ${marker};`, "  O.w;", "}", ""];
+  return [A8_CODE_LINE_1, A8_CODE_F_HEAD, `  ${marker};`, "  O.w;", "}", ""];
 }
 
 // The rewritten marker: a root not preceded by a `.` or by any code point a
@@ -6924,7 +6930,8 @@ const T6_5_8 = defineProductTest({
 // every plausible identifier free. The code arm is that arm re-staged —
 // T6.5-8's `specs/origin.mdx` (`A8_TS_ORIGIN_LINES`), the plain
 // `specs/target.mdx`, `move specs/origin.mdx#x specs/target.mdx#y`, and
-// `src/c.ts` built around `a8Code` — with a receiving `src/c.ts` that
+// `src/c.ts` built around `a8Code` — in two runs. In the module-scope run
+// (`A9_FILES`, the body's first workspace) the receiving `src/c.ts`
 // additionally declares, at module scope, bindings pre-empting the
 // identifiers a product would plausibly derive: spelled from the target
 // file's basename `target` (as written, which is its lower-cased form,
@@ -6959,10 +6966,37 @@ const T6_5_8 = defineProductTest({
 // added identifiers of every performed move (test/helpers/subprocess.ts):
 // standard tooling accepts a default import beside a same-named alias when
 // the imported default export has no type meaning, so compile-cleanliness
-// does not reach it, and this test asserts nothing of it itself. The
-// pre-empted set is a lure, not a bound: the identifier stays the product's
-// choice (6.5's latitude), and compile-cleanliness is the assertion
-// whatever the choice.
+// does not reach it, and this test asserts nothing of it itself.
+//
+// The parameter run (TEST-SPEC T6.5-9: "The run recurs with the same
+// spellings pre-empted by parameters of `f` alone"): a parameter is among
+// the declarations an added identifier must avoid (6.5: bound by no
+// declaration already in the file, in any scope; 2.4). Its `src/c.ts` is
+// T6.5-8's TS arm file (`a8Code`) with `f`'s parameter list holding every
+// spelling the module-scope run pre-empts — the value lures, the non-spec
+// import's bindings among them (`A9_VALUE_LURES`), and the alias's name
+// (`A9_TYPE_LURE`) — each typed `unknown`; no lure is declared at module
+// scope, and the workspace holds no `src/util.ts` and no util import. The
+// origin import alone heads the file, so its one line-start admissible
+// offset is the start of line 2 (T6.5-8's TS arm), where the added run is
+// pinned. The run is asserted alike: the premise `build`, the clean
+// whole-program compile under both configurations before the move, the
+// move, the clean compile after it, the diff-isolated added run, `query
+// edges` (the same two edges, both from `f`), and `check` clean. A product
+// checking freshness against module-scope declarations alone, or against
+// every declaration but parameters, binds a parameter's name: the moved
+// marker, standing in `f`, is then rooted at the parameter (4.5), its edge
+// silently dropped behind a clean `check` — the parameter and the added
+// top-level import declare the name in different scopes, so no 14.15 —
+// and it fails `query edges` and the compile, which reports the property
+// access on `unknown` (TS18046), as well as T6.5-22(a)'s universal check,
+// S-6's name analysis counting a parameter among the file's declarations
+// (helpers/oracles/name-analysis.ts). Its workspace is created after the
+// module-scope run's invocations, so its `src/c.ts` is a staged-source
+// record (S-9's timing clause), staged beside the module-scope run's origin
+// record and the plain target. In either run the pre-empted set is a lure,
+// not a bound: the identifier stays the product's choice (6.5's latitude),
+// and compile-cleanliness is the assertion whatever the choice.
 
 /** The code arm's non-spec module, whose bindings pre-empt `Target` and `O2`. */
 const A9_UTIL = "src/util.ts";
@@ -7026,6 +7060,17 @@ const A9_VALUE_LURES: readonly PreemptedBinding[] = [
   },
 ];
 
+/**
+ * The type-level lure: the alias's name, which compile-cleanliness does not
+ * reach in the module-scope run (left to T6.5-22(a)); in the parameter run a
+ * parameter like the rest.
+ */
+const A9_TYPE_LURE: PreemptedBinding = {
+  name: "targetSPEC",
+  kind: "a `type` alias",
+  derivation: "the target file's basename `SPEC`-suffixed",
+};
+
 /** Line 2 of `src/c.ts`: the non-spec lures' import declaration. */
 const A9_UTIL_IMPORT_LINE = 'import Target, { O2 } from "./util.js"';
 
@@ -7033,7 +7078,7 @@ const A9_UTIL_IMPORT_LINE = 'import Target, { O2 } from "./util.js"';
  * The lure declarations between the imports and `f`, every binding used
  * trivially — rooted at local declarations, so none is a spec module
  * reference (4.5) and none records an edge. The `type` alias pre-empts the
- * basename `SPEC`-suffixed, `targetSPEC`, left to T6.5-22(a).
+ * basename `SPEC`-suffixed (`A9_TYPE_LURE`), left to T6.5-22(a).
  */
 const A9_LURE_LINES: readonly string[] = [
   "const target = Target + O2;",
@@ -7043,8 +7088,8 @@ const A9_LURE_LINES: readonly string[] = [
   "class targetSpec {",
   "  readonly value = TARGET();",
   "}",
-  "type targetSPEC = targetSpec;",
-  "const O1: targetSPEC = new targetSpec();",
+  `type ${A9_TYPE_LURE.name} = targetSpec;`,
+  `const O1: ${A9_TYPE_LURE.name} = new targetSpec();`,
   "function O_(): number {",
   "  return O1.value;",
   "}",
@@ -7052,10 +7097,10 @@ const A9_LURE_LINES: readonly string[] = [
 ];
 
 /**
- * `src/c.ts` around its one variable part, the marker on the moved node
- * (`O.x` before the move, `<fresh>.y` after): T6.5-8's TS arm file
- * (`a8Code`) with the non-spec lures' import after its origin import and
- * the lure declarations before `f`.
+ * The module-scope run's `src/c.ts` around its one variable part, the
+ * marker on the moved node (`O.x` before the move, `<fresh>.y` after):
+ * T6.5-8's TS arm file (`a8Code`) with the non-spec lures' import after its
+ * origin import and the lure declarations before `f`.
  */
 function a9Code(marker: string): readonly string[] {
   const lines = a8Code(marker);
@@ -7067,36 +7112,140 @@ function a9Code(marker: string): readonly string[] {
   ];
 }
 
-/** The import declarations heading `src/c.ts`, lines 1 and 2. */
+/**
+ * The parameter run's pre-empted spellings, `f`'s parameters in order:
+ * every spelling the module-scope run pre-empts (TEST-SPEC T6.5-9: "the same
+ * spellings") — the value lures, the non-spec import's bindings among them,
+ * then the alias's name — read from those tables.
+ */
+const A9_PARAMETER_NAMES: readonly string[] = [
+  ...A9_VALUE_LURES.map((binding) => binding.name),
+  A9_TYPE_LURE.name,
+];
+
+/**
+ * The parameter run's `src/c.ts` around its one variable part, the marker
+ * on the moved node (`O.x` before the move, `<fresh>.y` after): T6.5-8's TS
+ * arm file (`a8Code`) with `f`'s parameter list holding every pre-empted
+ * spelling, each typed `unknown` (TEST-SPEC T6.5-9) — no module-scope lure,
+ * no non-spec import. The markers stand in `f`, so a parameter of a name
+ * the added import binds shadows that binding there (SPEC 4.5, 2.4).
+ */
+function a9ParamCode(marker: string): readonly string[] {
+  const [importLine, head, ...rest] = a8Code(marker);
+  if (importLine !== A8_CODE_LINE_1 || head !== A8_CODE_F_HEAD) {
+    throw new Error(
+      "T6.5-9 parameter run: a8Code no longer opens with the origin import " +
+        "and f's head — the parameter run's src/c.ts is composed from them " +
+        "(a harness defect)",
+    );
+  }
+  const parameters = A9_PARAMETER_NAMES.map((name) => `${name}: unknown`);
+  return [
+    importLine,
+    head.replace("()", `(${parameters.join(", ")})`),
+    ...rest,
+  ];
+}
+
+/** The import declarations heading the module-scope run's file, lines 1–2. */
 const A9_IMPORT_LINES: readonly string[] = [
   A8_CODE_LINE_1,
   A9_UTIL_IMPORT_LINE,
 ];
 
+/** The one import declaration heading the parameter run's file, line 1. */
+const A9_PARAM_IMPORT_LINES: readonly string[] = [A8_CODE_LINE_1];
+
 /**
- * The receiving file's line-start admissible offsets (SPEC 6.5): the start
- * of the line directly after each import declaration heading it, as byte
+ * A receiving file's line-start admissible offsets (SPEC 6.5): the start of
+ * the line directly after each import declaration heading it, as byte
  * offsets into the composed text (every line U+000A-terminated).
  */
-const A9_AFTER_IMPORT_OFFSETS: readonly number[] = A9_IMPORT_LINES.map(
-  (_, index) =>
-    A9_IMPORT_LINES.slice(0, index + 1).reduce(
-      (sum, line) => sum + Buffer.byteLength(line, "utf8") + X2_LF.length,
-      0,
-    ),
+function a9AfterImportOffsets(
+  importLines: readonly string[],
+): readonly number[] {
+  return importLines.map((_, index) =>
+    importLines
+      .slice(0, index + 1)
+      .reduce(
+        (sum, line) => sum + Buffer.byteLength(line, "utf8") + X2_LF.length,
+        0,
+      ),
+  );
+}
+
+/** The module-scope run's: the starts of lines 2 and 3. */
+const A9_AFTER_IMPORT_OFFSETS = a9AfterImportOffsets(A9_IMPORT_LINES);
+
+/** The parameter run's one: the start of line 2. */
+const A9_PARAM_AFTER_IMPORT_OFFSETS = a9AfterImportOffsets(
+  A9_PARAM_IMPORT_LINES,
 );
 
+/**
+ * Module-load self-check (a failure is a harness defect, never a product
+ * verdict): a run's staged `src/c.ts` opens with exactly the import
+ * declarations its offsets are computed from, each a line of its own, and
+ * the line after them is no import declaration — so the offsets are the
+ * starts of the lines directly after the imports heading the file, every
+ * one of them.
+ */
+function a9CheckImportHead(
+  lines: readonly string[],
+  importLines: readonly string[],
+  run: string,
+): void {
+  const head = lines.slice(0, importLines.length);
+  const next = lines[importLines.length] ?? "";
+  if (
+    head.length !== importLines.length ||
+    head.some((line, index) => line !== importLines[index]) ||
+    next.startsWith("import ")
+  ) {
+    throw new Error(
+      `T6.5-9 ${run}: ${A8_CODE} must open with exactly the import ` +
+        `declarations ${JSON.stringify(importLines)}, its pinned line-start ` +
+        `admissible offsets computed from them (a harness defect)`,
+    );
+  }
+}
+a9CheckImportHead(a9Code("O.x"), A9_IMPORT_LINES, "module-scope run");
+a9CheckImportHead(a9ParamCode("O.x"), A9_PARAM_IMPORT_LINES, "parameter run");
+
+/** The code arm's origin, staged by both runs: T6.5-8's TS arm origin. */
+const A9_ORIGIN = stagedMdx(
+  "T6.5-9 code arm specs/origin.mdx — T6.5-8's TS arm origin, the moved x and the unmoved w",
+  A8_TS_ORIGIN_LINES.join(X2_LF),
+);
+
+/** The module-scope run's workspace, the body's first. */
 const A9_FILES: Readonly<Record<string, InitialFileContents>> = {
-  [A8_ORIGIN]: stagedMdx(
-    "T6.5-9 code arm specs/origin.mdx — T6.5-8's TS arm origin, the moved x and the unmoved w",
-    A8_TS_ORIGIN_LINES.join(X2_LF),
-  ),
+  [A8_ORIGIN]: A9_ORIGIN,
   [A8_TARGET]: A8_PLAIN_TARGET,
   [A8_CODE]: a9Code("O.x").join(X2_LF),
   [A9_UTIL]: A9_UTIL_SOURCE,
 };
 
-/** The workspace's complete `references` edge set after the move. */
+/**
+ * The parameter run's workspace, created after the module-scope run's
+ * invocations, so every file is a staged-source record (S-9's timing
+ * clause): the code arm's origin, the plain target, and `src/c.ts` — no
+ * `src/util.ts`.
+ */
+const A9_PARAM_FILES: Readonly<Record<string, InitialFileContents>> = {
+  [A8_ORIGIN]: A9_ORIGIN,
+  [A8_TARGET]: A8_PLAIN_TARGET,
+  [A8_CODE]: stagedTs(
+    "T6.5-9 parameter run src/c.ts — T6.5-8's TS arm file, f's parameters (each typed unknown) pre-empting the module-scope run's spellings, no module-scope lure",
+    a9ParamCode("O.x").join(X2_LF),
+  ),
+};
+
+/**
+ * The workspace's complete `references` edge set after the move, in either
+ * run: both markers stand in `f`.
+ */
 const A9_EDGES: readonly GraphEdge[] = [
   { from: `${A8_CODE}#f`, to: `${A8_TARGET}#y`, kind: "references" },
   { from: `${A8_CODE}#f`, to: `${A8_ORIGIN}#w`, kind: "references" },
@@ -7128,6 +7277,203 @@ function a9RewrittenMarkerRoot(text: string, context: string): string {
       `rooted at the added import's binding of the target module`,
   );
 }
+
+/**
+ * One run of T6.5-9's code arm — the module-scope run, or its recurrence
+ * with the same spellings pre-empted by parameters of `f` alone, "asserted
+ * alike" (TEST-SPEC T6.5-9): its staging, its line-start admissible
+ * offsets, and how its diagnoses name them.
+ */
+interface A9CodeRun {
+  /** The diagnoses' context. */
+  readonly context: string;
+  /** The workspace's files beside the configuration. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The run's `src/c.ts` around the marker on the moved node. */
+  readonly code: (marker: string) => readonly string[];
+  /** The line-start admissible offsets the added run is confined to. */
+  readonly offsets: readonly number[];
+  /** How the diagnoses name those offsets. */
+  readonly where: string;
+  /** What the pre-move compile vouches for in the staging (a premise). */
+  readonly premise: string;
+  /** What a finding located in `src/c.ts` at the move would point at. */
+  readonly moveFinding: string;
+  /** What the post-move compile's cleanliness rules out. */
+  readonly compile: string;
+}
+
+/**
+ * Run one code-arm run (`A9CodeRun`) on a fresh workspace: the premise
+ * `build` and the clean whole-program compile under each of H-2's
+ * configurations before the move; the move; the clean compile after it;
+ * T6.5-8's discipline on the diff-isolated added run, confined to the run's
+ * line-start admissible offsets (pinned where there is one), the fresh
+ * identifier read off the rewritten marker; the complete `references` edge
+ * set; and `check` clean.
+ */
+async function runA9CodeRun(
+  product: ProductBinding,
+  run: A9CodeRun,
+): Promise<void> {
+  const { context } = run;
+  await withWorkspace(SPEC_AND_CODE_CONFIG, run.files, async (workspace) => {
+    // Premise: the staging is valid (every reference and marker resolves).
+    await buildOk(product, workspace, `${context} \`build\` over the staging`);
+    // Fixture self-check, under each of H-2's two configurations: the
+    // pre-empting declarations are valid TypeScript and the generated
+    // origin module resolves, the whole program clean, so a later
+    // diagnostic is the move's, not the staging's.
+    await forEachConsumerProject(
+      { rootDir: workspace.root, rootFiles: [A8_CODE] },
+      (project) =>
+        assertTypeChecksClean(
+          project,
+          `${context} premise: ${A8_CODE} compiles clean before the move ` +
+            `under standard tooling — ${run.premise} and the generated ` +
+            `origin module and the companions it reaches resolve and ` +
+            `type-check clean (SPEC 4, 13.1; a fixture self-check)`,
+        ),
+    );
+
+    await expectExit(
+      product,
+      workspace,
+      [...A8_TS_ARGV],
+      0,
+      `${context} \`${A8_TS_ARGV.join(" ")}\` — a valid move over the ` +
+        `workspace the premise \`build\` accepted succeeds (SPEC 6.5)` +
+        run.moveFinding,
+    );
+
+    // The assertion T6.5-9 names: no diagnostics, whatever identifier the
+    // product chose, under each of H-2's two configurations. Fresh
+    // projects — the language service snapshots files on first access,
+    // and the move rewrote them.
+    await forEachConsumerProject(
+      { rootDir: workspace.root, rootFiles: [A8_CODE] },
+      (project) =>
+        assertTypeChecksClean(
+          project,
+          `${context}: ${A8_CODE} after the move compiles with no ` +
+            `diagnostics under standard tooling — ${run.compile}`,
+        ),
+    );
+
+    // T6.5-8's discipline on the diff-isolated run, confined to the file's
+    // line-start admissible offsets — the start of the line directly after
+    // each import heading it — with the fresh identifier read off the
+    // rewritten marker.
+    const text = await readSourceText(workspace, A8_CODE, context);
+    const root = a9RewrittenMarkerRoot(text, context);
+    const [only, ...others] = run.offsets;
+    const pin =
+      only !== undefined && others.length === 0
+        ? { pinnedOffset: { offset: only, where: run.where } }
+        : { pinnedOffsets: { offsets: run.offsets, where: run.where } };
+    const one = "pinnedOffset" in pin;
+    assertAddedImportInsertion(
+      {
+        rel: A8_CODE,
+        base: Buffer.from(run.code(`${root}.y`).join(X2_LF), "utf8"),
+        actual: await workspace.readBytes(A8_CODE),
+        importerDir: posixPath.dirname(A8_CODE),
+        expectedModule: A8_TARGET_MODULE,
+        identifier: root,
+        ...pin,
+      },
+      `${context}: ${A8_CODE} after the move is its pre-move bytes with ` +
+        `the moved marker rewritten in 6.4's pinned spelling and exactly ` +
+        `one import of the target module added as a line of its own — ` +
+        `byte-exactly 6.5's spelling (single spaces, no statement ` +
+        `terminator, the specifier double-quoted in its canonical ` +
+        `relative spelling) followed by U+000A, at ${run.where}, ` +
+        (one
+          ? "its one line-start admissible offset"
+          : "its line-start admissible offsets") +
+        `, which 6.5 takes over any other — binding the fresh identifier ` +
+        `the rewritten marker is rooted at, no other byte inserted (SPEC ` +
+        `6.5, 2.1, 6.4, 3; T6.5-8)`,
+    );
+
+    assertEdgeSetEqual(
+      await queryEdgesOfKind(product, workspace, "references", context),
+      A9_EDGES,
+      `${context}: the complete \`references\` edge set after the move — ` +
+        `the rewritten marker reported under the moved node's new ` +
+        `identity through the fresh binding, the unmoved marker's edge ` +
+        `through the retained origin binding, both attributed to the ` +
+        `file's function \`f\` (SPEC 6.5, 4.5, 4.6, 5.2)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context} \`check\` immediately after the move — the added import ` +
+        `and the rewritten marker resolve and no staleness remains (SPEC ` +
+        `6.5, 12.2, 14.10)`,
+    );
+  });
+}
+
+const A9_LURE_NAMES = A9_VALUE_LURES.map((binding) => binding.name).join(", ");
+const A9_PARAMETER_LIST = A9_PARAMETER_NAMES.join(", ");
+
+/** The module-scope run: the lures declared at module scope. */
+const A9_MODULE_SCOPE_RUN: A9CodeRun = {
+  context: "T6.5-9",
+  files: A9_FILES,
+  code: a9Code,
+  offsets: A9_AFTER_IMPORT_OFFSETS,
+  where:
+    "the start of the line directly after one of the import declarations " +
+    "heading the file",
+  premise:
+    `its pre-empting module-scope declarations (${A9_LURE_NAMES}, and the ` +
+    `\`type\` alias \`${A9_TYPE_LURE.name}\`) are valid TypeScript`,
+  moveFinding:
+    `; a finding located in ${A8_CODE} at this step points at the added ` +
+    `target-module import binding one of the pre-empted identifiers ` +
+    `(${A9_LURE_NAMES}), the file's pre-existing local uses of that name ` +
+    `then read as value-level uses of a spec binding (SPEC 6.5, 4.5, 14.18)`,
+  compile:
+    `the added target-module import binds an identifier colliding with ` +
+    `none of the file's value-level module-scope bindings (pre-empted: ` +
+    `${A9_LURE_NAMES}; a collision is TS2440 "Import declaration conflicts ` +
+    `with local declaration" or TS2300 "Duplicate identifier"), and the ` +
+    `rewritten marker resolves against the regenerated modules, whose ` +
+    `program type-checks clean (SPEC 6.5, 2.1, 4, 4.5)`,
+};
+
+/**
+ * The parameter run (TEST-SPEC T6.5-9): the same spellings pre-empted by
+ * parameters of `f` alone, each typed `unknown`, no module-scope lure.
+ */
+const A9_PARAMETER_RUN: A9CodeRun = {
+  context: "T6.5-9 parameter run",
+  files: A9_PARAM_FILES,
+  code: a9ParamCode,
+  offsets: A9_PARAM_AFTER_IMPORT_OFFSETS,
+  where:
+    "the start of line 2, directly after the origin import heading the file",
+  premise:
+    `\`f\`'s parameters (${A9_PARAMETER_LIST}), each typed \`unknown\` and ` +
+    `none used, are valid TypeScript`,
+  moveFinding:
+    ` — the parameters and the added top-level import declare their names ` +
+    `in different scopes, so no binding collides (SPEC 4.5)`,
+  compile:
+    `the added target-module import binds an identifier none of \`f\`'s ` +
+    `parameters binds (pre-empted: ${A9_PARAMETER_LIST}; a parameter is ` +
+    `among the declarations an added identifier avoids, in any scope: one ` +
+    `spelling the added binding's name shadows it at the moved marker ` +
+    `standing in \`f\`, rooting the marker at the parameter typed ` +
+    `\`unknown\`, whose property access the compile reports as TS18046 ` +
+    `"'<name>' is of type 'unknown'"), and the rewritten marker resolves ` +
+    `against the regenerated modules, whose program type-checks clean ` +
+    `(SPEC 6.5, 2.1, 2.4, 4, 4.5)`,
+};
 
 // Spec-source arm (TEST-SPEC T6.5-9): the freshness rule's other clauses —
 // an added import's identifiers are distinct from the others added there
@@ -7314,120 +7660,12 @@ function s9ReferenceRoot(
 const T6_5_9 = defineProductTest({
   id: "T6.5-9",
   title:
-    "fresh identifiers in code: T6.5-8's TS arm re-staged (its `specs/origin.mdx`, the plain `specs/target.mdx`, `move specs/origin.mdx#x specs/target.mdx#y`) with a receiving `src/c.ts` that also declares at module scope — as a local `const`, a `function`, a `class`, a `type` alias, and non-spec import bindings, each used trivially — the identifiers a product would plausibly derive for the added target-module import (the target file's basename as written, lower- and upper-cased, `Spec`- and `SPEC`-suffixed, and capitalized; the origin binding's name with a digit and with an underscore appended), the file compiling clean before the move under standard tooling, under both of H-2's configurations, its import declarations — the origin's, then the non-spec lures' — heading it with no blank line after them; after the section move the rewritten file compiles with no diagnostics, its whole program clean, through H-2's standard-tooling channel under both of its configurations (a collision with the `const`, `function`, or `class` is TS2440, with a non-spec import binding TS2300, an unrewritten or misrooted marker a type error against the regenerated modules), so the added identifier is none of the value-level pre-empted names, the `type` alias's name left to T6.5-22(a); the diff-isolated added run is asserted as T6.5-8 asserts it — byte-exactly `import <X> from \"../specs/target.xspec\"` followed by U+000A, the fresh identifier read off the rewritten marker, at the start of the line directly after one of the file's import declarations (the start of line 2 or 3, its line-start admissible offsets); `query edges` reports the moved marker's `references` edge to the moved node's new identity and the unmoved marker's through the retained origin binding, and `check` is clean (SPEC 6.5, 2.1, 4, 4.5, 6.4, 3); spec-source arm: a spec target lacking imports of two third modules, `specs/S.mdx` and `specs/text.mdx`, both referenced by the moved text through the origin's bindings, so that a product deriving identifiers from basenames would bind `S` and `text` (14.15) and one deriving them from a fixed stem would bind one identifier twice — after the move `check` is clean, `view` lists the two added declarations under `imports` with distinct `name`s and targets `specs/S.mdx` and `specs/text.mdx`, each moved reference is rooted at the binding of its own module (`query edges` under the new identities), and the declarations stand contiguous in one ESM block (T6.5-13(g)), the single inserted run being byte-exactly the two declarations on contiguous lines, each followed by U+000A, at a line-start offset, in the order the product fixed (SPEC 6.5, 2.1, 11.4)",
+    "fresh identifiers in code: T6.5-8's TS arm re-staged (its `specs/origin.mdx`, the plain `specs/target.mdx`, `move specs/origin.mdx#x specs/target.mdx#y`) with a receiving `src/c.ts` that also declares at module scope — as a local `const`, a `function`, a `class`, a `type` alias, and non-spec import bindings, each used trivially — the identifiers a product would plausibly derive for the added target-module import (the target file's basename as written, lower- and upper-cased, `Spec`- and `SPEC`-suffixed, and capitalized; the origin binding's name with a digit and with an underscore appended), the file compiling clean before the move under standard tooling, under both of H-2's configurations, its import declarations — the origin's, then the non-spec lures' — heading it with no blank line after them; after the section move the rewritten file compiles with no diagnostics, its whole program clean, through H-2's standard-tooling channel under both of its configurations (a collision with the `const`, `function`, or `class` is TS2440, with a non-spec import binding TS2300, an unrewritten or misrooted marker a type error against the regenerated modules), so the added identifier is none of the value-level pre-empted names, the `type` alias's name left to T6.5-22(a); the diff-isolated added run is asserted as T6.5-8 asserts it — byte-exactly `import <X> from \"../specs/target.xspec\"` followed by U+000A, the fresh identifier read off the rewritten marker, at the start of the line directly after one of the file's import declarations (the start of line 2 or 3, its line-start admissible offsets); `query edges` reports the moved marker's `references` edge to the moved node's new identity and the unmoved marker's through the retained origin binding, and `check` is clean (SPEC 6.5, 2.1, 4, 4.5, 6.4, 3); the run recurs with the same spellings pre-empted by parameters of `f` alone — T6.5-8's TS arm file with `f`'s parameter list holding every pre-empted spelling, the alias's name and the non-spec import's bindings included, each typed `unknown`, no lure declared at module scope and no non-spec import, the file compiling clean before the move under both configurations — and is asserted alike: after the move the rewritten file compiles with no diagnostics under both configurations, so the added identifier is none of the parameters' names (one would shadow the added binding at the moved marker standing in `f`, rooting the marker at the parameter typed `unknown`, a property access on `unknown` the compile reports, its edge dropped behind a clean `check`), the diff-isolated added run is byte-exactly the declaration followed by U+000A at the start of line 2, the file's one line-start admissible offset, `query edges` reports the same two edges, and `check` is clean (SPEC 6.5, 2.4, 4.5); spec-source arm: a spec target lacking imports of two third modules, `specs/S.mdx` and `specs/text.mdx`, both referenced by the moved text through the origin's bindings, so that a product deriving identifiers from basenames would bind `S` and `text` (14.15) and one deriving them from a fixed stem would bind one identifier twice — after the move `check` is clean, `view` lists the two added declarations under `imports` with distinct `name`s and targets `specs/S.mdx` and `specs/text.mdx`, each moved reference is rooted at the binding of its own module (`query edges` under the new identities), and the declarations stand contiguous in one ESM block (T6.5-13(g)), the single inserted run being byte-exactly the two declarations on contiguous lines, each followed by U+000A, at a line-start offset, in the order the product fixed (SPEC 6.5, 2.1, 11.4)",
   run: async (product) => {
-    const context = "T6.5-9";
-    const lures = A9_VALUE_LURES.map((binding) => binding.name).join(", ");
-    await withWorkspace(SPEC_AND_CODE_CONFIG, A9_FILES, async (workspace) => {
-      // Premise: the staging is valid (every reference and marker resolves).
-      await buildOk(
-        product,
-        workspace,
-        `${context} \`build\` over the staging`,
-      );
-      // Fixture self-check, under each of H-2's two configurations: the
-      // pre-empting declarations are valid TypeScript and the generated
-      // origin module resolves, the whole program clean, so a later
-      // diagnostic is the move's, not the staging's.
-      await forEachConsumerProject(
-        { rootDir: workspace.root, rootFiles: [A8_CODE] },
-        (project) =>
-          assertTypeChecksClean(
-            project,
-            `${context} premise: ${A8_CODE} compiles clean before the move ` +
-              `under standard tooling — its pre-empting module-scope ` +
-              `declarations (${lures}, and the \`type\` alias \`targetSPEC\`) ` +
-              `are valid TypeScript and the generated origin module and the ` +
-              `companions it reaches resolve and type-check clean (SPEC 4, ` +
-              `13.1; a fixture self-check)`,
-          ),
-      );
-
-      await expectExit(
-        product,
-        workspace,
-        [...A8_TS_ARGV],
-        0,
-        `${context} \`${A8_TS_ARGV.join(" ")}\` — a valid move over the ` +
-          `workspace the premise \`build\` accepted succeeds (SPEC 6.5); a ` +
-          `finding located in ${A8_CODE} at this step points at the added ` +
-          `target-module import binding one of the pre-empted identifiers ` +
-          `(${lures}), the file's pre-existing local uses of that name then ` +
-          `read as value-level uses of a spec binding (SPEC 6.5, 4.5, 14.18)`,
-      );
-
-      // The assertion T6.5-9 names: no diagnostics, whatever identifier the
-      // product chose, under each of H-2's two configurations. Fresh
-      // projects — the language service snapshots files on first access,
-      // and the move rewrote them.
-      await forEachConsumerProject(
-        { rootDir: workspace.root, rootFiles: [A8_CODE] },
-        (project) =>
-          assertTypeChecksClean(
-            project,
-            `${context}: ${A8_CODE} after the move compiles with no ` +
-              `diagnostics under standard tooling — the added target-module ` +
-              `import binds an identifier colliding with none of the file's ` +
-              `value-level module-scope bindings (pre-empted: ${lures}; a ` +
-              `collision is TS2440 "Import declaration conflicts with local ` +
-              `declaration" or TS2300 "Duplicate identifier"), and the ` +
-              `rewritten marker resolves against the regenerated modules, ` +
-              `whose program type-checks clean (SPEC 6.5, 2.1, 4, 4.5)`,
-          ),
-      );
-
-      // T6.5-8's discipline on the diff-isolated run, confined to the file's
-      // line-start admissible offsets — the start of the line directly
-      // after each import heading it — with the fresh identifier read off
-      // the rewritten marker.
-      const text = await readSourceText(workspace, A8_CODE, context);
-      const root = a9RewrittenMarkerRoot(text, context);
-      assertAddedImportInsertion(
-        {
-          rel: A8_CODE,
-          base: Buffer.from(a9Code(`${root}.y`).join(X2_LF), "utf8"),
-          actual: await workspace.readBytes(A8_CODE),
-          importerDir: posixPath.dirname(A8_CODE),
-          expectedModule: A8_TARGET_MODULE,
-          identifier: root,
-          pinnedOffsets: {
-            offsets: A9_AFTER_IMPORT_OFFSETS,
-            where:
-              "the start of the line directly after one of the import " +
-              "declarations heading the file",
-          },
-        },
-        `${context}: ${A8_CODE} after the move is its pre-move bytes with ` +
-          `the moved marker rewritten in 6.4's pinned spelling and exactly ` +
-          `one import of the target module added as a line of its own — ` +
-          `byte-exactly 6.5's spelling (single spaces, no statement ` +
-          `terminator, the specifier double-quoted in its canonical ` +
-          `relative spelling) followed by U+000A, at the start of the line ` +
-          `directly after one of the import declarations heading the file, ` +
-          `its line-start admissible offsets, which 6.5 takes over any ` +
-          `other — binding the fresh identifier the rewritten marker is ` +
-          `rooted at, no other byte inserted (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
-      );
-
-      assertEdgeSetEqual(
-        await queryEdgesOfKind(product, workspace, "references", context),
-        A9_EDGES,
-        `${context}: the complete \`references\` edge set after the move — ` +
-          `the rewritten marker reported under the moved node's new ` +
-          `identity through the fresh binding, the unmoved marker's edge ` +
-          `through the retained origin binding, both attributed to the ` +
-          `file's function \`f\` (SPEC 6.5, 4.5, 4.6, 5.2)`,
-      );
-      await expectExit(
-        product,
-        workspace,
-        ["check"],
-        0,
-        `${context} \`check\` immediately after the move — the added import ` +
-          `and the rewritten marker resolve and no staleness remains (SPEC ` +
-          `6.5, 12.2, 14.10)`,
-      );
-    });
+    // The code arm: the module-scope run, then its recurrence with the
+    // same spellings pre-empted by parameters of `f` alone.
+    await runA9CodeRun(product, A9_MODULE_SCOPE_RUN);
+    await runA9CodeRun(product, A9_PARAMETER_RUN);
     {
       // Spec-source arm: the freshness rule's distinctness and reserved-name
       // clauses, observable to xspec (14.15) and through `view` (11.4).
