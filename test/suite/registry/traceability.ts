@@ -320,14 +320,18 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T4.5-10": ["4.5", "1.7", "2.4", "4.3", "4.6", "5.7", "11.2", "11.3", "14"],
   // T4.5-11: 4.5's and 2.4's collisions in an import's own scope — a
   // function's scope holding its parameters, an inner scope's declaration
-  // shadowing instead — read as the language's scoping question (2.4); the
-  // collision (condition 15, every colliding declaration located by its own
-  // characters as 1.7 reads one) and the unresolved chains beside it
-  // (condition 7, at the span each occurrence would occupy, 5.7) are 14's
-  // findings, read through `occurrences` (11.3) on the failing workspace
-  // (11.2) beside no record; a valid staging's `references` edge attributed
-  // to its enclosing unit or file (4.6).
-  "T4.5-11": ["4.5", "1.7", "2.4", "4.6", "5.7", "11.2", "11.3", "14"],
+  // shadowing instead, two imports colliding whatever scope each declares
+  // the identifier in — read as the language's scoping question (2.4), a
+  // type-only import's binding colliding with no non-import declaration
+  // (4); the collision (condition 15, every colliding declaration located
+  // by its own characters as 1.7 reads one), the unresolved chains beside
+  // it (condition 7, at the span each occurrence would occupy, 5.7), and a
+  // colliding `text` call's node argument (condition 18) are 14's findings,
+  // read through `occurrences` (11.3) on the failing workspace (11.2)
+  // beside the records of chains its own scope's import roots (5.7); a
+  // valid staging's `references` edge attributed to its enclosing unit or
+  // file (4.6).
+  "T4.5-11": ["4.5", "1.7", "2.4", "4", "4.6", "5.7", "11.2", "11.3", "14"],
   "T4.6-1": ["4.6"],
   "T4.6-2": ["4.6"],
   // T4.6-3: its one-file and declaration-file arms' occurrence records
