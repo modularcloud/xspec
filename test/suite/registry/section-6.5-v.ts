@@ -156,11 +156,12 @@
 // `S23Spelling`), and its module-load self-checks compose their forms
 // through `s23ComposedForm` — or, for T6.5-26's arms, which gain none,
 // through `s23RewrittenForm`, the bytes `s23AssertNothingAdded` asserts.
-// T6.5-25's and T6.5-26's arms also state the workspace before the move
-// (`before`, an `S23Before`): after the premise `build`, and before the
-// preview, `check --json` exactly `{"findings": []}` and each `query edges`
-// answer exactly its edge (`s23AssertEdge`, its label then "before the
-// move"; T6.5-26's arms list none); no T6.5-23 or T6.5-24 arm sets it.
+// T6.5-24's, T6.5-25's, and T6.5-26's arms also state the workspace before
+// the move (`before`, an `S23Before`): after the premise `build`, and before
+// the preview, `check --json` exactly `{"findings": []}` and each
+// `query edges` answer exactly its edge (`s23AssertEdge`, its label then
+// "before the move"; T6.5-24's and T6.5-26's arms list none); no T6.5-23
+// arm sets it.
 // Every one of section-6.5-vi.ts's arms — and only those — sets its preview
 // expectation's `exact` (`S23PreviewExpectation`): after the checks above,
 // `s23AssertPreview` asserts that the receiver's entry holds the listed
@@ -377,9 +378,10 @@ export interface S23Edge {
 
 /**
  * What TEST-SPEC states of the workspace before the move beyond the premise
- * `build` (T6.5-25, T6.5-26): `check --json` exactly `{"findings": []}` where
- * `check` is set, and each `query edges` answer exactly its edge — asserted
- * after the premise `build` and before the preview and the real move.
+ * `build` (T6.5-24, T6.5-25, T6.5-26): `check --json` exactly
+ * `{"findings": []}` where `check` is set, and each `query edges` answer
+ * exactly its edge — asserted after the premise `build` and before the
+ * preview and the real move.
  */
 export interface S23Before {
   readonly check: boolean;
@@ -427,7 +429,7 @@ export interface S23Arm {
   /** `query edges` answers after the move. */
   readonly edges?: readonly S23Edge[];
   /** What the workspace answers before the move beyond the premise `build`,
-   * where TEST-SPEC states it (T6.5-25, T6.5-26); unasserted where
+   * where TEST-SPEC states it (T6.5-24, T6.5-25, T6.5-26); unasserted where
    * undefined. */
   readonly before?: S23Before;
   /** (c): why the file compiles clean under standard tooling (H-2). */
