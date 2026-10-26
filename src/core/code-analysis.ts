@@ -23,12 +23,18 @@
 // diagnostics are ever requested.
 //
 // Masking (SPEC 14): an unparseable file (14.20) masks the conditions
-// inside itself — decode or parse failure yields only the 14.20. A chain
-// rooted at a binding of an invalid import is masked by that import's
-// 14.15. A chain rooted at a shadowing local declaration or a type-only
-// binding records no edge and falls under no condition (SPEC 4.5); its
-// value-level misuse is the consumer's TypeScript error, outside xspec's
-// validations. An identifier a spec module import binds that another
+// inside itself — decode or parse failure yields only the 14.20. A spec
+// module import's default and `text` bindings root chains and `text`
+// calls exactly as a valid import's do whatever other defect the
+// declaration carries (SPEC 4: the other binding is the invalid one; 11.2,
+// 14: its 14.15 makes nothing about their uses undetectable); an invalid
+// binding (a named binding other than `text`, a namespace binding) is no
+// spec module reference, and a chain rooted at the binding of an `.xspec`
+// require form — no spec module import (4) — is masked by that
+// declaration's 14.15. A chain rooted at a shadowing local declaration or
+// a type-only binding records no edge and falls under no condition (SPEC
+// 4.5); its value-level misuse is the consumer's TypeScript error, outside
+// xspec's validations. An identifier a spec module import binds that another
 // import of the same scope, or a value-level declaration of that scope,
 // also binds roots no resolving chain (SPEC 2.4, 4.5), whether or not
 // either import is type-only: beside the collision's 14.15, its chains
@@ -694,6 +700,14 @@ const UNDEFINED_TARGET_REASON =
 
 /**
  * What one import-bound identifier means as a reference root (SPEC 4.5).
+ * A spec module import's default and `text` bindings take their roles —
+ * `node` and `text`, or `type-level` where introduced type-only — whatever
+ * other defect the declaration carries: SPEC 4 makes the other binding
+ * the invalid one (a named binding other than `text`, a namespace
+ * binding), never the default or `text` binding beside it, and the
+ * declaration's 14.15 makes nothing about their uses undetectable (SPEC
+ * 14), so their chains and `text` calls record edges and occurrences, or
+ * report 14.7, 14.8, 14.11, and 14.18, exactly as a valid import's do.
  * A `node` or `text` binding's `target` is null where its spec module
  * import's specifier designates nothing — no discovered spec source: a
  * non-relative specifier, one whose ascent passes above the workspace
@@ -727,18 +741,21 @@ type TrackedBinding =
     }
   | {
       /**
-       * A binding of any other invalid import (one not colliding) — the
-       * default or `text` binding of a spec module import that designates
-       * a discovered spec source but is otherwise invalid, or an
-       * `import X = require(…)` binding of a `.xspec` specifier: the
-       * 14.15 accounts for it, and references rooted here are masked
-       * (SPEC 14).
+       * The binding of an `import X = require(…)` declaration whose
+       * specifier ends in `.xspec` (one not colliding): no spec module
+       * import (SPEC 4 — an import declaration is the only form through
+       * which a TypeScript file consumes a spec module), its declaration's
+       * 14.15 accounting for it, so references rooted here are masked
+       * (SPEC 14) — no edge, no occurrence, no other finding.
        */
       readonly kind: "poisoned";
     }
   | CollidingBinding;
 
-/** A `text` binding of a valid spec module import (SPEC 4, 4.5). */
+/**
+ * A `text` binding of a spec module import (SPEC 4, 4.5), the declaration
+ * valid or carrying another 14.15 defect.
+ */
 type TextBinding = Extract<TrackedBinding, { readonly kind: "text" }>;
 
 /**
@@ -1540,18 +1557,21 @@ class CodeAnalyzer {
     const importIndex = this.imports.length;
     for (const { declaration, binding, role } of roles) {
       this.importBindings.push({ name: binding.name, declaration });
-      // A valid import designates a member (`target` set). One whose
-      // specifier designates nothing (`target` null) still gives the
-      // default and `text` bindings their roles, the chains and calls
-      // through them unresolved (SPEC 2.1, 4, 11.2, 14 → 14.7); every
-      // other invalid import's bindings are masked by its 14.15.
+      // SPEC 4, 11.2, 14: the default and `text` bindings take their roles
+      // whatever other defect the declaration carries — 4 makes the other
+      // binding the invalid one, never these, and the 14.15 makes nothing
+      // about their uses undetectable. Through a designated member
+      // (`target` set) their chains and calls resolve or report 14.7 as a
+      // valid import's do; through a specifier designating nothing
+      // (`target` null) they are unresolved (SPEC 2.1, 4, 11.2 → 14.7).
+      // An invalid binding (a named binding other than `text`, a
+      // namespace binding) is no role's: it is never tracked here, its
+      // uses no spec module reference.
       this.declarations.set(
         declaration,
-        !valid && target !== null
-          ? { kind: "poisoned" }
-          : binding.typeOnly
-            ? { kind: "type-level" }
-            : { kind: role, target, specifier, importIndex },
+        binding.typeOnly
+          ? { kind: "type-level" }
+          : { kind: role, target, specifier, importIndex },
       );
     }
 
@@ -1653,7 +1673,8 @@ class CodeAnalyzer {
           `declaration with a ".xspec" specifier — a spec module is ` +
           `consumed only through an import declaration (SPEC 4, 14.15)`,
       );
-      // Uses of the binding are masked by this 14.15 (SPEC 14).
+      // No spec module import (SPEC 4): uses of the binding are masked by
+      // this 14.15 (SPEC 14) — the one source of a `poisoned` binding.
       this.declarations.set(statement, { kind: "poisoned" });
       return;
     }
@@ -2119,6 +2140,9 @@ class CodeAnalyzer {
       const binding = this.bindingOfSymbol(
         this.checker.getExportSpecifierLocalTargetSymbol(element),
       );
+      // A type-only binding's use is unrestricted (SPEC 4.5); a poisoned
+      // one — an `.xspec` require form's — is masked by its 14.15 (SPEC 4,
+      // 14).
       if (
         binding === undefined ||
         binding.kind === "type-level" ||
@@ -2161,6 +2185,9 @@ class CodeAnalyzer {
     const binding = this.bindingOfSymbol(
       this.checker.getSymbolAtLocation(name),
     );
+    // A type-only binding's use is unrestricted (SPEC 4.5); a poisoned
+    // one — an `.xspec` require form's — is masked by its 14.15 (SPEC 4,
+    // 14).
     if (
       binding === undefined ||
       binding.kind === "type-level" ||
@@ -2190,7 +2217,9 @@ class CodeAnalyzer {
     if (binding === undefined) return; // not a spec module reference
     if (binding.kind === "type-level" || binding.kind === "poisoned") {
       // SPEC 4.5: a chain rooted at a type-only binding records nothing
-      // and is no condition; a poisoned root is masked by its 14.15.
+      // and is no condition; a poisoned root — an `.xspec` require form's
+      // binding, no spec module import (4) — is masked by its 14.15
+      // (SPEC 14).
       return;
     }
     if (binding.kind === "colliding") {
@@ -2350,10 +2379,12 @@ class CodeAnalyzer {
     const binding = this.bindingOfSymbol(
       this.checker.getSymbolAtLocation(callee),
     );
-    // A poisoned callee — an invalid import's binding — masks its
-    // arguments too: the import's 14.15 already accounts for the whole
-    // call (SPEC 14). A colliding callee's call is no `text` call (SPEC
-    // 4.5): its arguments are ordinary uses.
+    // A poisoned callee — an `.xspec` require form's binding, no spec
+    // module import (SPEC 4) — masks its arguments too: the declaration's
+    // 14.15 already accounts for the whole call (SPEC 14). A spec module
+    // import's `text` binding is a `text` callee whatever other defect its
+    // declaration carries (SPEC 4, 11.2, 14). A colliding callee's call is
+    // no `text` call (SPEC 4.5): its arguments are ordinary uses.
     return binding?.kind === "text" || binding?.kind === "poisoned";
   }
 
@@ -2473,9 +2504,11 @@ class CodeAnalyzer {
     ) {
       // SPEC 4.5: rooting is scope-aware and value-level — a chain rooted
       // at a shadowing local or a type-only binding records no edge and
-      // falls under no condition; a poisoned root is masked by its
-      // import's 14.15. Any other non-node argument is the consumer's
-      // TypeScript error against the branded signature (SPEC 4.4).
+      // falls under no condition; a poisoned root — an `.xspec` require
+      // form's binding, no spec module import (4) — is masked by its
+      // declaration's 14.15 (SPEC 14). Any other non-node argument is the
+      // consumer's TypeScript error against the branded signature (SPEC
+      // 4.4).
       return;
     }
     if (
