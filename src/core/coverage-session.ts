@@ -68,11 +68,12 @@ const MATCHES_NOTHING: CoveragePathMatcher = {
 /**
  * Compile one recorded glob pattern in plain mode (SPEC 7: group globs
  * support exactly `*`, `?`, and `**`). A validated configuration cannot
- * hold an outside-root group pattern (SPEC 7 → 14.14), so a recorded
- * pattern failing to compile can only enter by external modification of the
- * session file; such a pattern resolves outside the workspace root and can
- * match no discovered source (SPEC 7), so it evaluates as matching nothing
- * — total and deterministic.
+ * hold an outside-root group pattern (SPEC 7 → 14.14), and the session
+ * parser reports a recorded one as malformed — the session corrupt (SPEC
+ * 10.1, 14.21; `parseRecordedGroup` in ./review.ts) — so no generator run
+ * meets a pattern failing to compile. Were one to arrive, it could match
+ * no discovered source (SPEC 7), so it evaluates as matching nothing:
+ * total and deterministic.
  */
 function compileRecordedPattern(pattern: string): CoveragePathMatcher {
   const compiled = compileGlob(pattern, "plain");

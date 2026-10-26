@@ -83,6 +83,7 @@ import type {
 import { DEPENDENCY_EDGE_KINDS, dependencyKindSet } from "./config.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
+import { compileGlob } from "./glob.js";
 
 /** SPEC 10.1: the reviews directory under the workspace root. */
 export const REVIEWS_DIRECTORY = ".xspec/reviews";
@@ -1083,9 +1084,41 @@ function parseItem(
   };
 }
 
+/**
+ * Whether `value` holds a lone surrogate: a UTF-16 code unit that no valid
+ * UTF-8 encodes — which a JSON escape in a session file can spell, though
+ * no configuration file, valid UTF-8 with its literals read as spelled
+ * (SPEC 7, 2.4), ever holds one. (`String.prototype.isWellFormed` lies
+ * beyond the es2023 library the product compiles against.)
+ */
+function holdsLoneSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
+      if (next < 0xdc00 || next > 0xdfff) return true;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * SPEC 10.1, 10.7: a recorded group reference is well-formed when it is
+ * one `create` can record — the group's configured kind and glob list. A
+ * profile's `target` is a spec group, its `boundary` a spec or code group
+ * (SPEC 7.4); and every recorded glob is one a configuration may hold:
+ * none lies outside the workspace root (SPEC 7, 14.14), and none holds a
+ * lone surrogate, which has no UTF-8 bytes to match as (SPEC 7: globs
+ * match byte-wise, as UTF-8). Any other recorded group makes the session
+ * corrupt (14.21).
+ */
 function parseRecordedGroup(
   value: unknown,
   where: string,
+  role: "target" | "boundary",
   problems: Problems,
 ): RecordedGroup | null {
   if (!isPlainJsonObject(value)) {
@@ -1102,6 +1135,16 @@ function parseRecordedGroup(
     );
     return null;
   }
+  if (role === "target" && kind !== "spec") {
+    // SPEC 7.4: `target` is the "spec group whose requirements must be
+    // covered", recorded with its kind at `create` (10.7).
+    problems.add(
+      `${where}.kind must be "spec", found ${JSON.stringify(kind)} — a ` +
+        `coverage profile's target is a spec group, recorded with its ` +
+        `configured kind at creation (SPEC 7.4, 10.7)`,
+    );
+    return null;
+  }
   const globsValue = value["globs"];
   if (!Array.isArray(globsValue)) {
     problems.add(
@@ -1112,10 +1155,26 @@ function parseRecordedGroup(
   const globs: string[] = [];
   let wellFormed = true;
   globsValue.forEach((glob, index) => {
-    if (requireString(glob, `${where}.globs[${String(index)}]`, problems)) {
-      globs.push(glob);
-    } else {
+    const globWhere = `${where}.globs[${String(index)}]`;
+    if (!requireString(glob, globWhere, problems)) {
       wellFormed = false;
+    } else if (holdsLoneSurrogate(glob)) {
+      problems.add(
+        `${globWhere} ${JSON.stringify(glob)} holds a lone surrogate, ` +
+          `which no valid UTF-8 encodes — no configured glob holds one, ` +
+          `and globs match as UTF-8 bytes (SPEC 7, 10.7)`,
+      );
+      wellFormed = false;
+    } else if (!compileGlob(glob, "plain").ok) {
+      // Plain mode's one compile error is outside-root (SPEC 7).
+      problems.add(
+        `${globWhere}: the glob ${JSON.stringify(glob)} resolves outside ` +
+          `the workspace root, which no configured glob does (SPEC 7, ` +
+          `14.14, 10.7)`,
+      );
+      wellFormed = false;
+    } else {
+      globs.push(glob);
     }
   });
   return wellFormed ? { kind, globs } : null;
@@ -1140,16 +1199,37 @@ function parseRecordedProfile(
   const before = problems.list.length;
 
   const name = value["name"];
-  requireNonEmptyString(name, `${where}.name`, problems);
+  if (
+    requireNonEmptyString(name, `${where}.name`, problems) &&
+    !isWellFormedArgumentValue(name)
+  ) {
+    // SPEC 7, 14.14: no configured profile name contains U+FFFD, since
+    // configured names are named in arguments — and 12.0 admits as an
+    // argument value only valid UTF-8 free of U+FFFD, so a name holding a
+    // lone surrogate (which a JSON escape in the file can spell) is no
+    // more one `create` can record (10.7). Either makes the session
+    // corrupt (SPEC 10.1 → 14.21).
+    problems.add(
+      `${where}.name ${JSON.stringify(name)} contains ` +
+        (name.includes(REPLACEMENT_CHARACTER)
+          ? "U+FFFD (REPLACEMENT CHARACTER)"
+          : "a lone surrogate, which no valid UTF-8 encodes") +
+        ` — no configured profile name does, since configured names are ` +
+        `named in arguments, whose values are valid UTF-8 free of U+FFFD ` +
+        `(SPEC 7, 12.0, 10.7)`,
+    );
+  }
 
   const target = parseRecordedGroup(
     value["target"],
     `${where}.target`,
+    "target",
     problems,
   );
   const boundary = parseRecordedGroup(
     value["boundary"],
     `${where}.boundary`,
+    "boundary",
     problems,
   );
 
@@ -1235,10 +1315,23 @@ function parseRecordedProfile(
 }
 
 /**
+ * SPEC 10.7: the form of a recorded baseline commit — a full commit object
+ * name, the identity git's `rev-parse` prints for the commit `--base`
+ * resolved to: 40 hexadecimal digits (SHA-1) or 64 (SHA-256). The product
+ * records lowercase; git reads either case.
+ */
+const RECORDED_COMMIT = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/;
+
+/**
  * SPEC 10.1: the recorded creation parameters well-formed, per strategy
  * (SPEC 10.7): `{base}` for `path-blocks`, nothing for `audit`, `{profile}`
- * for `coverage`. Value validity (e.g. whether the recorded commit still
- * resolves) is a use-time concern, not corruption (6.3 → 12.0).
+ * for `coverage` — each in the form `create` records. A baseline session
+ * records the commit identity `--base` resolved to, never a ref spelling,
+ * so its baseline never moves with a ref (10.7): the recorded identity's
+ * form is part of well-formedness, and a ref name, an abbreviation, or any
+ * other text makes the session corrupt (14.21). Whether a well-formed
+ * identity still resolves and reconstructs stays a use-time concern, never
+ * corruption: a usage error at its place in the order of 10.7 (6.3, 12.0).
  */
 function parseParameters(
   strategy: ReviewStrategy,
@@ -1261,6 +1354,16 @@ function parseParameters(
           problems,
         )
       ) {
+        return null;
+      }
+      if (!RECORDED_COMMIT.test(base)) {
+        problems.add(
+          `${where}.base ${JSON.stringify(base)} is not a full commit ` +
+            `object name (40 or 64 hexadecimal digits) — a baseline ` +
+            `session records the commit identity --base resolved to at ` +
+            `creation, never a ref name or an abbreviation, so its ` +
+            `baseline never moves with a ref (SPEC 10.1, 10.7)`,
+        );
         return null;
       }
       return { strategy, baseCommit: base };
