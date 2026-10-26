@@ -96,6 +96,7 @@
 // information of the preview's `mapping` (SPEC 6.5, 6.4, 6.6) — with
 // `--json`, the single JSON document (SPEC 12.0).
 
+import { isWellFormedArgumentValue } from "../../core/argument-value.js";
 import { compareBytes } from "../../core/bytes.js";
 import type {
   DiscoveredSource,
@@ -140,7 +141,7 @@ import {
   probeOccupant,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
-import { flagPresent, isValidUtf8ArgumentValue } from "../args.js";
+import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { emitAppliedMappingReport } from "../report.js";
 import { usageError } from "./common.js";
@@ -174,7 +175,7 @@ async function assessAndProbeDestination(
 }> {
   const assessment = assessDestinationPath(
     destination,
-    isValidUtf8ArgumentValue(destination),
+    isWellFormedArgumentValue(destination),
     workspace.configuration,
   );
   if (!assessment.probeable) {

@@ -222,8 +222,9 @@ function matchingGroups(
 /**
  * Assess a move destination path (SPEC 6.5): the file form's `<new-file>`
  * or the section form's to-be-created `<target-file>`. `utf8` is whether
- * the argument value decoded as valid UTF-8 (cli/args.ts marks
- * undecodable argv with U+FFFD); a non-UTF-8 spelling is normally an
+ * the argument value decoded as valid UTF-8 (core/argument-value.ts's
+ * predicate: Node marks undecodable argv with U+FFFD, and cli/args.ts
+ * applies the predicate to every token); a non-UTF-8 spelling is normally an
  * exit-2 usage error first (SPEC 12.0), leaving this cause a dead letter,
  * but the reason holds on its own terms (SPEC 14.19: such a path is never
  * a valid source path).

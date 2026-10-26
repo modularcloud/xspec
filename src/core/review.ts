@@ -69,6 +69,7 @@
 // values. File I/O — reading `.xspec/reviews/`, classifying occupants,
 // writing session files — lives in src/workspace/reviews.ts.
 
+import { isWellFormedArgumentValue } from "./argument-value.js";
 import { byteOrderedSet, compareBytes } from "./bytes.js";
 import { canonicalJson } from "./canonical-json.js";
 import type { JsonObject, JsonValue } from "./canonical-json.js";
@@ -911,6 +912,12 @@ function parseTextTable(
   return table;
 }
 
+/**
+ * U+FFFD (REPLACEMENT CHARACTER), which no item `id` contains (SPEC 10.2,
+ * 12.0). Built from its code point, never spelled literally.
+ */
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
 const ITEM_REQUIRED_KEYS = [
   "id",
   "kind",
@@ -942,7 +949,27 @@ function parseItem(
   checkKeys(value, where, ITEM_REQUIRED_KEYS, ["note"], problems);
 
   const id = value["id"];
-  requireNonEmptyString(id, `${where}.id`, problems);
+  if (
+    requireNonEmptyString(id, `${where}.id`, problems) &&
+    !isWellFormedArgumentValue(id)
+  ) {
+    // SPEC 10.2: an `id` never contains U+FFFD, so every item is nameable
+    // as an `<item-id>` operand — and 12.0 admits as an argument value only
+    // valid UTF-8 free of U+FFFD, so an `id` holding a lone surrogate (which
+    // a JSON escape in the file can spell, and no UTF-8 encodes) is as
+    // unnameable. Either is a malformed 10.2 field: the session is corrupt
+    // (SPEC 10.1 → 14.21).
+    problems.add(
+      `${where}.id ${JSON.stringify(id)} contains ` +
+        (id.includes(REPLACEMENT_CHARACTER)
+          ? "U+FFFD (REPLACEMENT CHARACTER)"
+          : "a lone surrogate, which no valid UTF-8 encodes") +
+        `, so no <item-id> operand can name the item — an item id never ` +
+        `contains U+FFFD, so every item is nameable as an <item-id> ` +
+        `operand, whose value must be valid UTF-8 free of U+FFFD ` +
+        `(SPEC 10.2, 12.0)`,
+    );
+  }
 
   const kind = value["kind"];
   if (

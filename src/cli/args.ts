@@ -62,6 +62,7 @@
 // filesystem paths, keeping all output byte-deterministic for identical
 // input (12.0: no absolute paths, no environment-dependent content).
 
+import { isWellFormedArgumentValue } from "../core/argument-value.js";
 import { nodeSpellingProblem } from "../core/availability.js";
 import { globLiesOutsideRoot } from "../core/glob.js";
 import { sessionNameProblem } from "../core/session-name.js";
@@ -586,38 +587,6 @@ function usageError(message: string, jsonInEffect: boolean): ParseResult {
 }
 
 /**
- * SPEC 12.0: argument values are interpreted as UTF-8, and a value that is
- * not valid UTF-8 is a usage error — every argument value, `move`'s
- * positional operands included: no argument value may name a non-UTF-8 path
- * (12.0), so 6.5's non-UTF-8 destination clause is unreachable through the
- * CLI. Node materializes `process.argv` by decoding the OS argument bytes
- * as UTF-8 with U+FFFD substituted for every invalid sequence, so invalid
- * input bytes are observable only as U+FFFD in the decoded string: a value
- * containing U+FFFD is indistinguishable from mis-decoded bytes and is
- * treated as not valid UTF-8. A lone surrogate (which no UTF-8 decode
- * produces, but an in-process caller could pass) has no UTF-8 encoding and
- * is rejected the same way.
- *
- * Exported for `move` (SPEC 6.5): the destination-validity assessment
- * (core/refusal.ts) takes the path's UTF-8 validity as an input — always
- * true for a CLI-supplied operand, per the parse rule above.
- */
-export function isValidUtf8ArgumentValue(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const unit = value.charCodeAt(index);
-    if (unit === 0xfffd) return false;
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
-      if (next < 0xdc00 || next > 0xdfff) return false;
-      index += 1;
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
  * SPEC 6.5: a `move` operand is classified by spelling alone — an operand
  * containing `#` is a `<file>#<id>` pair under the split of 12.0, one
  * without is a file. SPEC 12.0: at most one `#` is well-formed in any such
@@ -954,11 +923,12 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     usageError(message, jsonInEffect);
 
   // SPEC 12.0: argument values are interpreted as UTF-8, and a malformed
-  // value is judged before every per-flag and per-operand check — every
-  // token, `move`'s positional operands included (no argument value may
-  // name a non-UTF-8 path, 12.0).
+  // value (core/argument-value.ts) is judged before every per-flag and
+  // per-operand check — every token, `move`'s positional operands included:
+  // no argument value may name a non-UTF-8 path (12.0), so 6.5's non-UTF-8
+  // destination clause is unreachable through the CLI.
   for (let index = 0; index < argv.length; index += 1) {
-    if (!isValidUtf8ArgumentValue(argv[index]!)) {
+    if (!isWellFormedArgumentValue(argv[index]!)) {
       return refuse(
         `argument ${String(index + 1)} is not valid UTF-8 — argument ` +
           `values are interpreted as UTF-8`,
