@@ -204,11 +204,16 @@ const HANDLERS: ReadonlyMap<string, () => Promise<CommandHandler>> = new Map(
 /**
  * The CLI entry: parse per SPEC 12.0, dispatch per SPEC 12.5, return the
  * exit code. All output goes through the given writers; the working
- * directory arrives as data — the entry reads no `process` globals.
+ * directory arrives as data — the entry reads no `process` globals. `cwd`
+ * is `null` for a working directory with no path, one removed before the
+ * process started (cli/bin.ts): the syntax class and `version` never
+ * consult it (SPEC 12.0, 12.6), and workspace location reads it as a
+ * directory holding nothing, from which no relative path leads (SPEC 7, 14,
+ * 14.25, 11.6; workspace/locate.ts).
  */
 export async function main(
   argv: readonly string[],
-  cwd: string,
+  cwd: string | null,
   stdout: CliWriter,
   stderr: CliWriter,
 ): Promise<ExitCode> {
@@ -238,7 +243,9 @@ export async function main(
   // SPEC 7: every command *except* `version` locates the configuration), so
   // it dispatches before workspace location and cannot fail for workspace
   // or configuration reasons: configuration-error precedence (SPEC 14.14)
-  // never reaches it.
+  // never reaches it. Nor does the working directory: it "answers
+  // identically in any working directory", one with no path (`cwd` null)
+  // included.
   if (result.invocation.command === "version") {
     const { versionCommand } = await import("./commands/version.js");
     return versionCommand(stdout);
@@ -292,7 +299,7 @@ export async function main(
 async function dispatchInWorkspace(
   invocation: Invocation,
   loadHandler: () => Promise<CommandHandler>,
-  cwd: string,
+  cwd: string | null,
   stdout: CliWriter,
   stderr: CliWriter,
 ): Promise<ExitCode> {
@@ -301,7 +308,13 @@ async function dispatchInWorkspace(
   // value resolved against it (12.0). A missing or invalid configuration
   // is a configuration error, reported as a usage error (exit 2) preceding
   // all source analysis — with JSON output in effect, the 12.7 error
-  // document as the entire standard output (12.0).
+  // document as the entire standard output (12.0). A working directory
+  // with no path (`cwd` null) holds nothing: the upward search finds
+  // nothing there and has nowhere to ascend, a relative `--config` names
+  // nothing, and an absolute one locates as from any directory, its
+  // anchoring spellings in the platform's absolute form (SPEC 7, 14, 14.25,
+  // 11.6; workspace/locate.ts) — and a handler resolving a relative
+  // `--test-hold` against it creates nothing (13.5; workspace/lock.ts).
   const location = await locateWorkspace(cwd, invocation.config);
   if (!location.ok) {
     emitConfigurationErrors(

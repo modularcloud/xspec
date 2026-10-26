@@ -59,6 +59,21 @@
 // file's refused content read is invalid configuration instead (14.14).
 // Nonexistence is never a refusal: it is the missing configuration of
 // 14.14.
+//
+// A working directory with no path — removed before the process started,
+// getcwd failing (cli/bin.ts) — arrives as `null`. Removed, it holds
+// nothing and has no parent to ascend to, and nothing is read through it:
+// the process's own working directory is never consulted implicitly, every
+// path here being built from an absolute one. So the upward search
+// examines it, finds nothing, and stops — missing configuration, concerned
+// path `.`, the directory it started from (SPEC 7, 14, 14.14); a relative
+// `--config` resolved against it designates nothing — missing
+// configuration, the value echoed as given (12.0, 14, 14.25: an absent
+// configuration path); and an absolute `--config` resolves from its own
+// root as from any working directory, while every anchoring spelling — the
+// configuration path, the root, a refused read's directory — takes the
+// platform's absolute form, the platform admitting no relative path from a
+// directory with no path (SPEC 11.6, 14, 14.25; ./anchor.ts).
 
 import { Buffer } from "node:buffer";
 import type { Stats } from "node:fs";
@@ -223,19 +238,26 @@ async function physicalWorkingDirectory(cwd: string): Promise<string> {
  * `..` names the directory it reaches, never a link. Undefined when
  * nothing can occupy the path — a directory component missing, not a
  * directory, or a link whose target is either — the unoccupied path
- * echoed as given (SPEC 14). SPEC 14.25: a refused lookup in a directory
- * the resolution examines is the read failure concerning that directory in
- * its anchoring form.
+ * echoed as given (SPEC 14) — and likewise for a relative value beside a
+ * working directory with no path (`null`, module header), which resolves
+ * against a directory holding nothing. SPEC 14.25: a refused lookup in a
+ * directory the resolution examines is the read failure concerning that
+ * directory in its anchoring form.
  */
 async function namedConfigurationEntry(
-  workingDirectory: string,
+  workingDirectory: string | null,
   configFlag: string,
 ): Promise<string | undefined> {
-  let start = workingDirectory;
-  let rest = configFlag;
+  let start: string;
+  let rest: string;
   if (path.isAbsolute(configFlag)) {
     start = path.parse(configFlag).root;
     rest = configFlag.slice(start.length);
+  } else if (workingDirectory === null) {
+    return undefined;
+  } else {
+    start = workingDirectory;
+    rest = configFlag;
   }
   const segments = pathSegments(rest);
   const last = segments[segments.length - 1];
@@ -338,17 +360,22 @@ async function searchUpward(
 /**
  * Locate and read the project configuration file (SPEC 7, 14.14) without
  * parsing it. `cwd` is the invocation working directory, resolved
- * physically first (SPEC 11.6). `configFlag` is the `--config <path>`
- * value when given, resolved against it (SPEC 12.0); otherwise the upward
- * search from it applies.
+ * physically first (SPEC 11.6), or `null` for one with no path (module
+ * header: it holds nothing, admits no relative path, and is never read
+ * through). `configFlag` is the `--config <path>` value when given,
+ * resolved against it (SPEC 12.0); otherwise the upward search from it
+ * applies (SPEC 7).
  */
 export async function locateWorkspace(
-  cwd: string,
+  cwd: string | null,
   configFlag: string | undefined,
 ): Promise<WorkspaceLocateResult> {
   // SPEC 11.6: every spelling below is anchored on the physical working
-  // directory, and every configuration path is found from it.
-  const workingDirectory = await physicalWorkingDirectory(cwd);
+  // directory, and every configuration path is found from it; a working
+  // directory with no path has no physical spelling, and every anchoring
+  // spelling below is then the platform's absolute form (./anchor.ts).
+  const workingDirectory =
+    cwd === null ? null : await physicalWorkingDirectory(cwd);
   let configPath: string;
   let configFileName: string;
   let occupant: ConfigOccupant;
@@ -378,10 +405,18 @@ export async function locateWorkspace(
       // absolute value stays absolute: `./../cfg//xspec.config.ts` is
       // reported byte-for-byte, never `../cfg/xspec.config.ts`. Once the
       // path is occupied, whatever occupies it, the anchoring form below
-      // applies: existence, not spelling, decides the form.
+      // applies: existence, not spelling, decides the form. A relative
+      // value beside a working directory with no path designates nothing
+      // (`namedConfigurationEntry`): the same missing configuration, its
+      // diagnostic saying why.
       return failure(
-        `--config ${configFlag}: no configuration file exists at this ` +
-          `path, resolved against the working directory (SPEC 7, 12.0)`,
+        workingDirectory === null && !path.isAbsolute(configFlag)
+          ? `--config ${configFlag}: no configuration file exists at this ` +
+              `path — it is relative, and the working directory no longer ` +
+              `exists, so it designates nothing; pass an absolute path ` +
+              `(SPEC 7, 12.0)`
+          : `--config ${configFlag}: no configuration file exists at this ` +
+              `path, resolved against the working directory (SPEC 7, 12.0)`,
         configFlag,
       );
     }
@@ -389,15 +424,25 @@ export async function locateWorkspace(
     configFileName = path.basename(named);
     occupant = namedOccupant;
   } else {
-    const found = await searchUpward(workingDirectory);
+    // SPEC 7: a working directory with no path holds nothing and has no
+    // parent: the search examines it, finds nothing, and stops there.
+    const found =
+      workingDirectory === null
+        ? undefined
+        : await searchUpward(workingDirectory);
     if (found === undefined) {
       // SPEC 14: a failed upward search with no `--config` concerns the
       // directory it started from — the invocation working directory,
-      // spelled `.` (11.6).
+      // spelled `.` (11.6), whether or not it still has a path.
       return failure(
-        `no ${CONFIG_FILE_NAME} found by upward search from the working ` +
-          `directory — create one in the project root or pass --config ` +
-          `<path> (SPEC 7)`,
+        workingDirectory === null
+          ? `no ${CONFIG_FILE_NAME} found by upward search: the working ` +
+              `directory no longer exists, so it holds no entry and has no ` +
+              `parent to search — run from the project or pass --config ` +
+              `<absolute path> (SPEC 7)`
+          : `no ${CONFIG_FILE_NAME} found by upward search from the ` +
+              `working directory — create one in the project root or pass ` +
+              `--config <path> (SPEC 7)`,
         ".",
       );
     }

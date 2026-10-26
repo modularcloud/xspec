@@ -114,6 +114,23 @@ const analysisParser = unified()
   })
   .freeze();
 
+/**
+ * The file a unified parser parses `spelled` as — here and in mdx.ts: the
+ * text as a VFile's value, its `cwd` given so that building the file reads
+ * no process state. A VFile's default `cwd` is the process's working
+ * directory, read through `process.cwd()`, which throws where the working
+ * directory has no path (removed before the process started; cli/bin.ts),
+ * while a parse is a function of the text alone (SPEC 12.0, 14.20). The
+ * value given, `/` — VFile's own default where no process exists — is
+ * inert: nothing in the parse reads a file's `cwd`.
+ */
+export function parserFile(spelled: string): {
+  readonly value: string;
+  readonly cwd: string;
+} {
+  return { value: spelled, cwd: "/" };
+}
+
 /** A stock grammar failure, structurally (a `VFileMessage`). */
 interface MdxFailure {
   readonly source?: unknown;
@@ -154,7 +171,7 @@ function recordedParse(text: string): RecordedParse {
       calls = [];
       recording = calls;
       try {
-        return analysisParser.parse(spelled);
+        return analysisParser.parse(parserFile(spelled));
       } finally {
         recording = null;
       }

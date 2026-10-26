@@ -102,10 +102,11 @@ export function parseLocatedWorkspace(
 /**
  * Locate, read, and validate the project configuration (SPEC 7, 14.14).
  * `configFlag` is the `--config <path>` value when given, resolved against
- * `cwd` (SPEC 12.0); otherwise the upward search from `cwd` applies.
+ * `cwd` (SPEC 12.0); otherwise the upward search from `cwd` applies. `cwd`
+ * is `null` for a working directory with no path (./locate.ts).
  */
 export async function loadWorkspace(
-  cwd: string,
+  cwd: string | null,
   configFlag: string | undefined,
 ): Promise<WorkspaceLoadResult> {
   const location = await locateWorkspace(cwd, configFlag);

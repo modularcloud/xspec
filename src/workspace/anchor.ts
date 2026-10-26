@@ -8,12 +8,13 @@
 // the segments descending to the identified file or directory, joined with
 // `/` on every platform; no `.` segments, no trailing separator; the
 // working directory itself spelled `.`. Only when the platform admits no
-// relative path between the two (roots on different Windows drives) is the
-// anchoring the platform's absolute drive-qualified form — the sole
-// absolute-path case and the sole output spelling whose separator is the
-// platform's (SPEC 12.0). The result is a pure function of the invocation
-// input (SPEC 12.0: invocation-anchored content, deterministic per
-// invocation).
+// relative path between the two (roots on different Windows drives, or a
+// working directory with no path — one removed before the process started,
+// cli/bin.ts) is the anchoring the platform's absolute form, drive-qualified
+// where the platform has drives — the sole absolute-path case and the sole
+// output spelling whose separator is the platform's (SPEC 12.0). The result
+// is a pure function of the invocation input (SPEC 12.0: invocation-anchored
+// content, deterministic per invocation).
 //
 // SPEC 11.6: "The working directory and the workspace root enter this
 // spelling as physical directory paths, every symbolic link among their
@@ -35,13 +36,27 @@ import {
 
 /**
  * Spell `target` relative to the invocation working directory `cwd` in the
- * canonical anchoring form of SPEC 11.6. Both arguments are filesystem
- * paths; relative ones resolve against the process semantics of
- * `path.resolve` (callers pass absolute paths in practice).
+ * canonical anchoring form of SPEC 11.6. Both arguments are absolute
+ * filesystem paths, so no spelling here leans on the process's own working
+ * directory — save that `cwd` is `null` for a working directory with no
+ * path, one removed before the process started (cli/bin.ts).
+ *
+ * SPEC 11.6: such a directory cannot enter the spelling as a physical
+ * directory path, so the platform admits no relative path from it to any
+ * target — the case 11.6 reports in the platform's absolute form, as it
+ * does across Windows drives (its parenthetical names that case; a working
+ * directory with no path is the other): the target's physical absolute
+ * path in the platform's own spelling. The form is a pure function of the
+ * invocation input still (SPEC 12.0), the working directory's absence
+ * included.
  */
-export function anchoredPathSpelling(cwd: string, target: string): string {
-  const from = path.resolve(cwd);
+export function anchoredPathSpelling(
+  cwd: string | null,
+  target: string,
+): string {
   const to = path.resolve(target);
+  if (cwd === null) return to;
+  const from = path.resolve(cwd);
   const relative = path.relative(from, to);
   // The working directory itself is spelled `.` (SPEC 11.6).
   if (relative === "") return ".";

@@ -575,7 +575,8 @@ async function deleteQuietly(deletion: () => Promise<void>): Promise<void> {
 }
 
 export type HoldResult =
-  { readonly ok: true } | { readonly ok: false; readonly usageMessage: string };
+  | { readonly ok: true; readonly path: string }
+  | { readonly ok: false; readonly usageMessage: string };
 
 /**
  * The `--test-hold` seam (SPEC 13.5): immediately after acquiring workspace
@@ -587,12 +588,23 @@ export type HoldResult =
  * seam changes no other behavior and grants no access beyond the invoking
  * user's own file permissions: the file is created with the process's
  * ordinary permissions, at a path resolved against the working directory
- * (SPEC 12.0), with no directory creation.
+ * (SPEC 12.0), with no directory creation. A null `absolutePath` is a
+ * relative value beside a working directory with no path (cli/bin.ts),
+ * which designates no path to create at: the same usage error (13.5).
  */
 export async function createTestHoldFile(
-  absolutePath: string,
+  absolutePath: string | null,
   given: string,
 ): Promise<HoldResult> {
+  if (absolutePath === null) {
+    return {
+      ok: false,
+      usageMessage:
+        `cannot create the --test-hold file at '${given}' — the path is ` +
+        `relative and the working directory no longer exists, so it ` +
+        `designates no path to create the file at (SPEC 12.0, 13.5)`,
+    };
+  }
   let handle: fsp.FileHandle;
   try {
     // O_CREAT|O_EXCL ('wx'): fails when anything — a plain file, a
@@ -609,7 +621,7 @@ export async function createTestHoldFile(
     };
   }
   await handle.close();
-  return { ok: true };
+  return { ok: true, path: absolutePath };
 }
 
 /**
@@ -636,8 +648,13 @@ export async function awaitTestHoldRelease(
 export interface TestHoldSpec {
   /** The flag value verbatim, for diagnostics (argv tokens only, SPEC 12.0). */
   readonly given: string;
-  /** The value resolved against the working directory (SPEC 12.0). */
-  readonly absolutePath: string;
+  /**
+   * The value resolved against the working directory (SPEC 12.0), or
+   * `null` when it designates no path — a relative value beside a working
+   * directory with no path (cli/bin.ts), where the hold file cannot be
+   * created (13.5).
+   */
+  readonly absolutePath: string | null;
 }
 
 export type ExclusiveRunResult<T> =
@@ -671,7 +688,7 @@ export async function withMutationExclusivity<T>(
     if (hold !== undefined) {
       const created = await createTestHoldFile(hold.absolutePath, hold.given);
       if (!created.ok) return created;
-      await awaitTestHoldRelease(hold.absolutePath);
+      await awaitTestHoldRelease(created.path);
     }
     return { ok: true, value: await body() };
   } finally {

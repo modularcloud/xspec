@@ -67,7 +67,11 @@ import type { PathText } from "./path-text.js";
 import { isEmptyExpression, MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
 import { restoreNameSpelling } from "./mdx-jsx-names.js";
 import type { NameStandIns } from "./mdx-jsx-names.js";
-import { mdxSyntaxFailureOffset, parseAsJudged } from "./mdx-syntax-failure.js";
+import {
+  mdxSyntaxFailureOffset,
+  parseAsJudged,
+  parserFile,
+} from "./mdx-syntax-failure.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
   describeSegmentViolation,
@@ -525,7 +529,8 @@ function xspecTagSpans(this: { data(): unknown }): void {
  * The MDX parser (IMPLEMENTATION: remark-mdx defines well-formed MDX,
  * SPEC 14.20): MDX 3's grammar, its braces and ESM blocks derived by
  * ECMAScript 2024 alone, early errors excluded (`mdxAcorn`). Frozen once;
- * `parse` is pure.
+ * `parse` is pure, given its file through `parserFile` (which keeps the
+ * file it builds from reading the process's working directory).
  */
 const mdxParser = unified()
   .use(remarkParse)
@@ -565,7 +570,8 @@ function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
     // a token (`parseAsJudged`).
     const { result, originals, names } = parseAsJudged(
       text,
-      (spelled) => mdxParser.parse(spelled) as unknown as MdxTreeNode,
+      (spelled) =>
+        mdxParser.parse(parserFile(spelled)) as unknown as MdxTreeNode,
     );
     if (originals.size > 0) restoreRespelledContent(result, text, originals);
     if (names.units.size > 0) restoreJsxNames(result, names);
@@ -616,7 +622,9 @@ export function isWellFormedSpecSource(bytes: Uint8Array): boolean {
     return false;
   }
   try {
-    parseAsJudged(decoded.text, (spelled) => mdxParser.parse(spelled));
+    parseAsJudged(decoded.text, (spelled) =>
+      mdxParser.parse(parserFile(spelled)),
+    );
     return true;
   } catch {
     return false;

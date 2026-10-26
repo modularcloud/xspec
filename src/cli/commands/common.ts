@@ -80,16 +80,27 @@ export function emitDocument(stdout: CliWriter, document: JsonValue): 0 {
  * spec, or undefined when the flag was not given. SPEC 12.0/13.5: the value
  * is a filesystem path resolved against the working directory; the verbatim
  * token is kept for diagnostics (argv tokens only — never resolved paths).
+ * Against a working directory with no path (`cwd` null, cli/bin.ts) only an
+ * absolute value designates a path: a relative one resolves against a
+ * directory that holds nothing and leads nowhere, so the hold file cannot
+ * be created there — 13.5's usage error, met where creation is attempted
+ * (`absolutePath` null; workspace/lock.ts).
  */
 export function testHoldSpecOf(
   invocation: Invocation,
-  cwd: string,
+  cwd: string | null,
 ): TestHoldSpec | undefined {
   const given = flagValue(invocation, "--test-hold");
   if (given === undefined) {
     return undefined;
   }
-  return { given, absolutePath: path.resolve(cwd, given) };
+  if (path.isAbsolute(given)) {
+    return { given, absolutePath: path.resolve(given) };
+  }
+  return {
+    given,
+    absolutePath: cwd === null ? null : path.resolve(cwd, given),
+  };
 }
 
 /**

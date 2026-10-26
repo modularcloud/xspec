@@ -35,9 +35,11 @@ export interface CommandContext {
    * The invocation's working directory. `--config <path>` and
    * `--test-hold <path>` are filesystem paths resolved against it, while
    * node/graph-node/file/glob arguments are workspace-relative and
-   * independent of it (SPEC 12.0).
+   * independent of it (SPEC 12.0). `null` for a working directory with no
+   * path, one removed before the process started (cli/bin.ts): a relative
+   * path resolved against it designates nothing (SPEC 12.0, 13.5).
    */
-  readonly cwd: string;
+  readonly cwd: string | null;
   /**
    * The loaded workspace: root directory and validated configuration.
    * Every command loads it before running — a missing or invalid
