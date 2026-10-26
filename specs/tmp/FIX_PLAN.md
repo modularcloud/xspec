@@ -58,23 +58,11 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 | 142 | A1 | The permitted bindings of an invalid spec module import root chains | landed at ef61575, CI run 1705 green |
 | 143 | — (found planning 142) | An invalid-form spec-source import takes part in spec import cycles | landed at cb6fde4, CI run 1707 green |
 | 144 | A3 | Every cycle reported; `refused-cycle` locates every would-be cycle | landed at a4b0ffb, CI run 1709 green |
-| 145 | B1 | An item `id` holding U+FFFD makes its session corrupt | pending |
+| 145 | B1 | An item `id` holding U+FFFD makes its session corrupt | landed at 71bde9d, CI run 1711 green |
 | 146 | B2 | Malformed recorded creation parameters make the session corrupt | pending |
 | 147 | B3 | A vanished working directory ends every command in a defined outcome | pending |
 | 148 | B4 | Per-role text snapshots; `review create` succeeds at scale | pending |
 | 149 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
-
-## Task 145 — An item `id` holding U+FFFD makes its session corrupt (SPEC 10.2, 10.1, 14.21, 12.0; B1)
-
-**Requirement.** 10.2: an item's `id` is "unique within the session and never containing U+FFFD, so every item is nameable as an `<item-id>` operand, 12.0". 10.1: a session file that "violates a session invariant — the fields of 10.2 present and well-formed, …" is corrupt (14.21), and then "every `review` subcommand naming that session reports the corruption at its place in the order of 10.7 and exits 1, modifying nothing, and `list` reports it as corrupt (10.7)"; 14.21: reported by `check` (beside a failing workspace's other findings), by any `review` subcommand naming the session, and by `review list` (exit 1). 12.0: "An argument value is well-formed only when its bytes are valid UTF-8 and it contains no U+FFFD" — so by 10.2's own purpose clause an `id` holding a lone surrogate (which a JSON escape can spell in a session file, and which no UTF-8 argument encodes) is unnameable as well: reject it the same way.
-
-**Observed** (B1, at `f2ff6c3`): an audit session `s` over `specs/M.mdx` (`n` holding `n.c`; specs-only configuration), its leaf item's `id` rewritten in `.xspec/reviews/s.json` to `item-` U+FFFD `3`, consistently in n's item's `blockedBy` (B's `b-scripts/sess2.mjs`): `review list` exits 0 and shows `s` as not corrupt; `check --json` exits 0 with no 14.21; `review status`, `next`, and `export` exit 0 and present the item, which no `<item-id>` operand can name (12.0: a malformed value), so it can never be shown, split, or resolved. Expected: `list` reports `s` corrupt and exits 1; `check` reports 14.21 concerning `.xspec/reviews/s.json`; every `review` subcommand naming `s` reports the corruption and exits 1, modifying nothing.
-
-**Location.** `parseItem` in `src/core/review.ts` checks `id` with `requireNonEmptyString` alone (`review.ts` holds NUL bytes: `grep -a`). The exact predicate 12.0 needs — valid UTF-8 free of U+FFFD, a lone surrogate rejected — exists as `isValidUtf8ArgumentValue` in `src/cli/args.ts`, but `core` must not import from `cli` (IMPLEMENTATION's layers).
-
-**Change.** Move that predicate into a `core` module (exported; `src/cli/args.ts` and its other callers import it from there, behavior unchanged), and in `parseItem` add, after the non-empty check, a problem for an `id` the predicate rejects — naming SPEC 10.2 and 12.0 ("never containing U+FFFD, so every item is nameable as an `<item-id>` operand"). Spell U+FFFD by its code point in code and messages' construction, never as an escape (rule above). `blockedBy` keeps its own present-in-session check.
-
-**Verification.** No suite test pins it. By hand (a copy of `sess2.mjs`, or a small Node script writing the rewritten session with U+FFFD composed by `String.fromCodePoint(0xfffd)`): `review list --json` exits 1 reporting `s` corrupt with its 14.21; `check --json` exits 1 with one 14.21 concerning `.xspec/reviews/s.json`; `review status s`, `next s`, `show s <n's item id>`, `export s`, `resolve s <n's item id> --status no-change`, and `split s <n's item id>` each exit 1 reporting the corruption, the session file byte-unchanged (compare before and after); an `id` spelled with a JSON lone-surrogate escape (six ASCII characters built from character codes, e.g. `String.fromCharCode(92) + "udc00"`) the same. Regressions: `section-10.1` (T10.1-4's corrupt-session kinds), `section-10.2-10.3` (T10.2-1's item IDs), `section-10.7-i` (T10.7-1), `section-10.7-iii` (T10.7-15's order), `section-11.2` (T11.2-6), `section-11.6` (T11.6-4), `section-12.0-i` and `section-12.0-ii` (argument well-formedness, if the predicate moved), `section-12.0-iv` (T12.0-15's corrupt-session reports), `section-13.4-ii` (T13.4-13), `section-14`.
 
 ## Task 146 — Malformed recorded creation parameters make the session corrupt (SPEC 10.1, 10.7, 7, 7.4, 14.14, 14.21; B2)
 
