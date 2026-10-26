@@ -1457,9 +1457,15 @@ class CodeAnalyzer {
         target = { defined: false, file: designation.file };
       }
     }
-    if (statement.attributes !== undefined) {
-      defects.push("it carries import attributes");
-    }
+    // SPEC 4, 14.15: a TypeScript spec module import is judged by its
+    // specifier (above) and its bindings (below) alone. Import attributes
+    // (`with { … }`, or the legacy `assert { … }`, both well-formed under
+    // TypeScript 5.9.3, 14.20) are no condition of it and never invalidate
+    // it: a file move rewrites the specifier literal alone, keeping them,
+    // and a removal deletes the declaration whole (6.5). Attributes are a
+    // condition elsewhere only — in a spec source a parse failure, the MDX
+    // edition lacking their syntax (14.20), and on the configuration's
+    // `xspec` import a configuration error (7, `checkImport` in config.ts).
 
     // Bindings (SPEC 4): the default export and the named `text` export,
     // each optionally aliased, optionally type-only. A side-effect-only
