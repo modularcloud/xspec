@@ -1087,19 +1087,30 @@ function dependencyCycleFindings(
 }
 
 /**
- * SPEC 2.1: spec import cycles — over each parsed file's valid imports'
- * designated files, whether or not the bindings are used (an unused
- * import records no edges, but the import itself still relates the
- * files). A file importing itself is a cycle of length one. The relation
- * is between FILES, so discovered spec sources whose own paths are
- * invalid (SPEC 14.19) participate — their imports were analyzed
- * (SPEC 11.2) and a valid import designates a member whatever that
- * member's path validity — and the walk therefore runs over exact path
- * bytes (SPEC 12.0), with every location and message path rendered from
- * the file's real path (marked byte form capable). One 14.9 finding per
- * cyclic component, locating each participating import declaration —
- * every import recording a step of the reported cycle (SPEC 14 location
- * cardinality), the full file path carried in the message.
+ * SPEC 2.1: spec import cycles — over each parsed file's import
+ * declarations' designated files (`SpecImport.designatedFile`, the
+ * resolved target of SPEC 11.4), whether or not the bindings are used (an
+ * unused import records no edges, but the import itself still relates the
+ * files). A declaration relates its file to the file its specifier
+ * designates whatever its binding form: one of an invalid form — a named
+ * or namespace clause beside or instead of the default binding, a bound
+ * compiler-provided name, a side-effect-only import — still imports that
+ * module, since SPEC 11.2 leaves an import's resolved target undefined
+ * only where specifier form or discovery defines none, and its 14.15
+ * makes the cycle no less detectable (SPEC 14: every condition is
+ * reported unless another error makes it undetectable). A declaration
+ * whose specifier designates nothing (out of form, outside the root, or
+ * no discovered spec source) relates no files. A file importing itself is
+ * a cycle of length one. The relation is between FILES, so discovered
+ * spec sources whose own paths are invalid (SPEC 14.19) participate —
+ * their imports were analyzed (SPEC 11.2) and a specifier designates a
+ * member whatever that member's path validity — and the walk therefore
+ * runs over exact path bytes (SPEC 12.0), with every location and message
+ * path rendered from the file's real path (marked byte form capable). One
+ * 14.9 finding per cyclic component, locating each participating import
+ * declaration — every declaration recording a step of the reported cycle,
+ * valid or not (SPEC 14 location cardinality), the full file path carried
+ * in the message.
  */
 function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
   /** Byte key of one parsed file (both `PathText` forms, SPEC 12.0). */
@@ -1111,12 +1122,14 @@ function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
   for (const spec of specs) {
     const sourceKey = pathTextKey(spec.document.file);
     for (const declared of spec.imports.imports) {
-      if (declared.targetFile === null) continue;
+      // SPEC 2.1, 11.2: the designated file, the declaration's binding
+      // form notwithstanding (see above).
+      if (declared.designatedFile === null) continue;
       let targets = adjacency.get(sourceKey);
       if (targets === undefined) {
         adjacency.set(sourceKey, (targets = new Set()));
       }
-      targets.add(pathTextKey(declared.targetFile));
+      targets.add(pathTextKey(declared.designatedFile));
     }
   }
   const cycles = findCycles([...keyed.keys()], adjacency);
@@ -1129,17 +1142,17 @@ function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
       return spec.document.file;
     };
     // SPEC 14/14.9: locate each participating import declaration — for
-    // every step of the closed walk, every import of the step's source
-    // file designating the step's target (for a self-import cycle, the
-    // self-designating imports).
+    // every step of the closed walk, every declaration of the step's
+    // source file designating the step's target, valid or not (for a
+    // self-import cycle, the self-designating declarations).
     const locations: FindingLocation[] = [];
     for (let step = 0; step + 1 < cycle.length; step += 1) {
       const spec = keyed.get(cycle[step]);
       if (spec === undefined) continue;
       for (const declared of spec.imports.imports) {
         if (
-          declared.targetFile !== null &&
-          pathTextKey(declared.targetFile) === cycle[step + 1]
+          declared.designatedFile !== null &&
+          pathTextKey(declared.designatedFile) === cycle[step + 1]
         ) {
           locations.push({
             file: spec.document.file,

@@ -85,25 +85,20 @@ export interface SpecImport {
    * path, SPEC 11.2). Null for an invalid import — and for a valid import
    * designating a member whose path is invalid (SPEC 14.19): such a
    * member's identities are all undefined, so nothing identity-shaped
-   * points at it; `targetFile` still carries its path.
+   * points at it; `designatedFile` still carries its path.
    */
   readonly targetPath: string | null;
-  /**
-   * The designated member's path as data (SPEC 12.0, 12.7) for every
-   * valid import — equal to `targetPath` where that is non-null, and the
-   * 14.19 member's exact path (marked byte form capable) otherwise; the
-   * file-level import relation (cycles, SPEC 2.1 → 5.3) and the surfaces
-   * of 11.4 read it. Null exactly for an invalid import.
-   */
-  readonly targetFile: PathText | null;
   /**
    * The declaration's resolved target file where specifier form and
    * discovery define one (SPEC 11.4) — binding validity notwithstanding:
    * the file an in-form (`./`/`../`, `.xspec`) specifier designates when
-   * that member is discovered, whatever other defects the declaration
-   * carries. Null where form or discovery defines none — the view reports
-   * the datum explicitly unavailable (SPEC 11.2). Equal to `targetFile`
-   * for a valid import.
+   * that member is discovered, a 14.19 member's exact path (marked byte
+   * form capable, SPEC 12.0) included, whatever other defects the
+   * declaration carries. Null where form or discovery defines none — the
+   * view reports the datum explicitly unavailable (SPEC 11.2). The
+   * file-level import relation (spec import cycles, SPEC 2.1, 14) and the
+   * surfaces of 11.4 read it; equal to `targetPath` for a valid import
+   * designating a member whose identities are defined.
    */
   readonly designatedFile: PathText | null;
   /** Whether the import itself is valid (duplicate bindings are pairwise). */
@@ -562,7 +557,6 @@ export function analyzeSpecImports(
         );
       }
       let targetPath: string | null = null;
-      let targetFile: PathText | null = null;
       let designatedFile: PathText | null = null;
       if (relative && specifier.endsWith(XSPEC_SUFFIX)) {
         const designation = designate(specifier);
@@ -578,13 +572,11 @@ export function analyzeSpecImports(
           );
         } else if (designation.kind === "defined-member") {
           targetPath = designation.path;
-          targetFile = designation.path;
           designatedFile = designation.path;
         } else {
           // SPEC 14.19/11.2: a discovered member whose path is invalid is
           // designated validly — no 14.15 — while its identities are all
           // undefined, so references rooted at this binding never resolve.
-          targetFile = designation.file;
           designatedFile = designation.file;
         }
       }
@@ -632,7 +624,6 @@ export function analyzeSpecImports(
           ),
         );
         targetPath = null;
-        targetFile = null;
       }
 
       // SPEC 2.1: no two imports in a file may bind the same identifier —
@@ -673,9 +664,9 @@ export function analyzeSpecImports(
           end: specifierLiteral.getEnd(),
         }),
         targetPath,
-        targetFile,
-        // SPEC 11.4: the datum turns on specifier form and discovery
-        // alone — kept through the invalid-import reset above.
+        // SPEC 11.4, 2.1: the datum turns on specifier form and discovery
+        // alone — kept through the invalid-import reset above, so an
+        // invalid-form declaration still takes part in spec import cycles.
         designatedFile,
         valid,
       });
