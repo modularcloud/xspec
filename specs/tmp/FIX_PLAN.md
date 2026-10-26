@@ -56,25 +56,13 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 |---|---|---|---|
 | 141 | A2 | A TypeScript spec module import may carry import attributes | landed at 064f11d, CI run 1703 green |
 | 142 | A1 | The permitted bindings of an invalid spec module import root chains | landed at ef61575, CI run 1705 green |
-| 143 | — (found planning 142) | An invalid-form spec-source import takes part in spec import cycles | pending |
+| 143 | — (found planning 142) | An invalid-form spec-source import takes part in spec import cycles | landed at cb6fde4, CI run 1707 green |
 | 144 | A3 | Every cycle reported; `refused-cycle` locates every would-be cycle | pending |
 | 145 | B1 | An item `id` holding U+FFFD makes its session corrupt | pending |
 | 146 | B2 | Malformed recorded creation parameters make the session corrupt | pending |
 | 147 | B3 | A vanished working directory ends every command in a defined outcome | pending |
 | 148 | B4 | Per-role text snapshots; `review create` succeeds at scale | pending |
 | 149 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
-
-## Task 143 — An invalid-form spec-source import still takes part in spec import cycles (SPEC 2.1, 14.9, 14, 11.2; found while planning Task 142)
-
-**Requirement.** SPEC 2.1: "Import cycles among spec source files are invalid, even when no requirement-level dependency cycle exists; a file that imports itself is an import cycle of length one." SPEC 14: a cycle locates "each participating import declaration of a spec import cycle". A spec-source import declaration of an invalid form — a named or namespace clause beside or instead of the default binding, a compiler-provided name bound, or a side-effect-only form — still imports the module its specifier designates: 11.2 leaves an import's resolved target undefined only "when specifier form or discovery defines none" (`view` reports the target of each such declaration), and SPEC 14 reports every condition except "where another error makes it undetectable" — the declaration's 14.15 does not. So such a declaration relates its file to the designated one in the import relation exactly as a valid declaration designating the same file does, and a cycle's 14.9 locates it among the participating declarations.
-
-**Observed** (while planning, from the code at `f2ff6c3`; not run): `importCycleFindings` in `src/core/graph.ts` builds the file relation from each declaration's `targetFile`, which `analyzeSpecImports` (`src/core/spec-references.ts`) resets to null for every invalid import. So with `specs/A.mdx` = `import B, { x } from "./B.xspec"`, blank line, `<S id="a">`, `A`, `</S>` and `specs/B.mdx` = `import A from "./A.xspec"`, blank line, `<S id="b">`, `B`, `</S>`, `check --json` should report A's 14.15 and no 14.9; and `specs/A.mdx` = `import A, { x } from "./A.xspec"`, … its 14.15 alone. Expected: beside the 14.15, one 14.9 locating both declarations (A's at [0, 32), B's at [0, 25)), resp. the self-import declaration (a cycle of length one). Confirm the observation before changing anything; if the product already reports the cycles, record that in the Ledger row and close the task without a code change.
-
-**Location.** `importCycleFindings` in `src/core/graph.ts` — its doc comment says the relation runs "over each parsed file's valid imports' designated files". `SpecImport.designatedFile` (spec-references.ts) keeps the designated file through the invalid-import reset — 11.4's `target` datum, set exactly when specifier form and discovery designate a discovered spec source, a 14.19 member included.
-
-**Change.** Build the import relation, and locate each step's participating declarations, from `designatedFile` instead of `targetFile`. Rewrite the doc comment, citing SPEC 2.1, 11.2, and 14. Nothing else reads the relation on a failing workspace (moves and their would-be import cycles run on valid workspaces, where the two fields agree), so no other consumer changes.
-
-**Verification.** No suite test pins it (T2.1-5's cycles use valid imports; no invalid-import staging's target imports back). By hand: the two stagings above, each also with A's declaration spelled `import * as B from "./B.xspec"`, `import S from "./B.xspec"`, and `import "./B.xspec"` (resp. the self-import so spelled) — each reports the 14.9 beside the 14.15, with exactly the participating declarations located; a valid two-file cycle and a valid self-import unchanged; an import designating nothing (`import B, { x } from "./missing.xspec"`) relates no files. Regressions: `section-2.1` (T2.1-3, T2.1-5), `section-5.1-5.3` (T5.3-1's cross-file arm and its co-staged import cycle), `section-11.2`, `section-11.4`, `section-14` (T14-8), `section-12.0-iv`, `section-16-p8`, `section-16-p11`.
 
 ## Task 144 — Report every cycle, not one per strongly connected component (SPEC 5.3, 2.1, 14.9, 14 location cardinality and `refused-cycle`, 6.5; A3)
 
