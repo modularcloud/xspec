@@ -23,12 +23,13 @@
 //     "states": [<node state>, …],
 //     "strategy": "path-blocks" | "audit" | "coverage",
 //     "texts": [<text>, …],
-//     "version": 2
+//     "version": 3
 //   }
 //
 // where every node reference <ref> is a canonical identity key (identity
-// policy below). The three tables hold what the items record, each value
-// once (`SessionTables`): `references` every canonical reference an item
+// policy below). The three tables hold what the items record when the
+// session is created, each value once (`SessionTables`; later records,
+// below): `references` every canonical reference an item
 // holds, `states` every distinct recorded node state (`{"hashes": {…},
 // "present": true}` or `{"hashes": "absent", "present": false}`, SPEC
 // 10.4), and `texts` every distinct snapshot text. An item refers to them
@@ -38,15 +39,43 @@
 // with what its items record, never with how often they repeat it (an
 // n-deep section chain's audit items, each recording ~n nodes, are index
 // runs over a table of n + 1 references rather than O(n³) bytes of
-// spelled identities). Tables are append-only
-// across a session's writes: a write keeps every entry at its index and
-// appends what its items newly hold, so an index denotes the same value
-// in every later file of the session and an unchanged item is stored
-// with unchanged bytes. An index list is a string of space-separated
+// spelled identities). An index list is a string of space-separated
 // tokens — `i`, `i-j` for the ascending run i … j, and, in a state or
 // text list, `i*k` for i repeated k times (`encodeIndexList`) — so runs
 // of consecutive indices, which document-order numbering makes common,
 // take one token.
+//
+// Stably keyed (SPEC 13.4: durable files "are line-oriented or stably
+// keyed so that concurrent additions merge textually"): the tables are
+// fixed by the write that creates the session (`creationTables`), and
+// every later write stores them byte for byte unchanged — no entry
+// appended, reordered, or dropped, even one no item names any more. No
+// write after creation assigns a table position, so every copy of a
+// session, on every branch, holds the same tables, and an index names the
+// same value in all of them. Whatever an item comes to record that the
+// tables lack — a reference first met after creation (a node joining the
+// item's scope, context, or origin), a node state (SPEC 10.4), a snapshot
+// text (10.7) — is kept inside that item's own entry, in its own
+// `references`, `states`, and `texts` members (each omitted when empty),
+// which its index lists address past the session tables' lengths: index i
+// names entry i of the session's table while i is below that table's
+// length n, and entry i − n of the item's own table from n on. An item's
+// own tables are built in an order that is a function of its value alone
+// (`itemEntry`), so a write stores every item it leaves unchanged with
+// unchanged bytes: a `no-change` or `skipped` resolve rewrites the
+// resolved item's entry alone (with `journalLength`, when the journal
+// grew), an `updated` resolve's re-derivation and a `split` the entries of
+// the items they add or reassign (with `nextItemId`, and for a `split`
+// `decompositions`). Writes changing different items — resolutions on
+// different branches, each recording new node states and texts after
+// source edits — therefore change disjoint item entries and merge
+// textually. An item changed on both sides conflicts inside its own entry
+// alone: either side's entry, taken whole, reads back that side's
+// resolution, and both sides' entries kept side by side read as corrupt
+// (duplicate `id`, SPEC 10.1), never as a silently different resolution.
+// The cost, accepted: a value that many items record anew after creation
+// (a node's state after an edit, recorded by each item resolved over it)
+// is stored once per recording item rather than once per session.
 //
 // Each item carries exactly the fields of SPEC 10.2 — `id`, `kind`,
 // `scope` (stored as its root, `scope`, and the scope nodes beneath the
@@ -75,16 +104,24 @@
 // nodes are distinct and stored in byte order of their references (SPEC
 // 12.0), the order the in-memory tables take them in — the order a
 // format-1 file's sorted keys gave them, which human renderings follow.
-// Format 1 — the same document without the tables, every reference
-// spelled out and `baseline`/`current` and the text tables keyed by
-// reference — is still read (`validateSessionDocument`), so sessions
-// written before format 2 stay valid; every write stores format 2.
+//
+// Earlier formats are still read (`validateSessionDocument`), so sessions
+// written before format 3 stay valid; every write stores format 3. Format
+// 2 — the same document at `version` 2, with no item tables of its own,
+// whose writes extended the tables — is read with its tables as stored,
+// which every later write keeps, fixed from then on. Format 1 — the same
+// document without the tables, every reference spelled out and
+// `baseline`/`current` and the text tables keyed by reference — is read
+// with the tables its items would have had at creation, built by the
+// creating traversal over its items as read (`creationTables`), so two
+// copies of one format-1 file first written apart store identical tables
+// and differ only inside the items each write changed.
 //
 // Identity policy: every stored node reference — an item's `scope` and
 // `scopeDescendants` entries, its `recordedContext`, `context`, and
 // `origin` entries, the nodes of `baseline`/`current` and
-// of `baselineTexts`/`derivedTexts` (each, in format 2, the `references`
-// entry its index names), and each recorded decomposition's
+// of `baselineTexts`/`derivedTexts` (each, in formats 2 and 3, the
+// reference its index names), and each recorded decomposition's
 // `scope` — is a canonical identity (SPEC 5.4) in the injective key
 // encoding of src/core/journal.ts (`<position>:<identity>`,
 // `encodeCanonicalIdentity`). A node's canonical identity never changes as
@@ -544,21 +581,26 @@ export interface ReviewSession {
   /** In insertion order; presentation order is derived at read (10.5–10.7). */
   readonly items: readonly ReviewItem[];
   /**
-   * The tables of the file the session was read from (module header,
-   * "Stored document"), which the next write extends — never reorders —
-   * so every index that file holds keeps its meaning. Storage state alone,
-   * carrying no SPEC 10.2 information: absent for a session not yet
-   * written and for one read from a format-1 file, whose write starts the
-   * tables afresh.
+   * The session's tables (module header, "Stored document"), fixed by the
+   * write that created the session: every later write stores them byte
+   * for byte unchanged, keeping whatever its items record beyond them in
+   * the recording item's own entry, so no write after creation assigns a
+   * table position (SPEC 13.4: stably keyed). Storage state alone,
+   * carrying no SPEC 10.2 information: absent only for a session not yet
+   * written, whose creating write builds them (`creationTables`); read
+   * from a file, the tables it stores — for a format-1 file, which stores
+   * none, the tables its creating traversal builds over its items as read.
    */
   readonly tables?: SessionTables;
 }
 
 /**
- * A stored session's tables (module header, "Stored document"): every
- * canonical reference, recorded node state (SPEC 10.4), and snapshot text
- * (SPEC 10.7) its items index into, each once, in the order the session's
- * writes appended them.
+ * A session's tables (module header, "Stored document"): every canonical
+ * reference, recorded node state (SPEC 10.4), and snapshot text (SPEC
+ * 10.7) its items held when it was created, each once, in the order the
+ * creating write's traversal met them — a format-2 file's, every one its
+ * writes met, in the order they appended them. Whatever an item records
+ * beyond them later, its own entry keeps.
  */
 export interface SessionTables {
   readonly references: readonly string[];
@@ -725,130 +767,93 @@ function encodeIndexList(indices: readonly number[], repeats: boolean): string {
   return tokens.join(" ");
 }
 
-/**
- * The tables one write stores (module header, "Stored document"): the
- * session's tables as read, every entry kept at its index, extended by the
- * values its items newly hold, appended in `serializeSession`'s fixed
- * traversal order — so the stored text is a function of the session value
- * and the tables it was read with (SPEC 12.0), and a value already stored
- * keeps its index.
- */
-class SessionTableWriter {
-  readonly references: string[];
-  readonly states: RecordedNodeState[];
-  readonly texts: string[];
-  private readonly referenceIndex = new Map<string, number>();
-  private readonly stateByObject = new Map<RecordedNodeState, number>();
-  private readonly stateByContent = new Map<string, number>();
-  private readonly textIndex = new Map<string, number>();
-  /** Per reference index, its rank in byte order of the references
-   * (SPEC 12.0) — set by `rankReferences`, once every reference is in. */
-  private ranks: readonly number[] = [];
-  private ranked = false;
-
-  constructor(tables: SessionTables | undefined) {
-    this.references = [...(tables?.references ?? [])];
-    this.states = [...(tables?.states ?? [])];
-    this.texts = [...(tables?.texts ?? [])];
-    this.references.forEach((reference, index) => {
-      if (!this.referenceIndex.has(reference)) {
-        this.referenceIndex.set(reference, index);
-      }
-    });
-    this.states.forEach((state, index) => {
-      this.stateByObject.set(state, index);
-      const key = recordedNodeStateKey(state);
-      if (!this.stateByContent.has(key)) this.stateByContent.set(key, index);
-    });
-    this.texts.forEach((text, index) => {
-      if (!this.textIndex.has(text)) this.textIndex.set(text, index);
-    });
-  }
-
-  /** The reference's index, appending it when new. */
-  reference(reference: string): number {
-    let index = this.referenceIndex.get(reference);
-    if (index === undefined) {
-      if (this.ranked) {
-        throw new Error(
-          `xspec internal error: the stored reference ${JSON.stringify(reference)} ` +
-            `was met after the reference table was ranked`,
-        );
-      }
-      index = this.references.length;
-      this.references.push(reference);
-      this.referenceIndex.set(reference, index);
-    }
-    return index;
-  }
-
-  /** The state's index, appending it when no equal state is stored. */
-  state(state: RecordedNodeState): number {
-    let index = this.stateByObject.get(state);
-    if (index === undefined) {
-      const key = recordedNodeStateKey(state);
-      index = this.stateByContent.get(key);
-      if (index === undefined) {
-        index = this.states.length;
-        this.states.push(state);
-        this.stateByContent.set(key, index);
-      }
-      this.stateByObject.set(state, index);
-    }
-    return index;
-  }
-
-  /** The text's index, appending it when new. */
-  text(text: string): number {
-    let index = this.textIndex.get(text);
-    if (index === undefined) {
-      index = this.texts.length;
-      this.texts.push(text);
-      this.textIndex.set(text, index);
-    }
-    return index;
-  }
-
-  /** Rank every reference by byte order (SPEC 12.0), once all are in. */
-  rankReferences(): void {
-    const order = this.references.map((_, index) => index);
-    order.sort((a, b) => compareBytes(this.references[a], this.references[b]));
-    const ranks = new Array<number>(order.length);
-    order.forEach((index, rank) => {
-      ranks[index] = rank;
-    });
-    this.ranks = ranks;
-    this.ranked = true;
-  }
-
-  /** Stored references as their indices, in byte order of the references
-   * (the order of a state or text table's nodes, module header). */
-  byteOrdered(references: readonly string[]): number[] {
-    return references
-      .map((reference) => this.reference(reference))
-      .sort((a, b) => this.ranks[a] - this.ranks[b]);
-  }
-}
-
 /** The text kinds of a snapshot (`RecordedTexts`), in stored order. */
 const TEXT_KINDS: readonly TextKind[] = ["ownText", "subtreeText"];
 
 /**
- * The format-2 document of a session (module header, "Stored document"):
- * the tables extended over the session's items — references in a first
- * pass (each item's scope, scope nodes beneath it, context, origin,
- * recorded context, then its recorded states' and text tables' nodes), so
- * a document-order generation numbers them in document order; recorded
- * node states next (each item's `baseline`, then `current`, nodes in byte
- * order); texts last (every own text, then every subtree text, each pass
- * over the items' `baselineTexts`, then `derivedTexts`) — then every item
- * stored by index.
+ * Per position of the distinct `references`, its rank in their byte order
+ * (SPEC 12.0) — the order of a state or text table's nodes (module
+ * header), compared once per reference rather than once per sort.
  */
-function sessionDocument(session: ReviewSession): JsonObject {
-  const writer = new SessionTableWriter(session.tables);
-  for (const item of session.items) {
-    for (const references of [
-      [item.scope],
+function byteOrderRanks(references: readonly string[]): number[] {
+  const order = references.map((_, index) => index);
+  order.sort((a, b) => compareBytes(references[a], references[b]));
+  const ranks = new Array<number>(order.length);
+  order.forEach((index, rank) => {
+    ranks[index] = rank;
+  });
+  return ranks;
+}
+
+/**
+ * A recorded node state table's lookup: the index of a state equal to the
+ * one asked for, found by object first — a decoded or memoized state is
+ * the table's own object (`TableReader`, src/core/review-state.ts) — and
+ * by content otherwise, the answer then kept for the object.
+ */
+class StateLookup {
+  private readonly byObject = new Map<RecordedNodeState, number | null>();
+  private readonly byContent = new Map<string, number>();
+
+  constructor(states: readonly RecordedNodeState[]) {
+    states.forEach((state, index) => {
+      this.add(state, index);
+    });
+  }
+
+  /** The index of a state equal to `state`, or undefined. */
+  find(state: RecordedNodeState): number | undefined {
+    const known = this.byObject.get(state);
+    if (known !== undefined) return known ?? undefined;
+    const index = this.byContent.get(recordedNodeStateKey(state));
+    this.byObject.set(state, index ?? null);
+    return index;
+  }
+
+  /**
+   * Record `state` at `index`: its object keeps the first index recorded
+   * for it, its content the first index any equal state was recorded at —
+   * so a decoded state keeps the very index it was stored at.
+   */
+  add(state: RecordedNodeState, index: number): void {
+    this.byObject.set(state, this.byObject.get(state) ?? index);
+    const key = recordedNodeStateKey(state);
+    if (!this.byContent.has(key)) this.byContent.set(key, index);
+  }
+}
+
+/**
+ * The tables a session's creating write builds over its items (module
+ * header, "Stored document"), each value once, in first-use order:
+ * references in a first pass (each item's scope, the scope nodes beneath
+ * it, its context, origin, and recorded context, then its recorded
+ * states' and text tables' nodes), so a document-order generation numbers
+ * them in document order; recorded node states next (each item's
+ * `baseline`, then its `current`, nodes in byte order of their
+ * references); texts last (every own text, then every subtree text, each
+ * pass over the items' `baselineTexts`, then their `derivedTexts`, nodes
+ * in byte order). This is the traversal format 2 made of a new session,
+ * so a created session's tables, and its items' index lists over them,
+ * are format 2's. It also gives a format-1 file its tables, built over
+ * its items as read (`validateSessionDocument`) — a function of the file
+ * alone. Beside the tables comes each traversed map's nodes as table
+ * indices in byte order, which the creating write's encoding reuses.
+ */
+function createTables(items: readonly ReviewItem[]): {
+  readonly tables: SessionTables;
+  readonly orderedNodes: Map<object, readonly number[]>;
+} {
+  const references: string[] = [];
+  const referenceIndex = new Map<string, number>();
+  const addReference = (reference: string): void => {
+    if (!referenceIndex.has(reference)) {
+      referenceIndex.set(reference, references.length);
+      references.push(reference);
+    }
+  };
+  for (const item of items) {
+    addReference(item.scope);
+    for (const list of [
       item.scopeDescendants,
       item.context,
       item.origin,
@@ -858,20 +863,206 @@ function sessionDocument(session: ReviewSession): JsonObject {
       Object.keys(item.baselineTexts),
       Object.keys(item.derivedTexts),
     ]) {
-      for (const reference of references) writer.reference(reference);
+      for (const reference of list) addReference(reference);
     }
   }
-  writer.rankReferences();
+  const ranks = byteOrderRanks(references);
+  // Equal in-memory states and text tables (an audit item's `baseline` and
+  // `current`, say) are one object, ordered once.
+  const orderedNodes = new Map<object, readonly number[]>();
+  const byteOrdered = (
+    map: Readonly<Record<string, unknown>>,
+  ): readonly number[] => {
+    let nodes = orderedNodes.get(map);
+    if (nodes === undefined) {
+      nodes = Object.keys(map)
+        .map((reference) => referenceIndex.get(reference) as number)
+        .sort((a, b) => ranks[a] - ranks[b]);
+      orderedNodes.set(map, nodes);
+    }
+    return nodes;
+  };
 
+  const states: RecordedNodeState[] = [];
+  const stateLookup = new StateLookup([]);
+  const visited = new Set<RecordedState>();
+  for (const item of items) {
+    for (const state of [item.baseline, item.current]) {
+      if (visited.has(state)) continue;
+      visited.add(state);
+      for (const index of byteOrdered(state.nodes)) {
+        const node = state.nodes[references[index]];
+        if (stateLookup.find(node) === undefined) {
+          stateLookup.add(node, states.length);
+          states.push(node);
+        }
+      }
+    }
+  }
+
+  const texts: string[] = [];
+  const textIndex = new Set<string>();
+  for (const kind of TEXT_KINDS) {
+    for (const item of items) {
+      for (const table of [item.baselineTexts, item.derivedTexts]) {
+        for (const index of byteOrdered(table)) {
+          const text = table[references[index]][kind];
+          if (text !== undefined && !textIndex.has(text)) {
+            textIndex.add(text);
+            texts.push(text);
+          }
+        }
+      }
+    }
+  }
+  return { tables: { references, states, texts }, orderedNodes };
+}
+
+/** The tables `createTables` builds over `items` (a format-1 file's). */
+function creationTables(items: readonly ReviewItem[]): SessionTables {
+  return createTables(items).tables;
+}
+
+/**
+ * The fixed tables a write stores (module header, "Stored document") and
+ * their lookups: each value's index — by content the first, should a
+ * format-2 file's tables hold a state or text twice, while a decoded state
+ * keeps its own (`StateLookup`) — or undefined for a value they lack;
+ * and, per map object whose nodes the tables all hold, its nodes as table
+ * indices in byte order (`orderedNodes`), shared by every item holding it.
+ */
+class FixedTables {
+  /** Per reference index, its rank in byte order (SPEC 12.0). */
+  readonly ranks: readonly number[];
+  private readonly referenceIndex = new Map<string, number>();
+  private readonly stateLookup: StateLookup;
+  private readonly textIndex = new Map<string, number>();
+
+  constructor(
+    readonly tables: SessionTables,
+    readonly orderedNodes = new Map<object, readonly number[]>(),
+  ) {
+    tables.references.forEach((reference, index) => {
+      if (!this.referenceIndex.has(reference)) {
+        this.referenceIndex.set(reference, index);
+      }
+    });
+    this.ranks = byteOrderRanks(tables.references);
+    this.stateLookup = new StateLookup(tables.states);
+    tables.texts.forEach((text, index) => {
+      if (!this.textIndex.has(text)) this.textIndex.set(text, index);
+    });
+  }
+
+  reference(reference: string): number | undefined {
+    return this.referenceIndex.get(reference);
+  }
+
+  state(state: RecordedNodeState): number | undefined {
+    return this.stateLookup.find(state);
+  }
+
+  text(text: string): number | undefined {
+    return this.textIndex.get(text);
+  }
+}
+
+/**
+ * One item's stored entry (module header, "Stored document"): every member
+ * by index — into the session's fixed tables wherever they hold the value,
+ * and otherwise into the item's own `references`, `states`, and `texts`,
+ * addressed past the fixed tables' lengths and stored with the entry, each
+ * omitted when empty. The own tables' order is a function of the item's
+ * value alone, never of how its in-memory maps were built: own references
+ * as the item's lists first name them — its scope, the scope nodes beneath
+ * it, its context, origin, and recorded context — then, map by map
+ * (`baseline`, `current`, `baselineTexts`, `derivedTexts`), the ones only a
+ * map's nodes name, in byte order; own states as `baseline`, then
+ * `current`, first holds them, nodes in byte order; own texts as the text
+ * tables first hold them — every own text, then every subtree text, each
+ * pass over `baselineTexts`, then `derivedTexts`, nodes in byte order. So
+ * an item a write leaves unchanged — read back from the file the write
+ * replaces, its maps rebuilt in stored order — is stored with the same
+ * bytes (SPEC 13.4).
+ */
+function itemEntry(item: ReviewItem, fixed: FixedTables): JsonObject {
+  const shared = fixed.tables;
+  const sharedReferences = shared.references.length;
+  const ownReferences: string[] = [];
+  const ownReferenceIndex = new Map<string, number>();
+  const known = (reference: string): number | undefined =>
+    fixed.reference(reference) ?? ownReferenceIndex.get(reference);
+  const addOwnReference = (reference: string): number => {
+    const index = sharedReferences + ownReferences.length;
+    ownReferenceIndex.set(reference, index);
+    ownReferences.push(reference);
+    return index;
+  };
+  // The lists are encoded first, in this order, so their own references
+  // are numbered as the lists first name them.
+  const listIndex = (reference: string): number =>
+    known(reference) ?? addOwnReference(reference);
+  const listJson = (references: readonly string[]): string =>
+    encodeIndexList(references.map(listIndex), false);
+  const scope = listIndex(item.scope);
+  const scopeDescendants = listJson(item.scopeDescendants);
+  const context = listJson(item.context);
+  const origin = listJson(item.origin);
+  const recordedContext = listJson(item.recordedContext);
+
+  const referenceAt = (index: number): string =>
+    index < sharedReferences
+      ? shared.references[index]
+      : ownReferences[index - sharedReferences];
+  // Byte order of the references (SPEC 12.0): by rank within the fixed
+  // table, by comparison wherever an own reference takes part.
+  const compare = (a: number, b: number): number =>
+    a < sharedReferences && b < sharedReferences
+      ? fixed.ranks[a] - fixed.ranks[b]
+      : compareBytes(referenceAt(a), referenceAt(b));
+  const orderedNodes = new Map<object, readonly number[]>();
+  const byteOrdered = (
+    map: Readonly<Record<string, unknown>>,
+  ): readonly number[] => {
+    let nodes = fixed.orderedNodes.get(map) ?? orderedNodes.get(map);
+    if (nodes === undefined) {
+      const keys = Object.keys(map);
+      const unknown = keys.filter(
+        (reference) => known(reference) === undefined,
+      );
+      unknown.sort(compareBytes).forEach(addOwnReference);
+      const indices = keys.map((reference) => known(reference) as number);
+      indices.sort(compare);
+      // A map whose nodes the fixed tables all hold orders alike in every
+      // item holding it.
+      const allShared = indices.every((index) => index < sharedReferences);
+      (allShared ? fixed.orderedNodes : orderedNodes).set(map, indices);
+      nodes = indices;
+    }
+    return nodes;
+  };
+
+  const sharedStates = shared.states.length;
+  const ownStates: RecordedNodeState[] = [];
+  const ownStateLookup = new StateLookup([]);
+  const stateIndexOf = (state: RecordedNodeState): number => {
+    let index = fixed.state(state) ?? ownStateLookup.find(state);
+    if (index === undefined) {
+      index = sharedStates + ownStates.length;
+      ownStateLookup.add(state, index);
+      ownStates.push(state);
+    }
+    return index;
+  };
   // Equal in-memory states and text tables (an audit item's `baseline` and
   // `current`, say) are one object, stored by one encoding.
   const stateMaps = new Map<RecordedState, JsonObject>();
   const stateMapJson = (state: RecordedState): JsonObject => {
     let json = stateMaps.get(state);
     if (json === undefined) {
-      const nodes = writer.byteOrdered(Object.keys(state.nodes));
+      const nodes = byteOrdered(state.nodes);
       const states = nodes.map((index) =>
-        writer.state(state.nodes[writer.references[index]]),
+        stateIndexOf(state.nodes[referenceAt(index)]),
       );
       json = {
         nodes: encodeIndexList(nodes, false),
@@ -881,102 +1072,102 @@ function sessionDocument(session: ReviewSession): JsonObject {
     }
     return json;
   };
-  for (const item of session.items) {
-    stateMapJson(item.baseline);
-    stateMapJson(item.current);
-  }
+  const baseline = stateMapJson(item.baseline);
+  const current = stateMapJson(item.current);
 
-  const textEntries = new Map<
-    RecordedTextTable,
-    readonly (readonly [number, RecordedTexts])[]
-  >();
-  const entriesOf = (
-    table: RecordedTextTable,
-  ): readonly (readonly [number, RecordedTexts])[] => {
-    let entries = textEntries.get(table);
-    if (entries === undefined) {
-      entries = writer
-        .byteOrdered(Object.keys(table))
-        .map((index) => [index, table[writer.references[index]]] as const);
-      textEntries.set(table, entries);
+  const sharedTexts = shared.texts.length;
+  const ownTexts: string[] = [];
+  const ownTextIndex = new Map<string, number>();
+  const textIndexOf = (text: string): number => {
+    let index = fixed.text(text) ?? ownTextIndex.get(text);
+    if (index === undefined) {
+      index = sharedTexts + ownTexts.length;
+      ownTextIndex.set(text, index);
+      ownTexts.push(text);
     }
-    return entries;
+    return index;
   };
+  const kindJson = new Map<RecordedTextTable, Map<TextKind, JsonObject>>();
   for (const kind of TEXT_KINDS) {
-    for (const item of session.items) {
-      for (const table of [item.baselineTexts, item.derivedTexts]) {
-        for (const [, texts] of entriesOf(table)) {
-          const text = texts[kind];
-          if (text !== undefined) writer.text(text);
+    for (const table of [item.baselineTexts, item.derivedTexts]) {
+      let kinds = kindJson.get(table);
+      if (kinds === undefined) {
+        kinds = new Map<TextKind, JsonObject>();
+        kindJson.set(table, kinds);
+      }
+      if (kinds.has(kind)) continue;
+      const nodes: number[] = [];
+      const texts: number[] = [];
+      for (const index of byteOrdered(table)) {
+        const text = table[referenceAt(index)][kind];
+        if (text !== undefined) {
+          nodes.push(index);
+          texts.push(textIndexOf(text));
         }
       }
+      kinds.set(kind, {
+        nodes: encodeIndexList(nodes, false),
+        texts: encodeIndexList(texts, true),
+      });
     }
   }
-  const textMaps = new Map<RecordedTextTable, JsonObject>();
   const textMapJson = (table: RecordedTextTable): JsonObject => {
-    let json = textMaps.get(table);
-    if (json === undefined) {
-      const entries = entriesOf(table);
-      const kindJson = (kind: TextKind): JsonObject => {
-        const nodes: number[] = [];
-        const texts: number[] = [];
-        for (const [index, recorded] of entries) {
-          const text = recorded[kind];
-          if (text !== undefined) {
-            nodes.push(index);
-            texts.push(writer.text(text));
-          }
-        }
-        return {
-          nodes: encodeIndexList(nodes, false),
-          texts: encodeIndexList(texts, true),
-        };
-      };
-      json = {
-        ownText: kindJson("ownText"),
-        subtreeText: kindJson("subtreeText"),
-      };
-      textMaps.set(table, json);
-    }
-    return json;
+    const kinds = kindJson.get(table) as Map<TextKind, JsonObject>;
+    return {
+      ownText: kinds.get("ownText"),
+      subtreeText: kinds.get("subtreeText"),
+    };
   };
 
-  const listJson = (references: readonly string[]): string =>
-    encodeIndexList(
-      references.map((reference) => writer.reference(reference)),
-      false,
-    );
-  const items = session.items.map((item): JsonObject => ({
+  return {
     id: item.id,
     kind: item.kind,
-    scope: writer.reference(item.scope),
-    scopeDescendants: listJson(item.scopeDescendants),
-    context: listJson(item.context),
+    scope,
+    scopeDescendants,
+    context,
     reason: item.reason,
-    origin: listJson(item.origin),
-    baseline: stateMapJson(item.baseline),
-    current: stateMapJson(item.current),
-    recordedContext: listJson(item.recordedContext),
+    origin,
+    baseline,
+    current,
+    recordedContext,
     status: item.status,
     note: item.note,
     blockedBy: [...item.blockedBy],
     baselineTexts: textMapJson(item.baselineTexts),
     derivedTexts: textMapJson(item.derivedTexts),
-  }));
+    references: ownReferences.length === 0 ? undefined : ownReferences,
+    states:
+      ownStates.length === 0
+        ? undefined
+        : ownStates.map(recordedNodeStateToJson),
+    texts: ownTexts.length === 0 ? undefined : ownTexts,
+  };
+}
 
+/**
+ * The format-3 document of a session (module header, "Stored document"):
+ * the session's fixed tables — for a session its creating write is
+ * storing, the tables `createTables` builds over its items — stored as
+ * they are, and every item stored by index (`itemEntry`).
+ */
+function sessionDocument(session: ReviewSession): JsonObject {
+  const created =
+    session.tables === undefined ? createTables(session.items) : undefined;
+  const tables = created?.tables ?? (session.tables as SessionTables);
+  const fixed = new FixedTables(tables, created?.orderedNodes);
   return {
     creationParameters: parametersToJson(session.parameters),
     decompositions: session.decompositions.map((decomposition) => ({
       kind: decomposition.kind,
       scope: decomposition.scope,
     })),
-    items,
+    items: session.items.map((item) => itemEntry(item, fixed)),
     journalLength: session.journalLength,
     nextItemId: session.nextItemId,
-    references: writer.references,
-    states: writer.states.map(recordedNodeStateToJson),
+    references: tables.references,
+    states: tables.states.map(recordedNodeStateToJson),
     strategy: session.parameters.strategy,
-    texts: writer.texts,
+    texts: tables.texts,
     version: SESSION_VERSION,
   };
 }
@@ -1021,17 +1212,18 @@ export function parametersToJson(parameters: SessionParameters): JsonObject {
 }
 
 /** The stored format every write produces (module header). */
-const SESSION_VERSION = 2;
+const SESSION_VERSION = 3;
 
-/** The earlier stored format, still read (module header): any version
- * other than these two is corrupt (unintelligible). */
+/** The earlier stored formats, still read (module header): any version
+ * other than these three is corrupt (unintelligible). */
+const FORMAT_2_VERSION = 2;
 const FORMAT_1_VERSION = 1;
 
 /**
  * Serialize a session to its stored form: one canonical JSON document in
- * format 2 (module header; SPEC 10.1 "plain, deterministic"; 13.4 "stable
- * ordering and sorted keys"; 12.0 byte determinism — the text is a pure
- * function of the session value and the tables it was read with).
+ * format 3 (module header; SPEC 10.1 "plain, deterministic"; 13.4 "stable
+ * ordering and sorted keys", "stably keyed"; 12.0 byte determinism — the
+ * text is a pure function of the session value and its fixed tables).
  */
 export function serializeSession(session: ReviewSession): string {
   return canonicalJson(sessionDocument(session));
@@ -1317,11 +1509,24 @@ const ITEM_REQUIRED_KEYS = [
   "derivedTexts",
 ] as const;
 
+/** A format-1 or format-2 item's optional member: the `note` (SPEC 10.2). */
+const ITEM_OPTIONAL_KEYS = ["note"] as const;
+
+/** A format-3 item's optional members (module header): the `note`, and
+ * the item's own tables, each omitted when empty. */
+const FORMAT_3_ITEM_OPTIONAL_KEYS = [
+  ...ITEM_OPTIONAL_KEYS,
+  "references",
+  "states",
+  "texts",
+] as const;
+
 /**
  * How a stored format spells an item's node-bearing members (module
  * header): format 1 spells each reference out and keys recorded states and
- * text tables by reference; format 2 indexes into the session's tables
- * (`TableReader`). Each decoder reports what it finds malformed.
+ * text tables by reference; formats 2 and 3 index into the session's
+ * tables and, in format 3, the item's own (`TableReader`). Each decoder
+ * reports what it finds malformed.
  */
 interface ItemMemberDecoder {
   /** The scope node's stored reference, or null (reported). */
@@ -1343,11 +1548,17 @@ const FORMAT_1_MEMBERS: ItemMemberDecoder = {
   texts: parseTextTable,
 };
 
+/**
+ * One stored item (SPEC 10.2): its members decoded by `members`, the
+ * stored format's spellings, and none beyond the fields of 10.2 and the
+ * format's `optional` members. Null, reported, when anything is malformed.
+ */
 function parseItem(
   value: unknown,
   where: string,
   problems: Problems,
   members: ItemMemberDecoder,
+  optional: readonly string[],
 ): ReviewItem | null {
   if (!isPlainJsonObject(value)) {
     problems.add(`${where} must be an object, found ${describeType(value)}`);
@@ -1355,7 +1566,7 @@ function parseItem(
   }
   const before = problems.list.length;
   // SPEC 10.1: the fields of 10.2 present and well-formed.
-  checkKeys(value, where, ITEM_REQUIRED_KEYS, ["note"], problems);
+  checkKeys(value, where, ITEM_REQUIRED_KEYS, optional, problems);
 
   const id = value["id"];
   if (
@@ -1860,7 +2071,7 @@ function requireCount(
 }
 
 // ---------------------------------------------------------------------------
-// Format 2: the stored tables and index lists (module header)
+// Formats 2 and 3: the stored tables and index lists (module header)
 // ---------------------------------------------------------------------------
 
 /** One index-list token (module header, `encodeIndexList`): an index, an
@@ -1947,11 +2158,12 @@ function decodeIndexList(
 }
 
 /**
- * The tables of a format-2 document (module header): `references` — each
- * a canonical reference (`checkCanonicalReference`), none repeated, so an
- * index names one node — `states`, each a recorded node state (SPEC 10.4),
- * and `texts`, each a string. Null, reported, when any entry is malformed:
- * the items' indices then have nothing sound to resolve against.
+ * The tables of a format-2 or format-3 document (module header):
+ * `references` — each a canonical reference (`checkCanonicalReference`),
+ * none repeated, so an index names one node — `states`, each a recorded
+ * node state (SPEC 10.4), and `texts`, each a string. Null, reported, when
+ * any entry is malformed: the items' indices then have nothing sound to
+ * resolve against.
  */
 function parseSessionTables(
   document: Record<string, unknown>,
@@ -2006,49 +2218,166 @@ function parseSessionTables(
   return problems.list.length > before ? null : { references, states, texts };
 }
 
+/** No tables: an item recording nothing beyond the session's tables. */
+const NO_TABLES: SessionTables = { references: [], states: [], texts: [] };
+
 /**
- * Format 2's member spellings over one file's tables (module header):
- * every index resolves to its table's own value — so a canonical reference
- * is one string however many items hold it, and a recorded node state one
+ * Format 3: one item's own tables (module header, "Stored document") — its
+ * `references`, `states`, and `texts` members, each optional (a write
+ * omits an empty one, so an empty one is malformed) and otherwise an
+ * array: each reference canonical (`checkCanonicalReference`) and neither
+ * in the session's tables nor repeated, so an index still names one node;
+ * each state a recorded node state (SPEC 10.4); each text a string. Null,
+ * reported, when any is malformed: the item's indices then have nothing
+ * sound to resolve against.
+ */
+function parseItemTables(
+  value: Record<string, unknown>,
+  where: string,
+  sessionReferences: ReadonlySet<string>,
+  journalLength: number | null,
+  problems: Problems,
+): SessionTables | null {
+  const before = problems.list.length;
+  const entries = (key: string): readonly unknown[] => {
+    if (!Object.hasOwn(value, key)) return [];
+    const member = value[key];
+    if (!Array.isArray(member)) {
+      problems.add(
+        `${where}.${key} must be an array, found ${describeType(member)}`,
+      );
+      return [];
+    }
+    if (member.length === 0) {
+      problems.add(
+        `${where}.${key} is an empty array — an item's own table is ` +
+          `stored only when it holds an entry`,
+      );
+    }
+    return member;
+  };
+  const references: string[] = [];
+  const seen = new Set<string>();
+  entries("references").forEach((entry, index) => {
+    const entryWhere = `${where}.references[${String(index)}]`;
+    if (!requireString(entry, entryWhere, problems)) return;
+    if (!checkCanonicalReference(entry, entryWhere, journalLength, problems)) {
+      return;
+    }
+    if (sessionReferences.has(entry) || seen.has(entry)) {
+      problems.add(
+        `${entryWhere} repeats the stored reference ` +
+          `${JSON.stringify(entry)}, which ` +
+          (seen.has(entry)
+            ? "the item's own references already hold"
+            : "the session's references hold") +
+          ` — each reference is stored once`,
+      );
+      return;
+    }
+    seen.add(entry);
+    references.push(entry);
+  });
+  const states: RecordedNodeState[] = [];
+  entries("states").forEach((entry, index) => {
+    const state = parseRecordedNodeState(
+      entry,
+      `${where}.states[${String(index)}]`,
+      problems,
+    );
+    if (state !== null) states.push(state);
+  });
+  const texts: string[] = [];
+  entries("texts").forEach((entry, index) => {
+    if (requireString(entry, `${where}.texts[${String(index)}]`, problems)) {
+      texts.push(entry);
+    }
+  });
+  if (problems.list.length > before) return null;
+  return references.length + states.length + texts.length === 0
+    ? NO_TABLES
+    : { references, states, texts };
+}
+
+/**
+ * The member spellings of formats 2 and 3 (module header): indices into
+ * the session's tables, extended — for a format-3 item with tables of its
+ * own — by the item's, index i naming the session table's entry i below
+ * that table's length n and the item table's entry i − n from it. Every
+ * index resolves to its table's own value — so a canonical reference is
+ * one string however many items hold it, and a recorded node state one
  * object — and identically spelled recorded states and text entries
  * decode to one shared value, as the in-memory model, readonly throughout,
- * allows.
+ * allows (a reader serves one item when its tables are the item's, so no
+ * spelling is shared across tables that differ).
  */
 class TableReader implements ItemMemberDecoder {
   private readonly stateMaps = new Map<string, RecordedState>();
   private readonly textEntries = new Map<string, RecordedTexts>();
+  private readonly referenceCount: number;
+  private readonly stateCount: number;
+  private readonly textCount: number;
 
-  constructor(private readonly tables: SessionTables) {}
+  constructor(
+    private readonly tables: SessionTables,
+    private readonly own: SessionTables = NO_TABLES,
+  ) {
+    this.referenceCount = tables.references.length + own.references.length;
+    this.stateCount = tables.states.length + own.states.length;
+    this.textCount = tables.texts.length + own.texts.length;
+  }
+
+  private referenceAt(index: number): string {
+    const shared = this.tables.references;
+    return index < shared.length
+      ? shared[index]
+      : this.own.references[index - shared.length];
+  }
+
+  private stateAt(index: number): RecordedNodeState {
+    const shared = this.tables.states;
+    return index < shared.length
+      ? shared[index]
+      : this.own.states[index - shared.length];
+  }
+
+  private textAt(index: number): string {
+    const shared = this.tables.texts;
+    return index < shared.length
+      ? shared[index]
+      : this.own.texts[index - shared.length];
+  }
 
   scope(value: unknown, where: string, problems: Problems): string | null {
-    const references = this.tables.references;
     if (
       typeof value !== "number" ||
       !Number.isSafeInteger(value) ||
       value < 0 ||
-      value >= references.length
+      value >= this.referenceCount
     ) {
       problems.add(
-        `${where} must be the index of one of the session's ` +
-          `${String(references.length)} stored references, found ` +
+        `${where} must be the index of one of the ` +
+          `${String(this.referenceCount)} stored references it can name, ` +
+          `found ` +
           (typeof value === "number" ? String(value) : describeType(value)),
       );
       return null;
     }
-    return references[value];
+    return this.referenceAt(value);
   }
 
   references(value: unknown, where: string, problems: Problems): string[] {
-    const references = this.tables.references;
     const indices = decodeIndexList(
       value,
       where,
-      references.length,
-      references.length,
+      this.referenceCount,
+      this.referenceCount,
       false,
       problems,
     );
-    return indices === null ? [] : indices.map((index) => references[index]);
+    return indices === null
+      ? []
+      : indices.map((index) => this.referenceAt(index));
   }
 
   state(value: unknown, where: string, problems: Problems): RecordedState {
@@ -2073,7 +2402,7 @@ class TableReader implements ItemMemberDecoder {
     const states = decodeIndexList(
       statesValue,
       `${where}.states`,
-      this.tables.states.length,
+      this.stateCount,
       nodes.length,
       true,
       problems,
@@ -2088,7 +2417,7 @@ class TableReader implements ItemMemberDecoder {
     }
     const recorded: Record<string, RecordedNodeState> = {};
     nodes.forEach((index, at) => {
-      recorded[this.tables.references[index]] = this.tables.states[states[at]];
+      recorded[this.referenceAt(index)] = this.stateAt(states[at]);
     });
     const state: RecordedState = { nodes: recorded };
     if (key !== null) this.stateMaps.set(key, state);
@@ -2124,7 +2453,7 @@ class TableReader implements ItemMemberDecoder {
       const texts = decodeIndexList(
         entries["texts"],
         `${kindWhere}.texts`,
-        this.tables.texts.length,
+        this.textCount,
         nodes.length,
         true,
         problems,
@@ -2138,7 +2467,7 @@ class TableReader implements ItemMemberDecoder {
         return {};
       }
       nodes.forEach((index, at) => {
-        const reference = this.tables.references[index];
+        const reference = this.referenceAt(index);
         if (kind === "ownText") {
           ownTextOf.set(reference, texts[at]);
           table[reference] = this.textEntry(texts[at], null);
@@ -2159,12 +2488,11 @@ class TableReader implements ItemMemberDecoder {
     where: string,
     problems: Problems,
   ): number[] | null {
-    const references = this.tables.references;
     const indices = decodeIndexList(
       value,
       where,
-      references.length,
-      references.length,
+      this.referenceCount,
+      this.referenceCount,
       false,
       problems,
     );
@@ -2173,7 +2501,8 @@ class TableReader implements ItemMemberDecoder {
     for (const index of indices) {
       if (seen.has(index)) {
         problems.add(
-          `${where} lists the node ${JSON.stringify(references[index])} twice`,
+          `${where} lists the node ` +
+            `${JSON.stringify(this.referenceAt(index))} twice`,
         );
         return null;
       }
@@ -2187,13 +2516,12 @@ class TableReader implements ItemMemberDecoder {
     const key = `${own === null ? "" : String(own)}|${subtree === null ? "" : String(subtree)}`;
     let entry = this.textEntries.get(key);
     if (entry === undefined) {
-      const texts = this.tables.texts;
       entry =
         subtree === null
-          ? { ownText: texts[own as number] }
+          ? { ownText: this.textAt(own as number) }
           : own === null
-            ? { subtreeText: texts[subtree] }
-            : { ownText: texts[own], subtreeText: texts[subtree] };
+            ? { subtreeText: this.textAt(subtree) }
+            : { ownText: this.textAt(own), subtreeText: this.textAt(subtree) };
       this.textEntries.set(key, entry);
     }
     return entry;
@@ -2237,9 +2565,9 @@ function checkCanonicalReference(
 
 /**
  * SPEC 10.1: every node reference a format-1 item spells out, and every
- * recorded decomposition's, passes `checkCanonicalReference` (format 2's
- * items index the reference table, checked whole by
- * `parseSessionTables`).
+ * recorded decomposition's, passes `checkCanonicalReference` (the items of
+ * formats 2 and 3 index the reference tables, checked whole by
+ * `parseSessionTables` and, for an item's own, `parseItemTables`).
  */
 function checkCanonicalReferences(
   items: readonly ReviewItem[],
@@ -2448,21 +2776,24 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     );
     return { ok: false, problems: problems.list };
   }
-  // Module header: format 1 is read beside format 2, every write's; a
-  // document of any other version is judged against format 2's shape.
+  // Module header: formats 1 and 2 are read beside format 3, every
+  // write's; a document of any other version is judged against format 3's
+  // shape.
   const version = document["version"];
   const format1 = version === FORMAT_1_VERSION;
+  const format2 = version === FORMAT_2_VERSION;
   checkKeys(
     document,
     "the session document",
-    format1 ? FORMAT_1_DOCUMENT_KEYS : FORMAT_2_DOCUMENT_KEYS,
+    format1 ? FORMAT_1_DOCUMENT_KEYS : TABLE_DOCUMENT_KEYS,
     [],
     problems,
   );
-  if (version !== SESSION_VERSION && !format1) {
+  if (version !== SESSION_VERSION && !format1 && !format2) {
     problems.add(
       `the session document's version must be ${String(SESSION_VERSION)} ` +
-        `(or ${String(FORMAT_1_VERSION)}, the earlier format), found ` +
+        `(or ${String(FORMAT_2_VERSION)} or ${String(FORMAT_1_VERSION)}, ` +
+        `the earlier formats), found ` +
         (typeof version === "number" ? String(version) : describeType(version)),
     );
   }
@@ -2508,9 +2839,9 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     problems,
   );
 
-  // Format 2's items index the tables, decoded first; with a malformed
-  // table they have nothing to resolve against, and the session is
-  // already corrupt.
+  // The items of formats 2 and 3 index the tables, decoded first; with a
+  // malformed table they have nothing to resolve against, and the session
+  // is already corrupt.
   const tables = format1
     ? undefined
     : parseSessionTables(document, journalLength, problems);
@@ -2520,6 +2851,32 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
       : tables === null
         ? null
         : new TableReader(tables);
+  // Format 3: an item's own tables extend the session's for that item
+  // alone (module header); a reference the session's tables hold is never
+  // an item's own.
+  const sessionReferences =
+    tables === undefined || tables === null || format2
+      ? null
+      : new Set(tables.references);
+  const itemMembers = (
+    value: unknown,
+    where: string,
+  ): ItemMemberDecoder | null => {
+    if (sessionReferences === null || !isPlainJsonObject(value)) {
+      return members;
+    }
+    const own = parseItemTables(
+      value,
+      where,
+      sessionReferences,
+      journalLength,
+      problems,
+    );
+    if (own === null || own === NO_TABLES) {
+      return own === null ? null : members;
+    }
+    return new TableReader(tables as SessionTables, own);
+  };
 
   const itemsValue = document["items"];
   const items: ReviewItem[] = [];
@@ -2529,13 +2886,15 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
         describeType(itemsValue),
     );
   } else if (members !== null) {
+    const optional =
+      sessionReferences === null
+        ? ITEM_OPTIONAL_KEYS
+        : FORMAT_3_ITEM_OPTIONAL_KEYS;
     itemsValue.forEach((value, index) => {
-      const item = parseItem(
-        value,
-        `items[${String(index)}]`,
-        problems,
-        members,
-      );
+      const where = `items[${String(index)}]`;
+      const decoder = itemMembers(value, where);
+      if (decoder === null) return;
+      const item = parseItem(value, where, problems, decoder, optional);
       if (item !== null) {
         items.push(item);
       }
@@ -2562,7 +2921,10 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
       journalLength: journalLength as number,
       nextItemId: nextItemId as number,
       items,
-      tables,
+      // Module header: a format-1 file's tables are those its creating
+      // traversal builds over its items as read — a function of the file
+      // alone, so every copy's first write stores the same tables.
+      tables: tables ?? creationTables(items),
     },
   };
 }
@@ -2578,9 +2940,9 @@ const FORMAT_1_DOCUMENT_KEYS = [
   "version",
 ] as const;
 
-/** A format-2 document's members (module header): format 1's and the
- * tables. */
-const FORMAT_2_DOCUMENT_KEYS = [
+/** A format-2 or format-3 document's members (module header): format
+ * 1's and the tables. */
+const TABLE_DOCUMENT_KEYS = [
   ...FORMAT_1_DOCUMENT_KEYS,
   "references",
   "states",
