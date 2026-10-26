@@ -287,9 +287,53 @@ export function computeRecordedState(
 
   const nodes: Record<string, RecordedNodeState> = {};
   for (const [identity, names] of required) {
-    nodes[identity] = recordedNodeState(item, identity, names, inputs);
+    nodes[identity] = memoizedNodeState(item, identity, names, inputs);
   }
   return { nodes };
+}
+
+/** Per graph state, `memoizedNodeState`'s values by reference and key. */
+const NODE_STATES = new WeakMap<
+  ReviewStateInputs,
+  Map<string, Map<string, RecordedNodeState>>
+>();
+
+/**
+ * `recordedNodeState`, computed once per graph state (`inputs`, immutable),
+ * stored reference, role, and hash-name set — the values it is a function
+ * of (the item enters only through whether the reference is a
+ * `code-impact` item's scoped location) — so every item recording a node
+ * under one graph state shares one state object, and each node is resolved
+ * and looked up once rather than once per item holding it: an n-deep
+ * section chain's audit items hold O(n²) node entries over n + 1 nodes.
+ */
+function memoizedNodeState(
+  item: Pick<ItemStateSpec, "kind" | "scope">,
+  reference: string,
+  names: ReadonlySet<RecordedHashName>,
+  inputs: ReviewStateInputs,
+): RecordedNodeState {
+  let byReference = NODE_STATES.get(inputs);
+  if (byReference === undefined) {
+    byReference = new Map();
+    NODE_STATES.set(inputs, byReference);
+  }
+  let byKey = byReference.get(reference);
+  if (byKey === undefined) {
+    byKey = new Map();
+    byReference.set(reference, byKey);
+  }
+  let key =
+    item.kind === "code-impact" && reference === item.scope ? "location" : "";
+  for (const name of RECORDED_HASH_NAMES) {
+    if (names.has(name)) key += ` ${name}`;
+  }
+  let state = byKey.get(key);
+  if (state === undefined) {
+    state = recordedNodeState(item, reference, names, inputs);
+    byKey.set(key, state);
+  }
+  return state;
 }
 
 /** One node's recorded state (SPEC 10.4): presence judged by canonical
@@ -371,7 +415,7 @@ export function recordedNodesHold(
         }
       }
     }
-    const now = recordedNodeState(item, reference, names, inputs);
+    const now = memoizedNodeState(item, reference, names, inputs);
     if (!recordedNodeStatesEqual(recorded, now)) {
       return false;
     }
@@ -433,7 +477,46 @@ export function canonicalKeyOfCurrent(
   journal: Journal,
   spelling: string,
 ): string {
-  return encodeCanonicalIdentity(journal.canonicalIdentity(spelling));
+  const memo = codecMemo(journal);
+  let key = memo.keysOfCurrent.get(spelling);
+  if (key === undefined) {
+    key = encodeCanonicalIdentity(journal.canonicalIdentity(spelling));
+    memo.keysOfCurrent.set(spelling, key);
+  }
+  return key;
+}
+
+/** One journal's codec results (`codecMemo`). */
+interface CodecMemo {
+  readonly keysOfCurrent: Map<string, string>;
+  readonly resolutions: Map<string, ReferenceResolution>;
+  readonly resolutionsAt: Map<number, Map<string, ReferenceResolution>>;
+}
+
+const CODEC_MEMOS = new WeakMap<Journal, CodecMemo>();
+
+/**
+ * The codec seam's results for one journal, by argument
+ * (`canonicalKeyOfCurrent`, `resolveReference`, `resolveReferenceAt`):
+ * each is a function of the journal — immutable once parsed — and its
+ * string arguments alone, so a reference or spelling is decoded once per
+ * journal, and every caller shares one string per derived key or spelling.
+ * A shared string's hash and identity let the maps and graph lookups keyed
+ * by it run in constant time, where a fresh copy per call costs its whole
+ * length, and an n-deep section chain's identities are O(n) long and its
+ * audit items' node references O(n²).
+ */
+function codecMemo(journal: Journal): CodecMemo {
+  let memo = CODEC_MEMOS.get(journal);
+  if (memo === undefined) {
+    memo = {
+      keysOfCurrent: new Map(),
+      resolutions: new Map(),
+      resolutionsAt: new Map(),
+    };
+    CODEC_MEMOS.set(journal, memo);
+  }
+  return memo;
 }
 
 /**
@@ -464,7 +547,7 @@ export function spellingOfReference(
   journal: Journal,
   reference: string,
 ): string {
-  return currentSpellingOf(journal, parseReference(reference));
+  return resolveReference(journal, reference).spelling;
 }
 
 /** A stored reference's current resolution (`resolveReference`). */
@@ -491,11 +574,17 @@ export function resolveReference(
   journal: Journal,
   reference: string,
 ): ReferenceResolution {
-  const canonical = parseReference(reference);
-  return {
-    spelling: currentSpellingOf(journal, canonical),
-    resolves: resolvesCurrently(journal, canonical),
-  };
+  const memo = codecMemo(journal);
+  let resolution = memo.resolutions.get(reference);
+  if (resolution === undefined) {
+    const canonical = parseReference(reference);
+    resolution = {
+      spelling: currentSpellingOf(journal, canonical),
+      resolves: resolvesCurrently(journal, canonical),
+    };
+    memo.resolutions.set(reference, resolution);
+  }
+  return resolution;
 }
 
 /**
@@ -511,6 +600,25 @@ export function resolveReference(
  * of this reference.
  */
 export function resolveReferenceAt(
+  journal: Journal,
+  length: number,
+  reference: string,
+): ReferenceResolution {
+  const memo = codecMemo(journal);
+  let atLength = memo.resolutionsAt.get(length);
+  if (atLength === undefined) {
+    atLength = new Map();
+    memo.resolutionsAt.set(length, atLength);
+  }
+  let resolution = atLength.get(reference);
+  if (resolution === undefined) {
+    resolution = resolveReferenceAtUncached(journal, length, reference);
+    atLength.set(reference, resolution);
+  }
+  return resolution;
+}
+
+function resolveReferenceAtUncached(
   journal: Journal,
   length: number,
   reference: string,

@@ -7,8 +7,15 @@
 // `query node` and `show --json` (SPEC 12.4) lives in ./query-core.ts.
 
 import * as path from "node:path";
-import type { JsonObject, JsonValue } from "../../core/canonical-json.js";
-import { canonicalJson } from "../../core/canonical-json.js";
+import type {
+  JsonObject,
+  JsonStreamValue,
+  JsonValue,
+} from "../../core/canonical-json.js";
+import {
+  canonicalJson,
+  canonicalJsonChunks,
+} from "../../core/canonical-json.js";
 import type { ByteRange } from "../../core/bytes.js";
 import type { CompiledGlob } from "../../core/glob.js";
 import { compileGlob } from "../../core/glob.js";
@@ -72,6 +79,31 @@ export function reportBaselineFailure(
 /** SPEC 12.0: emit the single JSON document — the entire standard output. */
 export function emitDocument(stdout: CliWriter, document: JsonValue): 0 {
   stdout.write(canonicalJson(document));
+  return 0;
+}
+
+/**
+ * SPEC 12.0: emit the single JSON document — the entire standard output,
+ * byte for byte `emitDocument`'s — in bounded chunks
+ * (`canonicalJsonChunks`), each written once the stream has taken the one
+ * before, so a document whose deferred arrays are produced as it renders
+ * (`JsonDeferredArray`) never exists whole, in memory or as one string
+ * (SPEC 10.7: `review export` presents every item of a session, an answer
+ * that can outgrow both). A chunk the stream fails to take ends the
+ * emission there, the failure left to the stream's own error report.
+ */
+export async function emitDocumentStreamed(
+  stdout: CliWriter,
+  document: JsonStreamValue,
+): Promise<0> {
+  for (const chunk of canonicalJsonChunks(document)) {
+    const failed = await new Promise<boolean>((resolve) => {
+      stdout.write(chunk, (error) => {
+        resolve(error !== undefined && error !== null);
+      });
+    });
+    if (failed) break;
+  }
   return 0;
 }
 

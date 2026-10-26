@@ -12,7 +12,13 @@
  * identical bytes (SPEC 12.0 byte-determinism).
  */
 export interface CliWriter {
-  write(chunk: string): unknown;
+  /**
+   * Write `chunk`; `callback`, when given, runs once the stream has taken
+   * it — with the error when it could not — the backpressure a chunked
+   * document's emission waits on (commands/common.ts
+   * `emitDocumentStreamed`).
+   */
+  write(chunk: string, callback?: (error?: Error | null) => void): unknown;
 }
 
 import type { LoadedWorkspace } from "../workspace/config.js";

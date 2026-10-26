@@ -836,20 +836,30 @@ export interface BaselineDerivationSide {
   readonly journalLength: number;
 }
 
-/** `ReviewStateInputs` (review-state.ts) over a current side. */
+/** Per current side, its `ReviewStateInputs`. */
+const STATE_INPUTS = new WeakMap<CurrentDerivationSide, ReviewStateInputs>();
+
+/** `ReviewStateInputs` (review-state.ts) over a current side — one object
+ * per side, so the state computation's per-graph-state memo spans every
+ * item a derivation records against it. */
 export function reviewStateInputs(
   current: CurrentDerivationSide,
 ): ReviewStateInputs {
-  const impactTargets = current.impactTargets;
-  return {
-    graph: current.graph,
-    hashes: current.hashes,
-    journal: current.journal,
-    impactTargets:
-      impactTargets === undefined
-        ? undefined
-        : (location): readonly string[] => impactTargets.get(location) ?? [],
-  };
+  let inputs = STATE_INPUTS.get(current);
+  if (inputs === undefined) {
+    const impactTargets = current.impactTargets;
+    inputs = {
+      graph: current.graph,
+      hashes: current.hashes,
+      journal: current.journal,
+      impactTargets:
+        impactTargets === undefined
+          ? undefined
+          : (location): readonly string[] => impactTargets.get(location) ?? [],
+    };
+    STATE_INPUTS.set(current, inputs);
+  }
+  return inputs;
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,24 +1073,51 @@ function textRoles<N>(
   return roles;
 }
 
+/** Per text model, `nodeTexts`' values by identity and kinds. */
+const NODE_TEXTS = new WeakMap<
+  WorkspaceTextModel,
+  Map<string, Map<string, RecordedTexts | null>>
+>();
+
 /** A node's texts of the given kinds (SPEC 1.6, fully expanded) from a
  * graph and its text model — null when the identity resolves to no node
- * there. */
+ * there. Computed once per graph state, identity, and kinds — the text
+ * model is one graph state's, immutable — so every item snapshotting a
+ * node in one state shares one value: an n-deep chain's audit items
+ * snapshot O(n²) ancestor texts of n + 1 nodes. */
 function nodeTexts(
   graph: WorkspaceGraph,
   textModel: WorkspaceTextModel,
   identity: string,
   kinds: ReadonlySet<TextKind>,
 ): RecordedTexts | null {
+  let byIdentity = NODE_TEXTS.get(textModel);
+  if (byIdentity === undefined) {
+    byIdentity = new Map();
+    NODE_TEXTS.set(textModel, byIdentity);
+  }
+  let byKinds = byIdentity.get(identity);
+  if (byKinds === undefined) {
+    byKinds = new Map();
+    byIdentity.set(identity, byKinds);
+  }
+  const key =
+    (kinds.has("ownText") ? "own" : "") +
+    (kinds.has("subtreeText") ? " subtree" : "");
+  const known = byKinds.get(key);
+  if (known !== undefined) return known;
   const node = graph.requirementNode(identity);
-  if (node === undefined) return null;
-  const texts: { ownText?: string; subtreeText?: string } = {};
-  if (kinds.has("ownText")) {
-    texts.ownText = textModel.ownText(node.document, node.section);
+  let texts: { ownText?: string; subtreeText?: string } | null = null;
+  if (node !== undefined) {
+    texts = {};
+    if (kinds.has("ownText")) {
+      texts.ownText = textModel.ownText(node.document, node.section);
+    }
+    if (kinds.has("subtreeText")) {
+      texts.subtreeText = textModel.subtreeText(node.document, node.section);
+    }
   }
-  if (kinds.has("subtreeText")) {
-    texts.subtreeText = textModel.subtreeText(node.document, node.section);
-  }
+  byKinds.set(key, texts);
   return texts;
 }
 
@@ -1276,13 +1313,17 @@ function newItemFromGenerated(
   // is recorded over, as every resolve records it over the scope as last
   // assigned.
   const scopeDescendants = generatedScopeDescendants(generated);
+  // One array each — the item's model is readonly, so `context` and the
+  // recorded context set it starts as share theirs.
+  const context = generated.context.map((node) => node.identity);
+  const origin = generated.origin.map((node) => node.identity);
   const currentState = computeRecordedState(
     {
       kind: generated.kind,
       scope: generated.scope.identity,
       scopeDescendants,
-      context: generated.context.map((node) => node.identity),
-      origin: generated.origin.map((node) => node.identity),
+      context,
+      origin,
     },
     reviewStateInputs(current),
   );
@@ -1292,9 +1333,9 @@ function newItemFromGenerated(
     kind: generated.kind,
     scope: generated.scope.identity,
     scopeDescendants,
-    context: generated.context.map((node) => node.identity),
+    context,
     reason: generated.reason,
-    origin: generated.origin.map((node) => node.identity),
+    origin,
     // SPEC 10.2: `baseline` is fixed at entry — recorded-baseline values in
     // a baseline session, current values without one.
     baseline:
@@ -1304,7 +1345,7 @@ function newItemFromGenerated(
     current: currentState,
     // SPEC 10.4: the context nodes so recorded form the recorded context
     // set, written with `current`.
-    recordedContext: generated.context.map((node) => node.identity),
+    recordedContext: context,
     status: "unresolved",
     blockedBy,
     baselineTexts,

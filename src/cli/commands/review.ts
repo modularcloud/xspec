@@ -69,6 +69,7 @@
 // form, with or without `--json` (SPEC 10.7).
 
 import type { JsonObject } from "../../core/canonical-json.js";
+import { JsonDeferredArray } from "../../core/canonical-json.js";
 import type { SourceClassification } from "../../core/discovery.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { orderFindings } from "../../core/findings.js";
@@ -106,7 +107,12 @@ import {
   findingToJson,
   renderFindingsHuman,
 } from "../report.js";
-import { emitDocument, reportBaselineFailure, usageError } from "./common.js";
+import {
+  emitDocument,
+  emitDocumentStreamed,
+  reportBaselineFailure,
+  usageError,
+} from "./common.js";
 import { runMutatingCommand } from "./mutation.js";
 import {
   countsJson,
@@ -666,8 +672,12 @@ export async function reviewExportCommand(
   // output form, with or without `--json`: name, strategy, recorded
   // creation parameters and decompositions, every item in item order with
   // every 10.2 field, blocked state, and the payload, read-time
-  // invalidation applied (10.4).
-  emitDocument(context.stdout, {
+  // invalidation applied (10.4). The items render one at a time, each
+  // document built only as the emission reaches it: the whole answer can
+  // outgrow memory and any one string (an n-deep section chain's export
+  // presents O(n²) scope nodes, each under an O(n)-long identity).
+  const ordered = view.ordered;
+  await emitDocumentStreamed(context.stdout, {
     creationParameters: parametersToJson(view.session.parameters),
     decompositions: view.session.decompositions.map(
       (decomposition): JsonObject => ({
@@ -680,7 +690,9 @@ export async function reviewExportCommand(
         ),
       }),
     ),
-    items: view.ordered.map((item) => itemDocument(view, item)),
+    items: new JsonDeferredArray(ordered.length, (index) =>
+      itemDocument(view, ordered[index]),
+    ),
     name,
     strategy: sessionStrategy(view.session),
   });

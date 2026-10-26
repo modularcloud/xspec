@@ -372,6 +372,7 @@ function buildFileStructure(document: SpecDocument): FileStructure {
 export class WorkspaceTextModel {
   private readonly structures = new Map<SpecDocument, FileStructure>();
   private readonly subtreeMemo = new Map<SpecSection, string>();
+  private readonly ownMemo = new Map<SpecSection, string>();
   private readonly expansionMemo = new Map<SpecEmbedding, string>();
   private readonly expandedDropMemo = new Map<LineGroup, boolean>();
   private readonly inProgress = new Set<SpecSection>();
@@ -433,14 +434,23 @@ export class WorkspaceTextModel {
   /**
    * SPEC 1.6: the node's subtree text with every child's contribution
    * excised — its own-text runs (empty runs included) joined exactly at
-   * the excision points.
+   * the excision points. Memoized like `subtreeText`: rendering walks the
+   * file's line groups from its start, and review asks for one ancestor's
+   * own text once per item framed by it (SPEC 10.7: an ancestor chain's
+   * context text), so an unmemoized deep chain re-walked its file once per
+   * such ask.
    */
   ownText(document: SpecDocument, section: SpecSection): string {
+    const memoized = this.ownMemo.get(section);
+    if (memoized !== undefined) {
+      return memoized;
+    }
     const structure = this.structure(document);
     let out = "";
     for (const gap of gapSpans(document, section)) {
       out += this.renderExpanded(structure, gap.start, gap.end);
     }
+    this.ownMemo.set(section, out);
     return out;
   }
 
