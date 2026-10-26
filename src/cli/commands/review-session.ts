@@ -65,7 +65,9 @@
 // recorded state containing it (the snapshots of the derivations and
 // resolves that held it among the item's nodes, else the
 // item's baseline state: its baseline snapshots, and in a baseline session
-// the recorded-baseline graph the read reconstructed), and no text for a
+// the recorded-baseline graph the read reconstructed — the first of these
+// holding the text kind its role presents, snapshots storing only those
+// kinds), and no text for a
 // node contained in none or for a code-location scope — each origin node's
 // before/after pair of own text — before from the item's baseline state,
 // in a baseline session the recorded-baseline graph the read reconstructed
@@ -82,18 +84,19 @@ import type { SourceClassification } from "../../core/discovery.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { generatePathBlocksItems } from "../../core/path-blocks.js";
 import type {
-  ItemKind,
   ItemStatus,
   RecordedState,
-  RecordedTexts,
   ReviewItem,
   ReviewSession,
   SessionParameters,
+  TextKind,
 } from "../../core/review.js";
 import {
+  contextTextKind,
   isItemBlocked,
   kindScopesCodeLocation,
   recordedStateToJson,
+  scopeTextKind,
   sessionStrategy,
 } from "../../core/review.js";
 import type {
@@ -619,38 +622,13 @@ export function unknownSessionError(
 // Payload rendering (SPEC 10.7 — one payload rule for show/export/next)
 // ---------------------------------------------------------------------------
 
-/** Which text value a node presents in a payload role (SPEC 10.7). */
-type TextSelection = "own" | "subtree" | "code";
-
-/** SPEC 10.7: scope text per kind — subtree text for `subtree-coherence`
- * and `uncovered-requirement`, own text for the consistency kinds, none for
- * a code location. */
-function scopeTextSelection(kind: ItemKind): TextSelection {
-  switch (kind) {
-    case "subtree-coherence":
-    case "uncovered-requirement":
-      return "subtree";
-    case "parent-consistency":
-    case "dependency-consistency":
-    case "metadata-consistency":
-      return "own";
-    case "code-impact":
-      return "code";
-  }
-}
-
-/** SPEC 10.7: context text — own text where the context is an ancestor
- * chain (`subtree-coherence`, `uncovered-requirement`), subtree text
- * otherwise (branch children; dependency/metadata/code-impact targets). */
-function contextTextSelection(kind: ItemKind): TextSelection {
-  switch (kind) {
-    case "subtree-coherence":
-    case "uncovered-requirement":
-      return "own";
-    default:
-      return "subtree";
-  }
-}
+/**
+ * Which text value a node presents in a payload role (SPEC 10.7): the text
+ * kind core/review.ts's `scopeTextKind` and `contextTextKind` give — the
+ * same rule the stored snapshots follow (core/review-derive.ts
+ * `textRoles`) — or null for a code location, which has no text value.
+ */
+type TextSelection = TextKind | null;
 
 /**
  * SPEC 10.7: an absent node's text is its value in the most recent graph
@@ -662,10 +640,14 @@ function contextTextSelection(kind: ItemKind): TextSelection {
  * most recent wherever they exist; else the item's baseline state: its
  * baseline snapshots (the nodes it held at entry), and — in a baseline
  * session, whose items' baseline state is the graph at the recorded
- * baseline — that graph itself (`baselineGraphTexts`), which holds a node
+ * baseline — that graph itself (`baselineGraphText`), which holds a node
  * that joined the item later too: a node entering the current context set
  * at a read (SPEC 10.4), or one a re-derivation joined while already
- * absent. A node contained in none has no text. The tables are keyed by
+ * absent. A snapshot holds only the kinds the node's roles present
+ * (core/review.ts `RecordedTexts`), so the selected kind is taken from the
+ * first of these that holds it for the node; within one item a node's
+ * kind is fixed by its role, so that is still the most recent state's
+ * value. A node contained in none has no text. The tables are keyed by
  * canonical reference (10.4), so the lookup is exact whatever the node's
  * spelling became.
  */
@@ -675,34 +657,33 @@ function absentNodeText(
   reference: string,
   selection: TextSelection,
 ): string | undefined {
-  if (selection === "code") {
+  if (selection === null) {
     return undefined;
   }
-  const recorded =
-    item.derivedTexts[reference] ??
-    item.baselineTexts[reference] ??
-    baselineGraphTexts(view, reference);
-  if (recorded === undefined) {
-    return undefined;
-  }
-  return selection === "own" ? recorded.ownText : recorded.subtreeText;
+  return (
+    item.derivedTexts[reference]?.[selection] ??
+    item.baselineTexts[reference]?.[selection] ??
+    baselineGraphText(view, reference, selection)
+  );
 }
 
 /**
- * A stored reference's texts in the recorded-baseline graph a baseline
- * session's read reconstructed (`view.generation.baseline`; SPEC 10.2: the
- * item's baseline state in a baseline session) — the reference resolved as
- * of the baseline journal prefix (SPEC 6.3: the baseline journal is a
- * prefix of the current one; `resolveReferenceAt`), so a node that entered
- * the workspace after the baseline, or whose spelling a distinct chain bore
- * there, finds none. Undefined in a session without a baseline (`audit`,
- * `coverage`), whose items' baseline state — the current graph at entry —
- * survives only in their entry-time snapshots.
+ * A stored reference's text of the given kind in the recorded-baseline
+ * graph a baseline session's read reconstructed (`view.generation.baseline`;
+ * SPEC 10.2: the item's baseline state in a baseline session) — the
+ * reference resolved as of the baseline journal prefix (SPEC 6.3: the
+ * baseline journal is a prefix of the current one; `resolveReferenceAt`),
+ * so a node that entered the workspace after the baseline, or whose
+ * spelling a distinct chain bore there, finds none. Undefined in a session
+ * without a baseline (`audit`, `coverage`), whose items' baseline state —
+ * the current graph at entry — survives only in their entry-time
+ * snapshots.
  */
-function baselineGraphTexts(
+function baselineGraphText(
   view: SessionReadView,
   reference: string,
-): RecordedTexts | undefined {
+  kind: TextKind,
+): string | undefined {
   const baseline = view.generation.baseline;
   if (baseline === undefined) {
     return undefined;
@@ -716,10 +697,9 @@ function baselineGraphTexts(
   if (node === undefined) {
     return undefined;
   }
-  return {
-    ownText: baseline.textModel.ownText(node.document, node.section),
-    subtreeText: baseline.textModel.subtreeText(node.document, node.section),
-  };
+  return kind === "ownText"
+    ? baseline.textModel.ownText(node.document, node.section)
+    : baseline.textModel.subtreeText(node.document, node.section);
 }
 
 /**
@@ -733,7 +713,7 @@ function baselineGraphTexts(
  * — its identity ceased to resolve through the journal — presents absent,
  * with no source range and the absent-node text rule, even though its
  * presented spelling matches the distinct node that recaptured it. A code
- * location (`selection === "code"`) carries no text value either way.
+ * location (`selection === null`) carries no text value either way.
  */
 function nodeStateJson(
   view: SessionReadView,
@@ -745,7 +725,7 @@ function nodeStateJson(
     view.analysis.journal.journal,
     reference,
   );
-  if (selection === "code") {
+  if (selection === null) {
     const location = resolves
       ? view.analysis.graph.codeLocation(spelling)
       : undefined;
@@ -772,7 +752,7 @@ function nodeStateJson(
       present: true,
       sourceRange: rangeJson(node.section.range),
       text:
-        selection === "own"
+        selection === "ownText"
           ? view.analysis.textModel.ownText(node.document, node.section)
           : view.analysis.textModel.subtreeText(node.document, node.section),
     };
@@ -859,7 +839,7 @@ function originEntryJson(
  * item's baseline state (10.2), "whether or not the node has an entry in
  * `baseline`", presented absent, with no text, where that state does not
  * contain the node. In a baseline session that state is the graph at the
- * recorded baseline, which the read reconstructed (`baselineGraphTexts`:
+ * recorded baseline, which the read reconstructed (`baselineGraphText`:
  * the stored reference resolved as of the baseline journal prefix, 6.3),
  * so a node that joined the item's origin after it entered the session —
  * at a re-derivation (10.5), gaining no entry in `baseline` (10.2) — has
@@ -867,7 +847,8 @@ function originEntryJson(
  * node added since the baseline is absent there. A session without a
  * baseline (`audit`, `coverage`) generates empty origins (10.6, 10.7); its
  * items' baseline state, the current graph at entry, survives only in
- * their `baseline` entries and entry-time text snapshots, which stand for
+ * their `baseline` entries and entry-time text snapshots (an origin node's
+ * own text among them, core/review-derive.ts `textRoles`), which stand for
  * that state here.
  */
 function originBeforeSide(
@@ -876,10 +857,8 @@ function originBeforeSide(
   reference: string,
 ): JsonObject {
   if (view.generation.baseline !== undefined) {
-    const texts = baselineGraphTexts(view, reference);
-    return texts === undefined
-      ? { present: false }
-      : { present: true, text: texts.ownText };
+    const text = baselineGraphText(view, reference, "ownText");
+    return text === undefined ? { present: false } : { present: true, text };
   }
   const recordedBaseline = item.baseline.nodes[reference];
   return recordedBaseline !== undefined && recordedBaseline.present
@@ -907,7 +886,7 @@ export function itemDocument(
   item: ReviewItem,
 ): JsonObject {
   const journal = view.analysis.journal.journal;
-  const scopeSelection = scopeTextSelection(item.kind);
+  const scopeSelection = scopeTextKind(item.kind);
   return {
     id: item.id,
     kind: item.kind,
@@ -922,7 +901,7 @@ export function itemDocument(
       scopeSetEntryJson(view, item, reference),
     ),
     context: presentedContext(view, item).map((reference) =>
-      nodeStateJson(view, item, reference, contextTextSelection(item.kind)),
+      nodeStateJson(view, item, reference, contextTextKind(item.kind)),
     ),
     origin: item.origin.map((reference) =>
       originEntryJson(view, item, reference),

@@ -36,10 +36,12 @@
 //   update — the item assigned its current context set and its state
 //   recorded over it (SPEC 10.4), its nodes' texts snapshotted in the
 //   graph it records against (SPEC 10.7: the states under which mutating
-//   subcommands derived or resolved the item) — with its `updated`-triggered
-//   re-derivation (SPEC 10.5, `resolveSessionItem`), which an `updated`
-//   resolve runs first, assigning and recording once it is done, against
-//   the item as re-derived (SPEC 10.4);
+//   subcommands derived or resolved the item; every snapshot holds, per
+//   node, only the text kinds the node's roles present, `textRoles`) —
+//   with its `updated`-triggered re-derivation (SPEC 10.5,
+//   `resolveSessionItem`), which an `updated` resolve runs first,
+//   assigning and recording once it is done, against the item as
+//   re-derived (SPEC 10.4);
 // - derives the generator-assigned current context sets reads feed to
 //   read-time invalidation and present as each item's `context`
 //   (SPEC 10.4, `currentContextSets`);
@@ -88,8 +90,14 @@ import type {
   ResolveStatus,
   ReviewItem,
   ReviewSession,
+  TextKind,
 } from "./review.js";
-import { allocateItemId, kindScopesCodeLocation } from "./review.js";
+import {
+  allocateItemId,
+  contextTextKind,
+  kindScopesCodeLocation,
+  scopeTextKind,
+} from "./review.js";
 import type { ReferenceResolution, ReviewStateInputs } from "./review-state.js";
 import {
   canonicalKeyOfCurrent,
@@ -1007,63 +1015,103 @@ function baselineNodeState(
 // Text snapshots (SPEC 10.2, 10.7)
 // ---------------------------------------------------------------------------
 
-/** The distinct requirement nodes of an item's scope, context, and origin
- * — the nodes whose texts the payload rule presents (SPEC 10.7); a
- * `code-impact` scope is a code location with no text value. */
-function textBearingNodes(item: GeneratedItem): GeneratedNode[] {
-  const nodes: GeneratedNode[] = [];
-  const seen = new Set<string>();
-  const push = (node: GeneratedNode): void => {
-    if (!seen.has(node.identity)) {
-      seen.add(node.identity);
-      nodes.push(node);
-    }
-  };
-  if (!kindScopesCodeLocation(item.kind)) push(item.scope);
-  for (const node of item.context) push(node);
-  for (const node of item.origin) push(node);
-  return nodes;
+/** One node's text role in an item: the node and the text kinds its roles
+ * there present (SPEC 10.7). */
+interface TextRole<N> {
+  readonly node: N;
+  readonly kinds: ReadonlySet<TextKind>;
 }
 
-/** A node's own and subtree text (SPEC 1.6, fully expanded) from a graph
- * and its text model — null when the identity resolves to no node there. */
+/**
+ * SPEC 10.7: the requirement nodes whose texts an item's payload presents,
+ * each with the text kinds its roles present, keyed by stored reference
+ * (`referenceOf`) in first-role order — the scope root its kind's scope
+ * text (`scopeTextKind`: subtree text for `subtree-coherence` and
+ * `uncovered-requirement`, own text for the consistency kinds, none for a
+ * `code-impact` scope, a code location with no text value), each context
+ * node its kind's context text (`contextTextKind`: own text along an
+ * ancestor chain, subtree text otherwise), and each node of `origin` its
+ * own text, an origin's before side (its after side is the current
+ * graph's, so derivation-time snapshots pass no origin). A node holding
+ * several roles takes each role's kind; for every kind the scope root and
+ * the context nodes are disjoint, so within one item a node's kind as
+ * scope root or context node is fixed by its role. The scope nodes beneath
+ * a root present no text, and no ancestor's subtree text is presented, so
+ * a snapshot never holds both kinds of every node.
+ */
+function textRoles<N>(
+  kind: ItemKind,
+  scope: N,
+  context: readonly N[],
+  origin: readonly N[],
+  referenceOf: (node: N) => string,
+): ReadonlyMap<string, TextRole<N>> {
+  const roles = new Map<string, { node: N; kinds: Set<TextKind> }>();
+  const add = (node: N, textKind: TextKind): void => {
+    const reference = referenceOf(node);
+    let role = roles.get(reference);
+    if (role === undefined) {
+      roles.set(reference, (role = { node, kinds: new Set() }));
+    }
+    role.kinds.add(textKind);
+  };
+  const scopeKind = scopeTextKind(kind);
+  if (scopeKind !== null) add(scope, scopeKind);
+  const contextKind = contextTextKind(kind);
+  for (const node of context) add(node, contextKind);
+  for (const node of origin) add(node, "ownText");
+  return roles;
+}
+
+/** A node's texts of the given kinds (SPEC 1.6, fully expanded) from a
+ * graph and its text model — null when the identity resolves to no node
+ * there. */
 function nodeTexts(
   graph: WorkspaceGraph,
   textModel: WorkspaceTextModel,
   identity: string,
+  kinds: ReadonlySet<TextKind>,
 ): RecordedTexts | null {
   const node = graph.requirementNode(identity);
   if (node === undefined) return null;
-  return {
-    ownText: textModel.ownText(node.document, node.section),
-    subtreeText: textModel.subtreeText(node.document, node.section),
-  };
+  const texts: { ownText?: string; subtreeText?: string } = {};
+  if (kinds.has("ownText")) {
+    texts.ownText = textModel.ownText(node.document, node.section);
+  }
+  if (kinds.has("subtreeText")) {
+    texts.subtreeText = textModel.subtreeText(node.document, node.section);
+  }
+  return texts;
 }
 
-/** A stored reference's texts in the current graph — null unless the
- * reference canonically resolves to a present node (SPEC 10.4): text
- * snapshots record only nodes present per 10.4, so a dangling reference
- * never captures the text of the distinct node that recaptured its
- * spelling. */
+/** A stored reference's texts of the given kinds in the current graph —
+ * null unless the reference canonically resolves to a present node (SPEC
+ * 10.4): text snapshots record only nodes present per 10.4, so a dangling
+ * reference never captures the text of the distinct node that recaptured
+ * its spelling. */
 function currentNodeTexts(
   current: CurrentDerivationSide,
   reference: string,
+  kinds: ReadonlySet<TextKind>,
 ): RecordedTexts | null {
   const resolution = resolveReference(current.journal, reference);
   return resolution.resolves
-    ? nodeTexts(current.graph, current.textModel, resolution.spelling)
+    ? nodeTexts(current.graph, current.textModel, resolution.spelling, kinds)
     : null;
 }
 
 /**
  * SPEC 10.7: the item's baseline text snapshots — absent-node fallbacks,
  * and a session without a baseline's origin before-texts, come from the
- * item's baseline state, so each node present in the baseline graph
- * records its texts there, keyed by stored identity. Sessions without a
- * baseline record the entry-moment current texts (their `baseline` state
- * is the current graph's, SPEC 10.2); a baseline session's reads take
- * origin before-texts from the reconstructed recorded-baseline graph
- * (src/cli/commands/review-session.ts `originBeforeSide`).
+ * item's baseline state, so each of the item's nodes present in the
+ * baseline graph records there the kinds its roles present (`textRoles`,
+ * origins included: the scope root's scope text, each context node's
+ * context text, each origin node's own text), keyed by stored identity.
+ * Sessions without a baseline record the entry-moment current texts (their
+ * `baseline` state is the current graph's, SPEC 10.2); a baseline
+ * session's reads take origin before-texts from the reconstructed
+ * recorded-baseline graph (src/cli/commands/review-session.ts
+ * `originBeforeSide`).
  */
 function baselineTextTable(
   item: GeneratedItem,
@@ -1071,19 +1119,27 @@ function baselineTextTable(
   current: CurrentDerivationSide,
 ): RecordedTextTable {
   const table: Record<string, RecordedTexts> = {};
-  for (const node of textBearingNodes(item)) {
+  const roles = textRoles(
+    item.kind,
+    item.scope,
+    item.context,
+    item.origin,
+    (node) => node.identity,
+  );
+  for (const [reference, { node, kinds }] of roles) {
     const texts =
       baseline === undefined
-        ? currentNodeTexts(current, node.identity)
+        ? currentNodeTexts(current, reference, kinds)
         : node.baselineIdentity === null
           ? null
           : nodeTexts(
               baseline.graph,
               baseline.textModel,
               node.baselineIdentity,
+              kinds,
             );
     if (texts !== null) {
-      table[node.identity] = texts;
+      table[reference] = texts;
     }
   }
   return table;
@@ -1094,40 +1150,68 @@ function baselineTextTable(
  * — an absent node's text is its value in the most recent graph state that
  * contained it, among the item's baseline state and "the states under which
  * mutating subcommands (13.5) derived or resolved the item with that node
- * among its nodes". Each such state records, for every listed node present
- * per 10.4 (canonically resolving, in the current graph), its texts there:
- * an entry is rewritten per node at each derivation or resolve that finds
- * the node present among the item's nodes and never removed (`previous`
- * entries for nodes absent now, or no longer the item's, are kept), so the
- * table always holds each node's most recent such state.
+ * among its nodes". Each such state records, for every node of `roles`
+ * present per 10.4 (canonically resolving, in the current graph), the
+ * kinds its role presents there: an entry is rewritten per node at each
+ * derivation or resolve that finds the node present among the item's
+ * nodes and otherwise kept (`previous` entries for nodes absent now, or no
+ * longer the item's, stay), so the table always holds each node's most
+ * recent such state — save where the item's `baselineTexts` entry for the
+ * node holds that state's values: the state then records no entry and an
+ * earlier one is removed, the read taking the same values there
+ * (src/cli/commands/review-session.ts `absentNodeText`), so the session
+ * stores each unchanged text once.
  */
 function snapshotCurrentTexts(
-  references: Iterable<string>,
+  roles: ReadonlyMap<string, TextRole<unknown>>,
   current: CurrentDerivationSide,
   previous: RecordedTextTable,
+  baselineTexts: RecordedTextTable,
 ): RecordedTextTable {
   const table: Record<string, RecordedTexts> = { ...previous };
-  for (const reference of references) {
-    const texts = currentNodeTexts(current, reference);
-    if (texts !== null) {
+  for (const [reference, { kinds }] of roles) {
+    const texts = currentNodeTexts(current, reference, kinds);
+    if (texts === null) {
+      continue;
+    }
+    if (holdsTexts(baselineTexts[reference], texts)) {
+      delete table[reference];
+    } else {
       table[reference] = texts;
     }
   }
   return table;
 }
 
+/** Whether `recorded` holds every text `texts` holds, with the same
+ * value. */
+function holdsTexts(
+  recorded: RecordedTexts | undefined,
+  texts: RecordedTexts,
+): boolean {
+  return (
+    recorded !== undefined &&
+    (texts.ownText === undefined || recorded.ownText === texts.ownText) &&
+    (texts.subtreeText === undefined ||
+      recorded.subtreeText === texts.subtreeText)
+  );
+}
+
 /** SPEC 10.7: the derivation-time text snapshots — a derivation's state
- * (`create`, a re-derivation, a `split`) over the generated item's nodes
- * (`snapshotCurrentTexts`). */
+ * (`create`, a re-derivation, a `split`) over the generated item's scope
+ * root and context nodes, by role (`textRoles`, `snapshotCurrentTexts`
+ * beside the item's `baselineTexts`). */
 function derivedTextTable(
   item: GeneratedItem,
   current: CurrentDerivationSide,
   previous: RecordedTextTable,
+  baselineTexts: RecordedTextTable,
 ): RecordedTextTable {
   return snapshotCurrentTexts(
-    textBearingNodes(item).map((node) => node.identity),
+    textRoles(item.kind, item.scope, item.context, [], (node) => node.identity),
     current,
     previous,
+    baselineTexts,
   );
 }
 
@@ -1135,10 +1219,10 @@ function derivedTextTable(
  * SPEC 10.7: the resolve-time text snapshots — a resolve's state is among
  * "the states under which mutating subcommands (13.5) … resolved the item
  * with that node among its nodes", so the item as the resolve assigns and
- * records it (SPEC 10.4: its scope and origin as last assigned, its
- * context the current context set the resolve assigns) snapshots the
- * texts of its scope node (none for a code location, which has no text
- * value), context nodes, and origin nodes present in the graph the
+ * records it (SPEC 10.4: its scope as last assigned, its context the
+ * current context set the resolve assigns) snapshots, by role
+ * (`textRoles`), the texts of its scope root (none for a code location,
+ * which has no text value) and context nodes present in the graph the
  * resolve records against (`snapshotCurrentTexts`), exactly as a
  * derivation does.
  */
@@ -1146,10 +1230,18 @@ function resolvedTextTable(
   item: ReviewItem,
   current: CurrentDerivationSide,
 ): RecordedTextTable {
-  const references = kindScopesCodeLocation(item.kind)
-    ? [...item.context, ...item.origin]
-    : [item.scope, ...item.context, ...item.origin];
-  return snapshotCurrentTexts(references, current, item.derivedTexts);
+  return snapshotCurrentTexts(
+    textRoles(
+      item.kind,
+      item.scope,
+      item.context,
+      [],
+      (reference) => reference,
+    ),
+    current,
+    item.derivedTexts,
+    item.baselineTexts,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,7 +1257,10 @@ function resolvedTextTable(
  * context set holding (a freshly created item is never born invalidated),
  * `baseline` against the recorded-baseline side — or the current graph's
  * values at this moment for a session without one — and the SPEC 10.7
- * text snapshots.
+ * text snapshots by role: `baselineTexts` in its baseline state
+ * (`baselineTextTable`), `derivedTexts` in this derivation's state where
+ * that differs (`derivedTextTable`; in a session without a baseline the
+ * two states are one, so it starts empty).
  * `blockedBy` is the caller's: the generated item's blocker references,
  * resolved to item ids.
  */
@@ -1191,6 +1286,7 @@ function newItemFromGenerated(
     },
     reviewStateInputs(current),
   );
+  const baselineTexts = baselineTextTable(generated, baseline, current);
   return {
     id,
     kind: generated.kind,
@@ -1211,8 +1307,8 @@ function newItemFromGenerated(
     recordedContext: generated.context.map((node) => node.identity),
     status: "unresolved",
     blockedBy,
-    baselineTexts: baselineTextTable(generated, baseline, current),
-    derivedTexts: derivedTextTable(generated, current, {}),
+    baselineTexts,
+    derivedTexts: derivedTextTable(generated, current, {}, baselineTexts),
   };
 }
 
@@ -1236,10 +1332,11 @@ function generatedScopeDescendants(generated: GeneratedItem): string[] {
  * (SPEC 10.2, 10.4) — and takes the generated scope (the scope root and
  * the nodes beneath it, `generatedScopeDescendants`), context, origin,
  * reason, and `blockedBy` (the caller's, resolved to item ids). The
- * derivation-time text snapshots are rewritten per node of the item as
- * assigned that the current graph contains, never removed (SPEC 10.7: the
- * states under which mutating subcommands derived or resolved the item
- * count).
+ * derivation-time text snapshots are rewritten, by role, per scope root and
+ * context node of the item as assigned that the current graph contains,
+ * never removed save where the item's baseline snapshot holds the same
+ * values (SPEC 10.7: the states under which mutating subcommands derived or
+ * resolved the item count; `snapshotCurrentTexts`).
  */
 function reassignedExistingItem(
   existing: ReviewItem,
@@ -1255,7 +1352,12 @@ function reassignedExistingItem(
     origin: generated.origin.map((node) => node.identity),
     reason: generated.reason,
     blockedBy,
-    derivedTexts: derivedTextTable(generated, current, existing.derivedTexts),
+    derivedTexts: derivedTextTable(
+      generated,
+      current,
+      existing.derivedTexts,
+      existing.baselineTexts,
+    ),
   };
 }
 
@@ -1312,9 +1414,10 @@ export interface DerivedSessionItems {
  *   references (decomposed references were already replaced by
  *   `expandDecompositions`), matched and new items alike (SPEC 10.5,
  *   10.7);
- * - text snapshots follow SPEC 10.7: a new item records baseline texts
- *   and current texts; a matched item's derivation-time texts are
- *   rewritten per node found present, never removed.
+ * - text snapshots follow SPEC 10.7, by role (`textRoles`): a new item
+ *   records baseline texts and current texts; a matched item's
+ *   derivation-time texts are rewritten per node found present, never
+ *   removed save where its baseline texts hold the same values.
  *
  * The result keeps existing items in their stored order (matched ones
  * updated in place) and appends new items in generation order —
@@ -1798,9 +1901,10 @@ export interface ResolveItemArgs {
  * done, against the item as re-derived"). A node the re-derivation joined
  * to the item is thus recorded in `current` and gains no entry in
  * `baseline`, which the merge keeps as fixed at entry (SPEC 10.2). With
- * the recording, the item as assigned snapshots the texts of its scope,
- * context, and origin nodes present in that same graph
- * (`resolvedTextTable`): a resolve's state counts among those an absent
+ * the recording, the item as assigned snapshots, by role, the texts of its
+ * scope root and context nodes present in that same graph
+ * (`resolvedTextTable`; an origin's after side is the current graph's, so
+ * origins need none): a resolve's state counts among those an absent
  * node's text comes from (SPEC 10.7), whatever the status, so a
  * `no-change` or `skipped` resolve — which re-derives nothing — records
  * a state no derivation saw.

@@ -37,7 +37,12 @@
 // deleted (SPEC 10.2, 10.7: an absent node's text is its value in the most
 // recent graph state that contained it, among the item's `baseline` state
 // and the states under which mutating subcommands derived or resolved the
-// item with that node among its nodes).
+// item with that node among its nodes). A snapshot holds, per node, only
+// the text kinds the payload rule of SPEC 10.7 presents for the node's
+// roles in the item (`scopeTextKind`, `contextTextKind`; an origin's own
+// text, its before side, in `baselineTexts` alone) — never both kinds of
+// every node, and nothing for the scope nodes beneath a root, which carry
+// no text — so a session stays proportionate to what its payloads present.
 //
 // Identity policy: every stored node reference — an item's `scope` and
 // `scopeDescendants` entries, its `recordedContext`, `context`, and
@@ -190,6 +195,49 @@ export function kindScopesCodeLocation(kind: ItemKind): boolean {
   return kind === "code-impact";
 }
 
+/**
+ * A text value of SPEC 1.6, named by the `RecordedTexts` member that
+ * stores it: a node's own text or its subtree text.
+ */
+export type TextKind = "ownText" | "subtreeText";
+
+/**
+ * SPEC 10.7: the text an item's scope presents — the scope root's subtree
+ * text for `subtree-coherence`, the scope node's subtree text for
+ * `uncovered-requirement`, and the scope node's own text for
+ * `parent-consistency`, `dependency-consistency`, and
+ * `metadata-consistency` — or null for a `code-impact` scope, a code
+ * location, which has no text value. The scope nodes beneath a
+ * `subtree-coherence` root present none: scope text is the root's.
+ */
+export function scopeTextKind(kind: ItemKind): TextKind | null {
+  switch (kind) {
+    case "subtree-coherence":
+    case "uncovered-requirement":
+      return "subtreeText";
+    case "parent-consistency":
+    case "dependency-consistency":
+    case "metadata-consistency":
+      return "ownText";
+    case "code-impact":
+      return null;
+  }
+}
+
+/**
+ * SPEC 10.7: the text an item's context nodes present — own text where the
+ * context is an ancestor chain (`subtree-coherence`,
+ * `uncovered-requirement`), subtree text otherwise (the scope node's
+ * children for `parent-consistency`; the targets for
+ * `dependency-consistency`, `metadata-consistency`, and `code-impact`).
+ * An origin node presents its own text instead, as a before/after pair.
+ */
+export function contextTextKind(kind: ItemKind): TextKind {
+  return kind === "subtree-coherence" || kind === "uncovered-requirement"
+    ? "ownText"
+    : "subtreeText";
+}
+
 // ---------------------------------------------------------------------------
 // The item model (SPEC 10.2)
 // ---------------------------------------------------------------------------
@@ -229,10 +277,16 @@ export interface RecordedState {
 }
 
 /**
- * A node's recorded text snapshots (SPEC 10.2: items carry enough baseline
- * text to remain actionable after the referenced nodes are edited, moved,
- * or deleted; SPEC 10.7 fixes which value each payload role presents). Code
- * locations have no text value (10.7) and get no entry.
+ * A node's recorded text snapshot in one graph state (SPEC 10.2: items
+ * carry enough baseline text to remain actionable after the referenced
+ * nodes are edited, moved, or deleted; SPEC 10.7 fixes which value each
+ * payload role presents). It holds only the kinds the node's roles in the
+ * item present — the scope root's `scopeTextKind`, a context node's
+ * `contextTextKind`, an origin node's own text (its before side, in
+ * `ReviewItem.baselineTexts` alone) — so a missing member says only that
+ * no role of the node presents it. Code locations have no text value
+ * (10.7) and get no entry; neither do the scope nodes beneath a
+ * `subtree-coherence` root, which present none.
  */
 export interface RecordedTexts {
   /** The node's own text — the expanded value of SPEC 1.6. */
@@ -307,12 +361,14 @@ export interface ReviewItem {
   /**
    * Text snapshots at the item's baseline state (SPEC 10.2, 10.7), taken
    * when the item enters the session; entries exist only for the item's
-   * nodes present in that state. They keep absent nodes' texts actionable
-   * and, in a session without a baseline (`audit`, `coverage`), whose
-   * baseline state is the current graph at entry, stand for that state —
-   * a baseline session's reads take origin before-texts from the
-   * recorded-baseline graph they reconstruct instead (10.7: whether or not
-   * the node has an entry in `baseline`).
+   * nodes present in that state, each holding the kinds its roles present
+   * (`RecordedTexts`): the scope root's scope text, each context node's
+   * context text, and each origin node's own text. They keep absent nodes'
+   * texts actionable and, in a session without a baseline (`audit`,
+   * `coverage`), whose baseline state is the current graph at entry, stand
+   * for that state — a baseline session's reads take origin before-texts
+   * from the recorded-baseline graph they reconstruct instead (10.7:
+   * whether or not the node has an entry in `baseline`).
    */
   readonly baselineTexts: RecordedTextTable;
   /**
@@ -320,8 +376,15 @@ export interface ReviewItem {
    * subcommand derived or resolved the item with the node among its nodes
    * and found it present (SPEC 10.7) — `create`, a re-derivation, a
    * `split`, or a resolve of any status: rewritten per node at each such
-   * state, never removed (src/core/review-derive.ts
-   * `snapshotCurrentTexts`).
+   * state (src/core/review-derive.ts `snapshotCurrentTexts`). Each entry
+   * holds the kind the node presents as the scope root or a context node
+   * (`RecordedTexts`); origin nodes get none, an origin's after side being
+   * the current graph's. A state whose values the node's `baselineTexts`
+   * entry already holds leaves no entry here — none is written and an
+   * earlier one is removed, reads then taking those same values there —
+   * and no entry is removed otherwise. So an unchanged text is stored
+   * once, and in a session without a baseline, whose baseline state is the
+   * entry-moment current graph, the table starts empty.
    */
   readonly derivedTexts: RecordedTextTable;
 }
