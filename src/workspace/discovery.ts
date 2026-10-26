@@ -5,12 +5,19 @@
 // SPEC 7: discovery never follows symbolic links — a symbolic link, to a
 // file or to a directory, broken or not, is never a discovered source and
 // is never traversed, so symlinked, cyclic, or workspace-external content
-// never enters the discovered set. The walk starts at the workspace root
-// (the configuration file's directory, SPEC 7) and matching is against
-// workspace-relative paths as their UTF-8 bytes, so directory entries are
-// read with buffer encoding and never decoded before matching — a name the
-// filesystem reports is matched verbatim (byte-wise, case-sensitive,
-// SPEC 7/12.0), never re-derived through filesystem lookups.
+// never enters the discovered set. SPEC 7: discovery reads only what
+// deciding that set takes — it lists a directory exactly when some
+// configured spec or code glob matches a path below it, paths under
+// `.xspec/` (13.4) counting for none. So the walk starts at the workspace
+// root (the configuration file's directory, SPEC 7) only when some glob
+// matches a path below the root outside `.xspec/`, judged from the globs
+// alone, and enters each directory below only when some glob matches a
+// path below that directory, never entering the root-level `.xspec/`.
+// Matching is against workspace-relative paths as their UTF-8 bytes, so
+// directory entries are read with buffer encoding and never decoded
+// before matching — a name the filesystem reports is matched verbatim
+// (byte-wise, case-sensitive, SPEC 7/12.0), never re-derived through
+// filesystem lookups.
 //
 // SPEC 14.25: a directory the walk lists, or an entry whose kind it must
 // examine, that the environment refuses to read — permission denied, an
@@ -40,13 +47,15 @@ const XSPEC_DIR = Buffer.from(".xspec");
 
 /**
  * Discover the workspace's spec and code sources (SPEC 7): walk the
- * workspace root without following symbolic links, then classify every
- * plain file found against the configured groups (core/discovery.ts) —
- * exclusions (13.4) and path conditions (14.14, 14.19) included. `root` is
- * the workspace root's absolute filesystem path (SPEC 7: the configuration
- * file's directory; the walk is independent of the working directory), and
- * `rootAnchor` the root in its anchoring form (SPEC 11.6) — the concerned
- * path of a refused listing of the root itself (SPEC 14.25).
+ * workspace root without following symbolic links — when some configured
+ * glob matches a path below it outside `.xspec/`, else listing nothing —
+ * then classify every plain file found against the configured groups
+ * (core/discovery.ts), exclusions (13.4) and path conditions (14.14,
+ * 14.19) included. `root` is the workspace root's absolute filesystem path
+ * (SPEC 7: the configuration file's directory; the walk is independent of
+ * the working directory), and `rootAnchor` the root in its anchoring form
+ * (SPEC 11.6) — the concerned path of a refused listing of the root itself
+ * (SPEC 14.25).
  */
 export async function discoverSources(
   root: string,
@@ -58,10 +67,14 @@ export async function discoverSources(
     ...configuration.codeGroups,
   ].flatMap((group) => group.globs);
   const files: Uint8Array[] = [];
-  if (globs.length > 0) {
-    // SPEC 7: with no configured globs nothing can match — an empty
-    // `specs`/`code` configuration discovers zero sources without touching
-    // the filesystem.
+  // SPEC 7: discovery lists the workspace root exactly when some configured
+  // spec or code glob matches a path below it, paths under `.xspec/` — which
+  // 13.4 excludes from every group — counting for none (core/glob.ts). So
+  // with no configured glob, or only globs matching no path (a `.`, `..`,
+  // or empty segment: `./specs/*.mdx`) or none outside `.xspec/`
+  // (`.xspec/*.mdx`), discovery yields zero sources without touching the
+  // filesystem: the root's listing is never made, so never refused (14.25).
+  if (globs.some((glob) => glob.mayMatchBelowRoot(XSPEC_DIR))) {
     await walk(Buffer.from(root), null, rootAnchor, globs, files);
   }
   return classifySources(files, configuration);

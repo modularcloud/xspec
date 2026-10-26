@@ -645,6 +645,47 @@ export class CompiledGlob {
     }
     return false;
   }
+
+  /**
+   * Could some path below the workspace root, none of them under the
+   * root-level directory named `excluded`, match this pattern? `excluded`
+   * is one directory-entry name: a single non-empty segment. Supports the
+   * SPEC 7 discovery walk's decision at the root, which has no prefix for
+   * {@link CompiledGlob.mayMatchWithin}: discovery lists a directory, the
+   * workspace root included, exactly when some configured spec or code glob
+   * matches a path below it, paths under `.xspec/`, which SPEC 13.4
+   * excludes from every group, counting for none (the caller passes
+   * `.xspec`). Judged from the pattern alone, before any read, and exact:
+   * - a pattern holding a `.`, `..`, or empty segment matches no path at
+   *   all (SPEC 7), so it never qualifies;
+   * - a pattern whose first segment is exactly the literal `excluded`, no
+   *   wildcard in it, matches only paths whose first segment is `excluded`:
+   *   those under it, which count for none, and the root-level path
+   *   `excluded` itself, which lies below the root but not under it,
+   *   exactly when every later pattern segment is `**` (any number of
+   *   whole segments, including none) or there is none;
+   * - every other pattern qualifies: a first segment written `**`, holding
+   *   a wildcard, or spelling another literal matches some first path
+   *   segment other than `excluded`, and every later segment matches some
+   *   path segment (`**` none at all, a token segment a name its dot rule
+   *   admits), each segment matched apart from its neighbours.
+   */
+  mayMatchBelowRoot(excluded: PathInput): boolean {
+    if (this.matchesNothing) return false;
+    const [first, ...later] = this.segments;
+    if (first === undefined) return false; // never: every pattern has one
+    const excludedBytes = toBytes(excluded);
+    const spellsExcluded =
+      first.kind === "tokens" &&
+      first.tokens.length === 1 &&
+      first.tokens[0].kind === "literal" &&
+      first.tokens[0].bytes.length === excludedBytes.length &&
+      startsWithAt(excludedBytes, first.tokens[0].bytes, 0);
+    if (!spellsExcluded) return true;
+    // `.xspec` and `.xspec/**` match the root-level path `.xspec`;
+    // `.xspec/*.mdx` matches only paths under `.xspec/`.
+    return later.every((segment) => segment.kind === "globstar");
+  }
 }
 
 /**

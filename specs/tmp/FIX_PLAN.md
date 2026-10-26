@@ -6,6 +6,7 @@ Findings, as cited below:
 - B1 (B's G1): discovery lists the workspace root even when no configured glob can match a path below it — Task 154.
 - B3 (B's G3): long embedding chains exhaust the call stack, every command but `inventory` and `version` exiting 70 — Task 155; and B's note that `coverage --json` passes V8's string limit on a long `d` chain — the class of Task 150's export streaming, which B invites folding into G3 — Task 156.
 - B2 (B's G2): concurrent item additions to a review session cannot merge — Task 157 (item ids derived from what is added) and Task 158 (a stored layout whose keep-both merge is a valid session holding both sides' additions; after Task 157).
+- Found by Task 154's spawn, in the kind clause of the SPEC 7 sentence Task 154 serves: discovery examines the kind of entries SPEC 7 never examines — Task 160 (independent of the others).
 - Task 159 confirms everything and deletes this file.
 
 Goal: the product meets SPEC.md, and every test keeps passing — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head. No test fails at `abb7839`, and no suite test pins any of the gaps (B found each by probing a private build of `abb7839`), so each task is verified by hand beside the suite files it must keep green. The test harness must not be modified (Phase 10); it is unchanged since `f2ff6c3` (`git diff f2ff6c3 abb7839 -- test/ .github/` is empty).
@@ -64,6 +65,7 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 | 156 | B3 (note) | `coverage` streams its report, in both output forms | pending |
 | 157 | B2 | Item ids derived from kind and scope node, `nextItemId` dropped (session format 4): concurrent additions take distinct keys | pending |
 | 158 | B2 | One line per item and decomposition, comma-led, each followed by an empty line (format 5): a keep-both merge holds both sides' additions | pending |
+| 160 | Task 154's spawn | Discovery examines an entry's kind only where SPEC 7 does: never for an entry no glob matches and the walk would not list were it a directory | pending |
 | 159 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
 
 ## Task 154 — Discovery lists the workspace root only when some configured glob can match a path below it outside `.xspec/` (SPEC 7, 13.4, 14.25; B1)
@@ -197,6 +199,23 @@ After Task 157.
 7. Earlier formats 1–4 answer every read as before, and the first write stores format 5; tampering — the `decompositions` head missing, other than the head, or repeated, and `version` 6 — reads as the 14.21 corruption; a format-5 file rewritten through `JSON.stringify(doc, null, 2)` reads as it did.
 8. Regressions: the whole suite project (T13.5-9's and T13.5-10's files left out) and the E-6 writer test; then CI's `suite-windows`.
 - If the design cannot meet a criterion, do not land a partial format: add a dated note under this task saying what failed and why, commit and push it, and say so in your report.
+
+## Task 160 — Discovery examines the kind of no entry SPEC 7 leaves unexamined (SPEC 7, 14.25; found by Task 154's spawn)
+
+**Requirement.**
+- SPEC 7: discovery "examines the kind of exactly those entries of a listed directory whose paths such a glob matches or that it would list were they directories", paths under `.xspec/` counting for none.
+- SPEC 14.25: a refused read of a path occupant's kind is the read failure where xspec examines that kind. Whether discovery learns a kind it does examine from the listing it already made or by a separate examination is its own choice (TEST-SPEC T14-10, its note on the clauses it cannot stage).
+
+**Observed** (2026-10-26, with builds of `89ac53a` and of Task 154's change alike). `walk` (`src/workspace/discovery.ts`) runs `lstat` on every entry its listing reports as neither a plain file nor a directory: a FIFO, a socket, a device, or an entry whose type the filesystem does not report. It does so whatever the entry's path. Configuration `{ specs: { main: ["specs/*.mdx"] } }`, with `specs/` holding only a FIFO `p` (`mkfifo specs/p`). With `specs/` at mode 0755, `ids --json` answers `{"files": []}`, exit 0. After `chmod 0444 specs` (listing kept, search removed), run unprivileged, it exits 2 with `{"error": {"code": "read-failure", "path": "specs/p"}}`. Yet `specs/p` matches no glob, and no glob matches a path below it, so discovery never examines its kind, and the answer should stay `{"files": []}`, exit 0. Two contrasts: a regular file typed by the listing is not examined (`specs/notes.txt` alone answers exit 0 at 0444); and a FIFO the glob matches (`specs/q.mdx`) exits 2 concerning `specs/q.mdx` at 0444, a kind discovery does examine, so either route's answer stands there.
+
+**Change.**
+- In `walk`, examine an entry's kind separately only when SPEC 7 examines it: when some configured glob matches its path (`CompiledGlob.matches`), or when the walk would list it were it a directory (`mayMatchWithin`, never for the root-level `.xspec`, 13.4). Skip every other entry unexamined. An unmatched plain file was never a source anyway (`classifySources` drops it). Prefer the kind the listing reports wherever it reports one (a FIFO, socket, or device is neither source nor directory), and keep `lstat` (never following a link) for an entry of unreported type. Cite SPEC 7 in the comment, and rewrite the comment above the `lstat`.
+- `AGENTS.md`: add the kind probe to the bullet beginning "Hand-probing SPEC 7's root listing".
+
+**Verification** (each probe in its own fresh workspace; every product run unprivileged; modes restored after):
+1. The staging above at 0444: `ids --json`, `build --json`, `check --json`, and `inventory --json` each answer as at 0755.
+2. Untyped entries cannot be staged on this machine (its filesystems report every type), so check that branch by reading.
+3. Regressions: Task 154's set — `section-7-basics`, `section-7-discovery`, `section-7.1-7.3`, `section-11.6`, `section-14`, `section-14-ii`, `section-12.7`, `section-13.4-ii`, `section-13.5`, `section-13.5-iii`, `section-13.5-iv`, `section-10.7-iii`, and `section-6.6`.
 
 ## Task 159 — Confirm the full suite and CI green, record the state, and delete this file
 
