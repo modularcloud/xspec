@@ -452,6 +452,72 @@ interface DeletionCluster {
 }
 
 /**
+ * The merged lines `ranges` (sorted, disjoint) delete from: a deleted
+ * range spanning line terminators merges its lines into one output line,
+ * and ranges sharing such a line form one cluster (SPEC 3) — its start,
+ * the end of its content, and the end of its final terminator.
+ */
+function deletionClusters(
+  bytes: Uint8Array,
+  ranges: readonly ByteRange[],
+): DeletionCluster[] {
+  const clusters: DeletionCluster[] = [];
+  for (const range of ranges) {
+    const last = clusters[clusters.length - 1];
+    const extStart = lineStartBefore(bytes, range.start);
+    const contentEnd = lineContentEndAfter(bytes, range.end);
+    const extEnd = terminatorEndAt(bytes, contentEnd);
+    if (last !== undefined && extStart < last.extEnd) {
+      // The ranges share a (merged) line: one drop unit (SPEC 3).
+      last.ranges.push(range);
+      if (contentEnd > last.contentEnd) {
+        last.contentEnd = contentEnd;
+        last.extEnd = extEnd;
+      }
+    } else {
+      clusters.push({ extStart, contentEnd, extEnd, ranges: [range] });
+    }
+  }
+  return clusters;
+}
+
+const GREATER_THAN = 0x3e;
+
+/**
+ * Whether a merged line's kept characters — those its deletions do not
+ * cover — are all whitespace (SPEC 1.4), or, where `containerPrefixes`
+ * holds, whitespace and the `>` of a Markdown container prefix (a block
+ * quote's) among those before its first deletion: a spec source's line
+ * carries its prefix before its content, and an expression's tokens hold
+ * no `>` there — between a chain's tokens stand only whitespace and
+ * comments (SPEC 2.4, 14.20).
+ */
+function keptCharactersBlank(
+  bytes: Uint8Array,
+  cluster: DeletionCluster,
+  containerPrefixes: boolean,
+): boolean {
+  let cursor = cluster.extStart;
+  let leading = containerPrefixes;
+  for (const range of cluster.ranges) {
+    for (let pos = cursor; pos < range.start; pos += 1) {
+      const byte = bytes[pos]!;
+      if (!isWhitespaceByte(byte) && !(leading && byte === GREATER_THAN)) {
+        return false;
+      }
+    }
+    leading = false;
+    cursor = range.end;
+  }
+  for (let pos = cursor; pos < cluster.contentEnd; pos += 1) {
+    if (!isWhitespaceByte(bytes[pos]!)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Deletion edits for `ranges` with the SPEC 3 line-drop rule, exactly as
  * Markdown compilation applies it (SPEC 6.5: "dropped with their line
  * terminators, exactly as in Markdown compilation"): a deleted range
@@ -477,25 +543,8 @@ function deletionEditsWithLineDrops(
       throw new Error("xspec internal error: overlapping move deletions");
     }
   }
-  const clusters: DeletionCluster[] = [];
-  for (const range of sorted) {
-    const last = clusters[clusters.length - 1];
-    const extStart = lineStartBefore(bytes, range.start);
-    const contentEnd = lineContentEndAfter(bytes, range.end);
-    const extEnd = terminatorEndAt(bytes, contentEnd);
-    if (last !== undefined && extStart < last.extEnd) {
-      // The ranges share a (merged) line: one drop unit (SPEC 3).
-      last.ranges.push(range);
-      if (contentEnd > last.contentEnd) {
-        last.contentEnd = contentEnd;
-        last.extEnd = extEnd;
-      }
-    } else {
-      clusters.push({ extStart, contentEnd, extEnd, ranges: [range] });
-    }
-  }
   const edits: SourceEdit[] = [];
-  for (const cluster of clusters) {
+  for (const cluster of deletionClusters(bytes, sorted)) {
     // SPEC 3: "contained non-whitespace in the source" — over the merged
     // line's source characters, deleted characters included (interior
     // terminators are whitespace either way).
@@ -508,21 +557,7 @@ function deletionEditsWithLineDrops(
     }
     // The kept characters: everything in the merged line the deletion does
     // not cover.
-    let keptWhitespaceOnly = true;
-    let cursor = cluster.extStart;
-    for (const range of cluster.ranges) {
-      for (let pos = cursor; pos < range.start; pos += 1) {
-        if (!isWhitespaceByte(bytes[pos]!)) {
-          keptWhitespaceOnly = false;
-        }
-      }
-      cursor = range.end;
-    }
-    for (let pos = cursor; pos < cluster.contentEnd; pos += 1) {
-      if (!isWhitespaceByte(bytes[pos]!)) {
-        keptWhitespaceOnly = false;
-      }
-    }
+    const keptWhitespaceOnly = keptCharactersBlank(bytes, cluster, false);
     if (hadNonWhitespace && keptWhitespaceOnly) {
       // SPEC 3/6.5: drop the merged line — kept characters and final
       // terminator alike.
@@ -1115,18 +1150,130 @@ function segmentsPrefixed(
 }
 
 /**
+ * The source file a chain rewrite edits, as deleting a chain's segments
+ * reads it (`segmentDeletionEdits`).
+ */
+interface ChainSource {
+  /** The file's bytes — the edits' coordinates — read only when needed. */
+  bytes(): Uint8Array;
+  /**
+   * Whether the file is a spec source, whose lines may carry a Markdown
+   * container prefix (a block quote's `>`) before their content (SPEC
+   * 14.20).
+   */
+  readonly specSource: boolean;
+}
+
+/**
+ * The start of the line terminator ending just before `lineStart` (SPEC 3:
+ * U+000D U+000A is one terminator).
+ */
+function terminatorStartBefore(bytes: Uint8Array, lineStart: number): number {
+  if (lineStart === 0 || !isTerminatorByte(bytes[lineStart - 1]!)) {
+    throw new Error(
+      "xspec internal error: a chain's line without a terminator before it",
+    );
+  }
+  return lineStart >= 2 &&
+    bytes[lineStart - 1] === LF &&
+    bytes[lineStart - 2] === CR
+    ? lineStart - 2
+    : lineStart - 1;
+}
+
+/**
+ * The edits deleting the old segments a section move's prefix replacement
+ * leaves no counterpart (SPEC 6.5: re-identified by prefix replacement;
+ * 6.4: minimal edits): each segment's access from its own `.` or `[`
+ * token through its last byte (`ranges`, in document order) — what lies
+ * between its tokens goes with it, while the whitespace and comments
+ * before that token stay. A deletion leaving the line it stood on blank —
+ * nothing kept there but whitespace (SPEC 1.4) and, in a spec source, the
+ * line's Markdown container prefix (a block quote's `>`) — takes that line
+ * with it: a blank line inside a text-position embedding or tag ends its
+ * paragraph, and the expression with it (MDX's grammar, SPEC 14.20:
+ * `{text(O.p`, a line holding two spaces, `  .y)}` does not parse), and a
+ * blanked line is no author text to keep. Adjacent blanked lines go
+ * together, each with one line terminator: while the chain continues past
+ * them, their own; where the chain ends on the last of them — its last
+ * segments deleted — the last one's terminator stays and the one before
+ * the first goes instead, whatever follows the chain on its line kept: the
+ * rewrite changes no byte outside the chain (SPEC 6.6: a reference
+ * rewrite's range is the occurrence it rewrites, 5.7). As in Markdown
+ * compilation (SPEC 3), a deletion spanning line terminators joins the
+ * lines it spans into one line, judged as a whole.
+ */
+function segmentDeletionEdits(
+  source: ChainSource,
+  ranges: readonly ByteRange[],
+  chainEnd: number,
+): SourceEdit[] {
+  const bytes = source.bytes();
+  const edits: SourceEdit[] = [];
+  // The current run of adjacent blanked lines: its first line's start, and
+  // its last line's terminator end and last deleted byte.
+  let run: { start: number; end: number; lastDeleted: number } | null = null;
+  const closeRun = (): void => {
+    if (run === null) {
+      return;
+    }
+    edits.push({
+      range:
+        run.end <= chainEnd
+          ? { start: run.start, end: run.end }
+          : // The chain ends on the run's last line, its last deleted
+            // access ending the chain.
+            {
+              start: terminatorStartBefore(bytes, run.start),
+              end: run.lastDeleted,
+            },
+      replacement: "",
+    });
+    run = null;
+  };
+  for (const cluster of deletionClusters(bytes, ranges)) {
+    const lastDeleted = cluster.ranges[cluster.ranges.length - 1]!.end;
+    if (!keptCharactersBlank(bytes, cluster, source.specSource)) {
+      closeRun();
+      for (const range of cluster.ranges) {
+        edits.push({ range, replacement: "" });
+      }
+    } else if (run !== null && run.end === cluster.extStart) {
+      run.end = cluster.extEnd;
+      run.lastDeleted = lastDeleted;
+    } else {
+      closeRun();
+      run = { start: cluster.extStart, end: cluster.extEnd, lastDeleted };
+    }
+  }
+  closeRun();
+  return edits;
+}
+
+/**
  * The edits retargeting one chain to the moved subtree's new identity
- * (SPEC 6.5): the root rewritten to `newRootName` when it must change, and
- * the old ID's segment prefix replaced by the new ID's — per-segment
- * minimal edits preserving access form when the segment counts agree
- * (SPEC 6.4), the whole prefix span re-rendered otherwise (a form that
- * cannot be kept).
+ * (SPEC 6.5), tokens only (SPEC 6.4: minimal in-place edits): the root
+ * rewritten to `newRootName` when it must change, and the old ID's
+ * segment prefix replaced by the new ID's segment by segment from the
+ * chain's root, old prefix segment i paired with new prefix segment i —
+ * each paired segment whose name changes rewritten as a rename rewrites
+ * one (`segmentEdit`: its name token, and its `.` token where it must
+ * become computed access). A longer new prefix gains its extra segments,
+ * spelled as 6.4's fallback spells a rewritten part (`renderAccess`: dot
+ * access for identifier-valid names, double-quoted computed access
+ * otherwise), inserted immediately after the last paired segment's last
+ * byte — moving `x` to `p.x` turns `O . x` into `O . p.x`; a shorter one
+ * loses each extra old segment's access (`segmentDeletionEdits`) —
+ * moving `p.x` to `x` turns `O.p.x.y` into `O.x.y`. Every whitespace,
+ * comment, and line-terminator byte between the chain's remaining tokens
+ * stays where it is.
  */
 function chainPrefixEdits(
   spelling: Extract<ReferenceSpelling, { form: "chain" }>,
   oldSegments: readonly string[],
   newSegments: readonly string[],
   newRootName: string | null,
+  source: ChainSource,
 ): SourceEdit[] {
   const edits: SourceEdit[] = [];
   if (newRootName !== null && newRootName !== spelling.rootName) {
@@ -1138,24 +1285,39 @@ function chainPrefixEdits(
       "xspec internal error: affected chain shorter than the moved ID",
     );
   }
-  if (newSegments.length === count) {
-    for (let index = 0; index < count; index += 1) {
-      if (oldSegments[index] !== newSegments[index]) {
-        edits.push(segmentEdit(spelling.segments[index]!, newSegments[index]!));
-      }
+  const paired = Math.min(count, newSegments.length);
+  for (let index = 0; index < paired; index += 1) {
+    if (oldSegments[index] !== newSegments[index]) {
+      edits.push(
+        ...segmentEdit(spelling.segments[index]!, newSegments[index]!),
+      );
     }
-  } else {
-    let rendered = "";
-    for (const segment of newSegments) {
-      rendered += renderAccess(segment);
-    }
+  }
+  if (newSegments.length > count) {
+    // A zero-length insertion at the last paired access's end — after that
+    // access's own edit, which ends there (`applyEdits` orders by start,
+    // then end).
+    const at =
+      count === 0
+        ? spelling.rootRange.end
+        : spelling.segments[count - 1]!.accessRange.end;
     edits.push({
-      range: {
-        start: spelling.segments[0]!.accessRange.start,
-        end: spelling.segments[count - 1]!.accessRange.end,
-      },
-      replacement: rendered,
+      range: { start: at, end: at },
+      replacement: newSegments
+        .slice(count)
+        .map((segment) => renderAccess(segment))
+        .join(""),
     });
+  } else if (newSegments.length < count) {
+    edits.push(
+      ...segmentDeletionEdits(
+        source,
+        spelling.segments
+          .slice(newSegments.length, count)
+          .map((segment) => segment.accessRange),
+        chainSpan(spelling).end,
+      ),
+    );
   }
   return edits;
 }
@@ -2229,6 +2391,12 @@ function composeMoveSection(
   // order — the deterministic order fresh identifiers are allocated in.
   for (const spec of specs) {
     const path = spec.document.path;
+    // The file as a chain losing segments reads it (`chainPrefixEdits`).
+    let specBytes: Uint8Array | null = null;
+    const chainSource: ChainSource = {
+      bytes: () => (specBytes ??= encoder.encode(spec.document.text)),
+      specSource: true,
+    };
     for (const located of locatedReferencesOf(spec)) {
       const { section, reference, occurrence } = located;
       // The spelling at its pre-operation occurrence (5.7) — a moved
@@ -2405,6 +2573,7 @@ function composeMoveSection(
           oldSegments,
           newSegments,
           null,
+          chainSource,
         );
         for (const edit of prefixEdits) {
           outerEdits.add(path, edit);
@@ -2425,6 +2594,7 @@ function composeMoveSection(
         oldSegments,
         newSegments,
         rootName,
+        chainSource,
       );
       for (const edit of prefixEdits) {
         outerEdits.add(path, edit);
@@ -2491,6 +2661,12 @@ function composeMoveSection(
     }
   };
   for (const analysis of code) {
+    // The file as a chain losing segments reads it (`chainPrefixEdits`).
+    let codeBytes: Uint8Array | null = null;
+    const chainSource: ChainSource = {
+      bytes: () => (codeBytes ??= encoder.encode(analysis.text)),
+      specSource: false,
+    };
     const usesBefore = analysis.imports.map(() => 0);
     for (const reference of analysis.references) {
       usesBefore[reference.rootImport]! += 1;
@@ -2697,6 +2873,7 @@ function composeMoveSection(
         oldSegments,
         newSegments,
         rootName,
+        chainSource,
       );
       if (
         reference.callee !== null &&

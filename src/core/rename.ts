@@ -16,15 +16,20 @@
 // - the identity mapping the operation produces, as the journal entry the
 //   workspace layer appends (SPEC 6.1, 6.4).
 //
-// Rewrites are minimal in-place edits (SPEC 6.4): each affected part is
-// replaced within its recorded byte range, preserving the reference's quote
-// style and access form (2.4); where a form cannot be kept — a dot-access
-// chain segment whose new name is not a valid TypeScript identifier — the
-// rewritten part uses double-quoted computed access, and rewritten string
-// content is escaped so the literal re-parses to exactly the new value.
-// Every byte outside the affected parts is preserved verbatim, and the
-// rewritten content is a deterministic function of the operation and the
-// analyzed workspace state (SPEC 6.1, 12.0).
+// Rewrites are minimal in-place edits (SPEC 6.4): the affected parts are
+// tokens — an `id` attribute's value characters, a local reference's
+// string literal, a chain segment's name token (its identifier, or its
+// index literal with the quotes) — each replaced within its recorded byte
+// range, preserving the reference's quote style and access form (2.4);
+// where a form cannot be kept — a dot-access chain segment whose new name
+// is not a valid TypeScript identifier — the segment becomes double-quoted
+// computed access, its `.` token replaced by `[` and its name token by the
+// literal and the `]`, and each rewritten literal spells the new value
+// verbatim (2.4). Every byte outside the affected tokens is preserved
+// verbatim — the whitespace, comments, and line terminators between a
+// chain's tokens included, so `A /* c */ .a` becomes `A /* c */ ["x-y"]` —
+// and the rewritten content is a deterministic function of the operation
+// and the analyzed workspace state (SPEC 6.1, 12.0).
 //
 // Callers validate first (SPEC 6.4): the workspace passes `build`
 // validation, the old ID exists, and the new ID is valid, differs,
@@ -108,35 +113,45 @@ export function isDotAccessSegmentName(name: string): boolean {
 const encoder = new TextEncoder();
 
 /**
- * The edit rewriting one affected chain segment to `newName` (SPEC 6.4):
- * a dot access keeps its form when the new name is a valid segment of dot
- * access, and otherwise becomes double-quoted computed access (the whole
- * access — `.old` — is replaced); a computed access keeps its form and
+ * The edits rewriting one affected chain segment to `newName` (SPEC 6.4),
+ * tokens only: a dot access keeps its form when the new name is a valid
+ * segment of dot access, its name token replaced; otherwise it becomes
+ * double-quoted computed access — its `.` token replaced by `[`, its name
+ * token by the literal and the `]` — every byte between the two tokens
+ * kept where it stands (`A . a` becomes `A [ "x-y"]`, a comment between
+ * them staying inside the brackets); a computed access keeps its form and
  * quote style, its index literal rewritten in place. Shared with the
  * section-form move (SPEC 6.5: rewrites mirror rename's minimal edits).
  */
 export function segmentEdit(
   segment: SegmentSpelling,
   newName: string,
-): SourceEdit {
+): SourceEdit[] {
   if (segment.access === "dot") {
     if (isDotAccessSegmentName(newName)) {
-      return { range: segment.nameRange, replacement: newName };
+      return [{ range: segment.nameRange, replacement: newName }];
     }
     // SPEC 6.4: the dot form cannot hold the new name — double-quoted
     // computed access for segments that are not valid TypeScript
-    // identifiers.
-    return {
-      range: segment.accessRange,
-      replacement: `[${jsStringLiteral(newName, '"')}]`,
-    };
+    // identifiers. The access's first byte is its one-byte `.` token
+    // (`SegmentSpelling.accessRange`).
+    const dot = segment.accessRange.start;
+    return [
+      { range: { start: dot, end: dot + 1 }, replacement: "[" },
+      {
+        range: segment.nameRange,
+        replacement: `${jsStringLiteral(newName, '"')}]`,
+      },
+    ];
   }
   // SPEC 6.4: computed access keeps its form and quote style; escaping
   // keeps the literal exact whatever the new segment contains.
-  return {
-    range: segment.nameRange,
-    replacement: jsStringLiteral(newName, segment.quote ?? '"'),
-  };
+  return [
+    {
+      range: segment.nameRange,
+      replacement: jsStringLiteral(newName, segment.quote ?? '"'),
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -187,13 +202,13 @@ function chainAffected(
 // The plan
 // ---------------------------------------------------------------------------
 
-/** The affected chain-reference edit, if the reference is affected. */
-function chainReferenceEdit(
+/** The affected chain-reference edits, if the reference is affected. */
+function chainReferenceEdits(
   spelling: ReferenceSpelling,
   segments: readonly string[],
   oldSegments: readonly string[],
   newLastSegment: string,
-): SourceEdit | null {
+): SourceEdit[] | null {
   if (!chainAffected(segments, oldSegments)) {
     return null;
   }
@@ -369,14 +384,16 @@ export function planRename(
       if (reference.target.modulePath !== originPath) {
         continue;
       }
-      const edit = chainReferenceEdit(
+      const referenceEdits = chainReferenceEdits(
         reference.spelling,
         reference.target.segments,
         oldSegments,
         newLastSegment,
       );
-      if (edit !== null) {
-        edits.add(path, edit);
+      if (referenceEdits !== null) {
+        for (const edit of referenceEdits) {
+          edits.add(path, edit);
+        }
         preview.add(path, "reference-rewrite", occurrence);
       }
     }
@@ -390,14 +407,16 @@ export function planRename(
       if (reference.modulePath !== originPath) {
         continue;
       }
-      const edit = chainReferenceEdit(
+      const referenceEdits = chainReferenceEdits(
         reference.spelling,
         reference.segments,
         oldSegments,
         newLastSegment,
       );
-      if (edit !== null) {
-        edits.add(analysis.path, edit);
+      if (referenceEdits !== null) {
+        for (const edit of referenceEdits) {
+          edits.add(analysis.path, edit);
+        }
         // SPEC 6.6/5.7: a marker occurrence spans the bare chain, a TS
         // `text(...)` occurrence the whole call expression.
         preview.add(

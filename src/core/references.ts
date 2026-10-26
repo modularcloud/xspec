@@ -75,9 +75,12 @@ export interface ClassifiedSegment {
    */
   readonly nameSpan: TextSpan;
   /**
-   * The whole access — from just past the base expression through the
-   * access's last character (`.login`, or `["login-v2"]` through the
-   * `]`), for rewrites that must replace the access form (SPEC 6.4).
+   * The access's own characters: its access token — the `.` of a dot
+   * access, the `[` of a computed access, each one character (a `?.`
+   * makes the chain dynamic, SPEC 2.4) — through its last character (the
+   * name, or the `]`). The whitespace and comments between the preceding
+   * chain element and that token are not the access's: a rewrite
+   * replaces tokens and keeps every byte between them (SPEC 6.4, 6.5).
    */
   readonly accessSpan: TextSpan;
 }
@@ -174,6 +177,29 @@ function quoteOf(
     throw new Error("xspec internal error: string literal without a quote");
   }
   return quote;
+}
+
+/**
+ * Where a static segment's access token begins (SPEC 2.4, 6.4): the `.` of
+ * a dot access, the `[` of a computed access — one character each, ending
+ * where the compiler's next token, the name or the index, has its full
+ * start (a node's full start is the end of the token before it) — so past
+ * every whitespace and comment byte following the preceding chain element.
+ */
+function accessTokenStart(
+  access: tst.PropertyAccessExpression | tst.ElementAccessExpression,
+  sourceFile: tst.SourceFile,
+): number {
+  const dot = ts.isPropertyAccessExpression(access);
+  const tokenEnd = dot ? access.name.pos : access.argumentExpression.pos;
+  const token = dot ? "." : "[";
+  if (sourceFile.text[tokenEnd - 1] !== token) {
+    throw new Error(
+      `xspec internal error: a static chain segment without its ${token} ` +
+        `token`,
+    );
+  }
+  return tokenEnd - 1;
 }
 
 /** SPEC 2.4: why an expression of any other form is dynamic. */
@@ -306,7 +332,10 @@ export function classifyReference(
         access: "dot",
         quote: null,
         nameSpan: spanOf(node.name, sourceFile),
-        accessSpan: { start: node.expression.getEnd(), end: node.getEnd() },
+        accessSpan: {
+          start: accessTokenStart(node, sourceFile),
+          end: node.getEnd(),
+        },
       });
       node = node.expression;
       continue;
@@ -325,7 +354,10 @@ export function classifyReference(
         access: "computed",
         quote: quoteOf(index, sourceFile),
         nameSpan: spanOf(index, sourceFile),
-        accessSpan: { start: node.expression.getEnd(), end: node.getEnd() },
+        accessSpan: {
+          start: accessTokenStart(node, sourceFile),
+          end: node.getEnd(),
+        },
       });
       node = node.expression;
       continue;

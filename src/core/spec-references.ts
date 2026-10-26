@@ -829,7 +829,11 @@ export interface SegmentSpelling {
   readonly quote: '"' | "'" | null;
   /** The name token: the identifier, or the index literal with quotes. */
   readonly nameRange: ByteRange;
-  /** The whole access, from just past the base through its last byte. */
+  /**
+   * The access's own bytes: its one-byte access token (the `.` or the `[`)
+   * through its last byte (the name, or the `]`) — never the whitespace and
+   * comments before that token, which every rewrite keeps (SPEC 6.4, 6.5).
+   */
   readonly accessRange: ByteRange;
 }
 
