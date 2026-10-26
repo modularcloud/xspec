@@ -682,9 +682,11 @@ interface WouldBeCycle {
 /**
  * `refused-cycle` (SPEC 14): one reason, so one finding however many
  * cycles the move would create — a dependency cycle beside a spec import
- * cycle, or cycles in distinct strongly connected components — "one
- * finding per reason, never only the first found". It locates every
- * cycle's full path: the union of each cycle's located constructs, each
+ * cycle, or several elementary cycles of either kind, through one
+ * strongly connected component or several (`findCycles` yields each) —
+ * "one finding per reason, never only the first found". It locates every
+ * would-be cycle's full path, choosing no representative cycle: the union
+ * of each cycle's located constructs, each
  * construct once (one spelling can record a dependency edge of one cycle
  * and root a would-be import closing another; SPEC 12.7: one location per
  * offending construct), in 12.7's within-finding order; its message names

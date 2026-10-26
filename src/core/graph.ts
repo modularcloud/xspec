@@ -849,15 +849,19 @@ export function buildWorkspaceGraph(
   );
 
   // --- cycles (SPEC 5.3, 2.1 → 14.9) ---------------------------------------
-  findings.push(
-    ...dependencyCycleFindings(
-      requirementNodes,
-      requirementIndex,
-      edges,
-      edgeSpellings,
-    ),
-  );
-  findings.push(...importCycleFindings([...specs, ...invalidPathSpecs]));
+  // One finding per elementary cycle, however many (pushed one by one, so
+  // no count meets a spread's argument limit).
+  for (const finding of dependencyCycleFindings(
+    requirementNodes,
+    requirementIndex,
+    edges,
+    edgeSpellings,
+  )) {
+    findings.push(finding);
+  }
+  for (const finding of importCycleFindings([...specs, ...invalidPathSpecs])) {
+    findings.push(finding);
+  }
 
   return new WorkspaceGraph({
     requirementNodes,
@@ -1032,11 +1036,15 @@ class Resolver {
  * SPEC 5.3: dependency cycles over the combined graph of `contains`,
  * `depends`, and `embeds` edges on requirement nodes (`references` edges
  * and code-sourced `embeds` edges have code-location sources and do not
- * participate). One 14.9 finding per cyclic strongly connected component,
- * carrying a full cycle path within it — located in source through every
- * reference spelling recording a participating dependency edge (SPEC 14
- * location cardinality; `contains` steps arise from document structure and
- * spell nothing), the full identity path carried in the message.
+ * participate). One 14.9 finding per elementary cycle (`findCycles`) —
+ * each cycle is its own condition instance, so every one is reported
+ * (SPEC 14: each condition present, not only the first; 5.3: "report
+ * cycles", a section's dependency on its own ancestor among them even
+ * where another cycle runs through the same nodes) — located in source
+ * through every reference spelling recording a dependency edge of that
+ * cycle (SPEC 14 location cardinality: parallel spellings of one step
+ * stay in its one finding; `contains` steps arise from document structure
+ * and spell nothing), the full identity path carried in the message.
  */
 function dependencyCycleFindings(
   requirementNodes: readonly RequirementNode[],
@@ -1107,10 +1115,12 @@ function dependencyCycleFindings(
  * member whatever that member's path validity — and the walk therefore
  * runs over exact path bytes (SPEC 12.0), with every location and message
  * path rendered from the file's real path (marked byte form capable). One
- * 14.9 finding per cyclic component, locating each participating import
- * declaration — every declaration recording a step of the reported cycle,
- * valid or not (SPEC 14 location cardinality), the full file path carried
- * in the message.
+ * 14.9 finding per elementary cycle (`findCycles`; a closed path through
+ * distinct files), locating each participating import declaration —
+ * every declaration recording a step of that cycle, valid or not, so
+ * several declarations importing one module stay in the one finding
+ * (SPEC 14 location cardinality) — the full file path carried in the
+ * message.
  */
 function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
   /** Byte key of one parsed file (both `PathText` forms, SPEC 12.0). */
@@ -1181,15 +1191,26 @@ function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
 }
 
 /**
- * Every cycle of the directed graph, one full closed path per cyclic
- * strongly connected component: for each component containing a cycle (more
- * than one node, or a self-loop), the shortest cycle through its
- * byte-least node, as a closed walk (first identity repeated at the end;
- * `[a, a]` for a self-loop). Results are ordered by starting identity.
- * Adjacency entries naming unknown nodes are ignored. Exported for the
- * `rename`/`move` refusal evaluation (core/refusal.ts), which runs the
- * same detection over the would-be post-operation graph (SPEC 6.5, 14
- * `refused-cycle`).
+ * Every elementary cycle of the directed graph — a closed path through
+ * distinct nodes — each exactly once, whatever node it is entered from: as
+ * a closed walk from its byte-least node (that node repeated at the end;
+ * `[a, a]` for a self-loop). SPEC 5.3 and 2.1 make every cycle invalid and
+ * SPEC 14 reports each condition present, so each elementary cycle is its
+ * own finding (14.9) and, for `rename`/`move`, a would-be cycle
+ * `refused-cycle` names and locates (SPEC 6.5, 14) — no representative per
+ * strongly connected component. The list is ordered by node sequence,
+ * element-wise in byte order, a proper prefix first (SPEC 12.0:
+ * deterministic output). Adjacency entries naming unknown nodes are
+ * ignored. Exported for the `rename`/`move` refusal evaluation
+ * (core/refusal.ts), which runs the same detection over the would-be
+ * post-operation graph.
+ *
+ * Johnson's algorithm (SIAM J. Comput. 4(1), 1975) per cyclic strongly
+ * connected component: an acyclic graph costs one Tarjan pass, and a
+ * cyclic one O((n + e)(c + 1)) for its c cycles — output-sensitive, as an
+ * enumeration of every cycle must be. Iterative throughout, explicit
+ * stacks in place of recursion: cycles run through `contains` chains as
+ * deep as the sources nest, and SPEC bounds no nesting depth.
  */
 export function findCycles(
   nodes: readonly string[],
@@ -1217,64 +1238,179 @@ export function findCycles(
       component.length === 1 &&
       neighborLists[component[0]].includes(component[0]);
     if (component.length === 1 && !selfLoop) continue;
-    const members = component.map((index) => ordered[index]);
-    cycles.push(shortestCycleWithin(members, ordered, indexOf, neighborLists));
+    for (const cycle of elementaryCyclesWithin(
+      component.map((index) => ordered[index]),
+      component.map((index) => neighborLists[index]),
+      component,
+    )) {
+      cycles.push(cycle);
+    }
   }
-  return cycles.sort((a, b) => compareBytes(a[0], b[0]));
+  return cycles.sort(compareNodeSequences);
+}
+
+/** Element-wise byte order over node sequences, a proper prefix first. */
+function compareNodeSequences(
+  a: readonly string[],
+  b: readonly string[],
+): number {
+  const shared = Math.min(a.length, b.length);
+  for (let index = 0; index < shared; index += 1) {
+    const byNode = compareBytes(a[index], b[index]);
+    if (byNode !== 0) return byNode;
+  }
+  return a.length - b.length;
 }
 
 /**
- * The shortest cycle through the byte-least member of one cyclic strongly
- * connected component, as a closed walk. Deterministic: BFS with
- * byte-ordered adjacency; within a component every node reaches every
- * other, so a cycle through any member always exists.
+ * Every elementary cycle within one cyclic strongly connected component —
+ * Johnson's circuit search. `names[i]` is member i's node, `neighbors[i]`
+ * its out-neighbors as indices into the whole graph, and `members[i]` its
+ * own index there. Members are renumbered in byte order of their names,
+ * so the byte-least node of any member set is its least local number.
+ *
+ * Each strongly connected subgraph still to search is searched from its
+ * byte-least node `s` for every elementary cycle through `s` — necessarily
+ * each such cycle's byte-least node — and `s` is then set aside: the
+ * cyclic components of the rest are searched in turn. A cycle lies within
+ * one component of every subgraph holding it, so it is found exactly once,
+ * from its own byte-least node; and every subgraph searched holds at least
+ * one cycle through its start, which bounds the work by the output.
  */
-function shortestCycleWithin(
-  members: readonly string[],
-  ordered: readonly string[],
-  indexOf: ReadonlyMap<string, number>,
-  neighborLists: readonly (readonly number[])[],
-): string[] {
-  const inComponent = new Set(members.map((member) => indexOf.get(member)!));
-  const startIdentity = sortByBytes(members, (member) => member)[0];
-  const start = indexOf.get(startIdentity)!;
-  if (neighborLists[start].includes(start)) {
-    // A self-loop: a dependency cycle (or self-import) of length one.
-    return [startIdentity, startIdentity];
-  }
-  const parent = new Map<number, number>();
-  const queue: number[] = [start];
-  for (let head = 0; head < queue.length; head += 1) {
-    const current = queue[head];
-    for (const next of neighborLists[current]) {
-      if (!inComponent.has(next)) continue;
-      if (next === start) {
-        const path: string[] = [];
-        for (let node = current; node !== start; node = parent.get(node)!) {
-          path.push(ordered[node]);
+function elementaryCyclesWithin(
+  names: readonly string[],
+  neighbors: readonly (readonly number[])[],
+  members: readonly number[],
+): string[][] {
+  const order = names
+    .map((_, index) => index)
+    .sort((a, b) => compareBytes(names[a], names[b]));
+  const localOfGlobal = new Map<number, number>();
+  order.forEach((member, local) => localOfGlobal.set(members[member], local));
+  const localNames = order.map((member) => names[member]);
+  // In-component neighbors, renumbered. Each list stays ascending (byte
+  // order) wherever the whole graph's lists are byte-ordered, keeping the
+  // search order fixed (SPEC 12.0); the result is sorted regardless.
+  const localNeighbors: number[][] = order.map((member) => {
+    const list: number[] = [];
+    for (const next of neighbors[member]) {
+      const local = localOfGlobal.get(next);
+      if (local !== undefined) list.push(local);
+    }
+    return list;
+  });
+  const size = order.length;
+
+  const cycles: string[][] = [];
+  const inSubgraph = new Uint8Array(size);
+  const blocked = new Uint8Array(size);
+  // Johnson's B lists: `waiting[w]` holds the nodes to unblock with w.
+  const waiting: Set<number>[] = [];
+  for (let local = 0; local < size; local += 1) waiting.push(new Set());
+
+  /** Johnson's UNBLOCK(node), iterative: release every waiting chain. */
+  const unblock = (node: number): void => {
+    blocked[node] = 0;
+    const work = [node];
+    while (work.length > 0) {
+      const current = work.pop()!;
+      for (const held of waiting[current]) {
+        if (blocked[held] === 1) {
+          blocked[held] = 0;
+          work.push(held);
         }
-        path.reverse();
-        return [startIdentity, ...path, startIdentity];
       }
-      if (next !== start && !parent.has(next)) {
-        parent.set(next, current);
-        queue.push(next);
+      waiting[current].clear();
+    }
+  };
+
+  const pending: number[][] = [order.map((_, local) => local)];
+  while (pending.length > 0) {
+    // Ascending local numbers: the subgraph's byte-least node first.
+    const subgraph = pending.pop()!;
+    const start = subgraph[0];
+    for (const node of subgraph) {
+      inSubgraph[node] = 1;
+      blocked[node] = 0;
+      waiting[node].clear();
+    }
+
+    // Johnson's CIRCUIT(start), iterative: one frame per path node — its
+    // next neighbor position and whether a cycle was closed beneath it.
+    const path: number[] = [start];
+    const framePosition: number[] = [0];
+    const frameFound: boolean[] = [false];
+    blocked[start] = 1;
+    while (path.length > 0) {
+      const top = path.length - 1;
+      const node = path[top];
+      const nodeNeighbors = localNeighbors[node];
+      const position = framePosition[top];
+      if (position < nodeNeighbors.length) {
+        framePosition[top] = position + 1;
+        const next = nodeNeighbors[position];
+        if (inSubgraph[next] === 0) continue;
+        if (next === start) {
+          const cycle = path.map((member) => localNames[member]);
+          cycle.push(localNames[start]);
+          cycles.push(cycle);
+          frameFound[top] = true;
+        } else if (blocked[next] === 0) {
+          blocked[next] = 1;
+          path.push(next);
+          framePosition.push(0);
+          frameFound.push(false);
+        }
+        continue;
+      }
+      // Every neighbor explored: CIRCUIT(node) returns.
+      const found = frameFound[top];
+      path.pop();
+      framePosition.pop();
+      frameFound.pop();
+      if (found) {
+        unblock(node);
+        if (top > 0) frameFound[top - 1] = true;
+      } else {
+        for (const next of nodeNeighbors) {
+          if (inSubgraph[next] === 1) waiting[next].add(node);
+        }
       }
     }
+
+    // Set the start aside; the rest's cyclic components follow.
+    inSubgraph[start] = 0;
+    const rest = subgraph.slice(1);
+    for (const component of stronglyConnectedComponents(localNeighbors, {
+      nodes: rest,
+      member: inSubgraph,
+    })) {
+      if (
+        component.length > 1 ||
+        localNeighbors[component[0]].includes(component[0])
+      ) {
+        pending.push(component.sort((a, b) => a - b));
+      }
+    }
+    for (const node of rest) inSubgraph[node] = 0;
   }
-  throw new Error(
-    "xspec internal error: no cycle found within a cyclic component",
-  );
+  return cycles;
 }
 
 /**
  * Tarjan's strongly-connected-components algorithm, iterative (deep
  * `contains`/`depends` chains must not overflow the call stack). Nodes are
  * integer indices into `neighborLists`; components come out in a
- * deterministic order given the input order.
+ * deterministic order given the input order. With `subgraph`, only the
+ * subgraph its `nodes` induce is decomposed: an edge to a node not marked
+ * 1 in its `member` is ignored.
  */
 function stronglyConnectedComponents(
   neighborLists: readonly (readonly number[])[],
+  subgraph: {
+    readonly nodes: readonly number[];
+    readonly member: Uint8Array;
+  } | null = null,
 ): number[][] {
   const count = neighborLists.length;
   const index = new Int32Array(count).fill(-1);
@@ -1284,9 +1420,11 @@ function stronglyConnectedComponents(
   const components: number[][] = [];
   let nextIndex = 0;
 
+  const roots =
+    subgraph === null ? neighborLists.map((_, node) => node) : subgraph.nodes;
   const frameNode: number[] = [];
   const frameNext: number[] = [];
-  for (let root = 0; root < count; root += 1) {
+  for (const root of roots) {
     if (index[root] !== -1) continue;
     frameNode.push(root);
     frameNext.push(0);
@@ -1304,7 +1442,9 @@ function stronglyConnectedComponents(
       if (position < neighbors.length) {
         frameNext[frameNext.length - 1] = position + 1;
         const next = neighbors[position];
-        if (index[next] === -1) {
+        if (subgraph !== null && subgraph.member[next] === 0) {
+          // Outside the subgraph: not an edge of it.
+        } else if (index[next] === -1) {
           frameNode.push(next);
           frameNext.push(0);
         } else if (onStack[next] === 1 && index[next] < lowlink[node]) {
