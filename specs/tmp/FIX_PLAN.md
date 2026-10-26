@@ -54,7 +54,7 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 
 | Task | Finding | Change | Status |
 |---|---|---|---|
-| 141 | A2 | A TypeScript spec module import may carry import attributes | pending |
+| 141 | A2 | A TypeScript spec module import may carry import attributes | landed at 064f11d, CI run 1703 green |
 | 142 | A1 | The permitted bindings of an invalid spec module import root chains | pending |
 | 143 | — (found planning 142) | An invalid-form spec-source import takes part in spec import cycles | pending |
 | 144 | A3 | Every cycle reported; `refused-cycle` locates every would-be cycle | pending |
@@ -63,20 +63,6 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 | 147 | B3 | A vanished working directory ends every command in a defined outcome | pending |
 | 148 | B4 | Per-role text snapshots; `review create` succeeds at scale | pending |
 | 149 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
-
-## Task 141 — A TypeScript spec module import may carry import attributes (SPEC 4, 14.15, 14; A2)
-
-**Requirement.** SPEC 4 judges a TypeScript spec module import by its specifier — it "follows the same form and resolution as 2.1 and MUST designate a discovered spec source (14.15)" — and by its bindings — "The permitted bindings from a spec module are the default export and the named `text` export, each optionally aliased; any other binding is invalid (14.15)". 14.15's TypeScript list ("a `.xspec` import that does not designate such a source, a spec-module binding other than the default and `text` exports, a module-linking form other than an import declaration … whose specifier ends in `.xspec` (4), or a module-linking form whose relative specifier designates a derived-file path …") names no import attributes, and SPEC 14: "Stable codes cover exactly these conditions and the refusal reasons below, and no more". TypeScript 5.9.3 parses `with { … }` and the legacy `assert { … }` without a syntax error, so such a file is well-formed (14.20, which itself names `import a from "./a.json" with { type: "json" }` as deriving in a TypeScript source). What must not change: import attributes in a spec source stay a 14.20 parse failure at `with` (14.20: "an import spelled with syntax the edition lacks (import attributes, `with { … }`)"; T14-12); on the configuration's `xspec` import they stay a configuration error (7; T7-2); every other 14.15 defect of a TypeScript import stays.
-
-**Observed** (A2, at `f2ff6c3`; `E6_CONFIG` from `test/helpers/e6.ts`; `specs/A.mdx` = `<S id="a">` LF `A` LF `</S>` LF; every line ending in LF; ranges are [start, end) byte offsets): `src/j08.ts` = `import D from "../specs/A.xspec" with { type: "x" }`, `D.a`: `build --json` exits 1 with one 14.15 at [0, 51), "it carries import attributes", and `D.a` [52, 55) records nothing (Task 142's masking); the form `assert { type: "x" }` behaves the same. Expected: exit 0, no finding, and a `references` edge and occurrence for `D.a` [52, 55) from `src/j08.ts` to `specs/A.mdx#a`. Knock-on today: such a workspace is also refused as a baseline (6.3) and by the `rename`/`move` valid-workspace precondition (6.4, 6.5).
-
-**Location.** `scanImportDeclaration` in `src/core/code-analysis.ts`: `if (statement.attributes !== undefined) { defects.push("it carries import attributes"); }` (near line 1460), the one place the product reads a TypeScript import's attributes; nested spec module imports go through the same function. (`checkImport` in `src/core/config.ts` holds the configuration's own attribute rule — leave it.)
-
-**Change.**
-- Delete that defect, so attributes alone never invalidate a TypeScript spec module import. Nothing else needs them: a file move rewrites the specifier literal alone, a removal deletes the declaration whole, and an added import carries none (6.5).
-- Leave a comment beside the specifier and binding checks citing SPEC 4 and 14.15: attributes are no condition there (in a spec source they are 14.20's, in the configuration 7's).
-
-**Verification.** No suite test pins it. By hand, in a scratch workspace under `E6_CONFIG`: the staging above with `with` and, separately, with `assert` — `build --json` and `check --json` exit 0, `occurrences --file src/j08.ts --json` lists the one `references` occurrence [52, 55), `query edges --json` its edge; a nested twin (`export function f() {` LF `  import D from "../specs/A.xspec" with { type: "x" }` LF `  D.a` LF `}` LF) — the edge from `src/j08.ts#f`; contrasts still 14.15: the same declaration with `, * as NS` after `D`, and `import D from "../specs/missing.xspec" with { type: "x" }`; `move specs/A.mdx specs/sub/A.mdx --preview --json`, then performed — the preview's entry for `src/j08.ts` is one `import-specifier-rewrite` over the specifier alone and the performed file keeps the attributes byte for byte; in a git repository with the file committed and a spec then edited, `impact --base HEAD --json` exits 0 (the baseline validates, 6.3). Regressions: `section-4` (T4-2, T4-6), `section-4.5`, `section-14` (T14-11's module-linking forms), `section-14-iii` (T14-12's import-attribute arms, code source and spec source), `section-6.5` (T6.5-1's file moves), `section-7-basics` (T7-2), `section-12.0-iv`.
 
 ## Task 142 — The permitted bindings of an invalid spec module import root chains as a valid import's do (SPEC 2.1, 2.2, 2.3, 4, 4.3, 4.5, 5.7, 11.2, 14; A1)
 
