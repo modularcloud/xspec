@@ -60,39 +60,13 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 
 | Task | Finding | Change | Status |
 |---|---|---|---|
-| 154 | B1 | Discovery lists the workspace root only when some configured glob can match a path below it outside `.xspec/` | pending |
+| 154 | B1 | Discovery lists the workspace root only when some configured glob can match a path below it outside `.xspec/` | landed at `02dec03`, CI run 1729 green |
 | 155 | B3 | Text expansion on an explicit work stack, and any further recursion long chains meet made iterative: long embedding chains answer | pending |
 | 156 | B3 (note) | `coverage` streams its report, in both output forms | pending |
 | 157 | B2 | Item ids derived from kind and scope node, `nextItemId` dropped (session format 4): concurrent additions take distinct keys | pending |
 | 158 | B2 | One line per item and decomposition, comma-led, each followed by an empty line (format 5): a keep-both merge holds both sides' additions | pending |
 | 160 | Task 154's spawn | Discovery examines an entry's kind only where SPEC 7 does: never for an entry no glob matches and the walk would not list were it a directory | pending |
 | 159 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
-
-## Task 154 — Discovery lists the workspace root only when some configured glob can match a path below it outside `.xspec/` (SPEC 7, 13.4, 14.25; B1)
-
-**Requirement.**
-- SPEC 7: "Discovery reads only what deciding that set takes: it lists a directory — the workspace root, or one reached from it through directories alone — exactly when some configured spec or code glob matches a path below it, paths under `.xspec/`, which 13.4 excludes, counting for none". An inside glob's "`.`, `..`, and empty segments match nothing"; `**` matches "any number of whole segments, including none".
-- SPEC 7 and 14.25: a directory discovery does not list is never discovery's read failure — "So under `specs/**/*.mdx` alone neither a root-level `data/` nor a dot-directory below `specs/` is ever listed, readable or not (14.25)." The root is such a directory when no glob can match a path below it.
-
-**Observed** (B1, at `abb7839`). Configuration `export default defineConfig({ specs: { main: ["./specs/*.mdx"] } })` (B's `rootlist.mjs`), `specs/A.mdx` holding `<S id="a">` LF `A.` LF `</S>` LF:
-- with a readable root, `ids --json` answers `{"files": []}`, exit 0;
-- with the root at mode 0311 (search and write, no read) and each run unprivileged, `ids --json`, `build --json`, and `inventory` exit 2 with `{"error": {"code": "read-failure", "path": "."}}`, as does every other command that loads configuration;
-- the glob `.xspec/*.mdx` (B's `rootlist2.mjs`), whose every match lies under `.xspec/` and so counts for none, fails alike.
-- Cause: `discoverSources` (`src/workspace/discovery.ts`) walks the root whenever `globs.length > 0`. `walk` applies `CompiledGlob.mayMatchWithin` (`src/core/glob.ts`) before entering every other directory — exact there — but nothing judges the root.
-
-**Change.**
-- List the root exactly when some configured spec or code glob can match a path below it that is not under `.xspec/` — judged from the globs alone, before any read:
-  - a glob holding a `.`, `..`, or empty segment matches nothing (`matchesNothing`), so it never qualifies;
-  - a glob whose first segment is exactly the literal `.xspec` (no wildcard in it) matches only paths under `.xspec/` — unless every later segment is `**` (or there is none), when it also matches the root-level path `.xspec` itself, which is not under `.xspec/`: so `.xspec/**` and `.xspec` qualify, `.xspec/*.mdx` and `.xspec/**/*.mdx` do not;
-  - every other glob qualifies: a first segment that is `**`, holds a wildcard, or is another literal matches some segment other than `.xspec`, and the rest of an inside glob can always be matched.
-- Put the judgement in the pure core beside `mayMatchWithin` (for example a `CompiledGlob` method `mayMatchBelowRoot()`, its doc comment citing SPEC 7 and 13.4) and use it in `discoverSources` in place of `globs.length > 0`. Leave `walk`'s per-directory test and its root-level `.xspec` skip as they are. Rewrite the comments stating the old rule (`discoverSources`'s "with no configured globs nothing can match", and the module header's account of where the walk starts).
-- `AGENTS.md`: add the root-listing probe (recipe and outcomes) to the bullet beginning "Hand-probing SPEC 14.25's read failures", or as a new bullet beginning "Hand-probing SPEC 7's root listing".
-
-**Verification** (each probe in its own fresh workspace under a new `mktemp -d`; every product run unprivileged; stage with `chmod 0311 <root>`, and `chmod 0755 <root>` when done):
-1. B's two stagings (`./specs/*.mdx`, then `.xspec/*.mdx`, each beside `specs/A.mdx`): in one workspace, run each of `build --json`, `check --json`, `ids --json`, `query nodes --json`, `occurrences --json`, `view --json`, `inventory --json`, `coverage --json`, `review list --json`, and `rename specs/A.mdx a b --preview --json` first with the root readable and then at 0311. Each pair agrees in exit code and standard output (`ids --json` `{"files": []}` exit 0, `build --json` `{"findings": []}` exit 0, `inventory` exit 0), and no run reads `read-failure`.
-2. Further globs that match no path below the root outside `.xspec/` answer alike at 0311: `specs//*.mdx`, `specs/*.mdx/`, `a/../specs/*.mdx`, `.xspec/**/*.mdx`, and a code glob `./src/*.ts` beside `specs: {}`.
-3. Controls, which qualify, so the root's refused listing is the read failure (exit 2; with `--json`, `{"error": {"code": "read-failure", "path": "."}}`): `specs/*.mdx`, `*.mdx`, `**/*.mdx`, `.xspec/**`, `.xspec`, and a group holding both `./specs/*.mdx` and `specs/*.mdx`.
-4. Regressions, under the unprivileged recipe: `section-7-basics`, `section-7-discovery` (T7-4 to T7-8), `section-7.1-7.3`, `section-11.6`, `section-14`, `section-14-ii` (T14-9, T14-10), `section-12.7`, `section-13.4-ii`, `section-13.5`, `section-13.5-iii`, `section-13.5-iv`, `section-10.7-iii`, and `section-6.6`.
 
 ## Task 155 — Text expansion bounded by more than the call stack: long embedding chains answer (SPEC 3, 1.6, 5.3, 12.1, 12.0; B3)
 
