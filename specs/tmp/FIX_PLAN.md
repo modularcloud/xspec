@@ -62,38 +62,13 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 | Task | Finding | Change | Status |
 |---|---|---|---|
 | 154 | B1 | Discovery lists the workspace root only when some configured glob can match a path below it outside `.xspec/` | landed at `02dec03`, CI run 1729 green |
-| 155 | B3 | Text expansion on an explicit work stack, and any further recursion long chains meet made iterative: long embedding chains answer | pending |
+| 155 | B3 | Text expansion on an explicit work stack, and any further recursion long chains meet made iterative: long embedding chains answer | landed at `1b05db2`, CI run 1731 green |
 | 156 | B3 (note) | `coverage` streams its report, in both output forms | pending |
 | 157 | B2 | Item ids derived from kind and scope node, `nextItemId` dropped (session format 4): concurrent additions take distinct keys | pending |
 | 158 | B2 | One line per item and decomposition, comma-led, each followed by an empty line (format 5): a keep-both merge holds both sides' additions | pending |
 | 160 | Task 154's spawn | Discovery examines an entry's kind only where SPEC 7 does: never for an entry no glob matches and the walk would not list were it a directory | pending |
 | 161 | Task 155's spawn | Graph data, `view --json`, and any one-string output these chains drive past V8's string limit, spelled in chunks: long embedding chains build and answer | pending |
 | 159 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
-
-## Task 155 — Text expansion bounded by more than the call stack: long embedding chains answer (SPEC 3, 1.6, 5.3, 12.1, 12.0; B3)
-
-**Requirement.**
-- SPEC 3: each `text(...)` is replaced by the target's compiled subtree text, fully expanded; SPEC 1.6 defines subtree text and own text through that expansion; SPEC 5.3 makes cycles over `contains` and `embeds` edges invalid, so in a valid workspace expansion terminates. SPEC bounds no chain's length.
-- SPEC 12.1: `build` of a valid workspace succeeds, and every surface answers per its section (10.x, 11.x, 12.3, 12.4). SPEC 12.0: "Exit codes partition all outcomes; every defined failure belongs to exactly one class" (0, 1, or 2) — an internal error, exit 70, is none of them.
-
-**Observed** (B3, at `abb7839`). Configuration `{ specs: { main: ["specs/**/*.mdx"] } }`; `specs/A.mdx` holding N sections, section i (for i < N − 1) `<S id="s<i>">` LF `{text("s<i+1>")}` LF `</S>` LF and the last `<S id="s<N-1>">` LF `end.` LF `</S>` LF (B's `embchain4.mjs`, `embchain3.mjs`; `<i>` the decimal index):
-- N = 2000 builds, exit 0;
-- at N = 2200 and every larger N B tried up to 6000, `build`, `check`, `ids`, `show`, `query nodes`, `query node`, `occurrences`, `view` (with or without `--text`), `at`, and `review create --strategy audit` exit 70 with empty standard output, standard error `xspec: internal error: RangeError: Maximum call stack size exceeded`; only `inventory` and `version` answer;
-- a cross-file chain of 2500 files crashes alike (B's `embchainX.mjs`: `specs/F<i>.mdx` holding `import N from "./F<i+1>.xspec"` LF LF `<S id="x">` LF `{text(N.x)}` LF `</S>` LF, the last file `<S id="x">` LF `end.` LF `</S>` LF);
-- `d` chains of 6000, in one file and across 6000 files, build and answer.
-- Cause: the recursion `subtreeText` → `renderExpanded` → `expansion` → `subtreeText` (and `droppedExpanded` → `expansion`) in `WorkspaceTextModel`, `src/core/text-model.ts` — several frames per chain link, against this Node's ~9.9k frames for a plain recursive function (AGENTS.md's bullet beginning "Answer-document scale"). `indexSpan`, atop some traces, is only the frame on top when the stack ran out. For scale: the suite stages section towers 4096 deep (H-11), which the product handles.
-
-**Change.**
-- Evaluate expansion on an explicit work stack instead of the call stack: before rendering a node's subtree text, compute in post-order the subtree texts its expansions need — the targets of the embeddings in the line groups its span touches (the line-drop judgement of 3, `droppedExpanded`, consults those too), then theirs — each memoized before its embedder renders, so that rendering never recurses through `expansion`. Keep every value byte-identical, the memoization, and the re-entry rule (re-entering a node under computation yields the empty string; only a workspace cyclic under 5.3, which is invalid and never surfaces, can meet it). Raising the stack limit (`--stack-size`, a worker's `stackSizeMb`) is no fix: it moves the bound.
-- Then run every command over the long chains (Verification) and make iterative whatever recursion they meet next on any path — graph building, the cycle search (5.3), hashing (5.5), generated-module and Markdown emission (4, 3), review derivation and payloads (10.5–10.7), `impact` (9), `view`, `at`, `occurrences`, `query`, and `rename`/`move` evaluation and rewriting (6.4–6.6) — each with a comment citing the SPEC section it serves. An answer that passes V8's string limit at these stagings is Task 156's class: fix it here if it is on your path, else plan it as a new task.
-- `AGENTS.md`: a new bullet beginning "Hand-probing long chains" recording the stagings, the commands run, their exits and times, and each recursion removed.
-
-**Verification** (each staging in its own fresh workspace; time each command and record the times):
-1. The single-file chain at N = 2200, 4096, and 6000: `build --json` exits 0 finding-free; `check --json`, `ids --json`, `show specs/A.mdx#s0`, `query nodes --json`, `query node specs/A.mdx#s0 --json`, `occurrences --json`, `view specs/A.mdx --json`, `view specs/A.mdx --text --json`, `at specs/A.mdx 5 --json`, `coverage --json`, `review create --strategy audit --name s`, `review status s --json`, `review next s --json`, and `review export s` (streamed into a byte count, as the bullet beginning "Hand-probing review-session scale" describes) each exit 0; `rename specs/A.mdx s1 t1 --preview --json` exits 0, and the performed rename exits 0 with `check --json` then exiting 0 finding-free; `move specs/A.mdx#s1 specs/B.mdx#s1 --preview --json` exits 0. By SPEC 3's line rule, the subtree text of `s<i>` is `end.` followed by N − i LFs (each embedding line keeps its terminator after the expansion; the tag lines drop): check `s0`'s, `end.` and N LFs, in `query node`'s answer at each N.
-2. Baseline surfaces at N = 4096: `git init`, a local identity, commit; edit the last section's text to `end, revised.`; `impact --base HEAD --json` exits 0 (every other section `upstream-changed`), and `review create --base HEAD --name b` then `review status b --json` exit 0.
-3. The cross-file chain at 2500 files (and at 6000 if time allows): `build --json`, `ids --json`, `check --json`, and `query node specs/F0.mdx#x --json` exit 0, the text of `F0`'s `x` being `end.` and 2500 LFs.
-4. Unchanged values: at N = 100 and 2000, the files `build` writes — graph data, generated modules and companions, and Markdown with `markdown: { emit: true }` added — and the standard outputs of step 1's reads are byte-identical to those of a build of `abb7839` (B's private build `/tmp/claude-0/-home-user-xspec/08a79bea-e066-52cf-ac19-1be1615496b4/scratchpad/revB8-build.ZKUI/xspec/dist/cli/bin.js` if still present, otherwise one built in a fresh single-branch clone checked out at `abb7839`).
-5. Regressions: `section-1.6-1.7`, `section-2.2-2.3`, `section-3`, `section-4`, `section-4.1-4.2`, `section-4.3-4.4`, `section-5.5`, `section-5.6`, `section-6.5`, `section-9`, `section-10.7-ii`, `section-11.3`, `section-11.4`, `section-11.5`, `section-13.1-13.2`, `section-15`, `section-16-p2-p3`, `section-16-p8`, and `section-16-p11`.
 
 ## Task 156 — Coverage reports stream: a report past V8's string limit is emitted whole, in both output forms (SPEC 8.2, 12.0; B3's note)
 
