@@ -13,6 +13,12 @@
 // matches a path below the root outside `.xspec/`, judged from the globs
 // alone, and enters each directory below only when some glob matches a
 // path below that directory, never entering the root-level `.xspec/`.
+// SPEC 7: and it examines the kind of exactly those entries of a listed
+// directory whose paths such a glob matches or that it would list were
+// they directories. So the walk takes every kind the listing reports from
+// the listing, a read already made, and examines a kind separately (an
+// lstat) only for an entry of unreported kind that a glob matches or that
+// it would list were it a directory, leaving every other entry unexamined.
 // Matching is against workspace-relative paths as their UTF-8 bytes, so
 // directory entries are read with buffer encoding and never decoded
 // before matching — a name the filesystem reports is matched verbatim
@@ -32,6 +38,7 @@
 // (14.14/14.19) are the pure core's (src/core/discovery.ts).
 
 import { Buffer } from "node:buffer";
+import type { Dirent, Stats } from "node:fs";
 import * as fsp from "node:fs/promises";
 import type { Configuration } from "../core/config.js";
 import type { SourceClassification } from "../core/discovery.js";
@@ -39,7 +46,7 @@ import { classifySources } from "../core/discovery.js";
 import type { CompiledGlob } from "../core/glob.js";
 import type { PathText } from "../core/path-text.js";
 import { pathTextOf } from "../core/path-text.js";
-import { performRead } from "./environment-refusal.js";
+import { isFilesystemFailure, performRead } from "./environment-refusal.js";
 
 const SLASH = Buffer.from("/");
 /** SPEC 13.4/13.3: the workspace-root graph-data directory name. */
@@ -81,10 +88,129 @@ export async function discoverSources(
 }
 
 /**
+ * What occupies a directory entry, as discovery tells occupants apart
+ * (SPEC 7): a plain file, a directory, a symbolic link (never followed),
+ * or anything else — a FIFO, a socket, or a device, which is neither a
+ * source file nor a directory holding any.
+ */
+type EntryKind = "file" | "directory" | "symbolic-link" | "other";
+
+/**
+ * One entry of a listed directory: its name as the filesystem reports it,
+ * and its kind as the listing reports it — null where the listing reports
+ * none, so that only a separate examination could tell it.
+ */
+interface ListedEntry {
+  readonly name: Buffer;
+  readonly kind: EntryKind | null;
+}
+
+/** The kind a typed listing reports for an entry, or null for none. */
+function listedKind(dirent: Dirent<Buffer>): EntryKind | null {
+  if (dirent.isFile()) return "file";
+  if (dirent.isDirectory()) return "directory";
+  if (dirent.isSymbolicLink()) return "symbolic-link";
+  if (
+    dirent.isFIFO() ||
+    dirent.isSocket() ||
+    dirent.isBlockDevice() ||
+    dirent.isCharacterDevice()
+  ) {
+    return "other";
+  }
+  return null;
+}
+
+/**
+ * The kind an `lstat` of the entry tells: the entry's own, never a
+ * symbolic link's target's (SPEC 7).
+ */
+function examinedKind(stats: Stats): EntryKind {
+  if (stats.isSymbolicLink()) return "symbolic-link";
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  return "other";
+}
+
+/**
+ * List one directory (SPEC 7), each entry with the kind the listing
+ * reports. SPEC 14.25: a listing the environment refuses stops the command
+ * here, concerning `concerned`; a directory gone since its parent was
+ * listed lists nothing (SPEC 7, 14.25).
+ *
+ * Node's typed listing examines on its own — an `lstat` — every entry
+ * whose type the filesystem leaves unreported (one without `d_type`
+ * support), and fails the whole listing when one such examination fails.
+ * That examination is a kind read SPEC 7 may forbid (the entry may lie
+ * outside every glob), and its failure — refused, or the entry gone — is
+ * no failure of the listing itself. So when the typed listing fails at
+ * such an examination (its error names `lstat`, a listing's `scandir`),
+ * the directory is listed again by name alone, every entry's kind left
+ * unreported, for `walk` to examine only where SPEC 7 examines it.
+ */
+async function listDirectory(
+  absolute: Buffer,
+  concerned: PathText,
+): Promise<ListedEntry[]> {
+  const typed = await performRead(
+    concerned,
+    "listing",
+    async () => {
+      try {
+        return await fsp.readdir(absolute, {
+          withFileTypes: true,
+          encoding: "buffer",
+        });
+      } catch (error) {
+        if (isFilesystemFailure(error) && error.syscall === "lstat") {
+          return null;
+        }
+        throw error;
+      }
+    },
+    () => [],
+  );
+  if (typed !== null) {
+    return typed.map((dirent) => ({
+      name: dirent.name,
+      kind: listedKind(dirent),
+    }));
+  }
+  const names = await performRead(
+    concerned,
+    "listing",
+    () => fsp.readdir(absolute, { encoding: "buffer" }),
+    () => [],
+  );
+  return names.map((name) => ({ name, kind: null }));
+}
+
+/**
+ * SPEC 7: whether discovery would list the entry were it a directory —
+ * exactly when some configured glob matches a path below it, paths under
+ * `.xspec/` counting for none. So never the root-level `.xspec`, the
+ * workspace-root graph-data directory (13.3), every file under which 13.4
+ * excludes from every group; elsewhere `mayMatchWithin` decides (exact for
+ * a plain glob: some path below the entry matches exactly when pattern
+ * segments remain once the entry's own are matched). SPEC 7's dot rule
+ * keeps wildcard-only patterns out of dot-directories (`.git`, caches)
+ * unless a pattern spells the segment with its leading dot.
+ */
+function wouldList(
+  parent: Buffer | null,
+  name: Buffer,
+  entryRelative: Buffer,
+  globs: readonly CompiledGlob[],
+): boolean {
+  if (parent === null && Buffer.compare(name, XSPEC_DIR) === 0) return false;
+  return globs.some((glob) => glob.mayMatchWithin(entryRelative));
+}
+
+/**
  * Recursive walk of one directory. `relative` is the directory's
  * workspace-relative byte path (null for the root, whose concerned path is
- * `rootAnchor`). Entries are visited in byte order of their names,
- * classified without following symbolic links, and plain files are
+ * `rootAnchor`). Entries are visited in byte order of their names, each
+ * kind taken from the listing wherever it reports one, and plain files are
  * collected as workspace-relative byte paths.
  */
 async function walk(
@@ -94,35 +220,34 @@ async function walk(
   globs: readonly CompiledGlob[],
   files: Uint8Array[],
 ): Promise<void> {
-  // SPEC 14.25: a listing the environment refuses stops the command here;
-  // a directory gone since its parent was listed lists nothing (SPEC 7).
   const concerned: PathText =
     relative === null ? rootAnchor : pathTextOf(relative);
-  const entries = await performRead(
-    concerned,
-    "listing",
-    () => fsp.readdir(absolute, { withFileTypes: true, encoding: "buffer" }),
-    () => [],
-  );
+  const entries = await listDirectory(absolute, concerned);
   entries.sort((a, b) => Buffer.compare(a.name, b.name));
   for (const entry of entries) {
     const name: Buffer = entry.name;
-    // SPEC 7: a symbolic link — to a file or to a directory, broken or
-    // not — is never a discovered source and is never traversed.
-    if (entry.isSymbolicLink()) continue;
     const entryAbsolute = Buffer.concat([absolute, SLASH, name]);
     const entryRelative =
       relative === null
         ? Buffer.from(name)
         : Buffer.concat([relative, SLASH, name]);
-    let isFile = entry.isFile();
-    let isDirectory = entry.isDirectory();
-    if (!isFile && !isDirectory) {
-      // The directory entry reported no type (a filesystem without d_type
-      // support). Classify with lstat, which never follows a symbolic
-      // link (SPEC 7) — stat would. An entry gone since the listing is not
-      // a source; a kind read the environment refuses is the read failure
-      // concerning the entry (SPEC 14.25).
+    let kind = entry.kind;
+    if (kind === null) {
+      // SPEC 7: discovery examines the kind of exactly those entries of a
+      // listed directory whose paths some configured glob matches or that
+      // it would list were they directories. Any other entry is never a
+      // source — a plain file no glob matches is dropped by
+      // classification anyway — and is never listed, so it stays
+      // unexamined, a refusal to examine it never met (14.25).
+      const examined =
+        globs.some((glob) => glob.matches(entryRelative)) ||
+        wouldList(relative, name, entryRelative, globs);
+      if (!examined) continue;
+      // The examination is an lstat, which never follows a symbolic link
+      // (SPEC 7) — stat would. An entry gone since the listing is no
+      // source (SPEC 7, 14.25: an absent path is matched by no glob); a
+      // kind read the environment refuses is the read failure concerning
+      // the entry (SPEC 14.25).
       const stats = await performRead(
         pathTextOf(entryRelative),
         "kind",
@@ -130,30 +255,23 @@ async function walk(
         () => null,
       );
       if (stats === null) continue;
-      if (stats.isSymbolicLink()) continue;
-      isFile = stats.isFile();
-      isDirectory = stats.isDirectory();
+      kind = examinedKind(stats);
     }
-    if (isFile) {
-      files.push(entryRelative);
-      continue;
-    }
-    // Anything neither plain file nor directory (FIFOs, sockets, devices)
-    // is not a source file and holds none.
-    if (!isDirectory) continue;
-    // SPEC 13.4: every file under `.xspec/` — the workspace-root
-    // graph-data directory (13.3) — is excluded from every group, so the
-    // walk need not enter it: only a pattern segment written `.xspec`
-    // could reach inside (SPEC 7 dot rule), and classification would drop
-    // every hit.
-    if (relative === null && Buffer.compare(name, XSPEC_DIR) === 0) continue;
-    // Enter only directories some configured pattern could match within —
-    // an over-approximation (core/glob.ts) that never skips a matchable
-    // path. SPEC 7's dot rule keeps wildcard-only patterns out of
-    // dot-directories (`.git`, caches) unless a pattern spells the
-    // segment with its leading dot.
-    if (globs.some((glob) => glob.mayMatchWithin(entryRelative))) {
-      await walk(entryAbsolute, entryRelative, rootAnchor, globs, files);
+    switch (kind) {
+      case "file":
+        files.push(entryRelative);
+        break;
+      case "directory":
+        if (wouldList(relative, name, entryRelative, globs)) {
+          await walk(entryAbsolute, entryRelative, rootAnchor, globs, files);
+        }
+        break;
+      case "symbolic-link":
+      case "other":
+        // SPEC 7: a symbolic link — to a file or to a directory, broken or
+        // not — is never a discovered source and is never traversed; a
+        // FIFO, a socket, or a device is no source file and holds none.
+        break;
     }
   }
 }
