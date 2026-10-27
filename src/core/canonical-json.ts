@@ -24,7 +24,10 @@
 // the same value (SPEC 10.7: `review export` presents every item of a
 // session, an answer that can outgrow both). Frames walk arrays and
 // objects element by element, so a deferred element is produced only once
-// everything before it has been rendered.
+// everything before it has been rendered. A string value longer than a
+// chunk is spelled in pieces (`quotedPieces`), so no value's spelling is
+// ever one string either: its escaping can pass the cap where the value
+// itself does not.
 //
 // One layout option serves the stored review session
 // (`CanonicalJsonOptions.lineArrays`; src/core/review.ts, "Stored layout";
@@ -38,6 +41,7 @@
 // every output is byte for byte what it was.
 
 import { compareBytes } from "./bytes.js";
+import { STRING_SEGMENT_UNITS, stringSegments } from "./text-chunks.js";
 
 /**
  * A JSON-representable value. Object properties whose value is `undefined`
@@ -133,25 +137,32 @@ export function canonicalJson(
   value: JsonValue,
   options?: CanonicalJsonOptions,
 ): string {
-  const lineArrays =
-    options?.lineArrays === undefined || options.lineArrays.length === 0
-      ? null
-      : new Set(options.lineArrays);
-  return [...render(value, true, "\n", lineArrays)].join("");
+  return [...render(value, true, "\n", lineArraysOf(options))].join("");
 }
 
 /**
- * `canonicalJson`'s text for `value` — deferred arrays rendered as the
- * plain arrays they stand for — in consecutive chunks of bounded size
- * (about a mebi code unit each), produced as the consumer asks for them:
+ * `canonicalJson`'s text for `value` under `options` — deferred arrays
+ * rendered as the plain arrays they stand for — in consecutive chunks of
+ * bounded size (about a mebi code unit each, a long string's spelling
+ * split between them), produced as the consumer asks for them:
  * concatenated, the chunks are exactly the canonical text, trailing
  * newline included, and a deferred element is produced only when its
- * chunk is.
+ * chunk is. No chunk ends inside a surrogate pair.
  */
 export function canonicalJsonChunks(
   value: JsonStreamValue,
+  options?: CanonicalJsonOptions,
 ): Generator<string, void, undefined> {
-  return render(value, true, "\n", null);
+  return render(value, true, "\n", lineArraysOf(options));
+}
+
+/** The root members `options` lays out one element per line, or null. */
+function lineArraysOf(
+  options: CanonicalJsonOptions | undefined,
+): ReadonlySet<string> | null {
+  return options?.lineArrays === undefined || options.lineArrays.length === 0
+    ? null
+    : new Set(options.lineArrays);
 }
 
 /**
@@ -193,6 +204,25 @@ function quoteString(text: string): string {
   return text.length >= 32 && !MAY_ESCAPE.test(text)
     ? `"${text}"`
     : JSON.stringify(text);
+}
+
+/**
+ * A long string's JSON spelling in consecutive pieces — the opening
+ * quote, each segment's escaped body (core/text-chunks.ts
+ * `stringSegments`: no segment ends inside a surrogate pair, and every
+ * other escape is one code point's, so each segment escapes exactly as
+ * its part of the whole does), the closing quote: concatenated, exactly
+ * `quoteString`'s spelling of the whole, which can pass V8's cap on a
+ * string's length while the value does not (SPEC 12.0, 13.3: graph data
+ * holds a long embedding chain's root subtree text, mostly line feeds,
+ * each escaped as two code units).
+ */
+function* quotedPieces(text: string): Generator<string, void, undefined> {
+  yield '"';
+  for (const segment of stringSegments(text)) {
+    yield quoteString(segment).slice(1, -1);
+  }
+  yield '"';
 }
 
 /** The rendering of a primitive value, or null for arrays and objects. */
@@ -280,6 +310,23 @@ function* render(
     if (pending !== null) {
       const next = pending;
       pending = null;
+      if (
+        typeof next.value === "string" &&
+        next.value.length > STRING_SEGMENT_UNITS
+      ) {
+        // A long string value, spelled in pieces (`quotedPieces`) and
+        // handed out as the chunk fills: its spelling is never one string.
+        for (const piece of quotedPieces(next.value)) {
+          if (gathered >= CHUNK_UNITS) {
+            yield out.join("");
+            out.length = 0;
+            gathered = 0;
+          }
+          out.push(piece);
+          gathered += piece.length;
+        }
+        continue;
+      }
       const piece = openValue(next, frames);
       out.push(piece);
       gathered += piece.length;

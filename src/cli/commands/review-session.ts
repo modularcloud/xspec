@@ -120,6 +120,7 @@ import {
   resolveReference,
   resolveReferenceAt,
 } from "../../core/review-state.js";
+import { stringSegments } from "../../core/text-chunks.js";
 import type { ResolvedBaseline } from "../../workspace/baseline.js";
 import { resolveBaseline } from "../../workspace/baseline.js";
 import { loadSession, sessionOccupied } from "../../workspace/reviews.js";
@@ -955,12 +956,16 @@ function metadataSideJson(side: MetadataSide): JsonObject {
 /**
  * The item document rendered for human reading — the same information as
  * the JSON form (SPEC 12.0): every 10.2 field, the blocked state, and the
- * payload texts, in a stable indented layout.
+ * payload texts, in a stable indented layout. Given in pieces, each text
+ * block in segments (`renderTextBlock`), so the report is never one
+ * string: a long embedding chain's root subtree text, mostly line feeds,
+ * passes V8's cap on a string's length once each line is indented (SPEC
+ * 3, 5.3 bound no chain).
  */
-export function renderItemHuman(
+export function* renderItemHuman(
   view: SessionReadView,
   item: ReviewItem,
-): string {
+): Generator<string, void, undefined> {
   const document = itemDocument(view, item);
   let out = `item ${item.id}\n`;
   out += `  kind: ${item.kind}\n`;
@@ -971,36 +976,39 @@ export function renderItemHuman(
   if (item.note !== undefined) {
     out += `  note: ${item.note}\n`;
   }
-  out += renderNodeStateHuman("scope", document["scope"] as JsonObject);
+  yield out;
+  yield* renderNodeStateHuman("scope", document["scope"] as JsonObject);
   // SPEC 10.7, 12.0: the scope set, laid out as the context is.
   const scopeNodes = document["scopeNodes"] as readonly JsonObject[];
-  out += `  scopeNodes:${scopeNodes.length === 0 ? " (none)" : ""}\n`;
+  yield `  scopeNodes:${scopeNodes.length === 0 ? " (none)" : ""}\n`;
   for (const state of scopeNodes) {
-    out += renderNodeStateHuman("  -", state);
+    yield* renderNodeStateHuman("  -", state);
   }
   const contexts = document["context"] as readonly JsonObject[];
-  out += `  context:${contexts.length === 0 ? " (none)" : ""}\n`;
+  yield `  context:${contexts.length === 0 ? " (none)" : ""}\n`;
   for (const state of contexts) {
-    out += renderNodeStateHuman("  -", state);
+    yield* renderNodeStateHuman("  -", state);
   }
   const origins = document["origin"] as readonly JsonObject[];
-  out += `  origin:${origins.length === 0 ? " (none)" : ""}\n`;
+  yield `  origin:${origins.length === 0 ? " (none)" : ""}\n`;
   for (const entry of origins) {
-    out += renderOriginHuman(entry);
+    yield* renderOriginHuman(entry);
   }
   const metadata = document["metadata"];
   if (metadata !== undefined) {
     // SPEC 10.7: the metadata pair, on `metadata-consistency` items alone.
-    out += renderMetadataPairHuman(metadata as JsonObject);
+    yield renderMetadataPairHuman(metadata as JsonObject);
   }
   const journal = view.analysis.journal.journal;
-  out += `  baseline: ${compactStateHuman(presentRecordedState(journal, item.baseline))}\n`;
-  out += `  current: ${compactStateHuman(presentRecordedState(journal, item.current))}\n`;
-  return out;
+  yield `  baseline: ${compactStateHuman(presentRecordedState(journal, item.baseline))}\n`;
+  yield `  current: ${compactStateHuman(presentRecordedState(journal, item.current))}\n`;
 }
 
 /** One payload node as human lines (identity, presence, range, text). */
-function renderNodeStateHuman(label: string, state: JsonObject): string {
+function* renderNodeStateHuman(
+  label: string,
+  state: JsonObject,
+): Generator<string, void, undefined> {
   const present = state["present"] === true;
   let out = `  ${label}: ${String(state["node"])} (${present ? "present" : "absent"})\n`;
   const range = state["sourceRange"];
@@ -1008,31 +1016,33 @@ function renderNodeStateHuman(label: string, state: JsonObject): string {
     const rangeObject = range as JsonObject;
     out += `    range: ${String(rangeObject["start"])}-${String(rangeObject["end"])}\n`;
   }
+  yield out;
   const text = state["text"];
   if (typeof text === "string") {
-    out += renderTextBlock(text);
+    yield* renderTextBlock(text);
   }
-  return out;
 }
 
 /** One origin before/after pair as human lines (SPEC 10.7). */
-function renderOriginHuman(entry: JsonObject): string {
+function* renderOriginHuman(
+  entry: JsonObject,
+): Generator<string, void, undefined> {
   let out = `  - ${String(entry["node"])}\n`;
   const range = entry["sourceRange"];
   if (range !== undefined) {
     const rangeObject = range as JsonObject;
     out += `    range: ${String(rangeObject["start"])}-${String(rangeObject["end"])}\n`;
   }
+  yield out;
   for (const side of ["before", "after"] as const) {
     const sideObject = entry[side] as JsonObject;
     const present = sideObject["present"] === true;
-    out += `    ${side}: ${present ? "present" : "absent"}\n`;
+    yield `    ${side}: ${present ? "present" : "absent"}\n`;
     const text = sideObject["text"];
     if (typeof text === "string") {
-      out += renderTextBlock(text, "      ");
+      yield* renderTextBlock(text, "      ");
     }
   }
-  return out;
 }
 
 /**
@@ -1078,17 +1088,27 @@ function renderMetadataListHuman(
   return out;
 }
 
-/** A text value as an indented block, deterministic for identical text. */
-function renderTextBlock(text: string, indent = "    "): string {
+/**
+ * A text value as an indented block, deterministic for identical text, in
+ * pieces: the label line, then each of the text's lines — split at every
+ * line feed, so a final one ends an empty last line — led by the indent
+ * and two spaces and ended by a line feed, the text taken in segments
+ * (core/text-chunks.ts `stringSegments`).
+ */
+function* renderTextBlock(
+  text: string,
+  indent = "    ",
+): Generator<string, void, undefined> {
   if (text.length === 0) {
-    return `${indent}text: (empty)\n`;
+    yield `${indent}text: (empty)\n`;
+    return;
   }
-  const lines = text.split("\n");
-  let out = `${indent}text: |\n`;
-  for (const line of lines) {
-    out += `${indent}  ${line}\n`;
+  const lead = `${indent}  `;
+  yield `${indent}text: |\n${lead}`;
+  for (const segment of stringSegments(text)) {
+    yield segment.replaceAll("\n", `\n${lead}`);
   }
-  return out;
+  yield "\n";
 }
 
 /** A presented recorded state (`presentRecordedState`) as one compact

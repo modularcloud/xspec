@@ -110,6 +110,7 @@ import {
 import {
   emitDocument,
   emitDocumentStreamed,
+  emitTextStreamed,
   reportBaselineFailure,
   usageError,
 } from "./common.js";
@@ -592,13 +593,16 @@ export async function reviewNextCommand(
   }
   if (invocation.json) {
     // SPEC 10.7: the self-contained payload — review-session.ts fixes it
-    // once, so `next --json`, `show`, and `export` can never disagree.
-    emitDocument(context.stdout, {
+    // once, so `next --json`, `show`, and `export` can never disagree —
+    // streamed in either form, as `export` is: a payload's texts can pass
+    // V8's cap on a string's length once escaped or indented (a long
+    // embedding chain's root subtree text; SPEC 3, 5.3 bound no chain).
+    await emitDocumentStreamed(context.stdout, {
       fullyResolved: false,
       item: itemDocument(view, next),
     });
   } else {
-    context.stdout.write(renderItemHuman(view, next));
+    await emitTextStreamed(context.stdout, renderItemHuman(view, next));
   }
   return 0;
 }
@@ -633,10 +637,11 @@ export async function reviewShowCommand(
   }
   if (invocation.json) {
     // SPEC 10.7: the full item — every field of 10.2 plus the same
-    // self-contained text payload as `next --json`.
-    emitDocument(context.stdout, itemDocument(view, item));
+    // self-contained text payload as `next --json` — streamed in either
+    // form, as `next` is.
+    await emitDocumentStreamed(context.stdout, itemDocument(view, item));
   } else {
-    context.stdout.write(renderItemHuman(view, item));
+    await emitTextStreamed(context.stdout, renderItemHuman(view, item));
   }
   return 0;
 }

@@ -1,15 +1,19 @@
 // Texts in chunks — how a derived text too long to spell as one string is
-// carried, written, and compared (SPEC 12.0, 13.1, 13.3).
+// carried, written, and compared (SPEC 12.0, 10.1, 13.1, 13.3).
 //
 // Pure core (IMPLEMENTATION Architecture). V8 caps a string's length at
 // 2^29 − 24 code units, and some derived texts are quadratic in a long
 // embedding chain's length (SPEC 2.3, 3, 5.3 bound no chain): graph data
-// holds every node's own and subtree text (SPEC 13.3), and a generated
-// module every node's subtree text (SPEC 4.3, 13.1). Such a text is
-// produced as consecutive chunks (`ChunkedText`), written chunk by chunk
+// holds every node's own and subtree text (SPEC 13.3), a generated module
+// every node's subtree text (SPEC 4.3, 13.1), and an audit review session
+// every node's texts (SPEC 10.1, 10.6). Such a text is produced as
+// consecutive chunks (`ChunkedText`), written chunk by chunk
 // (workspace/writes.ts) and compared with stored bytes chunk by chunk
 // (`textMatchesBytes`), so no string ever holds the whole; its bytes are
-// exactly those the whole text would encode to (SPEC 12.0).
+// exactly those the whole text would encode to (SPEC 12.0). One value can
+// pass the cap once escaped where it does not itself — a long chain's root
+// subtree text is mostly line feeds, each escaped as two code units — so a
+// long string value is escaped segment by segment (`stringSegments`).
 
 /**
  * The chunk size, in UTF-16 code units, at which `gatherChunks` hands out
@@ -30,6 +34,51 @@ export interface ChunkedText {
 
 /** A derived file's text: one string, or consecutive chunks. */
 export type DerivedText = string | ChunkedText;
+
+/**
+ * The length, in UTF-16 code units, past which a string value is spelled
+ * in pieces (`stringSegments`) rather than escaped whole: one escaped
+ * piece then stays within a few chunks' size, and no escaping ever spells
+ * a value as one string — a JSON or TypeScript string literal can pass
+ * V8's cap on a string's length while the value it holds does not (the
+ * escaping of a line feed doubles it; a long embedding chain's root
+ * subtree text is mostly line feeds).
+ */
+export const STRING_SEGMENT_UNITS = CHUNK_UNITS;
+
+/**
+ * `text` as consecutive segments of at most `STRING_SEGMENT_UNITS` code
+ * units, none ending between a high surrogate and the low surrogate after
+ * it, so each segment escapes, and encodes to UTF-8, as its part of the
+ * whole does: the code points of `text` are exactly its segments' code
+ * points in order.
+ */
+export function* stringSegments(
+  text: string,
+): Generator<string, void, undefined> {
+  let start = 0;
+  while (start < text.length) {
+    let end = start + STRING_SEGMENT_UNITS;
+    if (end >= text.length) {
+      end = text.length;
+    } else if (
+      isHighSurrogate(text.charCodeAt(end - 1)) &&
+      isLowSurrogate(text.charCodeAt(end))
+    ) {
+      end -= 1;
+    }
+    yield text.slice(start, end);
+    start = end;
+  }
+}
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
 
 /**
  * `pieces` concatenated into consecutive chunks of about `CHUNK_UNITS`

@@ -133,7 +133,11 @@
 import { canonicalJson } from "./canonical-json.js";
 import type { SpecDocument, SpecSection } from "./mdx.js";
 import type { ChunkedText, DerivedText } from "./text-chunks.js";
-import { gatherChunks } from "./text-chunks.js";
+import {
+  gatherChunks,
+  STRING_SEGMENT_UNITS,
+  stringSegments,
+} from "./text-chunks.js";
 import type { WorkspaceTextModel } from "./text-model.js";
 
 // ---------------------------------------------------------------------------
@@ -321,6 +325,32 @@ const ESCAPED_ASTERISK = String.fromCharCode(0x5c) + "x2a";
  */
 function stringLiteral(value: string): string {
   return jsonStringLiteral(value).replaceAll("*", ESCAPED_ASTERISK);
+}
+
+/**
+ * `stringLiteral(value)` in consecutive pieces: the whole literal for a
+ * value of at most `STRING_SEGMENT_UNITS` code units; for a longer one the
+ * opening quote, each segment's escaped body (core/text-chunks.ts
+ * `stringSegments`: no segment ends inside a surrogate pair, and every
+ * other escape — JSON's, U+2028, U+2029, `*` — is one code point's, so
+ * each segment escapes exactly as its part of the whole does), and the
+ * closing quote. Concatenated, exactly `stringLiteral(value)`, which can
+ * pass V8's cap on a string's length while the value does not: a long
+ * embedding chain's root subtree text is mostly line feeds, each escaped
+ * as two code units (SPEC 3, 5.3 bound no chain; 4.3, 13.1).
+ */
+function* stringLiteralPieces(
+  value: string,
+): Generator<string, void, undefined> {
+  if (value.length <= STRING_SEGMENT_UNITS) {
+    yield stringLiteral(value);
+    return;
+  }
+  yield '"';
+  for (const segment of stringSegments(value)) {
+    yield stringLiteral(segment).slice(1, -1);
+  }
+  yield '"';
 }
 
 /** ASCII identifier test for property-name and type-name rendering. */
@@ -648,10 +678,11 @@ function renderModule(
     `// node's documentation comment. Children come first, so every literal`,
     `// references already-built nodes.`,
   ];
-  // A node's constructor call: its children by ID segment — the runtime
-  // object keys always string literals, uniform and safe for every segment
-  // SPEC 1.4 admits — and its subtree text (SPEC 1.6, 4.3).
-  const nodeValue = (node: EmitNode): string => {
+  // A node's constructor call, in pieces: its children by ID segment — the
+  // runtime object keys always string literals, uniform and safe for every
+  // segment SPEC 1.4 admits — and its subtree text (SPEC 1.6, 4.3), a
+  // literal spelled in pieces (`stringLiteralPieces`).
+  function* nodeValue(node: EmitNode): Generator<string, void, undefined> {
     const entries = node.children
       .map(
         (child) =>
@@ -659,17 +690,13 @@ function renderModule(
       )
       .join(", ");
     const children = entries === "" ? "{}" : `{ ${entries} }`;
-    const subtreeText = stringLiteral(
-      textModel.subtreeText(document, node.section),
-    );
-    return `xspecNode(${children}, ${subtreeText})`;
-  };
-  // The root's lines and the module's close, rendered once every other
-  // node's lines are.
+    yield `xspecNode(${children}, `;
+    yield* stringLiteralPieces(textModel.subtreeText(document, node.section));
+    yield ")";
+  }
+  // The module's close after the root's declaration, rendered once every
+  // other node's lines are.
   const closingLines = (): readonly string[] => [
-    `// ${stringLiteral(root.identity)}: the root node (SPEC 1.2).`,
-    docComment(root.ownText),
-    `export const root: ${rootType} = ${nodeValue(root)} as ${rootType};`,
     `// SPEC 4.1: the default export is the root node.`,
     `export { root as default };`,
     ``,
@@ -733,9 +760,17 @@ function renderModule(
       if (node !== root) {
         yield `\n// ${stringLiteral(node.identity)}`;
         yield `\n${docComment(node.ownText)}`;
-        yield `\nconst n${String(node.index)} = ${nodeValue(node)};`;
+        yield `\nconst n${String(node.index)} = `;
+        yield* nodeValue(node);
+        yield ";";
       }
     }
+    // The root's lines, then the module's close.
+    yield `\n// ${stringLiteral(root.identity)}: the root node (SPEC 1.2).`;
+    yield `\n${docComment(root.ownText)}`;
+    yield `\nexport const root: ${rootType} = `;
+    yield* nodeValue(root);
+    yield ` as ${rootType};`;
     for (const line of closingLines()) {
       yield `\n${line}`;
     }

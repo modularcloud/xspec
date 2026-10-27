@@ -127,7 +127,11 @@
 // the line after it conflicts, its keep-both corrupt (that item twice) or
 // unparseable (the removed line the first, its successor's comma kept).
 // Reading is layout-free — any JSON whitespace reads alike — so a session
-// staged or rewritten in another layout reads as the same session.
+// staged or rewritten in another layout reads as the same session. The
+// text is written and read in consecutive chunks, never as one string
+// (`serializeSession`, `parseSessionBytes`; core/json-parse.ts): an audit
+// session holds every node's texts (SPEC 10.6), quadratic in a long
+// embedding chain's length, which SPEC 3 and 5.3 do not bound.
 //
 // Item ids (SPEC 10.2: unique within the session, never containing
 // U+FFFD; 10.7: a `split` original's id is never reused; 13.4: concurrent
@@ -236,7 +240,7 @@
 
 import { isWellFormedArgumentValue } from "./argument-value.js";
 import { byteOrderedSet, compareBytes } from "./bytes.js";
-import { canonicalJson, compactJson } from "./canonical-json.js";
+import { canonicalJsonChunks, compactJson } from "./canonical-json.js";
 import type { JsonObject, JsonValue } from "./canonical-json.js";
 import { parseCanonicalIdentity } from "./journal.js";
 import type {
@@ -250,6 +254,8 @@ import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import { compileGlob } from "./glob.js";
 import { hashComponents } from "./hash.js";
+import { parseJsonChunks } from "./json-parse.js";
+import type { ChunkedText } from "./text-chunks.js";
 
 /** SPEC 10.1: the reviews directory under the workspace root. */
 export const REVIEWS_DIRECTORY = ".xspec/reviews";
@@ -1412,10 +1418,17 @@ const LINE_MEMBERS = ["decompositions", "items"] as const;
  * header; SPEC 10.1 "plain, deterministic"; 13.4 "stable ordering and
  * sorted keys", "line-oriented or stably keyed so that concurrent
  * additions merge textually"; 12.0 byte determinism — the text is a pure
- * function of the session value and its fixed tables).
+ * function of the session value and its fixed tables) — in consecutive
+ * chunks (core/text-chunks.ts), so the text is never one string: an audit
+ * session holds every node's texts, quadratic in a long embedding chain's
+ * length (SPEC 3, 5.3 bound no chain; 10.6), past V8's cap on a string's
+ * length beyond about 16,000 links of a one-file chain.
  */
-export function serializeSession(session: ReviewSession): string {
-  return canonicalJson(sessionDocument(session), { lineArrays: LINE_MEMBERS });
+export function serializeSession(session: ReviewSession): ChunkedText {
+  const document = sessionDocument(session);
+  return {
+    chunks: () => canonicalJsonChunks(document, { lineArrays: LINE_MEMBERS }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2942,31 +2955,72 @@ function checkSessionInvariants(
  * Parse and validate a session file's bytes (SPEC 10.1): strict UTF-8, one
  * JSON document, the stored shape of this module's header, and every listed
  * session invariant. Any failure yields the collected problems — the
- * session is corrupt (14.21).
+ * session is corrupt (14.21). The bytes are decoded, and the document
+ * parsed, in consecutive pieces (`decodedPieces`, core/json-parse.ts), so
+ * the file's text is never one string: an audit session holds every
+ * node's texts, quadratic in a long embedding chain's length (SPEC 3, 5.3
+ * bound no chain; 10.6), past V8's cap on a string's length beyond about
+ * 16,000 links of a one-file chain — where decoding it whole would
+ * misjudge a valid session corrupt. The whole file is judged as UTF-8
+ * first, so an invalid sequence anywhere is reported as such, as before.
  */
 export function parseSessionBytes(bytes: Uint8Array): SessionParseResult {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
+  if (!isStrictUtf8(bytes)) {
     return {
       ok: false,
       problems: ["the session file is not valid UTF-8, so it cannot be parsed"],
     };
   }
-  let document: unknown;
-  try {
-    document = JSON.parse(text);
-  } catch (error) {
+  const parsed = parseJsonChunks(decodedPieces(bytes));
+  if (!parsed.ok) {
     return {
       ok: false,
       problems: [
         `the session file cannot be parsed as one JSON document: ` +
-          (error as Error).message,
+          parsed.message,
       ],
     };
   }
-  return validateSessionDocument(document);
+  return validateSessionDocument(parsed.value);
+}
+
+/** Whether `bytes` decode as strict UTF-8, each piece dropped once read. */
+function isStrictUtf8(bytes: Uint8Array): boolean {
+  const pieces = decodedPieces(bytes);
+  try {
+    while (pieces.next().done !== true) {
+      // Decoded, judged, and dropped.
+    }
+  } catch {
+    return false;
+  }
+  return true;
+}
+
+/** The bytes decoded per piece (`decodedPieces`): a mebibyte. */
+const DECODED_PIECE_BYTES = 1 << 20;
+
+/**
+ * `bytes` decoded as strict UTF-8 — a leading byte order mark dropped,
+ * an invalid or truncated sequence throwing, exactly as one decoding of
+ * the whole would — in consecutive pieces, one per mebibyte of input:
+ * the decoder carries a sequence a piece's end cuts into the next piece.
+ */
+function* decodedPieces(bytes: Uint8Array): Generator<string, void, undefined> {
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (let offset = 0; offset < bytes.length; offset += DECODED_PIECE_BYTES) {
+    const piece = decoder.decode(
+      bytes.subarray(offset, offset + DECODED_PIECE_BYTES),
+      { stream: true },
+    );
+    if (piece !== "") {
+      yield piece;
+    }
+  }
+  const rest = decoder.decode();
+  if (rest !== "") {
+    yield rest;
+  }
 }
 
 /**

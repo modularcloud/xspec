@@ -21,6 +21,7 @@ import type { CliWriter, CommandIo } from "../io.js";
 import {
   compileFileFlag,
   emitDocument,
+  emitDocumentStreamed,
   rangeJson,
   usageError,
 } from "./common.js";
@@ -388,15 +389,18 @@ export function prevalidateQuery(
  * Answer one `query` subcommand from the view (SPEC 11). The caller has
  * already run `prevalidateQuery` (flag validation precedes preparation) and
  * prepared the view; this emits the single JSON document or the usage error
- * (SPEC 12.0).
+ * (SPEC 12.0) — the node report streamed (`emitDocumentStreamed`): it
+ * spells the node's own and subtree text, and a long embedding chain's
+ * root subtree text passes V8's cap on a string's length once escaped
+ * (SPEC 3, 5.3 bound no chain).
  */
-export function answerQuery(
+export async function answerQuery(
   invocation: Invocation,
   view: QueryView,
   groups: GroupsView,
   stdout: CliWriter,
   stderr: CliWriter,
-): ExitCode {
+): Promise<ExitCode> {
   const io: CommandIo = { stdout, stderr };
   switch (invocation.command) {
     case "query node": {
@@ -404,7 +408,7 @@ export function answerQuery(
       if (!resolved.ok) {
         return usageError(invocation, io, resolved.message);
       }
-      return emitDocument(stdout, nodeReportOf(view, resolved.row));
+      return emitDocumentStreamed(stdout, nodeReportOf(view, resolved.row));
     }
     case "query nodes": {
       const resolved = resolveNodesFilters(invocation, groups);

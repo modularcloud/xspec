@@ -859,15 +859,17 @@ async function requireDurableWritable(
 
 /**
  * Write a durable file (SPEC 13.4: the journal, review sessions) atomically
- * (SPEC 13.5), by its owning command only. The path must hold a plain file
- * or nothing: any other occupant refuses the write (SPEC 13.4; terminal
- * defense — the read side reports it as 14.13/14.21 first). A write the
- * environment refuses is the write failure concerning `rel` (SPEC 14.24).
+ * (SPEC 13.5), by its owning command only — a chunked text chunk by chunk
+ * (`WriteContent`: a review session can pass V8's cap on a string's
+ * length). The path must hold a plain file or nothing: any other occupant
+ * refuses the write (SPEC 13.4; terminal defense — the read side reports
+ * it as 14.13/14.21 first). A write the environment refuses is the write
+ * failure concerning `rel` (SPEC 14.24).
  */
 export async function writeDurableFile(
   root: string,
   rel: string,
-  content: Uint8Array | string,
+  content: WriteContent,
 ): Promise<void> {
   await assertUnobstructedParent(root, rel);
   const absolute = absoluteOf(root, rel);

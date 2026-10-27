@@ -13,23 +13,36 @@
 
 import type { ExitCode } from "../../core/findings.js";
 import type { GraphEdge } from "../../core/graph.js";
+import { stringSegments } from "../../core/text-chunks.js";
 import type { Invocation } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { analyzeGraphForRead, finishGraphForRead } from "../prepare.js";
 import { analysisQueryView } from "./analysis-view.js";
-import { emitDocument, usageError } from "./common.js";
+import {
+  emitDocumentStreamed,
+  emitTextStreamed,
+  usageError,
+} from "./common.js";
 import { nodeOperandProblem } from "./gated-args.js";
 import type { QueryRow, QueryView } from "./query-core.js";
 import { nodeReportOf, resolveRow } from "./query-core.js";
 
-/** A text value as an indented block, one report line per text line. */
-function indentedBlock(text: string): string {
-  if (text === "") return "";
+/**
+ * A text value as an indented block, one report line per text line, in
+ * pieces: each line of the text — its final line feed ending the last —
+ * led by two spaces, the text taken in segments (core/text-chunks.ts
+ * `stringSegments`), so a block is never one string (a long embedding
+ * chain's root subtree text, mostly line feeds, passes V8's cap on a
+ * string's length once each line is indented; SPEC 3, 5.3 bound no chain).
+ */
+function* indentedBlock(text: string): Generator<string, void, undefined> {
+  if (text === "") return;
   const body = text.endsWith("\n") ? text.slice(0, -1) : text;
-  return `${body
-    .split("\n")
-    .map((line) => `  ${line}`)
-    .join("\n")}\n`;
+  yield "  ";
+  for (const segment of stringSegments(body)) {
+    yield segment.replaceAll("\n", "\n  ");
+  }
+  yield "\n";
 }
 
 /** One edge line: its kind plus the far endpoint's identity (SPEC 5.2). */
@@ -45,9 +58,13 @@ function edgeLine(edge: GraphEdge, direction: "incoming" | "outgoing"): string {
  * and coverage attribute (both lines omitted for a root node, which
  * carries neither), and edges by kind (SPEC 12.0: the JSON form carries
  * the same information). Byte-deterministic: graph content and static text
- * only.
+ * only. Given in pieces, the texts' blocks in segments (`indentedBlock`),
+ * so the report is never one string.
  */
-function renderNodeHuman(view: QueryView, row: QueryRow): string {
+function* renderNodeHuman(
+  view: QueryView,
+  row: QueryRow,
+): Generator<string, void, undefined> {
   let out = `${row.identity}\n`;
   out += `source range: bytes ${String(row.range.start)}-${String(row.range.end)}\n`;
   // SPEC 12.4/11.1/5.5: a root node's tags and coverage attribute are both
@@ -74,10 +91,10 @@ function renderNodeHuman(view: QueryView, row: QueryRow): string {
     if (edge.source === row.identity) out += edgeLine(edge, "outgoing");
   }
   out += `own text:\n`;
-  out += indentedBlock(row.ownText());
-  out += `subtree text:\n`;
-  out += indentedBlock(row.subtreeText());
-  return out;
+  yield out;
+  yield* indentedBlock(row.ownText());
+  yield `subtree text:\n`;
+  yield* indentedBlock(row.subtreeText());
 }
 
 /** The `show` command handler (SPEC 12.4). */
@@ -123,9 +140,13 @@ export async function showCommand(
     return usageError(invocation, context, resolved.message);
   }
   if (invocation.json) {
-    // SPEC 12.4/11: the machine form is `query node`'s document exactly.
-    return emitDocument(stdout, nodeReportOf(view, resolved.row));
+    // SPEC 12.4/11: the machine form is `query node`'s document exactly —
+    // streamed, as is the human report: either spells the node's own and
+    // subtree text, and a long embedding chain's root subtree text
+    // passes V8's cap on a string's length once escaped or indented
+    // (SPEC 3, 5.3 bound no chain).
+    return emitDocumentStreamed(stdout, nodeReportOf(view, resolved.row));
   }
-  stdout.write(renderNodeHuman(view, resolved.row));
+  await emitTextStreamed(stdout, renderNodeHuman(view, resolved.row));
   return 0;
 }
