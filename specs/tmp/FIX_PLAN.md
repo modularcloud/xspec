@@ -7,6 +7,7 @@ Findings, as cited below:
 - B3 (B's G3): long embedding chains exhaust the call stack, every command but `inventory` and `version` exiting 70 — Task 155; and B's note that `coverage --json` passes V8's string limit on a long `d` chain — the class of Task 150's export streaming, which B invites folding into G3 — Task 156.
 - B2 (B's G2): concurrent item additions to a review session cannot merge — Task 157 (item ids derived from what is added) and Task 158 (a stored layout whose keep-both merge is a valid session holding both sides' additions; after Task 157).
 - Found by Task 154's spawn, in the kind clause of the SPEC 7 sentence Task 154 serves: discovery examines the kind of entries SPEC 7 never examines — Task 160 (independent of the others).
+- Found by Task 155's spawn, past the chain lengths its Verification names: graph data, which holds every node's text, passes V8's string limit near 13,000 chain links, and `build` and every gated read exit 70 — Task 161 (the class of Task 156; independent of the others).
 - Task 159 confirms everything and deletes this file.
 
 Goal: the product meets SPEC.md, and every test keeps passing — locally under the recipes below, and in CI's `harness-self`, `suite-linux`, and `suite-windows` on the branch head. No test fails at `abb7839`, and no suite test pins any of the gaps (B found each by probing a private build of `abb7839`), so each task is verified by hand beside the suite files it must keep green. The test harness must not be modified (Phase 10); it is unchanged since `f2ff6c3` (`git diff f2ff6c3 abb7839 -- test/ .github/` is empty).
@@ -66,6 +67,7 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 | 157 | B2 | Item ids derived from kind and scope node, `nextItemId` dropped (session format 4): concurrent additions take distinct keys | pending |
 | 158 | B2 | One line per item and decomposition, comma-led, each followed by an empty line (format 5): a keep-both merge holds both sides' additions | pending |
 | 160 | Task 154's spawn | Discovery examines an entry's kind only where SPEC 7 does: never for an entry no glob matches and the walk would not list were it a directory | pending |
+| 161 | Task 155's spawn | Graph data, `view --json`, and any one-string output these chains drive past V8's string limit, spelled in chunks: long embedding chains build and answer | pending |
 | 159 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
 
 ## Task 155 — Text expansion bounded by more than the call stack: long embedding chains answer (SPEC 3, 1.6, 5.3, 12.1, 12.0; B3)
@@ -190,6 +192,26 @@ After Task 157.
 1. The staging above at 0444: `ids --json`, `build --json`, `check --json`, and `inventory --json` each answer as at 0755.
 2. Untyped entries cannot be staged on this machine (its filesystems report every type), so check that branch by reading.
 3. Regressions: Task 154's set — `section-7-basics`, `section-7-discovery`, `section-7.1-7.3`, `section-11.6`, `section-14`, `section-14-ii`, `section-12.7`, `section-13.4-ii`, `section-13.5`, `section-13.5-iii`, `section-13.5-iv`, `section-10.7-iii`, and `section-6.6`.
+
+## Task 161 — Graph data, and the outputs that spell every node's text, emitted past V8's string limit: long embedding chains build and answer (SPEC 13.3, 12.1, 12.0, 3; found by Task 155's spawn)
+
+**Requirement.**
+- SPEC 12.1: `build` of a valid workspace succeeds. SPEC 13.3: on a valid workspace with stale graph data, `ids`, `show`, `coverage`, `impact`, `review`, `query`, `occurrences`, `view`, and `at` refresh it, "writing exactly what `xspec build` would write", graph data being stale when it "differs from the graph data `xspec build` would now write". SPEC 12.0: an internal error (exit 70) is no defined outcome. SPEC bounds no embedding chain's length (3, 5.3).
+
+**Observed** (2026-10-27, a build of Task 155's change; the single-file chain of `AGENTS.md`'s bullet beginning "Hand-probing long chains": `specs/A.mdx` holding N sections, each but the last embedding the next).
+- N = 12000: every command answers, as at 6000 (the `s1` move preview's `refused-cycle` aside); `view specs/A.mdx --text --json` prints 445,993,566 bytes.
+- N = 13500: `build --json` exits 70, standard error `xspec: internal error: RangeError: Invalid string length` at `Array.join` in `canonicalJson` (`src/core/canonical-json.ts`) ← `serializeGraphData` (`src/core/graph-data.ts`) ← `writeGraphData` (`src/workspace/graph-data.ts`) ← `executeBuildOutputs`, after the generated modules and Markdown were written. Graph data stores every node's `ownText` and `subtreeText`, together quadratic in N — 16,923,114 bytes at N = 2200, 54,818,559 at 4096, 114,581,311 at 6000 — and its one-string spelling passes V8's limit (2^29 − 24 code units) near N = 13000.
+- N = 15000: `ids`, `show specs/A.mdx#s0`, `query node specs/A.mdx#s0`, `occurrences`, `view specs/A.mdx`, `at specs/A.mdx 5`, and `coverage` (each `--json` where it takes one) exit 70 the same way — a read spells the whole document to judge staleness and refresh (`bytesEqual(storedBytes, utf8Encoder.encode(serializeGraphData(build)))` in `src/core/graph-data.ts`); `check --json` exits 1 (stale output, the graph data missing); `rename specs/A.mdx s1 t1 --preview --json` and the `s0` and `s<N-1>` move previews exit 0; the performed `rename specs/A.mdx s1 t1` and `move specs/A.mdx#s14999 specs/B.mdx#s14999` die of V8 heap exhaustion (about 2 GB, "Mark-Compact"; no exit code, the move after writing `specs/B.mdx`). There `specs/A.xspec.ts` is 465,914,948 bytes and `specs/A.md` 112,567,495; `view --text --json` (`context.stdout.write(canonicalJson(document))` in `src/cli/commands/view.ts`) passes the limit near N = 12500.
+
+**Change.**
+- Spell graph data in chunks, as `review export` does (`canonicalJsonChunks`, `emitDocumentStreamed`): write the file chunk by chunk, and judge staleness without one whole string (chunk by chunk against the stored bytes), the bytes unchanged. Likewise stream `view --json` (with or without `--text`), and any generated module, companion, or Markdown output spelled as one string that these chains drive past the limit. Alternatively, graph data's content being opaque (13.3 lists nodes, code locations, edges, occurrences, ranges, hashes, coverage attributes, tags, and the recorded derived-file paths, but no texts), drop the texts from graph data where no read needs them from it — a format change every reader of graph data must follow; say which in the commit message.
+- Heap exhaustion is a resource limit, not the string limit: lower peak memory where this change makes it natural (no value held again as one whole string), record the N at which the performed `rename` and `move` then die, and plan nothing further for it unless SPEC is shown to require it.
+- `AGENTS.md`: the bullet beginning "Hand-probing long chains".
+
+**Verification** (each staging in its own fresh workspace; record times and sizes):
+1. The single-file chain at N = 13500 and 15000: `build --json` exits 0 finding-free; `check --json` exits 0; `ids --json`, `query node specs/A.mdx#s0 --json` (its subtree text `end.` and N LFs), `occurrences --json`, `view specs/A.mdx --json`, `view specs/A.mdx --text --json` (streamed into a byte count), `at specs/A.mdx 5 --json`, and `coverage --json` exit 0.
+2. Unchanged bytes: at N = 100, 2000, and 6000, the files `build` writes and the standard outputs of step 1's reads are byte-identical to those of a build of Task 155's landing commit.
+3. Regressions: `section-13.3`, `section-13.4`, `section-13.4-ii`, `section-12.1-12.2`, `section-11.4`, `section-14`, `section-15`, `section-16-p10`, and `section-16-p11`.
 
 ## Task 159 — Confirm the full suite and CI green, record the state, and delete this file
 

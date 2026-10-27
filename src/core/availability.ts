@@ -23,7 +23,11 @@ import type { ByteRange } from "./bytes.js";
 import type { SourceClassification } from "./discovery.js";
 import type { Finding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
-import type { DependencyEdgeKind, WorkspaceGraph } from "./graph.js";
+import type {
+  DependencyEdgeKind,
+  RequirementNode,
+  WorkspaceGraph,
+} from "./graph.js";
 import type { SpecDocument, SpecSection } from "./mdx.js";
 import type { PathText } from "./path-text.js";
 import { pathTextKey } from "./path-text.js";
@@ -257,8 +261,10 @@ function rangeWithin(outer: ByteRange, range: ByteRange): boolean {
  * boundary: it consults no further file; a masked file (SPEC 14.20) is
  * never consulted — no spelling resolves into it (SPEC 11.2). From an
  * embedded target the expansion re-enters exactly the embeddings anywhere
- * in that target's subtree (SPEC 11.2), so the walk recurses over the
- * embeddings lying within the target section's construct range.
+ * in that target's subtree (SPEC 11.2), so the walk descends over the
+ * embeddings lying within the target section's construct range — a
+ * depth-first walk on an explicit stack, files in first-reached order:
+ * SPEC bounds no embedding chain's length (SPEC 3).
  */
 export function expansionConsultedFiles(
   graph: WorkspaceGraph,
@@ -267,12 +273,33 @@ export function expansionConsultedFiles(
   const files: PathText[] = [];
   const fileKeys = new Set<string>();
   const visited = new Set<SpecSection>();
-
-  const visitTarget = (document: SpecDocument, section: SpecSection): void => {
+  /** A target being walked: its embeddings from `next` on are still due. */
+  const stack: {
+    document: SpecDocument;
+    section: SpecSection;
+    next: number;
+  }[] = [];
+  const enter = (document: SpecDocument, section: SpecSection): void => {
     if (visited.has(section)) return;
     visited.add(section);
-    for (const embedding of document.embeddings) {
-      if (!rangeWithin(section.range, embedding.range)) continue;
+    stack.push({ document, section, next: 0 });
+  };
+
+  for (const document of requested) {
+    // With `--text` every node's text is computed, the root's subtree
+    // covering the whole file (SPEC 1.2), so every embedding of a
+    // requested file starts an expansion.
+    enter(document, document.root);
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const embeddings = frame.document.embeddings;
+      if (frame.next >= embeddings.length) {
+        stack.pop();
+        continue;
+      }
+      const embedding = embeddings[frame.next];
+      frame.next += 1;
+      if (!rangeWithin(frame.section.range, embedding.range)) continue;
       const target = graph.embeddingTarget(embedding);
       if (target === null) continue; // no occurrence — the boundary
       const key = pathTextKey(target.document.file);
@@ -280,15 +307,8 @@ export function expansionConsultedFiles(
         fileKeys.add(key);
         files.push(target.document.file);
       }
-      visitTarget(target.document, target.section);
+      enter(target.document, target.section);
     }
-  };
-
-  for (const document of requested) {
-    // With `--text` every node's text is computed, the root's subtree
-    // covering the whole file (SPEC 1.2), so every embedding of a
-    // requested file starts an expansion.
-    visitTarget(document, document.root);
   }
   return files;
 }
@@ -326,32 +346,63 @@ export class TextAvailability {
     return true;
   }
 
-  /** Whether the node's subtree text (SPEC 1.6) is defined (SPEC 11.2). */
+  /**
+   * Whether the node's subtree text (SPEC 1.6) is defined (SPEC 11.2): a
+   * depth-first walk over the embedding targets on an explicit stack, as
+   * long as the expansion chain (SPEC 3 bounds none), each verdict
+   * memoized. Re-entering a node still being walked is an embedding cycle:
+   * the value is undefined for every node on or reaching the cycle — the
+   * false verdict passes down the whole stack, each walk stopping at its
+   * first undefined embedding.
+   */
   subtreeTextDefined(document: SpecDocument, section: SpecSection): boolean {
     const memo = this.state.get(section);
-    if (memo === "visiting") {
-      // The recursion re-entered a node already being expanded: an
-      // embedding cycle — the value is undefined for every node on or
-      // reaching the cycle (the false return propagates up the chain).
-      return false;
-    }
+    if (memo === "visiting") return false;
     if (typeof memo === "boolean") return memo;
+    /** A node being walked: its embeddings from `next` on are still due. */
+    const stack: {
+      readonly document: SpecDocument;
+      readonly section: SpecSection;
+      next: number;
+    }[] = [{ document, section, next: 0 }];
     this.state.set(section, "visiting");
-    let defined = true;
-    for (const embedding of document.embeddings) {
-      // Anywhere in the subtree: the embeddings within the construct range
-      // (the whole file for the root, SPEC 1.2).
-      if (!rangeWithin(section.range, embedding.range)) continue;
-      const target = this.graph.embeddingTarget(embedding);
-      if (
-        target === null ||
-        !this.subtreeTextDefined(target.document, target.section)
-      ) {
-        defined = false;
-        break;
+    // The top walk's verdict so far — on resuming a walk, the verdict of
+    // the walk it descended into, so a false one ends it at once.
+    let verdict = true;
+    for (;;) {
+      const frame = stack[stack.length - 1];
+      const embeddings = frame.document.embeddings;
+      let descend: RequirementNode | null = null;
+      while (verdict && descend === null && frame.next < embeddings.length) {
+        const embedding = embeddings[frame.next];
+        frame.next += 1;
+        // Anywhere in the subtree: the embeddings within the construct
+        // range (the whole file for the root, SPEC 1.2).
+        if (!rangeWithin(frame.section.range, embedding.range)) continue;
+        const target = this.graph.embeddingTarget(embedding);
+        if (target === null) {
+          verdict = false; // records no occurrence
+          continue;
+        }
+        const known = this.state.get(target.section);
+        if (known === undefined) {
+          descend = target;
+        } else {
+          verdict = known === true; // "visiting": a cycle
+        }
       }
+      if (descend !== null) {
+        this.state.set(descend.section, "visiting");
+        stack.push({
+          document: descend.document,
+          section: descend.section,
+          next: 0,
+        });
+        continue;
+      }
+      this.state.set(frame.section, verdict);
+      stack.pop();
+      if (stack.length === 0) return verdict;
     }
-    this.state.set(section, defined);
-    return defined;
   }
 }
