@@ -240,46 +240,93 @@ interface EmitNode {
   readonly children: readonly EmitNode[];
 }
 
-/** Collect the emitted node tree in document order (root first). */
+/** A section of `collectNodes`'s walk whose emitted node is being built. */
+interface CollectFrame {
+  readonly section: SpecSection;
+  readonly segment: string | null;
+  readonly index: number;
+  /** The emitted nodes of the children finished so far, in document order. */
+  readonly children: EmitNode[];
+  /** The index in `section.children` of the next child to visit. */
+  next: number;
+}
+
+/**
+ * Collect the emitted node tree in document order (root first). SPEC 1.3
+ * bounds no nesting depth, and every spec source of a valid workspace gets
+ * its generated module (SPEC 4, 12.1, 13.1), so the tree is built on an
+ * explicit work stack, never the call stack: a section's pre-order index is
+ * assigned when it is entered, its own text read once its children are
+ * finished — exactly the order of the plain recursion.
+ */
 function collectNodes(
   document: SpecDocument,
   textModel: WorkspaceTextModel,
 ): EmitNode {
   let nextIndex = 0;
-  const build = (section: SpecSection, segment: string | null): EmitNode => {
-    const index = nextIndex;
+  const enter = (
+    section: SpecSection,
+    segment: string | null,
+  ): CollectFrame => {
+    const frame: CollectFrame = {
+      section,
+      segment,
+      index: nextIndex,
+      children: [],
+      next: 0,
+    };
     nextIndex += 1;
-    const children: EmitNode[] = [];
-    for (const child of section.children) {
+    return frame;
+  };
+  const stack: CollectFrame[] = [enter(document.root, null)];
+  for (;;) {
+    const frame = stack[stack.length - 1];
+    const sectionChildren = frame.section.children;
+    if (frame.next < sectionChildren.length) {
+      const child = sectionChildren[frame.next];
+      frame.next += 1;
       if (child.id === null) {
         // No usable identity (its own 14.1/14.17 finding accounts for it;
         // such workspaces never emit) — skipped with its subtree.
         continue;
       }
-      children.push(build(child, lastIdSegment(child.id)));
+      stack.push(enter(child, lastIdSegment(child.id)));
+      continue;
     }
-    const identity =
-      section.id === null ? document.path : `${document.path}#${section.id}`;
-    return {
+    stack.pop();
+    const section = frame.section;
+    const node: EmitNode = {
       section,
-      index,
-      segment,
-      identity,
+      index: frame.index,
+      segment: frame.segment,
+      identity:
+        section.id === null ? document.path : `${document.path}#${section.id}`,
       ownText: textModel.ownText(document, section),
-      children,
+      children: frame.children,
     };
-  };
-  return build(document.root, null);
+    if (stack.length === 0) {
+      return node;
+    }
+    stack[stack.length - 1].children.push(node);
+  }
 }
 
-/** Pre-order flattening of the emitted node tree (document order). */
+/**
+ * Pre-order flattening of the emitted node tree (document order), on an
+ * explicit stack (SPEC 1.3 bounds no nesting depth): children pushed in
+ * reverse, so they pop in document order.
+ */
 function flattenPreOrder(root: EmitNode): readonly EmitNode[] {
   const nodes: EmitNode[] = [];
-  const visit = (node: EmitNode): void => {
+  const stack: EmitNode[] = [root];
+  while (stack.length > 0) {
+    const node = stack[stack.length - 1];
+    stack.pop();
     nodes.push(node);
-    for (const child of node.children) visit(child);
-  };
-  visit(root);
+    for (let index = node.children.length - 1; index >= 0; index -= 1) {
+      stack.push(node.children[index]);
+    }
+  }
   return nodes;
 }
 

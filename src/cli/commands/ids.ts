@@ -149,9 +149,29 @@ function buildFileTree(
   return top;
 }
 
-/** A tree node as JSON data (`--tree --json`). */
-function treeNodeJson(node: TreeNode): JsonObject {
-  return { id: node.id, children: node.children.map(treeNodeJson) };
+/**
+ * A file's tree as JSON data (`--tree --json`, SPEC 12.3): each node an
+ * object of its ID and its children, in document order. SPEC 1.3 bounds no
+ * nesting depth, so the tree is converted on an explicit stack, never the
+ * call stack: each node is appended to its parent's children when popped,
+ * its own children pushed in reverse so they pop in document order.
+ */
+function treeJson(top: readonly TreeNode[]): JsonObject[] {
+  const out: JsonObject[] = [];
+  const stack: { readonly node: TreeNode; readonly into: JsonObject[] }[] = [];
+  for (let index = top.length - 1; index >= 0; index -= 1) {
+    stack.push({ node: top[index], into: out });
+  }
+  while (stack.length > 0) {
+    const { node, into } = stack[stack.length - 1];
+    stack.pop();
+    const children: JsonObject[] = [];
+    into.push({ id: node.id, children });
+    for (let index = node.children.length - 1; index >= 0; index -= 1) {
+      stack.push({ node: node.children[index], into: children });
+    }
+  }
+  return out;
 }
 
 /**
@@ -174,22 +194,27 @@ function renderFlatHuman(groups: readonly FileGroup[]): string {
 /**
  * The tree human listing: each entry's file line with its tree's full IDs
  * indented by nesting depth beneath it; an entry holding no node is its
- * file line alone (SPEC 12.3).
+ * file line alone (SPEC 12.3). SPEC 1.3 bounds no nesting depth, so each
+ * tree is walked in pre-order on an explicit stack, never the call stack,
+ * children pushed in reverse so they pop in document order.
  */
 function renderTreeHuman(
   groups: readonly { file: string; nodes: readonly TreeNode[] }[],
 ): string {
   let out = "";
-  const renderNode = (node: TreeNode, depth: number): void => {
-    out += `${"  ".repeat(depth)}${node.id}\n`;
-    for (const child of node.children) {
-      renderNode(child, depth + 1);
-    }
-  };
+  const stack: { readonly node: TreeNode; readonly depth: number }[] = [];
   for (const group of groups) {
     out += `${renderPathText(group.file)}\n`;
-    for (const node of group.nodes) {
-      renderNode(node, 1);
+    for (let index = group.nodes.length - 1; index >= 0; index -= 1) {
+      stack.push({ node: group.nodes[index], depth: 1 });
+    }
+    while (stack.length > 0) {
+      const { node, depth } = stack[stack.length - 1];
+      stack.pop();
+      out += `${"  ".repeat(depth)}${node.id}\n`;
+      for (let index = node.children.length - 1; index >= 0; index -= 1) {
+        stack.push({ node: node.children[index], depth: depth + 1 });
+      }
     }
   }
   return out;
@@ -232,7 +257,7 @@ export async function idsCommand(
       return emitDocument(stdout, {
         files: trees.map((entry) => ({
           file: entry.file,
-          nodes: entry.nodes.map(treeNodeJson),
+          nodes: treeJson(entry.nodes),
         })),
       });
     }
