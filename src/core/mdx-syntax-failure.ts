@@ -54,6 +54,14 @@
 // attribute's content its comment deletions empty before calling acorn,
 // though that content may hold a token they hide, and such a refusal is
 // undone by respelling (`parseAsJudged`, the last section below).
+//
+// A call-stack overflow in any parse or probe is no failure of the text's
+// (SPEC 14.20: derivability alone decides): while the invocation can still
+// run again on a larger stack, it propagates to that rerun
+// (core/stack-exhaustion.ts, cli/reruns.ts), so a location never depends
+// on the stack a run had (SPEC 12.0). Only the invocation's last attempt,
+// or one past its first effect, gives up on a probe so exhausted, falling
+// back on the place the grammar gave.
 
 import type { Options } from "acorn";
 import { tokTypes } from "acorn";
@@ -69,6 +77,10 @@ import {
 } from "./mdx-acorn.js";
 import { judgingNamesByCodePoint } from "./mdx-jsx-names.js";
 import type { NameStandIns } from "./mdx-jsx-names.js";
+import {
+  propagateNotedOverflow,
+  propagateWhileRerunPossible,
+} from "./stack-exhaustion.js";
 import { closingTagDivergence } from "./viable-prefix.js";
 
 // ---------------------------------------------------------------------------
@@ -163,9 +175,13 @@ class AnalysisAbandoned extends Error {}
  * One parse of `text` by the stock grammar, its acorn calls recorded — JSX
  * names judged by code point (`judgingNamesByCodePoint`, ./mdx-jsx-names.ts:
  * the calls are the last attempt's, and the failure is spelled as `text`).
+ * A call-stack overflow, thrown or noted on its way through the grammar,
+ * propagates to the rerun on a larger stack while one is possible
+ * (module header), whether the parse then failed or not.
  */
 function recordedParse(text: string): RecordedParse {
   let calls: AcornCall[] = [];
+  let failure: MdxFailure | null = null;
   try {
     judgingNamesByCodePoint(text, (spelled) => {
       calls = [];
@@ -176,15 +192,18 @@ function recordedParse(text: string): RecordedParse {
         recording = null;
       }
     });
-    return { failure: null, calls };
   } catch (error) {
-    const failure = error as MdxFailure;
+    propagateWhileRerunPossible(error);
+    propagateNotedOverflow();
     if (typeof error !== "object" || error === null) {
       throw new AnalysisAbandoned();
     }
-    if (typeof failure.source !== "string") throw new AnalysisAbandoned();
-    return { failure, calls };
+    const thrown = error as MdxFailure;
+    if (typeof thrown.source !== "string") throw new AnalysisAbandoned();
+    failure = thrown;
   }
+  propagateNotedOverflow();
+  return { failure, calls };
 }
 
 /**
@@ -1824,7 +1843,10 @@ function hiddenFailure(text: string, offset: number): number | null {
  * SPEC 14, 14.20: the UTF-16 length of the longest prefix of `text` — a
  * spec source the stock grammar rejects — with which some well-formed MDX
  * file begins; `fallback` where the analysis cannot proceed (a throw that
- * is not the grammar's own failure, or nesting too deep to re-parse).
+ * is not the grammar's own failure, or — in the invocation's last attempt,
+ * or one past its first effect, alone — nesting too deep to re-parse; in
+ * any other, a call-stack overflow propagates to the rerun on a larger
+ * stack: module header).
  */
 export function mdxSyntaxFailureOffset(text: string, fallback: number): number {
   paragraphsAbove = new Map();
@@ -1842,6 +1864,7 @@ export function mdxSyntaxFailureOffset(text: string, fallback: number): number {
     }
     return offset;
   } catch (error) {
+    propagateWhileRerunPossible(error);
     if (
       error instanceof AnalysisAbandoned ||
       error instanceof RangeError ||
@@ -2091,7 +2114,11 @@ function respellRefusedContent(
     }
     return originals.size === 0 ? null : { text: units.join(""), originals };
   } catch (error) {
-    // Nesting too deep to probe: the refusal stands.
+    // A call-stack overflow propagates to the rerun on a larger stack while
+    // one is possible (module header). In the invocation's last attempt, or
+    // one past its first effect, nesting too deep to probe even there: the
+    // refusal stands.
+    propagateWhileRerunPossible(error);
     if (error instanceof AnalysisAbandoned || error instanceof RangeError) {
       return null;
     }

@@ -4,19 +4,30 @@
 //
 // SPEC 14.20: well-formedness is decided by derivability alone — for
 // TypeScript, by TypeScript's parser's acceptance (a stack overflow reports
-// no syntax error), and name binding takes no part in it — and the
-// configuration is judged by the same grammar (14.14). So a call-stack
-// overflow met while parsing, binding, or analyzing a source is no verdict
-// about the source: given stack enough, the same work completes. SPEC 12.0:
-// the same workspace bytes give the same answer on every run, while the
-// depth at which V8's stack gives out moves from run to run with how far
-// the JIT has optimized the recursing functions. So an invocation that
-// meets an overflow before its first effect runs again from the start on a
-// larger stack (cli/reruns.ts), and the sites that would turn the overflow
-// into an outcome (core/code-analysis.ts, core/config.ts) instead let it
-// propagate while such a rerun is possible: only the last attempt, or an
-// attempt past its first effect — which a rerun would repeat — answers
-// from the overflow.
+// no syntax error), and name binding takes no part in it; for MDX, by its
+// grammar's productions, which no depth of nesting or length of reference
+// chain exhausts — and the configuration is judged by TypeScript's grammar
+// (14.14). So a call-stack overflow met while parsing, binding, or
+// analyzing a source is no verdict about the source: given stack enough,
+// the same work completes. SPEC 12.0: the same workspace bytes give the
+// same answer on every run, while the depth at which V8's stack gives out
+// moves from run to run with how far the JIT has optimized the recursing
+// functions. So an invocation that meets an overflow before its first
+// effect runs again from the start on a larger stack (cli/reruns.ts), and
+// the sites that would turn the overflow into an outcome — code sources
+// (core/code-analysis.ts), the configuration (core/config.ts), spec sources
+// (core/mdx.ts, core/mdx-acorn.ts, core/mdx-syntax-failure.ts,
+// workspace/pipeline.ts) — instead let it propagate while such a rerun is
+// possible: only the last attempt, or an attempt past its first effect —
+// which a rerun would repeat — answers from the overflow.
+//
+// Third-party code can catch an overflow and fold it into an outcome of
+// its own: remark-mdx takes acorn's for the failure of a brace's content
+// and tries the next `}` past it, so the failure it finally throws, or even
+// the tree it returns, may no longer carry the overflow. Such code is
+// handed an overflow only through a site that notes it on the way
+// (`noteStackOverflow`, core/mdx-acorn.ts), and the sites judging that
+// code's outcome propagate the noted overflow (`propagateNotedOverflow`).
 //
 // The run state is data alone, no I/O (IMPLEMENTATION: core is I/O-free):
 // the cli layer begins each attempt (cli/reruns.ts), and the first effect
@@ -87,15 +98,21 @@ export interface AttemptCarry {
 export const FIRST_ATTEMPT: AttemptCarry = { holdSeamEngaged: false };
 
 /** The current attempt's state (`beginAttempt`). */
-const state = {
+const state: {
   /**
    * Whether the attempt can still be rerun: begun rerunnable, no effect
    * since. False outside any attempt, so every site answers as it always
    * has where no rerun loop runs.
    */
-  rerunPossible: false,
-  holdSeamEngaged: false,
-};
+  rerunPossible: boolean;
+  holdSeamEngaged: boolean;
+  /**
+   * The first call-stack overflow noted while the attempt could still be
+   * rerun (`noteStackOverflow`), null while none is: from then on, the
+   * attempt's outcome may depend on the stack it had.
+   */
+  noted: { readonly overflow: unknown } | null;
+} = { rerunPossible: false, holdSeamEngaged: false, noted: null };
 
 /**
  * Begin an attempt (cli/reruns.ts): `rerunnable` false for the last one,
@@ -104,6 +121,7 @@ const state = {
 export function beginAttempt(rerunnable: boolean, carry: AttemptCarry): void {
   state.rerunPossible = rerunnable;
   state.holdSeamEngaged = carry.holdSeamEngaged;
+  state.noted = null;
 }
 
 /**
@@ -122,13 +140,46 @@ export function rerunPossible(): boolean {
 
 /**
  * At a site that answers from an overflow (core/code-analysis.ts,
- * core/config.ts): throw the `StackExhaustion` signal when `error` is a
- * call-stack overflow and a rerun is possible; otherwise return, the site
- * then answering as it always has.
+ * core/config.ts, the spec-source sites): throw the `StackExhaustion`
+ * signal — `error` itself when it is one — when `error` is a call-stack
+ * overflow and a rerun is possible; otherwise return, the site then
+ * answering as it always has. The overflow is noted first
+ * (`noteStackOverflow`), so third-party code that catches the signal on
+ * its way cannot hide it.
  */
 export function propagateWhileRerunPossible(error: unknown): void {
   if (state.rerunPossible && isStackOverflow(error)) {
-    throw new StackExhaustion(error);
+    noteStackOverflow(error);
+    throw error instanceof StackExhaustion ? error : new StackExhaustion(error);
+  }
+}
+
+/**
+ * Note `error` when it is a call-stack overflow met while a rerun is
+ * possible — at a site it passes on its way through code that may fold it
+ * into an outcome of its own (module header; core/mdx-acorn.ts). The note
+ * outlives whatever that code makes of the overflow: the sites judging its
+ * outcome propagate it (`propagateNotedOverflow`).
+ */
+export function noteStackOverflow(error: unknown): void {
+  if (state.rerunPossible && state.noted === null && isStackOverflow(error)) {
+    state.noted = { overflow: error };
+  }
+}
+
+/**
+ * At a site judging the outcome of code that may have folded a noted
+ * overflow into it — a parse by remark-mdx's grammar (core/mdx.ts,
+ * core/mdx-syntax-failure.ts), whether it threw or returned: throw the
+ * `StackExhaustion` signal when the attempt has noted an overflow and a
+ * rerun is possible; otherwise return.
+ */
+export function propagateNotedOverflow(): void {
+  if (state.rerunPossible && state.noted !== null) {
+    const overflow = state.noted.overflow;
+    throw overflow instanceof StackExhaustion
+      ? overflow
+      : new StackExhaustion(overflow);
   }
 }
 

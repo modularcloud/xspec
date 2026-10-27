@@ -78,6 +78,7 @@ import {
   analyzeSpecReferences,
   SpecSourceDomain,
 } from "../core/spec-references.js";
+import { propagateWhileRerunPossible } from "../core/stack-exhaustion.js";
 import { WorkspaceTextModel } from "../core/text-model.js";
 import type { LoadedWorkspace } from "./config.js";
 import { discoverSources } from "./discovery.js";
@@ -475,12 +476,18 @@ export async function analyzeWorkspaceContent(
       findings.push(...references.findings);
       specs.push({ document, imports, references });
     } catch (error) {
-      // SPEC 14.20: nesting beyond what the recursive analyses can process
-      // (a call-stack overflow surfaces as a RangeError — possible in the
-      // TypeScript re-parse of extracted import/reference expressions even
-      // when the MDX parse itself succeeded) makes the file unparseable —
-      // one finding, the file's contents masked, never a crash (SPEC 12.0).
+      // SPEC 14.20: derivability alone decides well-formedness, so a
+      // call-stack overflow after a successful parse — in the document
+      // builder's walks, or in the re-parse of extracted import and
+      // reference expressions — is no verdict about the file: while the
+      // invocation can still run again on a larger stack, the overflow
+      // propagates to that rerun (core/stack-exhaustion.ts, cli/reruns.ts),
+      // so no answer depends on the stack a run had (SPEC 12.0). Only the
+      // last attempt, or one past its first effect, answers from it: the
+      // file unparseable — one finding, its contents masked, never a crash
+      // (SPEC 12.0: exit codes partition all outcomes).
       if (!(error instanceof RangeError)) throw error;
+      propagateWhileRerunPossible(error);
       findings.push(
         locatedFinding(
           20,
@@ -556,8 +563,10 @@ export async function analyzeWorkspaceContent(
         findings.push(...references.findings);
         invalidPathSpecs.push({ document, imports, references });
       } catch (error) {
-        // SPEC 14.20: overflow-deep nesting, as in the valid-source loop.
+        // SPEC 14.20: a call-stack overflow, as in the valid-source loop —
+        // propagated to the rerun on a larger stack while one is possible.
         if (!(error instanceof RangeError)) throw error;
+        propagateWhileRerunPossible(error);
         findings.push(
           locatedFinding(
             20,

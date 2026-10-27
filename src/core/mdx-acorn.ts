@@ -40,10 +40,29 @@
 // empty expression, and what may follow a container's one expression — as
 // SPEC 14.20 does: by the comment deletions remark-mdx applies and, as
 // spelled, by lexing to no token (`judgeCommentsAsSpelled`, below).
+//
+// Nor does a limit of the machine take part: derivability alone decides,
+// and no depth of nesting or length of chain makes a text underivable. acorn
+// 8.17 turns a call-stack overflow met while parsing into the SyntaxError
+// "Not enough stack space to parse input" (`catchStackOverflow`), which
+// every reader — remark-mdx first — takes for a derivation failure. In
+// `mdxAcorn` the overflow propagates as the `RangeError` it is, and is
+// noted on its way (`propagateStackOverflow`, below): remark-mdx throws its
+// grammar failure with the overflow as `cause`, or tries a further `}` and
+// throws another failure, and the sites judging a parse tell either from a
+// derivation failure (core/stack-exhaustion.ts) — while the invocation can
+// still run again on a larger stack, it does (cli/reruns.ts), so a
+// well-formed file reaches its ordinary outcome whatever its depth (SPEC
+// 14.20, 12.0).
 
 import type { Expression, Options, Program, TokenType } from "acorn";
 import { isIdentifierChar, Parser, tokTypes } from "acorn";
 import acornJsx from "acorn-jsx";
+import {
+  isStackOverflow,
+  noteStackOverflow,
+  propagateWhileRerunPossible,
+} from "./stack-exhaustion.js";
 
 declare module "acorn" {
   /**
@@ -825,7 +844,12 @@ function lexesToNoToken(text: string): boolean {
   try {
     const tokenizer = mdxAcorn.tokenizer(text, { ...MDX_ACORN_OPTIONS });
     return tokenizer.getToken().type === tokTypes.eof;
-  } catch {
+  } catch (error) {
+    // A call-stack overflow is no lexing failure (SPEC 14.20): while a
+    // rerun on a larger stack is possible it propagates there
+    // (core/stack-exhaustion.ts); only the invocation's last attempt, or
+    // one past its first effect, answers from it.
+    propagateWhileRerunPossible(error);
     return false;
   }
 }
@@ -1000,17 +1024,79 @@ function judgeJsxNamesByCodePoint(BaseParser: typeof Parser): typeof Parser {
   return Extended as unknown as typeof Parser;
 }
 
+/** acorn's parser as `propagateStackOverflow` extends it (acorn 8.17). */
+interface OverflowCatchingParser {
+  /** Where the parse began (`startPos`, 0 when none is given). */
+  readonly xspecStartPos: number;
+  catchStackOverflow(
+    this: OverflowCatchingParser,
+    parse: () => unknown,
+  ): unknown;
+}
+
+/**
+ * SPEC 14.20: derivability alone decides, so a call-stack overflow is no
+ * derivation failure (module header). acorn 8.17 runs `parse` and
+ * `parseExpression` inside `catchStackOverflow`, which raises "Not enough
+ * stack space to parse input" in the overflow's place; here the overflow
+ * propagates as itself, noted on its way (core/stack-exhaustion.ts), since
+ * remark-mdx catches what acorn throws and may throw another failure in
+ * the end: the sites judging its parse propagate a noted overflow while
+ * the invocation can still run again on a larger stack (cli/reruns.ts).
+ * Every acorn parse of a spec source's text goes through `mdxAcorn` or a
+ * parser extending it, so none reads an overflow as a derivation failure.
+ *
+ * remark-mdx places whatever acorn throws by its position `pos`, which
+ * acorn gives every failure it raises and V8 gives no overflow
+ * (micromark-util-events-to-acorn: without one, an ESM block's failure
+ * cannot be placed at all, and its placing throws a TypeError of its own).
+ * The overflow is given the position the parse began at, which no depth
+ * at which the stack ran out moves.
+ */
+function propagateStackOverflow(BaseParser: typeof Parser): typeof Parser {
+  // One more derivation level, so the class handed in stays untouched.
+  const Base = BaseParser as unknown as new (
+    options: Options,
+    input: string,
+    startPos?: number,
+  ) => object;
+  const Extended = class extends Base {
+    readonly xspecStartPos: number;
+
+    constructor(options: Options, input: string, startPos?: number) {
+      super(options, input, startPos);
+      this.xspecStartPos = startPos ?? 0;
+    }
+  };
+  const prototype = Extended.prototype as unknown as OverflowCatchingParser;
+  prototype.catchStackOverflow = function (parse) {
+    try {
+      return parse();
+    } catch (error) {
+      noteStackOverflow(error);
+      if (isStackOverflow(error)) {
+        const placed = error as { pos?: unknown };
+        if (typeof placed.pos !== "number") placed.pos = this.xspecStartPos;
+      }
+      throw error;
+    }
+  };
+  return Extended as unknown as typeof Parser;
+}
+
 /**
  * The parser remark-mdx is handed (SPEC 14.20): acorn with JSX, its names
  * read code point by code point, deriving the ECMAScript 2024 grammar alone
- * — early errors excluded — and judging whitespace and comments alone by
- * the comment deletions and, as spelled, by lexing to no token.
+ * — early errors excluded — judging whitespace and comments alone by the
+ * comment deletions and, as spelled, by lexing to no token, and reading no
+ * call-stack overflow as a derivation failure.
  */
 export const mdxAcorn: typeof Parser = Parser.extend(
   acornJsx(),
   judgeJsxNamesByCodePoint,
   excludeEarlyErrors,
   judgeCommentsAsSpelled,
+  propagateStackOverflow,
 );
 
 /**
@@ -1034,7 +1120,11 @@ export function isEmptyExpression(content: string): boolean {
  * characters, first token through last, a parenthesized expression its
  * parentheses included (SPEC 14's reference-spelling locations). Positions
  * are UTF-16 offsets into `content`. Null where the content derives no
- * expression, which a parsed document's container never holds.
+ * expression, which a parsed document's container never holds — and, in
+ * the invocation's last attempt or one past its first effect, where the
+ * derivation exhausts the call stack, as acorn's own `catchStackOverflow`
+ * made it fail; in any other attempt such an overflow propagates to the
+ * rerun on a larger stack (core/stack-exhaustion.ts, cli/reruns.ts).
  */
 export function deriveContentExpression(content: string): Expression | null {
   try {
@@ -1044,6 +1134,10 @@ export function deriveContentExpression(content: string): Expression | null {
     });
   } catch (error) {
     if (error instanceof SyntaxError) {
+      return null;
+    }
+    propagateWhileRerunPossible(error);
+    if (isStackOverflow(error)) {
       return null;
     }
     throw error;

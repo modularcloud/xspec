@@ -10,14 +10,18 @@
 // effect, the next on a fresh `node:worker_threads` Worker with a larger
 // stack, `RERUN_STACK_SIZES_MB` in order, the last size the last attempt.
 //
-// Why: SPEC 14.20 makes a TypeScript source well-formed exactly when
-// TypeScript's parser accepts it, and name binding takes no part in the
-// verdict, so a call-stack overflow — in TypeScript's recursive parser or
-// binder, third-party recursion no rewrite of the product changes, or in
-// the product's own walks — is no verdict about the file; and SPEC 12.0
-// gives the same workspace bytes the same answer on every run, while the
-// calling thread's stack (under 1 MB) gives out at a depth that moves from
-// run to run with how far V8's JIT has optimized the recursing functions.
+// Why: SPEC 14.20 decides well-formedness by derivability alone — a
+// TypeScript source is well-formed exactly when TypeScript's parser accepts
+// it, name binding taking no part in the verdict, and an MDX source exactly
+// when its grammar's productions derive it, however deep its expressions
+// nest or long its reference chains run — so a call-stack overflow — in
+// TypeScript's recursive parser or binder, in acorn's recursive descent or
+// remark-mdx's walks over what it parsed, third-party recursion no rewrite
+// of the product changes, or in the product's own walks — is no verdict
+// about the file; and SPEC 12.0 gives the same workspace bytes the same
+// answer on every run, while the calling thread's stack (under 1 MB) gives
+// out at a depth that moves from run to run with how far V8's JIT has
+// optimized the recursing functions.
 // An attempt that completes gives the bytes stack enough gives, whichever
 // it is; only the last answers from an overflow (core/stack-exhaustion.ts).
 // Why not a large stack for every invocation: it only moves the bound, and

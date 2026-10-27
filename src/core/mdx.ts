@@ -74,6 +74,11 @@ import {
 } from "./mdx-syntax-failure.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
+  isStackOverflow,
+  propagateNotedOverflow,
+  propagateWhileRerunPossible,
+} from "./stack-exhaustion.js";
+import {
   describeSegmentViolation,
   idSegmentViolations,
   isWhitespaceCodePoint,
@@ -555,7 +560,12 @@ type MdxParse =
 /**
  * Decode and parse one spec source (SPEC 1.6, 14.20): valid UTF-8 with no
  * byte-order mark, then MDX 3's grammar — the whole verdict on
- * well-formedness, which the document builder never revises.
+ * well-formedness, which the document builder never revises. A call-stack
+ * overflow is no verdict (SPEC 14.20: derivability alone decides): while a
+ * rerun on a larger stack is possible it propagates there, thrown or noted
+ * on its way through the grammar (core/stack-exhaustion.ts, ./mdx-acorn.ts),
+ * whether the parse then failed or not; only the invocation's last
+ * attempt, or one past its first effect, answers from it.
  */
 function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
   const decoded = decodeSourceBytes(file, bytes);
@@ -564,6 +574,7 @@ function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
   }
   const text = decoded.text;
   const offsets = new Utf8Offsets(text);
+  let tree: MdxTreeNode;
   try {
     // SPEC 14.20: remark-mdx's grammar defines well-formed MDX, its refusal
     // of an attribute's content as empty undone where that content holds
@@ -575,13 +586,17 @@ function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
     );
     if (originals.size > 0) restoreRespelledContent(result, text, originals);
     if (names.units.size > 0) restoreJsxNames(result, names);
-    return { kind: "tree", text, offsets, tree: result };
+    tree = result;
   } catch (error) {
+    propagateWhileRerunPossible(error);
+    propagateNotedOverflow();
     return {
       kind: "unparseable",
       finding: parseFailureFinding(file, error, text, offsets),
     };
   }
+  propagateNotedOverflow();
+  return { kind: "tree", text, offsets, tree };
 }
 
 /**
@@ -613,7 +628,8 @@ export function parseSpecSource(
  * model: a pure judgement over a file's bytes, for texts no discovered file
  * holds yet — a move's would-be files (SPEC 6.5 "Validation and refusals",
  * `refused-invalid-rewrite`), whose refusal locates the moved construct
- * rather than the failure.
+ * rather than the failure. As in `parseMdx`, a call-stack overflow is no
+ * verdict while a rerun on a larger stack is possible: it propagates there.
  */
 export function isWellFormedSpecSource(bytes: Uint8Array): boolean {
   // The path only labels a finding this verdict never reports.
@@ -625,10 +641,13 @@ export function isWellFormedSpecSource(bytes: Uint8Array): boolean {
     parseAsJudged(decoded.text, (spelled) =>
       mdxParser.parse(parserFile(spelled)),
     );
-    return true;
-  } catch {
+  } catch (error) {
+    propagateWhileRerunPossible(error);
+    propagateNotedOverflow();
     return false;
   }
+  propagateNotedOverflow();
+  return true;
 }
 
 /** The 14.20 finding for a thrown MDX parse failure, with its location. */
@@ -650,9 +669,14 @@ function parseFailureFinding(
 
   // SPEC 14: one zero-length range at the failure's offset — the byte
   // length of the longest prefix with which some well-formed file begins
-  // (mdx-syntax-failure.ts). A throw that is not the grammar's own failure
-  // (a VFileMessage, carrying its source) — nesting too deep to parse —
-  // locates at the file start.
+  // (mdx-syntax-failure.ts). In the invocation's last attempt, or one past
+  // its first effect — the only ones that answer from a call-stack overflow
+  // (`parseMdx`) — a throw that is not the grammar's own failure (a
+  // VFileMessage, carrying its source) — nesting too deep to parse even
+  // there — locates at the file start, and the grammar's failure carrying
+  // such an overflow as its cause stays at the place the grammar gave it:
+  // locating it would parse the same nesting again on the same stack, every
+  // probe exhausting it anew before the analysis falls back on that place.
   let at = 0;
   if (typeof failure.source === "string") {
     const place = failure.place as
@@ -662,7 +686,9 @@ function parseFailureFinding(
       typeof placed === "number"
         ? Math.max(0, Math.min(text.length, placed))
         : 0;
-    at = mdxSyntaxFailureOffset(text, fallback);
+    at = isStackOverflow(error)
+      ? fallback
+      : mdxSyntaxFailureOffset(text, fallback);
   }
   const byte = offsets.byteOffset(at);
   const { line, column } = lineAndColumn(text, at);
