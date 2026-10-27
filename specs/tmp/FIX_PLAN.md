@@ -66,26 +66,9 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 | 156 | B3 (note) | `coverage` streams its report, in both output forms | landed at `cac524d`, CI run 1733 green |
 | 157 | B2 | Item ids derived from kind and scope node, `nextItemId` dropped (session format 4): concurrent additions take distinct keys | landed at `6b56a0c`, CI run 1735 green |
 | 158 | B2 | One line per item and decomposition, comma-led, each followed by an empty line (format 5): a keep-both merge holds both sides' additions | landed at `168e68c`, CI run 1737 green |
-| 160 | Task 154's spawn | Discovery examines an entry's kind only where SPEC 7 does: never for an entry no glob matches and the walk would not list were it a directory | pending |
+| 160 | Task 154's spawn | Discovery examines an entry's kind only where SPEC 7 does: never for an entry no glob matches and the walk would not list were it a directory | landed at `fd857ea`, CI run 1739 green |
 | 161 | Task 155's spawn | Graph data, `view --json`, and any one-string output these chains drive past V8's string limit, spelled in chunks: long embedding chains build and answer | pending |
 | 159 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
-
-## Task 160 — Discovery examines the kind of no entry SPEC 7 leaves unexamined (SPEC 7, 14.25; found by Task 154's spawn)
-
-**Requirement.**
-- SPEC 7: discovery "examines the kind of exactly those entries of a listed directory whose paths such a glob matches or that it would list were they directories", paths under `.xspec/` counting for none.
-- SPEC 14.25: a refused read of a path occupant's kind is the read failure where xspec examines that kind. Whether discovery learns a kind it does examine from the listing it already made or by a separate examination is its own choice (TEST-SPEC T14-10, its note on the clauses it cannot stage).
-
-**Observed** (2026-10-26, with builds of `89ac53a` and of Task 154's change alike). `walk` (`src/workspace/discovery.ts`) runs `lstat` on every entry its listing reports as neither a plain file nor a directory: a FIFO, a socket, a device, or an entry whose type the filesystem does not report. It does so whatever the entry's path. Configuration `{ specs: { main: ["specs/*.mdx"] } }`, with `specs/` holding only a FIFO `p` (`mkfifo specs/p`). With `specs/` at mode 0755, `ids --json` answers `{"files": []}`, exit 0. After `chmod 0444 specs` (listing kept, search removed), run unprivileged, it exits 2 with `{"error": {"code": "read-failure", "path": "specs/p"}}`. Yet `specs/p` matches no glob, and no glob matches a path below it, so discovery never examines its kind, and the answer should stay `{"files": []}`, exit 0. Two contrasts: a regular file typed by the listing is not examined (`specs/notes.txt` alone answers exit 0 at 0444); and a FIFO the glob matches (`specs/q.mdx`) exits 2 concerning `specs/q.mdx` at 0444, a kind discovery does examine, so either route's answer stands there.
-
-**Change.**
-- In `walk`, examine an entry's kind separately only when SPEC 7 examines it: when some configured glob matches its path (`CompiledGlob.matches`), or when the walk would list it were it a directory (`mayMatchWithin`, never for the root-level `.xspec`, 13.4). Skip every other entry unexamined. An unmatched plain file was never a source anyway (`classifySources` drops it). Prefer the kind the listing reports wherever it reports one (a FIFO, socket, or device is neither source nor directory), and keep `lstat` (never following a link) for an entry of unreported type. Cite SPEC 7 in the comment, and rewrite the comment above the `lstat`.
-- `AGENTS.md`: add the kind probe to the bullet beginning "Hand-probing SPEC 7's root listing".
-
-**Verification** (each probe in its own fresh workspace; every product run unprivileged; modes restored after):
-1. The staging above at 0444: `ids --json`, `build --json`, `check --json`, and `inventory --json` each answer as at 0755.
-2. Untyped entries cannot be staged on this machine (its filesystems report every type), so check that branch by reading.
-3. Regressions: Task 154's set — `section-7-basics`, `section-7-discovery`, `section-7.1-7.3`, `section-11.6`, `section-14`, `section-14-ii`, `section-12.7`, `section-13.4-ii`, `section-13.5`, `section-13.5-iii`, `section-13.5-iv`, `section-10.7-iii`, and `section-6.6`.
 
 ## Task 161 — Graph data, and the outputs that spell every node's text, emitted past V8's string limit: long embedding chains build and answer (SPEC 13.3, 12.1, 12.0, 3; found by Task 155's spawn)
 
