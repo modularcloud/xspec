@@ -1840,10 +1840,24 @@ export function splitItemDecomposition(
   // SPEC 10.7: the original is removed; every item outside the
   // decomposition that was blocked by it becomes blocked by all items of
   // the decomposition. Reused decomposition items keep their places, as
-  // assigned above; newly created ones follow in expansion order.
+  // assigned above. In the stored layout (src/core/review.ts, "Stored
+  // layout"; SPEC 13.4: concurrent additions merge textually), the scope
+  // root's `parent-consistency` item, where this split creates it, takes
+  // the original's place, so that the split rewrites the original's line
+  // rather than removing it — a removal conflicts with another branch's
+  // change to the line after it — and the other newly created items follow
+  // the last stored item in expansion order; only where that item already
+  // exists is the original's line removed.
+  const rootKey = kindScopeKey("parent-consistency", original.scope);
+  const rootItem = existingByKey.has(rootKey)
+    ? undefined
+    : assignedByKey.get(rootKey);
   const items: ReviewItem[] = [];
   for (const item of session.items) {
-    if (item.id === original.id) continue;
+    if (item.id === original.id) {
+      if (rootItem !== undefined) items.push(rootItem);
+      continue;
+    }
     const assigned = assignedByKey.get(kindScopeKey(item.kind, item.scope));
     if (assigned !== undefined) {
       items.push(assigned);
@@ -1869,7 +1883,10 @@ export function splitItemDecomposition(
   }
   for (const generated of expansion) {
     const key = kindScopeKey(generated.kind, generated.scope.identity);
-    if (!existingByKey.has(key)) {
+    if (
+      !existingByKey.has(key) &&
+      !(rootItem !== undefined && key === rootKey)
+    ) {
       items.push(assignedByKey.get(key) as ReviewItem);
     }
   }

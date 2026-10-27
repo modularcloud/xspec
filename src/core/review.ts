@@ -11,18 +11,30 @@
 //
 // Stored document (this implementation's design; SPEC.md fixes the
 // information, not the concrete shape) — one canonical-JSON document
-// (canonical-json.ts: sorted keys, two-space indentation, trailing newline):
+// (canonical-json.ts: sorted keys, two-space indentation, trailing
+// newline), its `decompositions` and `items` laid out one element per line
+// ("Stored layout", below):
 //
 //   {
 //     "creationParameters": {"base": <commit>} | {} | {"profile": {…}},
-//     "decompositions": [{"kind": "subtree-coherence", "scope": <ref>}, …],
-//     "items": [<item>, …],
+//     "decompositions": [
+//       null
+//
+//       ,{"kind":"subtree-coherence","scope":<ref>}
+//
+//     ],
+//     "items": [
+//       <item>
+//
+//       ,<item>
+//
+//     ],
 //     "journalLength": <n>,
 //     "references": [<ref>, …],
 //     "states": [<node state>, …],
 //     "strategy": "path-blocks" | "audit" | "coverage",
 //     "texts": [<text>, …],
-//     "version": 4
+//     "version": 5
 //   }
 //
 // where every node reference <ref> is a canonical identity key (identity
@@ -64,17 +76,58 @@
 // unchanged bytes: a `no-change` or `skipped` resolve rewrites the
 // resolved item's entry alone (with `journalLength`, when the journal
 // grew), an `updated` resolve's re-derivation and a `split` the entries of
-// the items they add or reassign (with, for a `split`, `decompositions`).
-// Writes changing different items — resolutions on different branches,
-// each recording new node states and texts after source edits — therefore
-// change disjoint item entries and merge textually. An item changed on
-// both sides conflicts inside its own entry alone: either side's entry,
-// taken whole, reads back that side's resolution, and both sides' entries
-// kept side by side read as corrupt (duplicate `id`, SPEC 10.1), never as
-// a silently different resolution. The cost, accepted: a value that many
-// items record anew after creation (a node's state after an edit, recorded
-// by each item resolved over it) is stored once per recording item rather
-// than once per session.
+// the items they add or reassign (with, for a `split`, the original's
+// entry and the decomposition's). Writes changing different items —
+// resolutions on different branches, each recording new node states and
+// texts after source edits — therefore change disjoint item entries, each
+// on a line of its own ("Stored layout", below), and merge textually. An
+// item changed on both sides conflicts on its own line alone: either
+// side's line, taken whole, reads back that side's resolution, and both
+// sides' lines kept side by side read as corrupt (duplicate `id`, SPEC
+// 10.1), never as a silently different resolution. The cost, accepted: a
+// value that many items record anew after creation (a node's state after
+// an edit, recorded by each item resolved over it) is stored once per
+// recording item rather than once per session.
+//
+// Stored layout (SPEC 13.4: durable files "are line-oriented or stably
+// keyed so that concurrent additions merge textually"; 10.1: "a plain,
+// deterministic file"): each element of `items` and of `decompositions`
+// stands on a line of its own — compact canonical JSON, keys sorted, no
+// newline inside (`CanonicalJsonOptions.lineArrays` of canonical-json.ts)
+// — the first bare and every later one led by its comma, and an empty line
+// follows each; every other member keeps the pretty layout. So an item or
+// decomposition a write adds is one line, unique by the id or scope it
+// holds, which git's conflict refinement can neither split nor fuse with
+// another; lines two branches append after the last element merge cleanly
+// where git's diff sets them apart (one side's sliding onto its own change
+// of the last element, an empty line between them), and otherwise meet as
+// a conflict whose keep-both resolution — `git merge-file --union`, or a
+// `merge=union` attribute: ours' lines, then theirs' — is still a valid
+// array, every appended line bringing its own comma; and a change to one
+// element never stands on a line next to a change to another (git meets
+// changes to adjacent lines as a conflict), an empty line lying between.
+// `decompositions` opens with a fixed head element, `null`, so that every
+// recorded decomposition is a comma-led line even where the session
+// recorded none before; the head is read as exactly that, never as a
+// decomposition (`parseDecompositions`). Items keep their stored order: a
+// re-derivation (SPEC 10.5) keeps every existing item where it stands,
+// rewriting a matched item's line only where its entry changes, and
+// appends new items after the last; a `split` (10.7) appends its
+// decomposition last, puts the scope root's `parent-consistency` item on
+// the original's line where the split creates that item, and removes the
+// original's line only where that item already existed
+// (src/core/review-derive.ts, `splitItemDecomposition`). Two branches'
+// additions to one session therefore merge — cleanly, or by that
+// keep-both resolution — into a valid session holding both sides'
+// additions, as the journal's lines do (SPEC 6.1), while resolutions of
+// different items, changing different lines, merge cleanly. What cannot
+// merge is never silently different: an item changed on both branches
+// conflicts on its own line, its keep-both holding the item twice
+// (duplicate `id`, SPEC 10.1); an item's line removed beside a change of
+// the line after it conflicts, its keep-both corrupt (that item twice) or
+// unparseable (the removed line the first, its successor's comma kept).
+// Reading is layout-free — any JSON whitespace reads alike — so a session
+// staged or rewritten in another layout reads as the same session.
 //
 // Item ids (SPEC 10.2: unique within the session, never containing
 // U+FFFD; 10.7: a `split` original's id is never reused; 13.4: concurrent
@@ -89,17 +142,18 @@
 // changes as the journal grows (identity policy below) — so a derived id is
 // unique, never reused, and the same on every branch that adds the same
 // item, while two branches adding different items assign different keys,
-// whose entries a keep-both resolution holds side by side as a valid
-// session. Should a derived id already name another item of the session,
-// or equal one a recorded decomposition's kind and scope node derive (the
-// removed original's, which stays retired), it extends deterministically
-// by further digest digits. The session stores no id counter, so an
-// addition rewrites no member beyond the item entries it adds or
-// reassigns (and, as every write may, `journalLength`; a `split`,
-// `decompositions`). Stored ids are opaque — nothing checks an id against
-// its derivation: formats 1–3 hold their counter's `item-<n>` ids, which
-// every later write keeps, and the leading `r`, outside the hex digits,
-// keeps every derived id distinct from those and from every hash value.
+// whose lines a keep-both resolution holds side by side as a valid session
+// ("Stored layout"). Should a derived id already name another item of the
+// session, or equal one a recorded decomposition's kind and scope node
+// derive (the removed original's, which stays retired), it extends
+// deterministically by further digest digits. The session stores no id
+// counter, so an addition rewrites no member beyond the item entries it
+// adds or reassigns (and, as every write may, `journalLength`; a `split`,
+// the original's entry and the decomposition it appends). Stored ids are
+// opaque — nothing checks an id against its derivation: formats 1–3 hold
+// their counter's `item-<n>` ids, which every later write keeps, and the
+// leading `r`, outside the hex digits, keeps every derived id distinct
+// from those and from every hash value.
 //
 // Each item carries exactly the fields of SPEC 10.2 — `id`, `kind`,
 // `scope` (stored as its root, `scope`, and the scope nodes beneath the
@@ -130,8 +184,12 @@
 // format-1 file's sorted keys gave them, which human renderings follow.
 //
 // Earlier formats are still read (`validateSessionDocument`), so sessions
-// written before format 4 stay valid; every write stores format 4. Format
-// 3 — the same document at `version` 3 with one member more,
+// written before format 5 stay valid; every write stores format 5, so a
+// session's first write after an earlier format's changes its whole
+// layout once. Format 4 — format 5's document at `version` 4, its
+// `decompositions` the recorded ones alone, with no head, and every member
+// laid out pretty (each item spread over many lines) — is read as stored.
+// Format 3 — format 4's document at `version` 3 with one member more,
 // `nextItemId`, the counter its writes took `item-<n>` ids from — is read
 // with that member checked as before and then unused: its items keep their
 // ids, and every item added later takes a derived one (above). Format 2 —
@@ -148,7 +206,7 @@
 // Identity policy: every stored node reference — an item's `scope` and
 // `scopeDescendants` entries, its `recordedContext`, `context`, and
 // `origin` entries, the nodes of `baseline`/`current` and
-// of `baselineTexts`/`derivedTexts` (each, in formats 2 to 4, the
+// of `baselineTexts`/`derivedTexts` (each, in formats 2 to 5, the
 // reference its index names), and each recorded decomposition's
 // `scope` — is a canonical identity (SPEC 5.4) in the injective key
 // encoding of src/core/journal.ts (`<position>:<identity>`,
@@ -607,7 +665,12 @@ export interface ReviewSession {
    * entry count on every write.
    */
   readonly journalLength: number;
-  /** In insertion order; presentation order is derived at read (10.5–10.7). */
+  /**
+   * In stored order (module header, "Stored layout"): existing items keep
+   * their places, items a write adds follow the last, and a `split` puts
+   * the `parent-consistency` item it creates in the original's place.
+   * Presentation order is derived at read (SPEC 10.5–10.7).
+   */
   readonly items: readonly ReviewItem[];
   /**
    * The session's tables (module header, "Stored document"), fixed by the
@@ -1252,10 +1315,11 @@ function itemEntry(item: ReviewItem, fixed: FixedTables): JsonObject {
 }
 
 /**
- * The format-4 document of a session (module header, "Stored document"):
+ * The format-5 document of a session (module header, "Stored document"):
  * the session's fixed tables — for a session its creating write is
  * storing, the tables `createTables` builds over its items — stored as
- * they are, and every item stored by index (`itemEntry`).
+ * they are, every item stored by index (`itemEntry`), and the recorded
+ * decompositions after the fixed head element (`DECOMPOSITIONS_HEAD`).
  */
 function sessionDocument(session: ReviewSession): JsonObject {
   const created =
@@ -1264,10 +1328,13 @@ function sessionDocument(session: ReviewSession): JsonObject {
   const fixed = new FixedTables(tables, created?.orderedNodes);
   return {
     creationParameters: parametersToJson(session.parameters),
-    decompositions: session.decompositions.map((decomposition) => ({
-      kind: decomposition.kind,
-      scope: decomposition.scope,
-    })),
+    decompositions: [
+      DECOMPOSITIONS_HEAD,
+      ...session.decompositions.map((decomposition) => ({
+        kind: decomposition.kind,
+        scope: decomposition.scope,
+      })),
+    ],
     items: session.items.map((item) => itemEntry(item, fixed)),
     journalLength: session.journalLength,
     references: tables.references,
@@ -1318,22 +1385,37 @@ export function parametersToJson(parameters: SessionParameters): JsonObject {
 }
 
 /** The stored format every write produces (module header). */
-const SESSION_VERSION = 4;
+const SESSION_VERSION = 5;
 
 /** The earlier stored formats, still read (module header): any version
- * other than these and format 4 is corrupt (unintelligible). */
+ * other than these and format 5 is corrupt (unintelligible). */
+const FORMAT_4_VERSION = 4;
 const FORMAT_3_VERSION = 3;
 const FORMAT_2_VERSION = 2;
 const FORMAT_1_VERSION = 1;
 
 /**
+ * The fixed head element of a format-5 document's `decompositions` (module
+ * header, "Stored layout"): stored first, bare, so that every recorded
+ * decomposition after it is a comma-led line; read as exactly that and
+ * never as a decomposition (`parseDecompositions`).
+ */
+const DECOMPOSITIONS_HEAD = null;
+
+/** The members a format-5 document lays out one element per line (module
+ * header, "Stored layout"). */
+const LINE_MEMBERS = ["decompositions", "items"] as const;
+
+/**
  * Serialize a session to its stored form: one canonical JSON document in
- * format 4 (module header; SPEC 10.1 "plain, deterministic"; 13.4 "stable
- * ordering and sorted keys", "stably keyed"; 12.0 byte determinism — the
- * text is a pure function of the session value and its fixed tables).
+ * format 5, its `decompositions` and `items` one element per line (module
+ * header; SPEC 10.1 "plain, deterministic"; 13.4 "stable ordering and
+ * sorted keys", "line-oriented or stably keyed so that concurrent
+ * additions merge textually"; 12.0 byte determinism — the text is a pure
+ * function of the session value and its fixed tables).
  */
 export function serializeSession(session: ReviewSession): string {
-  return canonicalJson(sessionDocument(session));
+  return canonicalJson(sessionDocument(session), { lineArrays: LINE_MEMBERS });
 }
 
 // ---------------------------------------------------------------------------
@@ -1619,8 +1701,9 @@ const ITEM_REQUIRED_KEYS = [
 /** A format-1 or format-2 item's optional member: the `note` (SPEC 10.2). */
 const ITEM_OPTIONAL_KEYS = ["note"] as const;
 
-/** A format-3 or format-4 item's optional members (module header): the
- * `note`, and the item's own tables, each omitted when empty. */
+/** A format-3, format-4, or format-5 item's optional members (module
+ * header): the `note`, and the item's own tables, each omitted when
+ * empty. */
 const OWN_TABLE_ITEM_OPTIONAL_KEYS = [
   ...ITEM_OPTIONAL_KEYS,
   "references",
@@ -1631,8 +1714,8 @@ const OWN_TABLE_ITEM_OPTIONAL_KEYS = [
 /**
  * How a stored format spells an item's node-bearing members (module
  * header): format 1 spells each reference out and keys recorded states and
- * text tables by reference; formats 2 to 4 index into the session's
- * tables and, in formats 3 and 4, the item's own (`TableReader`). Each
+ * text tables by reference; formats 2 to 5 index into the session's
+ * tables and, in formats 3 to 5, the item's own (`TableReader`). Each
  * decoder reports what it finds malformed.
  */
 interface ItemMemberDecoder {
@@ -2106,8 +2189,15 @@ function parseParameters(
   }
 }
 
+/**
+ * The recorded decompositions (SPEC 10.7) a document stores: in format 5
+ * (`headed`), the entries after the fixed head element, which must open
+ * the array and appear nowhere else (module header, "Stored layout");
+ * in formats 1 to 4, every entry.
+ */
 function parseDecompositions(
   value: unknown,
+  headed: boolean,
   problems: Problems,
 ): RecordedDecomposition[] {
   const where = "the recorded decompositions (decompositions)";
@@ -2115,9 +2205,17 @@ function parseDecompositions(
     problems.add(`${where} must be an array, found ${describeType(value)}`);
     return [];
   }
+  if (headed && (value.length === 0 || value[0] !== DECOMPOSITIONS_HEAD)) {
+    problems.add(
+      `${where} must open with the head element null, found ` +
+        (value.length === 0 ? "an empty array" : describeType(value[0])),
+    );
+    return [];
+  }
   const decompositions: RecordedDecomposition[] = [];
   const seen = new Set<string>();
   value.forEach((entry, index) => {
+    if (headed && index === 0) return;
     const entryWhere = `${where}[${String(index)}]`;
     if (!isPlainJsonObject(entry)) {
       problems.add(
@@ -2265,7 +2363,7 @@ function decodeIndexList(
 }
 
 /**
- * The tables of a format-2, format-3, or format-4 document (module header):
+ * The tables of a document of formats 2 to 5 (module header):
  * `references` — each a canonical reference (`checkCanonicalReference`),
  * none repeated, so an index names one node — `states`, each a recorded
  * node state (SPEC 10.4), and `texts`, each a string. Null, reported, when
@@ -2329,7 +2427,7 @@ function parseSessionTables(
 const NO_TABLES: SessionTables = { references: [], states: [], texts: [] };
 
 /**
- * Formats 3 and 4: one item's own tables (module header, "Stored
+ * Formats 3 to 5: one item's own tables (module header, "Stored
  * document") — its `references`, `states`, and `texts` members, each
  * optional (a write omits an empty one, so an empty one is malformed) and
  * otherwise an array: each reference canonical (`checkCanonicalReference`)
@@ -2407,8 +2505,8 @@ function parseItemTables(
 }
 
 /**
- * The member spellings of formats 2 to 4 (module header): indices into
- * the session's tables, extended — for a format-3 or format-4 item with
+ * The member spellings of formats 2 to 5 (module header): indices into
+ * the session's tables, extended — for an item of formats 3 to 5 with
  * tables of its own — by the item's, index i naming the session table's
  * entry i below that table's length n and the item table's entry i − n
  * from it. Every index resolves to its table's own value — so a canonical
@@ -2673,7 +2771,7 @@ function checkCanonicalReference(
 /**
  * SPEC 10.1: every node reference a format-1 item spells out, and every
  * recorded decomposition's, passes `checkCanonicalReference` (the items of
- * formats 2 to 4 index the reference tables, checked whole by
+ * formats 2 to 5 index the reference tables, checked whole by
  * `parseSessionTables` and, for an item's own, `parseItemTables`).
  */
 function checkCanonicalReferences(
@@ -2883,13 +2981,14 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     );
     return { ok: false, problems: problems.list };
   }
-  // Module header: formats 1 to 3 are read beside format 4, every
-  // write's; a document of any other version is judged against format 4's
+  // Module header: formats 1 to 4 are read beside format 5, every
+  // write's; a document of any other version is judged against format 5's
   // shape.
   const version = document["version"];
   const format1 = version === FORMAT_1_VERSION;
   const format2 = version === FORMAT_2_VERSION;
   const format3 = version === FORMAT_3_VERSION;
+  const format4 = version === FORMAT_4_VERSION;
   checkKeys(
     document,
     "the session document",
@@ -2901,11 +3000,18 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     [],
     problems,
   );
-  if (version !== SESSION_VERSION && !format1 && !format2 && !format3) {
+  if (
+    version !== SESSION_VERSION &&
+    !format1 &&
+    !format2 &&
+    !format3 &&
+    !format4
+  ) {
     problems.add(
       `the session document's version must be ${String(SESSION_VERSION)} ` +
-        `(or ${String(FORMAT_3_VERSION)}, ${String(FORMAT_2_VERSION)}, or ` +
-        `${String(FORMAT_1_VERSION)}, the earlier formats), found ` +
+        `(or ${String(FORMAT_4_VERSION)}, ${String(FORMAT_3_VERSION)}, ` +
+        `${String(FORMAT_2_VERSION)}, or ${String(FORMAT_1_VERSION)}, the ` +
+        `earlier formats), found ` +
         (typeof version === "number" ? String(version) : describeType(version)),
     );
   }
@@ -2933,8 +3039,11 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
       ? null
       : parseParameters(strategy, document["creationParameters"], problems);
 
+  // Format 5 opens its decompositions with the fixed head element (module
+  // header, "Stored layout"); formats 1 to 4 store the recorded ones alone.
   const decompositions = parseDecompositions(
     document["decompositions"],
+    !format1 && !format2 && !format3 && !format4,
     problems,
   );
 
@@ -2946,7 +3055,7 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
   );
   // Formats 1 to 3 store the counter their writes took `item-<n>` ids
   // from (module header): checked as those formats were, then unused —
-  // format 4 stores none, every id it adds being derived.
+  // formats 4 and 5 store none, every id they add being derived.
   if (format1 || format2 || format3) {
     requireCount(
       document["nextItemId"],
@@ -2956,7 +3065,7 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     );
   }
 
-  // The items of formats 2 to 4 index the tables, decoded first; with a
+  // The items of formats 2 to 5 index the tables, decoded first; with a
   // malformed table they have nothing to resolve against, and the session
   // is already corrupt.
   const tables = format1
@@ -2968,7 +3077,7 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
       : tables === null
         ? null
         : new TableReader(tables);
-  // Formats 3 and 4: an item's own tables extend the session's for that item
+  // Formats 3 to 5: an item's own tables extend the session's for that item
   // alone (module header); a reference the session's tables hold is never
   // an item's own.
   const sessionReferences =
@@ -3065,8 +3174,8 @@ const TABLE_DOCUMENT_KEYS = [
   "texts",
 ] as const;
 
-/** A format-4 document's members (module header): format 3's but the id
- * counter `nextItemId`, which format 4 stores no longer. */
+/** A format-4 or format-5 document's members (module header): format 3's
+ * but the id counter `nextItemId`, which formats 4 and 5 store no longer. */
 const DOCUMENT_KEYS: readonly string[] = TABLE_DOCUMENT_KEYS.filter(
   (key) => key !== "nextItemId",
 );

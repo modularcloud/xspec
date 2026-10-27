@@ -25,6 +25,17 @@
 // session, an answer that can outgrow both). Frames walk arrays and
 // objects element by element, so a deferred element is produced only once
 // everything before it has been rendered.
+//
+// One layout option serves the stored review session
+// (`CanonicalJsonOptions.lineArrays`; src/core/review.ts, "Stored layout";
+// SPEC 13.4: durable files "are line-oriented or stably keyed so that
+// concurrent additions merge textually"): a named member of the root object
+// holding a non-empty array is laid out one element per line — each element
+// in `compactJson`'s rendering, so no newline falls inside it, the first
+// bare and every later one led by its comma, each followed by an empty line
+// — while everything else keeps the pretty layout. Each frame carries its
+// own layout, so the serializer stays iterative, and without the option
+// every output is byte for byte what it was.
 
 import { compareBytes } from "./bytes.js";
 
@@ -95,15 +106,38 @@ function indentAt(level: number): string {
  */
 const CHUNK_UNITS = 1 << 20;
 
+/** Layout options of `canonicalJson` (module header). */
+export interface CanonicalJsonOptions {
+  /**
+   * Members of the root object whose array values are laid out one element
+   * per line: the opening bracket ends its line; each element stands on a
+   * line of its own at the next indentation level, in `compactJson`'s
+   * rendering, every element after the first led by its comma, and each
+   * followed by an empty line; the closing bracket's line follows the last
+   * element's empty line. An empty array stays `[]`. A named member holding
+   * anything but an array, and every other array, renders as it would
+   * without the option.
+   */
+  readonly lineArrays?: readonly string[];
+}
+
 /**
  * Serializes `value` to canonical JSON text: object keys sorted byte-wise
  * (SPEC 12.0 comparison), array elements in given order, two-space
  * indentation (bounded at MAX_INDENT_LEVELS), and a trailing newline
- * terminating the document. The output is a deterministic function of
- * `value` alone.
+ * terminating the document — with the root object's members that
+ * `options.lineArrays` names laid out one element per line. The output is
+ * a deterministic function of `value` and the options alone.
  */
-export function canonicalJson(value: JsonValue): string {
-  return [...render(value, true, "\n")].join("");
+export function canonicalJson(
+  value: JsonValue,
+  options?: CanonicalJsonOptions,
+): string {
+  const lineArrays =
+    options?.lineArrays === undefined || options.lineArrays.length === 0
+      ? null
+      : new Set(options.lineArrays);
+  return [...render(value, true, "\n", lineArrays)].join("");
 }
 
 /**
@@ -117,7 +151,7 @@ export function canonicalJson(value: JsonValue): string {
 export function canonicalJsonChunks(
   value: JsonStreamValue,
 ): Generator<string, void, undefined> {
-  return render(value, true, "\n");
+  return render(value, true, "\n", null);
 }
 
 /**
@@ -129,7 +163,7 @@ export function canonicalJsonChunks(
  * a single line whatever characters it contains.
  */
 export function compactJson(value: JsonValue): string {
-  return [...render(value, false, "")].join("");
+  return [...render(value, false, "", null)].join("");
 }
 
 /**
@@ -186,14 +220,18 @@ function renderPrimitive(value: JsonStreamValue): string | null {
 
 /**
  * One open container: an array (plain or deferred) or an object with its
- * keys — sorted byte-wise, those holding `undefined` left out — and the
- * index of the next element or member to render.
+ * keys — sorted byte-wise, those holding `undefined` left out — the index
+ * of the next element or member to render, and its layout: pretty or
+ * compact, and for an array whether it takes the one-element-per-line
+ * layout (`CanonicalJsonOptions.lineArrays`), its elements then compact.
  */
 type Frame =
   | {
       readonly kind: "array";
       readonly array: readonly JsonStreamValue[] | JsonDeferredArray;
       readonly level: number;
+      readonly pretty: boolean;
+      readonly lines: boolean;
       next: number;
     }
   | {
@@ -201,23 +239,38 @@ type Frame =
       readonly object: JsonStreamObject;
       readonly keys: readonly string[];
       readonly level: number;
+      readonly pretty: boolean;
       next: number;
     };
+
+/** A value to render next: its level and the layout it renders in
+ * (`Frame`). */
+interface Pending {
+  readonly value: JsonStreamValue;
+  readonly level: number;
+  readonly pretty: boolean;
+  readonly lines: boolean;
+}
+
+/**
+ * What follows each element in the one-element-per-line layout
+ * (`CanonicalJsonOptions.lineArrays`): the end of the element's line and
+ * the empty line after it.
+ */
+const LINE_ELEMENT_END = "\n\n";
 
 function* render(
   root: JsonStreamValue,
   pretty: boolean,
   trailer: string,
+  lineArrays: ReadonlySet<string> | null,
 ): Generator<string, void, undefined> {
   const out: string[] = [];
   let gathered = 0;
   const frames: Frame[] = [];
-  // The value to render next, at its level; null once a container's frame
-  // must be consulted for the next one.
-  let pending: { value: JsonStreamValue; level: number } | null = {
-    value: root,
-    level: 0,
-  };
+  // The value to render next; null once a container's frame must be
+  // consulted for the next one.
+  let pending: Pending | null = { value: root, level: 0, pretty, lines: false };
   for (;;) {
     if (gathered >= CHUNK_UNITS) {
       yield out.join("");
@@ -225,9 +278,9 @@ function* render(
       gathered = 0;
     }
     if (pending !== null) {
-      const { value, level } = pending;
+      const next = pending;
       pending = null;
-      const piece = openValue(value, level, pretty, frames);
+      const piece = openValue(next, frames);
       out.push(piece);
       gathered += piece.length;
       continue;
@@ -241,7 +294,12 @@ function* render(
     if (frame.next >= count) {
       frames.pop();
       const closer = frame.kind === "array" ? "]" : "}";
-      const piece = pretty ? "\n" + indentAt(frame.level) + closer : closer;
+      const piece =
+        frame.kind === "array" && frame.lines
+          ? LINE_ELEMENT_END + indentAt(frame.level) + closer
+          : frame.pretty
+            ? "\n" + indentAt(frame.level) + closer
+            : closer;
       out.push(piece);
       gathered += piece.length;
       continue;
@@ -249,9 +307,8 @@ function* render(
     const index = frame.next;
     frame.next += 1;
     const inner = frame.level + 1;
-    let piece = index > 0 ? (pretty ? ",\n" : ",") : "";
+    let piece: string;
     if (frame.kind === "array") {
-      if (pretty) piece += indentAt(inner);
       const array = frame.array;
       const element =
         array instanceof JsonDeferredArray
@@ -260,13 +317,42 @@ function* render(
       if (element === undefined) {
         throw new TypeError("undefined array element in canonical JSON");
       }
-      pending = { value: element, level: inner };
+      if (frame.lines) {
+        // One element per line, compact: the first bare, every later one
+        // led by its comma after the previous element's line and the empty
+        // line following it.
+        piece =
+          index > 0
+            ? LINE_ELEMENT_END + indentAt(inner) + ","
+            : indentAt(inner);
+        pending = { value: element, level: inner, pretty: false, lines: false };
+      } else {
+        piece = index > 0 ? (frame.pretty ? ",\n" : ",") : "";
+        if (frame.pretty) piece += indentAt(inner);
+        pending = {
+          value: element,
+          level: inner,
+          pretty: frame.pretty,
+          lines: false,
+        };
+      }
     } else {
       const key = frame.keys[index];
-      piece += pretty
+      piece = index > 0 ? (frame.pretty ? ",\n" : ",") : "";
+      piece += frame.pretty
         ? indentAt(inner) + quoteString(key) + ": "
         : quoteString(key) + ":";
-      pending = { value: frame.object[key] as JsonStreamValue, level: inner };
+      pending = {
+        value: frame.object[key] as JsonStreamValue,
+        level: inner,
+        pretty: frame.pretty,
+        // A member of the root object that `lineArrays` names.
+        lines:
+          frame.level === 0 &&
+          frame.pretty &&
+          lineArrays !== null &&
+          lineArrays.has(key),
+      };
     }
     out.push(piece);
     gathered += piece.length;
@@ -278,14 +364,11 @@ function* render(
 /**
  * The opening text of one value: a primitive's whole rendering, an empty
  * container's (`[]`, `{}`), or a non-empty container's opener — its frame
- * then pushed for the elements or members to follow.
+ * then pushed, in the value's layout, for the elements or members to
+ * follow.
  */
-function openValue(
-  value: JsonStreamValue,
-  level: number,
-  pretty: boolean,
-  frames: Frame[],
-): string {
+function openValue(pending: Pending, frames: Frame[]): string {
+  const { value, level, pretty, lines } = pending;
   const primitive = renderPrimitive(value);
   if (primitive !== null) {
     return primitive;
@@ -304,7 +387,14 @@ function openValue(
         }
       }
     }
-    frames.push({ kind: "array", array: composite, level, next: 0 });
+    frames.push({
+      kind: "array",
+      array: composite,
+      level,
+      pretty,
+      lines,
+      next: 0,
+    });
     return pretty ? "[\n" : "[";
   }
   const object: JsonStreamObject = composite;
@@ -317,7 +407,7 @@ function openValue(
   if (keys.length === 0) {
     return "{}";
   }
-  frames.push({ kind: "object", object, keys, level, next: 0 });
+  frames.push({ kind: "object", object, keys, level, pretty, next: 0 });
   return pretty ? "{\n" : "{";
 }
 
