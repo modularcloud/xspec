@@ -35,6 +35,7 @@ import type { CompiledGlob } from "./glob.js";
 import { compileGlob, unboundToCaptures } from "./glob.js";
 import { GRAPH_DATA_AREA } from "./graph-data.js";
 import { identifierSpelling, stringLiteralValue } from "./references.js";
+import { propagateWhileRerunPossible } from "./stack-exhaustion.js";
 
 // ---------------------------------------------------------------------------
 // The validated configuration model
@@ -1530,7 +1531,9 @@ function validateSchema(
  * in the findings' concerned-path member (the caller's label — the anchored
  * spelling of SPEC 14 for the current configuration; never an
  * environment-dependent absolute path, SPEC 12.0). The text is analyzed
- * statically and never executed or imported (IMPLEMENTATION).
+ * statically and never executed or imported (IMPLEMENTATION). A call-stack
+ * overflow is no verdict about it while a rerun on a larger stack is
+ * possible: it propagates there (SPEC 14.14, 14.20; core/stack-exhaustion.ts).
  */
 export function parseConfiguration(
   text: string,
@@ -1563,13 +1566,18 @@ export function parseConfiguration(
     }
     return { ok: true, configuration };
   } catch (error) {
-    // SPEC 14.14: a file whose nesting exceeds what the recursive parser
-    // and this static analysis can process (a call-stack overflow surfaces
-    // as a RangeError) is not analyzable as well-formed declarative
-    // configuration — a configuration error, never a crash: exit codes
-    // partition all outcomes (SPEC 12.0). Anything else is an internal
-    // defect and propagates.
+    // SPEC 14.14, 14.20: the configuration is judged by TypeScript's
+    // grammar, whose derivability is the parser's acceptance — which a
+    // call-stack overflow, in the recursive parser or in this static
+    // analysis, never reports. While the invocation can still run again on
+    // a larger stack, the overflow propagates to that rerun
+    // (core/stack-exhaustion.ts, cli/reruns.ts), so the file is judged
+    // whatever its depth and no answer depends on the stack a run had
+    // (SPEC 12.0). Only the last attempt answers from it: a configuration
+    // error, never a crash — exit codes partition all outcomes (SPEC
+    // 12.0). Anything else is an internal defect and propagates.
     if (!(error instanceof RangeError)) throw error;
+    propagateWhileRerunPossible(error);
     return {
       ok: false,
       findings: [

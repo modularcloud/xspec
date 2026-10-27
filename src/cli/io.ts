@@ -1,10 +1,11 @@
 // CLI I/O surface types.
 //
 // IMPLEMENTATION (Architecture): the CLI entry point is a function
-// `(argv, cwd, stdout, stderr) → exit code`; the bin is a trivial wrapper
-// around it. Handlers receive the streams and working directory through
-// `CommandContext`, never `process` globals, so every invocation path — the
-// executable and any in-process caller — shares one code path.
+// `(argv, cwd, stdout, stderr) → exit code` (cli/reruns.ts); the bin is a
+// trivial wrapper around it. Handlers receive the streams and working
+// directory through `CommandContext`, never `process` globals, so every
+// invocation path — the executable, a rerun on a worker thread's larger
+// stack (cli/reruns.ts), and any in-process caller — shares one code path.
 
 /**
  * Minimal writable surface of `process.stdout`/`process.stderr`. Strings are

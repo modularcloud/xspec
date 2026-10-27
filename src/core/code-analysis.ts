@@ -67,6 +67,7 @@ import {
   stringLiteralValue,
 } from "./references.js";
 import { decodeSourceBytes } from "./source-text.js";
+import { propagateWhileRerunPossible } from "./stack-exhaustion.js";
 import { tsSyntaxFailureOffset } from "./ts-syntax-failure.js";
 import type { PathText } from "./path-text.js";
 import { pathTextKey, renderPathText } from "./path-text.js";
@@ -437,13 +438,19 @@ export function analyzeCodeSource(
     );
     return { kind: "analysis", analysis: analyzer.analyze() };
   } catch (error) {
-    // SPEC 14.20: a file whose nesting exceeds what the recursive parser
-    // and analysis can process (a call-stack overflow surfaces as a
-    // RangeError) is not well-formed TypeScript this product can analyze —
-    // an unparseable source, never a crash (SPEC 12.0: exit codes
-    // partition all outcomes). Anything else is an internal defect and
-    // propagates.
+    // SPEC 14.20: derivability is TypeScript's parser's acceptance, which
+    // a call-stack overflow — in the recursive parser, in TypeScript's
+    // binder (run by `getTypeChecker`; name binding takes no part in the
+    // verdict), or in this analysis's own walks — never reports. While the
+    // invocation can still run again on a larger stack, the overflow
+    // propagates to that rerun (core/stack-exhaustion.ts, cli/reruns.ts),
+    // so a well-formed file is analyzed whatever its depth and no answer
+    // depends on the stack a run had (SPEC 12.0). Only the last attempt, or
+    // one past its first effect, answers from it: the file unparseable,
+    // its contents masked, never a crash (SPEC 12.0: exit codes partition
+    // all outcomes). Anything else is an internal defect and propagates.
     if (!(error instanceof RangeError)) throw error;
+    propagateWhileRerunPossible(error);
     return {
       kind: "unparseable",
       finding: stackOverflowFinding(file, tsx ? "TSX" : "plain TypeScript"),
@@ -460,7 +467,8 @@ export function analyzeCodeSource(
  * byte range of each top-level import declaration, in document order —
  * the `import` keyword through its last token, a statement terminator the
  * grammar reads into it included; null for a text that is not well-formed
- * or that the parser cannot process.
+ * or, in the invocation's last attempt, one whose parse exhausts the call
+ * stack (`topLevelStatementsOf`).
  */
 export function topLevelImportRanges(
   path: string,
@@ -497,7 +505,8 @@ export interface TopLevelStatement {
  * the rewrite removes included), and the end of its directive prologue
  * (ECMAScript's: its leading statements each a string literal alone, such
  * as `"use client"`), 0 where the prologue is empty. Null for a text that
- * is not well-formed (14.20) or that the parser cannot process.
+ * is not well-formed (14.20) or, in the invocation's last attempt, one
+ * whose parse exhausts the call stack (`topLevelStatementsOf`).
  */
 export interface StatementLayout {
   readonly statements: readonly TopLevelStatement[];
@@ -526,7 +535,10 @@ export function topLevelStatementLayout(
  * discovered code source (SPEC 1.6, 14.20: `.tsx` as TSX, any other name
  * as plain TypeScript, well-formed exactly when scanning and parsing
  * report no syntax error) and read its top-level statements; null for a
- * text that is not well-formed or that the parser cannot process.
+ * text that is not well-formed. A call-stack overflow is no verdict
+ * (SPEC 14.20): while a rerun on a larger stack is possible it propagates
+ * there (core/stack-exhaustion.ts), and only the invocation's last attempt,
+ * or one past its first effect, answers null from it.
  */
 function topLevelStatementsOf(
   path: string,
@@ -562,14 +574,22 @@ function topLevelStatementsOf(
         ts.isStringLiteral(statement.expression),
     }));
   } catch (error) {
-    // As in `analyzeCodeSource`: a call-stack overflow is a text the
-    // parser cannot process, never a crash.
+    // As in `analyzeCodeSource`: a call-stack overflow propagates to the
+    // rerun on a larger stack while one is possible; past that, the text
+    // is one the parser cannot process, never a crash.
     if (!(error instanceof RangeError)) throw error;
+    propagateWhileRerunPossible(error);
     return null;
   }
 }
 
-/** The 14.20 finding for a source the parser cannot process (overflow). */
+/**
+ * The 14.20 finding for a source whose analysis exhausted the call stack
+ * in the invocation's last attempt, or in one past its first effect
+ * (`analyzeCodeSource`; core/stack-exhaustion.ts): no other attempt answers
+ * from an overflow, and the last runs on the largest stack the rerun loop
+ * gives (cli/reruns.ts).
+ */
 function stackOverflowFinding(file: PathText, grammar: string): Finding {
   return locatedFinding(
     20,

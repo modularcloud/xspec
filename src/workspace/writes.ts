@@ -78,6 +78,7 @@ import {
   pathTextOf,
   renderPathText,
 } from "../core/path-text.js";
+import { recordEffect } from "../core/stack-exhaustion.js";
 import type { DerivedText } from "../core/text-chunks.js";
 import type { RefusedWrite } from "./environment-refusal.js";
 import {
@@ -577,13 +578,16 @@ async function createParentDirectories(absolute: string): Promise<void> {
  * later write is attempted, and every earlier one stays complete (SPEC
  * 13.5). The occupant classifications around a write are reads, never run
  * through here. Anything else — a defect of the product's own — propagates
- * unchanged.
+ * unchanged. Every mutation is an effect (core/stack-exhaustion.ts): from
+ * the first, the invocation is never rerun on a larger stack, which would
+ * repeat it (SPEC 13.5, 12.0; cli/reruns.ts).
  */
 async function performWrite<T>(
   concerned: string,
   write: RefusedWrite,
   mutation: () => Promise<T>,
 ): Promise<T> {
+  recordEffect();
   try {
     return await mutation();
   } catch (error) {

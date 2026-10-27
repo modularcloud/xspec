@@ -104,6 +104,15 @@
 // terminated abnormally leaves its entry, a leftover the next acquisition
 // removes once its identifier leaves the process list.
 //
+// A rerun (cli/reruns.ts): an attempt that meets a call-stack overflow
+// before its first effect unwinds through release like any other throw,
+// and the invocation runs again on a larger stack, on a worker thread of
+// the same process — whose acquisition adds a new entry under the same
+// process identifier — past a seam that does not engage again (SPEC 13.5:
+// the invocation creates its hold file once). Acquisition and release are
+// no effect that ends a run's eligibility for that rerun
+// (core/stack-exhaustion.ts): release undoes what acquisition made.
+//
 // Every diagnostic is static (SPEC 12.0): never an entry's name, a process
 // identifier, or an absolute path — coordination state outside 12.0's
 // determinism (13.4).
@@ -116,6 +125,10 @@ import * as path from "node:path";
 import * as process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
 import { GRAPH_DATA_AREA, LOCK_PATH } from "../core/graph-data.js";
+import {
+  holdSeamEngaged,
+  recordHoldSeamEngaged,
+} from "../core/stack-exhaustion.js";
 import type {
   AcquisitionRead,
   AcquisitionWrite,
@@ -665,9 +678,11 @@ export type ExclusiveRunResult<T> =
  * Run a mutating command's operation under workspace exclusivity (SPEC
  * 13.5): acquire it in the workspace's lock directory — the busy refusal of
  * 14.26, or acquisition's read or write failure (14.25, 14.24), thrown
- * there — then, when `--test-hold` was given, create the hold file and
- * proceed only once it has been deleted, then run `body`; release follows
- * on every normal end, a throw from acquisition or `body` included. A
+ * there — then, when `--test-hold` was given and no earlier attempt of the
+ * invocation created the hold file (core/stack-exhaustion.ts), create it
+ * and proceed only once it has been deleted, then run `body`; release
+ * follows on every normal end, a throw from acquisition or `body`
+ * included — a call-stack overflow propagating to a rerun among them. A
  * failure to create the hold file returns the code-less usage error with
  * nothing modified. The hold file itself is never deleted here: its
  * deletion is the external release signal.
@@ -685,9 +700,16 @@ export async function withMutationExclusivity<T>(
   };
   try {
     await acquireExclusivity(paths, held);
-    if (hold !== undefined) {
+    // SPEC 13.5: an invocation engages the seam once. A rerun on a larger
+    // stack (cli/reruns.ts, core/stack-exhaustion.ts) — this attempt's
+    // release having followed its call-stack overflow — acquires afresh and
+    // proceeds without creating the hold file again: the seam changes no
+    // other behavior, so with it as without it the invocation gives the
+    // answer stack enough gives (SPEC 14.20, 12.0).
+    if (hold !== undefined && !holdSeamEngaged()) {
       const created = await createTestHoldFile(hold.absolutePath, hold.given);
       if (!created.ok) return created;
+      recordHoldSeamEngaged();
       await awaitTestHoldRelease(created.path);
     }
     return { ok: true, value: await body() };

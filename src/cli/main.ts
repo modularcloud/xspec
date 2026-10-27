@@ -1,11 +1,15 @@
-// The CLI entry point and command dispatch.
+// One attempt of the CLI entry point, and command dispatch.
 //
 // IMPLEMENTATION (Architecture): the entry point is a function
-// `(argv, cwd, stdout, stderr) → exit code`; the bin (`bin.ts`) is a trivial
-// wrapper around it. SPEC 12.0: exit codes partition all outcomes — 0
-// success, 1 findings, 2 usage and configuration errors; reports are
-// standard-output content, usage and configuration error messages and all
-// other diagnostic text standard-error content.
+// `(argv, cwd, stdout, stderr) → exit code`, and the bin (`bin.ts`) is a
+// trivial wrapper around it. `main` has that signature and is one attempt
+// of it: the entry (cli/reruns.ts `runInvocation`) runs it on the calling
+// thread and, should it exhaust the call stack before its first effect,
+// again from the start on a worker thread with a larger stack (SPEC 14.20,
+// 12.0; core/stack-exhaustion.ts). SPEC 12.0: exit codes partition all
+// outcomes — 0 success, 1 findings, 2 usage and configuration errors;
+// reports are standard-output content, usage and configuration error
+// messages and all other diagnostic text standard-error content.
 //
 // Command modules load on demand (dynamic import per dispatch), and the
 // configuration parser (workspace/config.ts, on the TypeScript compiler)
@@ -202,14 +206,15 @@ const HANDLERS: ReadonlyMap<string, () => Promise<CommandHandler>> = new Map(
 );
 
 /**
- * The CLI entry: parse per SPEC 12.0, dispatch per SPEC 12.5, return the
- * exit code. All output goes through the given writers; the working
- * directory arrives as data — the entry reads no `process` globals. `cwd`
- * is `null` for a working directory with no path, one removed before the
- * process started (cli/bin.ts): the syntax class and `version` never
- * consult it (SPEC 12.0, 12.6), and workspace location reads it as a
- * directory holding nothing, from which no relative path leads (SPEC 7, 14,
- * 14.25, 11.6; workspace/locate.ts).
+ * One attempt of the CLI entry (cli/reruns.ts): parse per SPEC 12.0,
+ * dispatch per SPEC 12.5, return the exit code. All output goes through
+ * the given writers; the working directory arrives as data — the entry
+ * reads no `process` globals, so an attempt on a worker thread answers as
+ * one on the main thread does. `cwd` is `null` for a working directory
+ * with no path, one removed before the process started (cli/bin.ts): the
+ * syntax class and `version` never consult it (SPEC 12.0, 12.6), and
+ * workspace location reads it as a directory holding nothing, from which
+ * no relative path leads (SPEC 7, 14, 14.25, 11.6; workspace/locate.ts).
  */
 export async function main(
   argv: readonly string[],
