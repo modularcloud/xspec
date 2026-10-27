@@ -40,10 +40,11 @@
 // the analysis pipeline (./pipeline.ts), the store load and the one write
 // (./graph-data.ts) — and takes the refresh content and the staleness
 // predicate from the pure core (core/graph-data.ts over core/build.ts:
-// "what `xspec build` would write" is `computeBuildOutputs`' graph data,
-// so refresh and build agree by construction, byte for byte — SPEC 12.0).
+// "what `xspec build` would write" is `computeGraphData`, the derivation
+// behind `computeBuildOutputs`' graph data, so refresh and build agree by
+// construction, byte for byte — SPEC 12.0).
 
-import { computeBuildOutputs, discoveredSourcePaths } from "../core/build.js";
+import { computeGraphData } from "../core/build.js";
 import type { SourceClassification } from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
@@ -165,21 +166,20 @@ export async function assessWorkspaceRead(
   }
 
   // What `xspec build` would write for the current sources and
-  // configuration (SPEC 13.3): the same pure derivation `build` runs
-  // (SPEC 12.1), so the refreshed bytes match a real build's byte for byte
-  // (SPEC 12.0 determinism). Its graph data is independent of the stored
-  // record (the record feeds orphan removal alone, which no refresh
-  // performs), so the record is never consulted. The refresh generates and
-  // removes no TypeScript or Markdown — only the snapshot file is ever
-  // written.
-  const build = computeBuildOutputs(
-    workspace.configuration,
-    analysis.specs,
+  // configuration (SPEC 13.3): the graph data of the same pure derivation
+  // `build` runs (SPEC 12.1; core/build.ts `computeGraphData`, behind
+  // `computeBuildOutputs`' graph data), so the refreshed bytes match a real
+  // build's byte for byte (SPEC 12.0 determinism). It is independent of
+  // the stored record (the record feeds orphan removal alone, which no
+  // refresh performs), so the record is never consulted. The refresh
+  // generates and removes no TypeScript or Markdown — only the snapshot
+  // file is ever written — so none is rendered either: a generated module
+  // spells every node's subtree text, quadratic in a long embedding
+  // chain's length (SPEC 3, 5.3 bound no chain), which no read needs.
+  const graphData = computeGraphData(
     analysis.graph,
     analysis.textModel,
     analysis.hashes,
-    [],
-    discoveredSourcePaths(analysis.classification),
     workspaceInputsOf(workspace, analysis),
   );
 
@@ -196,7 +196,6 @@ export async function assessWorkspaceRead(
   // (SPEC 14.10) until a successful `build` or a finishing `rename`/`move`
   // regeneration replaces it.
   const stored = await loadGraphData(workspace.root);
-  const graphData = build.graphData;
   if (graphDataMatchesCurrent(stored.bytes, graphData)) {
     return { kind: "ready", graphData, commit: async () => {} };
   }

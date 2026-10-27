@@ -19,6 +19,7 @@ import {
 import type { ByteRange } from "../../core/bytes.js";
 import type { CompiledGlob } from "../../core/glob.js";
 import { compileGlob } from "../../core/glob.js";
+import { gatherChunks } from "../../core/text-chunks.js";
 import type { BaselineFailure } from "../../workspace/baseline.js";
 import type { TestHoldSpec } from "../../workspace/lock.js";
 import type { Invocation } from "../args.js";
@@ -104,46 +105,19 @@ export async function emitDocumentStreamed(
 /**
  * SPEC 12.0: emit a human report given as consecutive pieces — the entire
  * standard output, byte for byte the pieces' concatenation — gathered into
- * chunks of bounded size (`TEXT_CHUNK_UNITS`), each written once the stream
- * has taken the one before, so a report whose pieces are produced as it is
- * written never exists whole as one string, whose length V8 caps near 2^29
- * (SPEC 8.2: a coverage report holds one covering path per covered node,
- * quadratic in a long dependency chain's length). A chunk the stream fails
- * to take ends the emission there, as for `emitDocumentStreamed`.
+ * chunks of bounded size (core/text-chunks.ts `gatherChunks`), each
+ * written once the stream has taken the one before, so a report whose
+ * pieces are produced as it is written never exists whole as one string,
+ * whose length V8 caps near 2^29 (SPEC 8.2: a coverage report holds one
+ * covering path per covered node, quadratic in a long dependency chain's
+ * length). A chunk the stream fails to take ends the emission there, as
+ * for `emitDocumentStreamed`.
  */
 export async function emitTextStreamed(
   stdout: CliWriter,
   pieces: Iterable<string>,
 ): Promise<void> {
   await writeChunks(stdout, gatherChunks(pieces));
-}
-
-/**
- * The text size, in UTF-16 code units, at which `emitTextStreamed` hands
- * the pieces gathered so far to the stream: a chunk exceeds it by less
- * than one piece — the bound `canonicalJsonChunks` keeps for JSON text.
- */
-const TEXT_CHUNK_UNITS = 1 << 20;
-
-/** `pieces` concatenated into consecutive chunks of about
- * `TEXT_CHUNK_UNITS` code units, each produced only when asked for. */
-function* gatherChunks(
-  pieces: Iterable<string>,
-): Generator<string, void, undefined> {
-  const out: string[] = [];
-  let gathered = 0;
-  for (const piece of pieces) {
-    out.push(piece);
-    gathered += piece.length;
-    if (gathered >= TEXT_CHUNK_UNITS) {
-      yield out.join("");
-      out.length = 0;
-      gathered = 0;
-    }
-  }
-  if (gathered > 0) {
-    yield out.join("");
-  }
 }
 
 /**

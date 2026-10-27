@@ -132,6 +132,8 @@
 
 import { canonicalJson } from "./canonical-json.js";
 import type { SpecDocument, SpecSection } from "./mdx.js";
+import type { ChunkedText, DerivedText } from "./text-chunks.js";
+import { gatherChunks } from "./text-chunks.js";
 import type { WorkspaceTextModel } from "./text-model.js";
 
 // ---------------------------------------------------------------------------
@@ -142,8 +144,12 @@ import type { WorkspaceTextModel } from "./text-model.js";
 export interface GeneratedFile {
   /** Workspace-relative `/`-separated path (SPEC 1.5). */
   readonly path: string;
-  /** The file's exact text (UTF-8 once written, SPEC 12.0). */
-  readonly content: string;
+  /**
+   * The file's exact text (UTF-8 once written, SPEC 12.0) — for a
+   * generated module in consecutive chunks (`renderModule`), never spelled
+   * as one string.
+   */
+  readonly content: DerivedText;
 }
 
 /** The generated-file paths of one spec source (SPEC 13.1). */
@@ -589,7 +595,8 @@ function extensionlessSpecifier(path: string, extension: string): string {
  * library: no `@types/node` (`exports`, `require`, `process`), types
  * reached by type-level syntax alone (`isolatedModules`,
  * `verbatimModuleSyntax`), and every export annotated
- * (`isolatedDeclarations`).
+ * (`isolatedDeclarations`). Its text comes in consecutive chunks
+ * (core/text-chunks.ts), each rendered only as it is written or compared.
  */
 function renderModule(
   document: SpecDocument,
@@ -597,7 +604,7 @@ function renderModule(
   paths: SpecModulePaths,
   brand: string,
   root: EmitNode,
-): string {
+): ChunkedText {
   const specPath = document.path;
   const rootType = nodeTypeName(brand, root.index);
   const typesSpecifier = extensionlessSpecifier(
@@ -657,18 +664,9 @@ function renderModule(
     );
     return `xspecNode(${children}, ${subtreeText})`;
   };
-  const emitDescendants = (node: EmitNode): void => {
-    for (const child of node.children) {
-      emitDescendants(child);
-      lines.push(
-        `// ${stringLiteral(child.identity)}`,
-        docComment(child.ownText),
-        `const n${String(child.index)} = ${nodeValue(child)};`,
-      );
-    }
-  };
-  emitDescendants(root);
-  lines.push(
+  // The root's lines and the module's close, rendered once every other
+  // node's lines are.
+  const closingLines = (): readonly string[] => [
     `// ${stringLiteral(root.identity)}: the root node (SPEC 1.2).`,
     docComment(root.ownText),
     `export const root: ${rootType} = ${nodeValue(root)} as ${rootType};`,
@@ -707,8 +705,42 @@ function renderModule(
     `  );`,
     `}`,
     ``,
-  );
-  return lines.join("\n");
+  ];
+  // The module's text as consecutive pieces — the lines above, every other
+  // node's, and the closing ones, joined by LF — gathered into chunks
+  // (core/text-chunks.ts), so the module is never spelled as one string:
+  // it holds every node's subtree text, quadratic in a long embedding
+  // chain's length (SPEC 3, 5.3 bound no chain).
+  function* pieces(): Generator<string, void, undefined> {
+    yield lines.join("\n");
+    // Every node but the root, children first — each after its own
+    // descendants, so every literal references already-built nodes — the
+    // post-order walked on an explicit stack, so no nesting depth can
+    // exhaust the call stack.
+    const stack: { readonly node: EmitNode; next: number }[] = [
+      { node: root, next: 0 },
+    ];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      if (frame.next < frame.node.children.length) {
+        const child = frame.node.children[frame.next];
+        frame.next += 1;
+        stack.push({ node: child, next: 0 });
+        continue;
+      }
+      stack.pop();
+      const node = frame.node;
+      if (node !== root) {
+        yield `\n// ${stringLiteral(node.identity)}`;
+        yield `\n${docComment(node.ownText)}`;
+        yield `\nconst n${String(node.index)} = ${nodeValue(node)};`;
+      }
+    }
+    for (const line of closingLines()) {
+      yield `\n${line}`;
+    }
+  }
+  return { chunks: () => gatherChunks(pieces()) };
 }
 
 /** The rendered type companion and its declaration map (SPEC 4.1, 4.2). */

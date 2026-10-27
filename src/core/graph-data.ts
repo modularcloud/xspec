@@ -14,17 +14,24 @@
 //   recorded derived-file paths;
 // - `buildGraphSnapshot` — the pure derivation of the snapshot from the
 //   graph and its computed hashes (./hashes.ts);
-// - `serializeGraphData`/`parseGraphData` and
+// - `graphDataText` and
 //   `serializeDerivedFileRecord`/`parseDerivedFileRecord` — the byte
 //   encodings of the two parts through the one canonical serializer
 //   (./canonical-json.ts; IMPLEMENTATION: stored JSON goes through one
 //   canonical serializer — sorted keys, stable ordering, trailing newline),
 //   byte-deterministic for a given workspace (SPEC 12.0: no wall-clock
 //   values, no randomness, no absolute paths — every stored path is
-//   workspace-relative, SPEC 1.5);
+//   workspace-relative, SPEC 1.5). The snapshot's text is produced in
+//   consecutive chunks, never spelled as one string: it holds every node's
+//   own and subtree text, which a long embedding chain (SPEC 2.3, 3, 5.3 —
+//   no length bound) makes quadratic in the chain's length, past V8's cap
+//   on a string's length (2^29 − 24 code units) near 13,000 links of a
+//   one-file chain;
 // - the compare-with-current predicate `graphDataMatchesCurrent` — shared
 //   by refresh-on-read (SPEC 13.3) and `check`'s staleness finding
-//   (SPEC 14.10), so both judge the store by one rule.
+//   (SPEC 14.10), so both judge the store by one rule: the stored bytes
+//   against the current snapshot's chunks, the stored bytes never decoded
+//   or parsed.
 //
 // The two parts age differently (SPEC 13.3), so each has its own file in
 // the graph-data area (the layout is the product's own, deliberately
@@ -53,22 +60,22 @@
 // The content is otherwise opaque (SPEC 13.3): its observable contract is
 // its location under `.xspec/`, its classification as a derived file
 // (SPEC 13.4), and the refresh, failure, and staleness behaviors — the
-// concrete JSON shape here is an implementation choice, versioned so a
-// future shape change reads as "does not match" rather than misparsing.
+// concrete JSON shape here is an implementation choice, versioned. No read
+// answers from the stored snapshot — every read answers from the current
+// analysis, the stored bytes judged by comparison alone — so nothing parses
+// it: any other content, a former version's included, simply does not
+// match.
 
 import type { ByteRange } from "./bytes.js";
 import { compareBytes } from "./bytes.js";
 import type { JsonValue } from "./canonical-json.js";
-import { canonicalJson } from "./canonical-json.js";
+import { canonicalJson, canonicalJsonChunks } from "./canonical-json.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
-import type {
-  DependencyEdgeKind,
-  GraphEdge,
-  GraphEdgeKind,
-  WorkspaceGraph,
-} from "./graph.js";
+import type { DependencyEdgeKind, GraphEdge, WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
+import type { ChunkedText } from "./text-chunks.js";
+import { textMatchesBytes } from "./text-chunks.js";
 import type { WorkspaceTextModel } from "./text-model.js";
 
 /**
@@ -139,10 +146,10 @@ export function unreadableRecordFinding(): Finding {
 }
 
 /**
- * The stored graph-data format version: a parsed file of any other version
- * is malformed (parse yields null) — graph data that does not match the
- * current sources and configuration: the refreshing reads rewrite it,
- * `check` reports it as staleness, and a `build` (or finishing
+ * The stored graph-data format version, part of the stored text: a file of
+ * any other version differs in its bytes, so it is graph data that does
+ * not match the current sources and configuration — the refreshing reads
+ * rewrite it, `check` reports it as staleness, and a `build` (or finishing
  * regeneration) replaces it (SPEC 13.3, 14.10). Version 3 added the
  * reference occurrences (SPEC 5.7, 13.3); version 4 added the
  * code-location source ranges (SPEC 1.7); version 5 moved the recorded
@@ -294,9 +301,10 @@ export interface GraphData {
  * Derive the storable snapshot from the assembled graph and its computed
  * hashes (SPEC 13.3): every requirement node with its source range,
  * coverage attribute, tags, four hashes, and fully expanded own and
- * subtree text (SPEC 1.6 — recorded so the store answers the node report
- * of SPEC 11/12.4 without re-deriving); every code location; every edge;
- * every reference occurrence (SPEC 5.7).
+ * subtree text (SPEC 1.6 — like the rest, judged by the byte comparison
+ * alone, no read answering from the store; quadratic in a long embedding
+ * chain's length, hence the chunked text, `graphDataText`); every code
+ * location; every edge; every reference occurrence (SPEC 5.7).
  * Deterministic: everything is emitted in the graph's own fixed order
  * (SPEC 12.0). `hashes` must be the computation over this same graph
  * (./hashes.ts covers every requirement node), `textModel` the model over
@@ -374,47 +382,47 @@ export function buildGraphSnapshot(
  * `check`, which never refreshes, reports the graph data mismatched
  * exactly when this is false and the record is readable or absent
  * (SPEC 14.10: an unreadable record reports under its own unit form
- * alone) — the same rule for both.
+ * alone) — the same rule for both. The comparison runs chunk by chunk
+ * (`graphDataText`), each chunk's UTF-8 bytes against the stored bytes
+ * at its offset, and stops at the first difference: the current graph
+ * data is never spelled, nor encoded, as a whole.
  */
 export function graphDataMatchesCurrent(
   storedBytes: Uint8Array | null,
   build: GraphData,
 ): boolean {
-  if (storedBytes === null) {
-    return false;
-  }
-  return bytesEqual(storedBytes, utf8Encoder.encode(serializeGraphData(build)));
+  return (
+    storedBytes !== null && textMatchesBytes(graphDataText(build), storedBytes)
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Serialization (the canonical byte encoding)
 // ---------------------------------------------------------------------------
 
-const utf8Encoder = new TextEncoder();
-
-/** Exact byte equality of two byte sequences (SPEC 12.0 comparisons). */
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  for (let index = 0; index < a.length; index += 1) {
-    if (a[index] !== b[index]) {
-      return false;
-    }
-  }
-  return true;
+/**
+ * Graph data's stored text, in consecutive chunks (core/text-chunks.ts):
+ * the canonical serializer over the versioned shape (IMPLEMENTATION: one
+ * canonical serializer — sorted keys, stable ordering, trailing newline)
+ * through `canonicalJsonChunks`, whose chunks concatenate to exactly
+ * `canonicalJson`'s text for the same value — so the bytes are those one
+ * whole string would encode — while no string ever holds the whole: the
+ * snapshot carries every node's own and subtree text, quadratic in a long
+ * embedding chain's length (SPEC 3, 5.3 bound no chain), past V8's cap on
+ * a string's length. Each chunk ends between two JSON tokens, never inside
+ * a string's spelling, so no chunk splits a surrogate pair and each
+ * encodes to UTF-8 on its own. Byte-deterministic for a given workspace
+ * (SPEC 13.3, 12.0): the snapshot enters in the graph's fixed order. The
+ * recorded derived-file paths are no part of it (they are stored apart,
+ * `serializeDerivedFileRecord`).
+ */
+export function graphDataText(data: GraphData): ChunkedText {
+  return { chunks: () => canonicalJsonChunks(graphDataJson(data)) };
 }
 
-/**
- * Serialize graph data to its stored text: the canonical serializer over
- * the versioned shape (IMPLEMENTATION: one canonical serializer — sorted
- * keys, stable ordering, trailing newline). Byte-deterministic for a given
- * workspace (SPEC 13.3, 12.0): the snapshot enters in the graph's fixed
- * order. The recorded derived-file paths are no part of it (they are
- * stored apart, `serializeDerivedFileRecord`).
- */
-export function serializeGraphData(data: GraphData): string {
-  const value: JsonValue = {
+/** Graph data's stored shape, the value `graphDataText` spells. */
+function graphDataJson(data: GraphData): JsonValue {
+  return {
     version: GRAPH_DATA_VERSION,
     inputs: {
       configHash: data.inputs.configHash,
@@ -449,7 +457,6 @@ export function serializeGraphData(data: GraphData): string {
       target: occurrence.target,
     })),
   };
-  return canonicalJson(value);
 }
 
 function requirementToJson(node: StoredRequirementNode): JsonValue {
@@ -474,57 +481,9 @@ function requirementToJson(node: StoredRequirementNode): JsonValue {
 }
 
 // ---------------------------------------------------------------------------
-// Parsing (structural validation; anything else is malformed)
+// The derived-file record: its encoding and its parse (structural
+// validation; anything else is malformed)
 // ---------------------------------------------------------------------------
-
-/** SPEC 5.2: the four edge kinds, for runtime validation. */
-const EDGE_KINDS: ReadonlySet<string> = new Set([
-  "contains",
-  "depends",
-  "embeds",
-  "references",
-]);
-
-/**
- * Parse stored graph-data text. Returns null — malformed — for anything
- * that is not the versioned shape `serializeGraphData` writes: not JSON,
- * a different version, or structurally invalid fields. Malformed graph
- * data is graph data that does not match the current sources and
- * configuration (SPEC 13.3): the refreshing reads rewrite it, `check`
- * reports it as staleness (SPEC 14.10) — under the unreadable-record unit
- * form alone where the record cannot be read either — and a successful
- * `build` or finishing regeneration replaces it. The record it sits beside
- * is judged on its own (`parseDerivedFileRecord`).
- */
-export function parseGraphData(text: string): GraphData | null {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  if (!isRecord(raw) || raw["version"] !== GRAPH_DATA_VERSION) {
-    return null;
-  }
-  const inputs = parseInputs(raw["inputs"]);
-  const requirements = parseArray(raw["requirements"], parseRequirement);
-  const codeLocations = parseArray(raw["codeLocations"], parseCodeLocation);
-  const edges = parseArray(raw["edges"], parseEdge);
-  const occurrences = parseArray(raw["occurrences"], parseOccurrence);
-  if (
-    inputs === null ||
-    requirements === null ||
-    codeLocations === null ||
-    edges === null ||
-    occurrences === null
-  ) {
-    return null;
-  }
-  return {
-    snapshot: { requirements, codeLocations, edges, occurrences },
-    inputs,
-  };
-}
 
 /**
  * Serialize the recorded derived-file paths (SPEC 13.3, 13.4) — the paths
@@ -567,51 +526,8 @@ export function parseDerivedFileRecord(text: string): readonly string[] | null {
   return parseStringArray(raw["derivedFiles"]);
 }
 
-function parseSourceInput(value: unknown): StoredSourceInput | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const path = value["path"];
-  const hash = value["hash"];
-  if (typeof path !== "string" || typeof hash !== "string") {
-    return null;
-  }
-  return { path, hash };
-}
-
-function parseInputs(value: unknown): StoredInputs | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const configHash = value["configHash"];
-  const journalHash = value["journalHash"];
-  const sources = parseArray(value["sources"], parseSourceInput);
-  if (
-    typeof configHash !== "string" ||
-    (journalHash !== null && typeof journalHash !== "string") ||
-    sources === null ||
-    !("config" in value)
-  ) {
-    return null;
-  }
-  // The recorded parse (`config`) is never read back (core/config-data.ts);
-  // here it must only be JSON data, which a parsed JSON document's field
-  // always is.
-  return {
-    configHash,
-    config: value["config"] as JsonValue,
-    journalHash,
-    sources,
-  };
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/** A non-negative safe integer (SPEC 1.7 byte offsets). */
-function isOffset(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
 function parseArray<T>(
@@ -634,143 +550,4 @@ function parseArray<T>(
 
 function parseStringArray(value: unknown): string[] | null {
   return parseArray(value, (item) => (typeof item === "string" ? item : null));
-}
-
-function parseRange(value: unknown): ByteRange | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const start = value["start"];
-  const end = value["end"];
-  if (!isOffset(start) || !isOffset(end) || end < start) {
-    return null;
-  }
-  return { start, end };
-}
-
-function parseHashes(value: unknown): NodeHashes | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const ownHash = value["ownHash"];
-  const subtreeHash = value["subtreeHash"];
-  const effectiveHash = value["effectiveHash"];
-  const metadataHash = value["metadataHash"];
-  if (
-    typeof ownHash !== "string" ||
-    typeof subtreeHash !== "string" ||
-    typeof effectiveHash !== "string" ||
-    typeof metadataHash !== "string"
-  ) {
-    return null;
-  }
-  return { ownHash, subtreeHash, effectiveHash, metadataHash };
-}
-
-function parseRequirement(value: unknown): StoredRequirementNode | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const identity = value["identity"];
-  const path = value["path"];
-  const id = value["id"];
-  const coverage = value["coverage"];
-  if (typeof identity !== "string" || typeof path !== "string") {
-    return null;
-  }
-  if (id !== null && typeof id !== "string") {
-    return null;
-  }
-  if (coverage !== "required" && coverage !== "none" && coverage !== null) {
-    return null;
-  }
-  const range = parseRange(value["range"]);
-  const tags = parseStringArray(value["tags"]);
-  const hashes = parseHashes(value["hashes"]);
-  const ownText = value["ownText"];
-  const subtreeText = value["subtreeText"];
-  if (
-    range === null ||
-    tags === null ||
-    hashes === null ||
-    typeof ownText !== "string" ||
-    typeof subtreeText !== "string"
-  ) {
-    return null;
-  }
-  return {
-    identity,
-    path,
-    id,
-    range,
-    coverage,
-    tags,
-    hashes,
-    ownText,
-    subtreeText,
-  };
-}
-
-function parseCodeLocation(value: unknown): StoredCodeLocation | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const identity = value["identity"];
-  const path = value["path"];
-  const range = parseRange(value["range"]);
-  if (
-    typeof identity !== "string" ||
-    typeof path !== "string" ||
-    range === null
-  ) {
-    return null;
-  }
-  return { identity, path, range };
-}
-
-function parseEdge(value: unknown): GraphEdge | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const kind = value["kind"];
-  const source = value["source"];
-  const target = value["target"];
-  if (
-    typeof kind !== "string" ||
-    !EDGE_KINDS.has(kind) ||
-    typeof source !== "string" ||
-    typeof target !== "string"
-  ) {
-    return null;
-  }
-  return { kind: kind as GraphEdgeKind, source, target };
-}
-
-/** SPEC 5.7: the dependency edge kinds occurrences record. */
-const OCCURRENCE_KINDS: ReadonlySet<string> = new Set([
-  "depends",
-  "embeds",
-  "references",
-]);
-
-function parseOccurrence(value: unknown): StoredOccurrence | null {
-  if (!isRecord(value)) {
-    return null;
-  }
-  const file = value["file"];
-  const kind = value["kind"];
-  const source = value["source"];
-  const target = value["target"];
-  const range = parseRange(value["range"]);
-  if (
-    typeof file !== "string" ||
-    typeof kind !== "string" ||
-    !OCCURRENCE_KINDS.has(kind) ||
-    (source !== null && typeof source !== "string") ||
-    typeof target !== "string" ||
-    range === null
-  ) {
-    return null;
-  }
-  return { file, range, kind: kind as DependencyEdgeKind, source, target };
 }

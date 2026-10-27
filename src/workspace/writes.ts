@@ -78,6 +78,7 @@ import {
   pathTextOf,
   renderPathText,
 } from "../core/path-text.js";
+import type { DerivedText } from "../core/text-chunks.js";
 import type { RefusedWrite } from "./environment-refusal.js";
 import {
   isFilesystemFailure,
@@ -152,7 +153,7 @@ export async function probeOccupant(
  * "refused" where the environment refuses the kind read. SPEC 14.25: a
  * refused read of the area's own occupant is the state of condition 23,
  * never the read failure of condition 25 — no record can be read under it
- * (14.23; `readStoredFile`, graph-data.ts), and, as below an area path
+ * (14.23; `readStoredBytes`, graph-data.ts), and, as below an area path
  * holding no directory, nothing below it is read (13.4): the journal is
  * empty and unoccupied to the inventory, the session directory holds no
  * sessions (`readableDirectory`; SPEC 11.6: "a refused read of the area's
@@ -615,9 +616,40 @@ function contentBytes(content: Uint8Array | string): Uint8Array {
 }
 
 /**
+ * A write's content: its bytes, its text (UTF-8 once written, SPEC 12.0),
+ * or its text in consecutive chunks (core/text-chunks.ts `ChunkedText`),
+ * written chunk by chunk so a text too long to spell as one string — graph
+ * data, a generated module, quadratic in a long embedding chain's length —
+ * never exists whole.
+ */
+export type WriteContent = Uint8Array | DerivedText;
+
+/**
+ * What a write hands the filesystem: the content's bytes, or a chunked
+ * text's bytes chunk by chunk, each encoded only once the chunk before it
+ * is written — the file's bytes either way the content's UTF-8 encoding
+ * (SPEC 12.0).
+ */
+function writtenData(content: WriteContent): Uint8Array | Iterable<Uint8Array> {
+  if (typeof content === "string" || content instanceof Uint8Array) {
+    return contentBytes(content);
+  }
+  return encodedChunks(content.chunks());
+}
+
+function* encodedChunks(
+  chunks: Iterable<string>,
+): Generator<Uint8Array, void, undefined> {
+  for (const chunk of chunks) {
+    yield Buffer.from(chunk, "utf8");
+  }
+}
+
+/**
  * Atomically replace whatever occupies `absolute` with a plain file holding
- * `content`: the complete bytes land in a temp file beside the target, then
- * one rename replaces the occupant (SPEC 13.5). A symbolic-link occupant is
+ * `content`: the complete bytes land in a temp file beside the target — a
+ * chunked text's chunk by chunk (`ChunkedText`) — then one rename replaces
+ * the occupant (SPEC 13.5). A symbolic-link occupant is
  * replaced as itself — rename never follows the destination — and nothing
  * is ever written through it (SPEC 13.4). A directory occupant, which
  * rename cannot replace, is removed and the rename retried: derived-file
@@ -629,11 +661,11 @@ function contentBytes(content: Uint8Array | string): Uint8Array {
  */
 async function replaceWithFile(
   absolute: string,
-  content: Uint8Array | string,
+  content: WriteContent,
 ): Promise<void> {
   const temporary = temporaryPathBeside(absolute);
   try {
-    await fsp.writeFile(temporary, contentBytes(content));
+    await fsp.writeFile(temporary, writtenData(content));
     await renameOnto(temporary, absolute);
   } catch (error) {
     // Never leave the temp behind; where even its removal is refused, the
@@ -675,7 +707,7 @@ async function renameOnto(temporary: string, absolute: string): Promise<void> {
 export async function writeDerivedFile(
   root: string,
   rel: string,
-  content: Uint8Array | string,
+  content: WriteContent,
   area?: string,
 ): Promise<void> {
   await assertUnobstructedParent(root, rel);

@@ -41,7 +41,6 @@ import {
   selectOccurrences,
   TextAvailability,
 } from "../../core/availability.js";
-import { canonicalJson } from "../../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../../core/canonical-json.js";
 import type { ExitCode } from "../../core/findings.js";
 import { orderFindings } from "../../core/findings.js";
@@ -65,7 +64,12 @@ import {
   occurrenceRecordJson,
   unavailableJson,
 } from "../report.js";
-import { compileFileFlag, rangeJson, usageError } from "./common.js";
+import {
+  compileFileFlag,
+  emitDocumentStreamed,
+  rangeJson,
+  usageError,
+} from "./common.js";
 
 /** One requested file's parsed analysis and its path validity (SPEC 14.19). */
 interface RequestedSpec {
@@ -224,7 +228,11 @@ export async function viewCommand(
     findings: findings.map(findingToJson),
     views,
   };
-  context.stdout.write(canonicalJson(document));
+  // SPEC 12.0: the one JSON document, streamed in bounded chunks — with
+  // `--text` it spells every node's own and subtree text, quadratic in a
+  // long embedding chain's length (SPEC 3, 5.3 bound no chain), past V8's
+  // cap on a string's length beyond about 13,000 links of a one-file chain.
+  await emitDocumentStreamed(context.stdout, document);
   // SPEC 11.2: any finding or explicitly-unavailable datum → exit 1 with
   // the full document emitted; complete and finding-free → exit 0.
   return availabilityExit(findings, renderer.carriesUnavailable);

@@ -131,18 +131,31 @@ export function computeBuildOutputs(
 
   return {
     files,
-    graphData: {
-      snapshot: buildGraphSnapshot(graph, hashes, textModel),
-      // SPEC 13.3: the recorded derivation inputs certify the snapshot for
-      // byte-identical current inputs (core/graph-data.ts).
-      inputs,
-    },
+    graphData: computeGraphData(graph, textModel, hashes, inputs),
     // SPEC 13.3: the paths of the derived files most recently generated —
     // updated only by generation.
     record: [...generated].sort(compareBytes),
     orphans,
     writePaths: [...files.map((file) => file.path), ...GRAPH_DATA_OWN_PATHS],
   };
+}
+
+/**
+ * SPEC 13.3: the graph data `xspec build` writes — the current snapshot
+ * with its derivation inputs (`inputs`, recorded beside it, core/
+ * graph-data.ts) — and so exactly what a refresh writes: the one
+ * derivation behind `computeBuildOutputs`' graph data and the refreshing
+ * reads' (workspace/refresh.ts), which generate no TypeScript or Markdown
+ * and so render none, so the two agree by construction, byte for byte
+ * (SPEC 12.0). `hashes` must be the SPEC 5.5 computation over `graph`.
+ */
+export function computeGraphData(
+  graph: WorkspaceGraph,
+  textModel: WorkspaceTextModel,
+  hashes: ReadonlyMap<string, NodeHashes>,
+  inputs: StoredInputs,
+): GraphData {
+  return { snapshot: buildGraphSnapshot(graph, hashes, textModel), inputs };
 }
 
 /**

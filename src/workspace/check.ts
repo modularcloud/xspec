@@ -32,6 +32,7 @@ import {
   graphDataMatchesCurrent,
 } from "../core/graph-data.js";
 import { renderPathText } from "../core/path-text.js";
+import { textMatchesBytes } from "../core/text-chunks.js";
 import { isFilesystemFailure } from "./environment-refusal.js";
 import type { DerivedFileRecord, LoadedGraphData } from "./graph-data.js";
 import type { PathOccupant } from "./writes.js";
@@ -42,20 +43,9 @@ import {
   readsReach,
 } from "./writes.js";
 
-const utf8Encoder = new TextEncoder();
-
 /** The absolute filesystem path of a workspace-relative `/`-path. */
 function absoluteOf(root: string, rel: string): string {
   return path.join(root, ...rel.split("/"));
-}
-
-/** Exact byte equality (SPEC 12.0: comparisons are byte-wise). */
-function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false;
-  for (let index = 0; index < a.length; index += 1) {
-    if (a[index] !== b[index]) return false;
-  }
-  return true;
 }
 
 /**
@@ -234,7 +224,9 @@ export async function mismatchStalenessFindings(
       );
       continue;
     }
-    if (!bytesEqual(bytes, utf8Encoder.encode(file.content))) {
+    // SPEC 12.0: byte-wise — a generated module's chunks one by one
+    // (core/text-chunks.ts), never spelled or encoded as a whole.
+    if (!textMatchesBytes(file.content, bytes)) {
       findings.push(staleFinding(file.path, "does not match"));
     }
   }
