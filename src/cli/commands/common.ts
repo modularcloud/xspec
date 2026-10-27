@@ -89,14 +89,75 @@ export function emitDocument(stdout: CliWriter, document: JsonValue): 0 {
  * before, so a document whose deferred arrays are produced as it renders
  * (`JsonDeferredArray`) never exists whole, in memory or as one string
  * (SPEC 10.7: `review export` presents every item of a session, an answer
- * that can outgrow both). A chunk the stream fails to take ends the
+ * that can outgrow both; SPEC 8.2: a coverage report holds one covering
+ * path per covered node). A chunk the stream fails to take ends the
  * emission there, the failure left to the stream's own error report.
  */
 export async function emitDocumentStreamed(
   stdout: CliWriter,
   document: JsonStreamValue,
 ): Promise<0> {
-  for (const chunk of canonicalJsonChunks(document)) {
+  await writeChunks(stdout, canonicalJsonChunks(document));
+  return 0;
+}
+
+/**
+ * SPEC 12.0: emit a human report given as consecutive pieces — the entire
+ * standard output, byte for byte the pieces' concatenation — gathered into
+ * chunks of bounded size (`TEXT_CHUNK_UNITS`), each written once the stream
+ * has taken the one before, so a report whose pieces are produced as it is
+ * written never exists whole as one string, whose length V8 caps near 2^29
+ * (SPEC 8.2: a coverage report holds one covering path per covered node,
+ * quadratic in a long dependency chain's length). A chunk the stream fails
+ * to take ends the emission there, as for `emitDocumentStreamed`.
+ */
+export async function emitTextStreamed(
+  stdout: CliWriter,
+  pieces: Iterable<string>,
+): Promise<void> {
+  await writeChunks(stdout, gatherChunks(pieces));
+}
+
+/**
+ * The text size, in UTF-16 code units, at which `emitTextStreamed` hands
+ * the pieces gathered so far to the stream: a chunk exceeds it by less
+ * than one piece — the bound `canonicalJsonChunks` keeps for JSON text.
+ */
+const TEXT_CHUNK_UNITS = 1 << 20;
+
+/** `pieces` concatenated into consecutive chunks of about
+ * `TEXT_CHUNK_UNITS` code units, each produced only when asked for. */
+function* gatherChunks(
+  pieces: Iterable<string>,
+): Generator<string, void, undefined> {
+  const out: string[] = [];
+  let gathered = 0;
+  for (const piece of pieces) {
+    out.push(piece);
+    gathered += piece.length;
+    if (gathered >= TEXT_CHUNK_UNITS) {
+      yield out.join("");
+      out.length = 0;
+      gathered = 0;
+    }
+  }
+  if (gathered > 0) {
+    yield out.join("");
+  }
+}
+
+/**
+ * Write `chunks` in order, each once the stream has taken the one before
+ * (`CliWriter`'s callback): the backpressure under which a streamed answer
+ * builds no chunk ahead of the stream. A chunk the stream fails to take
+ * ends the writing there, the failure left to the stream's own error
+ * report.
+ */
+async function writeChunks(
+  stdout: CliWriter,
+  chunks: Iterable<string>,
+): Promise<void> {
+  for (const chunk of chunks) {
     const failed = await new Promise<boolean>((resolve) => {
       stdout.write(chunk, (error) => {
         resolve(error !== undefined && error !== null);
@@ -104,7 +165,6 @@ export async function emitDocumentStreamed(
     });
     if (failed) break;
   }
-  return 0;
 }
 
 /**

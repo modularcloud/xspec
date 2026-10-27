@@ -15,8 +15,20 @@
 // node is uncovered — a findings outcome (SPEC 12.0) whose report is still
 // the standard-output content; the information never changes with the flag.
 // `--json` emits the same information as the single JSON document.
+//
+// Both output forms are streamed (SPEC 8.2, 12.0): the report holds one
+// covering path per covered node, so a long dependency chain's report is
+// quadratic in the chain's length — hundreds of megabytes at a few thousand
+// links, past V8's cap on one string's length (2^29 − 24 code units) soon
+// after. The JSON document renders in bounded chunks, each covered row
+// built only as the serializer reaches it (`emitDocumentStreamed`,
+// `JsonDeferredArray`), and the human report is written row by row
+// (`emitTextStreamed`); either way the bytes are exactly the whole
+// document's or report's, and peak memory follows the coverage result,
+// never its rendering.
 
-import type { JsonObject } from "../../core/canonical-json.js";
+import type { JsonStreamObject } from "../../core/canonical-json.js";
+import { JsonDeferredArray } from "../../core/canonical-json.js";
 import type { CoverageProfile } from "../../core/config.js";
 import type { ProfileCoverage } from "../../core/coverage.js";
 import { evaluateCoverageProfile } from "../../core/coverage.js";
@@ -25,27 +37,36 @@ import type { Invocation } from "../args.js";
 import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { analyzeGraphForRead, finishGraphForRead } from "../prepare.js";
-import { emitDocument, usageError } from "./common.js";
+import {
+  emitDocumentStreamed,
+  emitTextStreamed,
+  usageError,
+} from "./common.js";
 
-/** One profile's report as JSON data (SPEC 8.2: the same information). */
-function profileJson(result: ProfileCoverage): JsonObject {
+/**
+ * One profile's report as JSON data (SPEC 8.2: the same information), its
+ * covered rows — each with its covering path — produced one at a time as
+ * the emission reaches them (module header).
+ */
+function profileJson(result: ProfileCoverage): JsonStreamObject {
+  const covered = result.covered;
   return {
     name: result.name,
     // SPEC 8.2: counts of required, covered, uncovered, and ignored nodes.
     counts: {
       required: result.requiredCount,
-      covered: result.covered.length,
+      covered: covered.length,
       uncovered: result.uncovered.length,
       ignored: result.ignored.length,
     },
-    covered: result.covered.map((row) => ({
-      identity: row.identity,
-      path: [...row.path],
-    })),
-    uncovered: [...result.uncovered],
+    covered: new JsonDeferredArray(covered.length, (index) => {
+      const row = covered[index];
+      return { identity: row.identity, path: row.path };
+    }),
+    uncovered: result.uncovered,
     ignored: result.ignored.map((row) => ({
       identity: row.identity,
-      reasons: [...row.reasons],
+      reasons: row.reasons,
     })),
   };
 }
@@ -55,31 +76,31 @@ function profileJson(result: ProfileCoverage): JsonObject {
  * per profile the counts, every covered node with its covering path, every
  * uncovered identity, and every ignored identity with its reasons in the
  * fixed order. Byte-deterministic: graph content and static text only.
+ * Produced piece by piece — a profile's heading lines, then one piece per
+ * node row — for the streamed emission (module header).
  */
-function renderCoverageHuman(results: readonly ProfileCoverage[]): string {
-  let out = "";
+function* coverageHumanPieces(
+  results: readonly ProfileCoverage[],
+): Generator<string, void, undefined> {
   for (const result of results) {
-    out += `profile ${result.name}\n`;
-    out +=
+    yield `profile ${result.name}\n` +
       `  required: ${String(result.requiredCount)}, ` +
       `covered: ${String(result.covered.length)}, ` +
       `uncovered: ${String(result.uncovered.length)}, ` +
-      `ignored: ${String(result.ignored.length)}\n`;
-    out += `  covered:\n`;
+      `ignored: ${String(result.ignored.length)}\n` +
+      `  covered:\n`;
     for (const row of result.covered) {
-      out += `    ${row.identity}\n`;
-      out += `      path: ${row.path.join(" -> ")}\n`;
+      yield `    ${row.identity}\n      path: ${row.path.join(" -> ")}\n`;
     }
-    out += `  uncovered:\n`;
+    yield `  uncovered:\n`;
     for (const identity of result.uncovered) {
-      out += `    ${identity}\n`;
+      yield `    ${identity}\n`;
     }
-    out += `  ignored:\n`;
+    yield `  ignored:\n`;
     for (const row of result.ignored) {
-      out += `    ${row.identity}: ${row.reasons.join("; ")}\n`;
+      yield `    ${row.identity}: ${row.reasons.join("; ")}\n`;
     }
   }
-  return out;
 }
 
 /** The `coverage` command handler (SPEC 8.2). */
@@ -136,9 +157,9 @@ export async function coverageCommand(
   );
 
   if (invocation.json) {
-    emitDocument(stdout, { profiles: results.map(profileJson) });
+    await emitDocumentStreamed(stdout, { profiles: results.map(profileJson) });
   } else {
-    stdout.write(renderCoverageHuman(results));
+    await emitTextStreamed(stdout, coverageHumanPieces(results));
   }
 
   // SPEC 8.2: with `--check`, exit 1 if any required node is uncovered —
