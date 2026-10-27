@@ -63,30 +63,12 @@ Each task's Status cell is filled by its landing's follow-up commit. No test is 
 |---|---|---|---|
 | 154 | B1 | Discovery lists the workspace root only when some configured glob can match a path below it outside `.xspec/` | landed at `02dec03`, CI run 1729 green |
 | 155 | B3 | Text expansion on an explicit work stack, and any further recursion long chains meet made iterative: long embedding chains answer | landed at `1b05db2`, CI run 1731 green |
-| 156 | B3 (note) | `coverage` streams its report, in both output forms | pending |
+| 156 | B3 (note) | `coverage` streams its report, in both output forms | landed at `cac524d`, CI run 1733 green |
 | 157 | B2 | Item ids derived from kind and scope node, `nextItemId` dropped (session format 4): concurrent additions take distinct keys | pending |
 | 158 | B2 | One line per item and decomposition, comma-led, each followed by an empty line (format 5): a keep-both merge holds both sides' additions | pending |
 | 160 | Task 154's spawn | Discovery examines an entry's kind only where SPEC 7 does: never for an entry no glob matches and the walk would not list were it a directory | pending |
 | 161 | Task 155's spawn | Graph data, `view --json`, and any one-string output these chains drive past V8's string limit, spelled in chunks: long embedding chains build and answer | pending |
 | 159 | — | Confirm the full suite and CI green, record the state, delete this file | pending |
-
-## Task 156 — Coverage reports stream: a report past V8's string limit is emitted whole, in both output forms (SPEC 8.2, 12.0; B3's note)
-
-**Requirement.**
-- SPEC 8.2: the report includes, per profile, the counts, "the identity of every covered, uncovered, and ignored node; and for each covered node one shortest covering path"; "JSON output MUST be available and MUST contain the same information".
-- SPEC 12.0: with `--json` the single JSON document is the entire standard output; `coverage` without `--check` exits 0 (with `--check`, 1 exactly when a required node is uncovered); an internal error (exit 70) is no defined outcome.
-
-**Observed** (B's note under G3, at `abb7839`; B's `dchainN.mjs`). Configuration `{ specs: { main: ["specs/**/*.mdx"] }, code: { app: ["src/**/*.ts"] }, coverage: [ { name: "t", target: "main", boundary: "app", mode: "transitive" } ] }`; `specs/A.mdx` holding N sections, section i `<S id="s<i>" d={"s<i+1>"}>` LF `S<i>.` LF `</S>` LF (the last without `d`); `src/x.ts` holding `import A from "../specs/A.xspec"` LF `export function f() { A.s0 }` LF; `build` first. At N = 6000, `coverage --json` exits 70 with `RangeError: Invalid string length` in `canonicalJson`: the document — one path per covered node, so O(N²) — is about 540 MB, past V8's string limit (`require("node:buffer").constants.MAX_STRING_LENGTH`, 2^29 − 24 code units in this Node 22). At N = 4096 its ~268 MB are emitted. `coverageCommand` (`src/cli/commands/coverage.ts`) spells the JSON document as one string through `emitDocument` (`src/cli/commands/common.ts`), and `renderCoverageHuman` builds the whole human report as one string, which passes the limit too at about N = 7200 (its rows `      path: <identity> -> <identity> …`).
-
-**Change.**
-- As `review export` does since Task 150 (`emitDocumentStreamed` in `src/cli/commands/common.ts`, `JsonDeferredArray` in `src/core/canonical-json.ts`): emit `coverage --json` in chunks, each profile's `covered` rows (paths included) produced as the serializer reaches them, the bytes exactly what `emitDocument` gives wherever that fits; write the human report profile by profile and row by row, awaiting the stream as `emitDocumentStreamed` does, its bytes unchanged. Keep peak memory proportional to the coverage result, not to its rendering. Exit codes are unchanged.
-- `AGENTS.md`: the bullet beginning "Hand-probing long chains" (create it if Task 155 has not).
-
-**Verification.**
-1. B's staging at N = 4096: the standard output of `coverage --json` and of `coverage`, each streamed into a byte count and a sha256 (the recipe in the bullet beginning "Hand-probing review-session scale"), equals that of a build of `abb7839` (B's private build, or one built in a fresh clone).
-2. At N = 6000 and 8000 (where the human report passes the limit as well): `coverage --json`, `coverage`, `coverage t --json`, and `coverage --check --json` each exit 0 (every required node is covered); each output's head and tail have the form the N = 4096 output predicts, and the JSON holds as many `"identity"` members as covered and ignored nodes together (count them while streaming). Record sizes, times, and peak RSS.
-3. Any other answer these stagings drive past the string limit — check `query reachable --from src/x.ts#f --to specs/A.mdx#s<N-1> --json`, and `impact --base HEAD --json` after a git baseline commit and an edit of `s<N-1>`'s text — is a new task (160 on) unless this change fixes it.
-4. Regressions: `section-8`, `section-7.4-7.5`, `section-2.5-2.6`, `section-12.0-i`, `section-12.0-ii`, `section-12.0-iii`, `section-12.3-12.5`, `section-12.7`, `section-15`, and `section-16-p13`.
 
 ## Task 157 — Review item ids derived from what is added, never from a counter: concurrent additions take distinct keys (SPEC 13.4, 10.1, 10.2, 10.5, 10.7, 14.21; B2)
 
