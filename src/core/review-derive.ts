@@ -82,6 +82,7 @@ import type { Journal } from "./journal.js";
 import { canonicalAt, encodeCanonicalIdentity } from "./journal.js";
 import type {
   ItemKind,
+  RecordedDecomposition,
   RecordedHashName,
   RecordedNodeState,
   RecordedState,
@@ -93,7 +94,7 @@ import type {
   TextKind,
 } from "./review.js";
 import {
-  allocateItemId,
+  ItemIdAllocator,
   contextTextKind,
   kindScopesCodeLocation,
   scopeTextKind,
@@ -1413,8 +1414,13 @@ export interface DeriveSessionItemsArgs {
    * (src/core/review.ts identity policy); empty at `create`.
    */
   readonly existing: readonly ReviewItem[];
-  /** The session's item-id counter (src/core/review.ts). */
-  readonly nextItemId: number;
+  /**
+   * The session's recorded decompositions (SPEC 10.7) — empty at
+   * `create` — whose kinds and scope nodes keep their ids retired: a new
+   * item's derived id never equals one of them (`ItemIdAllocator`,
+   * src/core/review.ts "Item ids").
+   */
+  readonly decompositions: readonly RecordedDecomposition[];
   /** The expanded canonical-space generation (`canonicalizeGeneration` →
    * `expandDecompositions`) — one item per kind and scope node. */
   readonly generated: readonly GeneratedItem[];
@@ -1424,10 +1430,9 @@ export interface DeriveSessionItemsArgs {
   readonly baseline?: BaselineDerivationSide;
 }
 
-/** The merge result: the session's new item list and id counter. */
+/** The merge result: the session's new item list. */
 export interface DerivedSessionItems {
   readonly items: readonly ReviewItem[];
-  readonly nextItemId: number;
 }
 
 /**
@@ -1450,7 +1455,8 @@ export interface DerivedSessionItems {
  *   (SPEC 10.2), `current` computed against the current graph, the
  *   generated context its recorded context set, `baseline` against the
  *   recorded-baseline side (or the current graph when none, SPEC 10.2) —
- *   and fresh ids in generation order (ids are never reused, SPEC 10.7);
+ *   and ids derived from their kinds and scope nodes, in generation order
+ *   (src/core/review.ts "Item ids": unique, never reused, SPEC 10.2, 10.7);
  * - `blockedBy` is recomputed for every generated item from its blocker
  *   references (decomposed references were already replaced by
  *   `expandDecompositions`), matched and new items alike (SPEC 10.5,
@@ -1474,21 +1480,22 @@ export function deriveSessionItems(
     existingByKey.set(kindScopeKey(item.kind, item.scope), item);
   }
 
-  // First pass: fix ids — matched items keep theirs, new items allocate in
-  // generation order (SPEC 10.5: new items take their place with fresh
-  // ids; SPEC 10.7: an id is never reused).
-  let nextItemId = args.nextItemId;
+  // First pass: fix ids — matched items keep theirs (SPEC 10.5), new items
+  // take ids derived from their kinds and scope nodes, in generation order
+  // (src/core/review.ts "Item ids": unique within the session, SPEC 10.2;
+  // never a removed original's, 10.7; alike on every branch adding the
+  // item, 13.4).
+  const ids = new ItemIdAllocator(existing, args.decompositions);
   const idByKey = new Map<string, string>();
   for (const item of generated) {
     const key = kindScopeKey(item.kind, item.scope.identity);
     const existingItem = existingByKey.get(key);
-    if (existingItem !== undefined) {
-      idByKey.set(key, existingItem.id);
-    } else {
-      const allocation = allocateItemId(nextItemId);
-      nextItemId = allocation.nextItemId;
-      idByKey.set(key, allocation.id);
-    }
+    idByKey.set(
+      key,
+      existingItem !== undefined
+        ? existingItem.id
+        : ids.allocate(item.kind, item.scope.identity),
+    );
   }
 
   const resolveRefs = (item: GeneratedItem): readonly string[] => {
@@ -1555,7 +1562,7 @@ export function deriveSessionItems(
     const merged = mergedByKey.get(key);
     if (merged !== undefined) items.push(merged);
   }
-  return { items, nextItemId };
+  return { items };
 }
 
 /** The inputs of `rederiveSession`. */
@@ -1587,8 +1594,9 @@ export interface RederiveSessionArgs {
  * (`deriveSessionItems`): matched items keep their `id`, status, note, and
  * recorded state and take the generated scope, context, origin, reason, and
  * `blockedBy`; items that no longer generate remain, keeping their
- * `blockedBy`; new items enter `unresolved` with current state and fresh
- * ids. The re-derivation every `split` ends with (SPEC 10.7: the
+ * `blockedBy`; new items enter `unresolved` with current state and ids
+ * derived from their kinds and scope nodes. The re-derivation every `split`
+ * ends with (SPEC 10.7: the
  * decomposition, once recorded, "governs re-derivation (10.5), with which
  * `split` ends, so blocking is recomputed against the current graph"),
  * replaying the decompositions `session` records — the new one included.
@@ -1602,12 +1610,12 @@ export function rederiveSession(args: RederiveSessionArgs): ReviewSession {
   );
   const derived = deriveSessionItems({
     existing: session.items,
-    nextItemId: session.nextItemId,
+    decompositions: session.decompositions,
     generated: expanded,
     current,
     baseline,
   });
-  return { ...session, nextItemId: derived.nextItemId, items: derived.items };
+  return { ...session, items: derived.items };
 }
 
 // ---------------------------------------------------------------------------
@@ -1683,8 +1691,9 @@ export type SplitDecompositionResult =
  * `unresolved` with current state and the decomposition's `blockedBy`
  * alone, never the original's; every item outside the decomposition that
  * was blocked by the original becomes blocked by all items of the
- * decomposition; the original is removed and its id never reused (the id
- * counter only advances); the decomposition is recorded durably and
+ * decomposition; the original is removed and its id never reused (its kind
+ * and scope node, recorded as decomposed, stay retired from id derivation,
+ * src/core/review.ts "Item ids"); the decomposition is recorded durably and
  * governs re-derivation (SPEC 10.5, 10.7) — with which `split` ends
  * (`rederiveSession` over `generated`, the decomposition just recorded
  * among those it replays), so every generated or decomposition-produced
@@ -1754,25 +1763,30 @@ export function splitItemDecomposition(
 
   // SPEC 10.7: an item of the decomposition whose kind and scope node
   // already exist in the session is not created — the existing item takes
-  // its place. New items allocate fresh ids in expansion order; the
-  // removed original's id is never reused (the counter only advances).
+  // its place. New items take ids derived from their kinds and scope nodes,
+  // in expansion order (src/core/review.ts "Item ids"), never the removed
+  // original's: its id is taken while it is derived from here, and its
+  // kind and scope node, recorded as decomposed, stay retired afterwards.
   const existingByKey = new Map<string, ReviewItem>();
   for (const item of session.items) {
     if (item.id === original.id) continue;
     existingByKey.set(kindScopeKey(item.kind, item.scope), item);
   }
-  let nextItemId = session.nextItemId;
+  const decompositions: readonly RecordedDecomposition[] = [
+    ...session.decompositions,
+    { kind: "subtree-coherence", scope: original.scope },
+  ];
+  const ids = new ItemIdAllocator(session.items, decompositions);
   const idByKey = new Map<string, string>();
   for (const generated of expansion) {
     const key = kindScopeKey(generated.kind, generated.scope.identity);
     const existing = existingByKey.get(key);
-    if (existing !== undefined) {
-      idByKey.set(key, existing.id);
-    } else {
-      const allocation = allocateItemId(nextItemId);
-      nextItemId = allocation.nextItemId;
-      idByKey.set(key, allocation.id);
-    }
+    idByKey.set(
+      key,
+      existing !== undefined
+        ? existing.id
+        : ids.allocate(generated.kind, generated.scope.identity),
+    );
   }
 
   // A blocker reference resolves against the decomposition's items and the
@@ -1868,15 +1882,7 @@ export function splitItemDecomposition(
   // (10.1). Every decomposition item is in the session the re-derivation
   // merges into, so each keeps its id — matched where generated again,
   // remaining as it stands where not (10.5).
-  const decomposed: ReviewSession = {
-    ...session,
-    decompositions: [
-      ...session.decompositions,
-      { kind: "subtree-coherence", scope: original.scope },
-    ],
-    nextItemId,
-    items,
-  };
+  const decomposed: ReviewSession = { ...session, decompositions, items };
   return {
     ok: true,
     session: rederiveSession({
@@ -1996,14 +2002,13 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
   // (10.5), so the resolved item is among the derived items.
   const derived = deriveSessionItems({
     existing: withStatus,
-    nextItemId: session.nextItemId,
+    decompositions: session.decompositions,
     generated: expanded,
     current,
     baseline,
   });
   return {
     ...session,
-    nextItemId: derived.nextItemId,
     items: derived.items.map((item) =>
       item.id === itemId ? assignAndRecord(item) : item,
     ),

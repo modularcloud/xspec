@@ -327,7 +327,8 @@ async function runCreate(
 
   // Derive the session's items with the creation-time generator run
   // (SPEC 10.5–10.7; `create` merges into an empty session, so every
-  // generated item enters with current state and a fresh id).
+  // generated item enters with current state and an id derived from its
+  // kind and scope node — core/review.ts "Item ids").
   const generation = runSessionGenerators(parameters, analysis, baseline);
   const expanded = expandDecompositions(
     generation.items,
@@ -336,7 +337,7 @@ async function runCreate(
   );
   const derived = deriveSessionItems({
     existing: [],
-    nextItemId: 1,
+    decompositions: [],
     generated: expanded,
     current: {
       graph: analysis.graph,
@@ -354,7 +355,6 @@ async function runCreate(
     // policy): record the journal's entry count as the write-moment bound
     // every stored canonical position stays within.
     journalLength: analysis.journal.journal.entries.length,
-    nextItemId: derived.nextItemId,
     items: derived.items,
   };
 

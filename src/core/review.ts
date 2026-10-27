@@ -18,12 +18,11 @@
 //     "decompositions": [{"kind": "subtree-coherence", "scope": <ref>}, …],
 //     "items": [<item>, …],
 //     "journalLength": <n>,
-//     "nextItemId": <n>,
 //     "references": [<ref>, …],
 //     "states": [<node state>, …],
 //     "strategy": "path-blocks" | "audit" | "coverage",
 //     "texts": [<text>, …],
-//     "version": 3
+//     "version": 4
 //   }
 //
 // where every node reference <ref> is a canonical identity key (identity
@@ -65,17 +64,42 @@
 // unchanged bytes: a `no-change` or `skipped` resolve rewrites the
 // resolved item's entry alone (with `journalLength`, when the journal
 // grew), an `updated` resolve's re-derivation and a `split` the entries of
-// the items they add or reassign (with `nextItemId`, and for a `split`
-// `decompositions`). Writes changing different items — resolutions on
-// different branches, each recording new node states and texts after
-// source edits — therefore change disjoint item entries and merge
-// textually. An item changed on both sides conflicts inside its own entry
-// alone: either side's entry, taken whole, reads back that side's
-// resolution, and both sides' entries kept side by side read as corrupt
-// (duplicate `id`, SPEC 10.1), never as a silently different resolution.
-// The cost, accepted: a value that many items record anew after creation
-// (a node's state after an edit, recorded by each item resolved over it)
-// is stored once per recording item rather than once per session.
+// the items they add or reassign (with, for a `split`, `decompositions`).
+// Writes changing different items — resolutions on different branches,
+// each recording new node states and texts after source edits — therefore
+// change disjoint item entries and merge textually. An item changed on
+// both sides conflicts inside its own entry alone: either side's entry,
+// taken whole, reads back that side's resolution, and both sides' entries
+// kept side by side read as corrupt (duplicate `id`, SPEC 10.1), never as
+// a silently different resolution. The cost, accepted: a value that many
+// items record anew after creation (a node's state after an edit, recorded
+// by each item resolved over it) is stored once per recording item rather
+// than once per session.
+//
+// Item ids (SPEC 10.2: unique within the session, never containing
+// U+FFFD; 10.7: a `split` original's id is never reused; 13.4: concurrent
+// additions merge textually): every item a write adds — at `create`, by a
+// re-derivation (10.5), or by a `split` (10.7) — takes an id derived from
+// what is added, never from a counter both branches of a history advance
+// alike: `r` and the first 16 lowercase hex digits of the SHA-256 of the
+// item's kind and its scope node's stored canonical reference, under the
+// injective framing of src/core/hash.ts (`ItemIdAllocator`). The at-most-one
+// invariant makes that pair unique within a session (10.1), a decomposed
+// pair never enters it again (10.5, 10.7), and a canonical reference never
+// changes as the journal grows (identity policy below) — so a derived id is
+// unique, never reused, and the same on every branch that adds the same
+// item, while two branches adding different items assign different keys,
+// whose entries a keep-both resolution holds side by side as a valid
+// session. Should a derived id already name another item of the session,
+// or equal one a recorded decomposition's kind and scope node derive (the
+// removed original's, which stays retired), it extends deterministically
+// by further digest digits. The session stores no id counter, so an
+// addition rewrites no member beyond the item entries it adds or
+// reassigns (and, as every write may, `journalLength`; a `split`,
+// `decompositions`). Stored ids are opaque — nothing checks an id against
+// its derivation: formats 1–3 hold their counter's `item-<n>` ids, which
+// every later write keeps, and the leading `r`, outside the hex digits,
+// keeps every derived id distinct from those and from every hash value.
 //
 // Each item carries exactly the fields of SPEC 10.2 — `id`, `kind`,
 // `scope` (stored as its root, `scope`, and the scope nodes beneath the
@@ -106,10 +130,14 @@
 // format-1 file's sorted keys gave them, which human renderings follow.
 //
 // Earlier formats are still read (`validateSessionDocument`), so sessions
-// written before format 3 stay valid; every write stores format 3. Format
-// 2 — the same document at `version` 2, with no item tables of its own,
+// written before format 4 stay valid; every write stores format 4. Format
+// 3 — the same document at `version` 3 with one member more,
+// `nextItemId`, the counter its writes took `item-<n>` ids from — is read
+// with that member checked as before and then unused: its items keep their
+// ids, and every item added later takes a derived one (above). Format 2 —
+// format 3's document at `version` 2, with no item tables of its own,
 // whose writes extended the tables — is read with its tables as stored,
-// which every later write keeps, fixed from then on. Format 1 — the same
+// which every later write keeps, fixed from then on. Format 1 — format 2's
 // document without the tables, every reference spelled out and
 // `baseline`/`current` and the text tables keyed by reference — is read
 // with the tables its items would have had at creation, built by the
@@ -120,7 +148,7 @@
 // Identity policy: every stored node reference — an item's `scope` and
 // `scopeDescendants` entries, its `recordedContext`, `context`, and
 // `origin` entries, the nodes of `baseline`/`current` and
-// of `baselineTexts`/`derivedTexts` (each, in formats 2 and 3, the
+// of `baselineTexts`/`derivedTexts` (each, in formats 2 to 4, the
 // reference its index names), and each recorded decomposition's
 // `scope` — is a canonical identity (SPEC 5.4) in the injective key
 // encoding of src/core/journal.ts (`<position>:<identity>`,
@@ -163,6 +191,7 @@ import { DEPENDENCY_EDGE_KINDS, dependencyKindSet } from "./config.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import { compileGlob } from "./glob.js";
+import { hashComponents } from "./hash.js";
 
 /** SPEC 10.1: the reviews directory under the workspace root. */
 export const REVIEWS_DIRECTORY = ".xspec/reviews";
@@ -374,7 +403,12 @@ export type RecordedTextTable = Readonly<Record<string, RecordedTexts>>;
 
 /** One review item (SPEC 10.2). */
 export interface ReviewItem {
-  /** Unique within the session; never reused after removal (SPEC 10.7). */
+  /**
+   * Unique within the session (SPEC 10.2); never reused after removal
+   * (10.7). Derived from the item's kind and scope node when the item
+   * enters the session (`ItemIdAllocator`, module header "Item ids"), and
+   * opaque once stored.
+   */
   readonly id: string;
   /** Assigned by the strategy (SPEC 10.2). */
   readonly kind: ItemKind;
@@ -573,11 +607,6 @@ export interface ReviewSession {
    * entry count on every write.
    */
   readonly journalLength: number;
-  /**
-   * The next item id's ordinal — ids are `item-<n>`, allocated in creation
-   * order and never reused after removal (SPEC 10.7).
-   */
-  readonly nextItemId: number;
   /** In insertion order; presentation order is derived at read (10.5–10.7). */
   readonly items: readonly ReviewItem[];
   /**
@@ -613,12 +642,90 @@ export function sessionStrategy(session: ReviewSession): ReviewStrategy {
   return session.parameters.strategy;
 }
 
-/** Allocate the next item id (`item-<n>`), returning it with the bumped counter. */
-export function allocateItemId(nextItemId: number): {
-  readonly id: string;
-  readonly nextItemId: number;
-} {
-  return { id: `item-${String(nextItemId)}`, nextItemId: nextItemId + 1 };
+// ---------------------------------------------------------------------------
+// Item ids (module header, "Item ids"; SPEC 10.2, 10.7, 13.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * The lead of every derived item id: one ASCII letter outside the hex
+ * digits, so no derived id equals a format-1–3 `item-<n>` id or occurs
+ * inside a hex hash value.
+ */
+const ITEM_ID_LEAD = "r";
+
+/** The digest digits a derived item id takes first: 64 bits. */
+const ITEM_ID_DIGITS = 16;
+
+/**
+ * The digest an item id derives from: the SHA-256, hex-encoded, of the
+ * item's kind and its scope node's stored canonical reference under
+ * injective framing (`hashComponents`; IMPLEMENTATION "Hashing") — a
+ * function of what is added alone (module header, "Item ids").
+ */
+function itemIdDigest(kind: ItemKind, scope: string): string {
+  return hashComponents([kind, scope]);
+}
+
+/**
+ * The ids of the items one write adds (module header, "Item ids"; SPEC
+ * 10.2, 10.5, 10.7, 13.4): an item's id is `r` and the first 16 hex digits
+ * of its kind and scope node's digest (`itemIdDigest`), extended digit by
+ * digit while that id names an item of the session, one this allocator
+ * gave earlier, or one a recorded decomposition's kind and scope node
+ * derive at the same length — so the removed original of a `split` keeps
+ * its id retired, whatever length it took (SPEC 10.7: never reused). Past
+ * the whole digest (every digit shared), a numeric suffix keeps the id
+ * unique. Deterministic: a function of the session's item ids, its
+ * recorded decompositions, and the order of the requests.
+ */
+export class ItemIdAllocator {
+  private readonly taken: Set<string>;
+  /** The recorded decompositions' digests (their kinds and scope nodes). */
+  private readonly retired: readonly string[];
+  /** Their first `ITEM_ID_DIGITS` digits, for the common first check. */
+  private readonly retiredHeads: ReadonlySet<string>;
+
+  constructor(
+    items: readonly { readonly id: string }[],
+    decompositions: readonly RecordedDecomposition[],
+  ) {
+    this.taken = new Set(items.map((item) => item.id));
+    this.retired = decompositions.map((decomposition) =>
+      itemIdDigest(decomposition.kind, decomposition.scope),
+    );
+    this.retiredHeads = new Set(
+      this.retired.map((digest) => digest.slice(0, ITEM_ID_DIGITS)),
+    );
+  }
+
+  /** The id of a new item of `kind` over the scope node `scope` (its stored
+   * canonical reference), recorded as taken. */
+  allocate(kind: ItemKind, scope: string): string {
+    const digest = itemIdDigest(kind, scope);
+    for (let digits = ITEM_ID_DIGITS; digits <= digest.length; digits += 1) {
+      const head = digest.slice(0, digits);
+      const id = ITEM_ID_LEAD + head;
+      if (!this.taken.has(id) && !this.isRetired(head)) {
+        this.taken.add(id);
+        return id;
+      }
+    }
+    for (let suffix = 2; ; suffix += 1) {
+      const id = `${ITEM_ID_LEAD}${digest}-${String(suffix)}`;
+      if (!this.taken.has(id)) {
+        this.taken.add(id);
+        return id;
+      }
+    }
+  }
+
+  /** Whether a recorded decomposition's digest begins with `head`. */
+  private isRetired(head: string): boolean {
+    return (
+      this.retiredHeads.has(head.slice(0, ITEM_ID_DIGITS)) &&
+      this.retired.some((digest) => digest.startsWith(head))
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1145,7 +1252,7 @@ function itemEntry(item: ReviewItem, fixed: FixedTables): JsonObject {
 }
 
 /**
- * The format-3 document of a session (module header, "Stored document"):
+ * The format-4 document of a session (module header, "Stored document"):
  * the session's fixed tables — for a session its creating write is
  * storing, the tables `createTables` builds over its items — stored as
  * they are, and every item stored by index (`itemEntry`).
@@ -1163,7 +1270,6 @@ function sessionDocument(session: ReviewSession): JsonObject {
     })),
     items: session.items.map((item) => itemEntry(item, fixed)),
     journalLength: session.journalLength,
-    nextItemId: session.nextItemId,
     references: tables.references,
     states: tables.states.map(recordedNodeStateToJson),
     strategy: session.parameters.strategy,
@@ -1212,16 +1318,17 @@ export function parametersToJson(parameters: SessionParameters): JsonObject {
 }
 
 /** The stored format every write produces (module header). */
-const SESSION_VERSION = 3;
+const SESSION_VERSION = 4;
 
 /** The earlier stored formats, still read (module header): any version
- * other than these three is corrupt (unintelligible). */
+ * other than these and format 4 is corrupt (unintelligible). */
+const FORMAT_3_VERSION = 3;
 const FORMAT_2_VERSION = 2;
 const FORMAT_1_VERSION = 1;
 
 /**
  * Serialize a session to its stored form: one canonical JSON document in
- * format 3 (module header; SPEC 10.1 "plain, deterministic"; 13.4 "stable
+ * format 4 (module header; SPEC 10.1 "plain, deterministic"; 13.4 "stable
  * ordering and sorted keys", "stably keyed"; 12.0 byte determinism — the
  * text is a pure function of the session value and its fixed tables).
  */
@@ -1512,9 +1619,9 @@ const ITEM_REQUIRED_KEYS = [
 /** A format-1 or format-2 item's optional member: the `note` (SPEC 10.2). */
 const ITEM_OPTIONAL_KEYS = ["note"] as const;
 
-/** A format-3 item's optional members (module header): the `note`, and
- * the item's own tables, each omitted when empty. */
-const FORMAT_3_ITEM_OPTIONAL_KEYS = [
+/** A format-3 or format-4 item's optional members (module header): the
+ * `note`, and the item's own tables, each omitted when empty. */
+const OWN_TABLE_ITEM_OPTIONAL_KEYS = [
   ...ITEM_OPTIONAL_KEYS,
   "references",
   "states",
@@ -1524,9 +1631,9 @@ const FORMAT_3_ITEM_OPTIONAL_KEYS = [
 /**
  * How a stored format spells an item's node-bearing members (module
  * header): format 1 spells each reference out and keys recorded states and
- * text tables by reference; formats 2 and 3 index into the session's
- * tables and, in format 3, the item's own (`TableReader`). Each decoder
- * reports what it finds malformed.
+ * text tables by reference; formats 2 to 4 index into the session's
+ * tables and, in formats 3 and 4, the item's own (`TableReader`). Each
+ * decoder reports what it finds malformed.
  */
 interface ItemMemberDecoder {
   /** The scope node's stored reference, or null (reported). */
@@ -2158,7 +2265,7 @@ function decodeIndexList(
 }
 
 /**
- * The tables of a format-2 or format-3 document (module header):
+ * The tables of a format-2, format-3, or format-4 document (module header):
  * `references` — each a canonical reference (`checkCanonicalReference`),
  * none repeated, so an index names one node — `states`, each a recorded
  * node state (SPEC 10.4), and `texts`, each a string. Null, reported, when
@@ -2222,14 +2329,14 @@ function parseSessionTables(
 const NO_TABLES: SessionTables = { references: [], states: [], texts: [] };
 
 /**
- * Format 3: one item's own tables (module header, "Stored document") — its
- * `references`, `states`, and `texts` members, each optional (a write
- * omits an empty one, so an empty one is malformed) and otherwise an
- * array: each reference canonical (`checkCanonicalReference`) and neither
- * in the session's tables nor repeated, so an index still names one node;
- * each state a recorded node state (SPEC 10.4); each text a string. Null,
- * reported, when any is malformed: the item's indices then have nothing
- * sound to resolve against.
+ * Formats 3 and 4: one item's own tables (module header, "Stored
+ * document") — its `references`, `states`, and `texts` members, each
+ * optional (a write omits an empty one, so an empty one is malformed) and
+ * otherwise an array: each reference canonical (`checkCanonicalReference`)
+ * and neither in the session's tables nor repeated, so an index still
+ * names one node; each state a recorded node state (SPEC 10.4); each text
+ * a string. Null, reported, when any is malformed: the item's indices then
+ * have nothing sound to resolve against.
  */
 function parseItemTables(
   value: Record<string, unknown>,
@@ -2300,16 +2407,16 @@ function parseItemTables(
 }
 
 /**
- * The member spellings of formats 2 and 3 (module header): indices into
- * the session's tables, extended — for a format-3 item with tables of its
- * own — by the item's, index i naming the session table's entry i below
- * that table's length n and the item table's entry i − n from it. Every
- * index resolves to its table's own value — so a canonical reference is
- * one string however many items hold it, and a recorded node state one
- * object — and identically spelled recorded states and text entries
- * decode to one shared value, as the in-memory model, readonly throughout,
- * allows (a reader serves one item when its tables are the item's, so no
- * spelling is shared across tables that differ).
+ * The member spellings of formats 2 to 4 (module header): indices into
+ * the session's tables, extended — for a format-3 or format-4 item with
+ * tables of its own — by the item's, index i naming the session table's
+ * entry i below that table's length n and the item table's entry i − n
+ * from it. Every index resolves to its table's own value — so a canonical
+ * reference is one string however many items hold it, and a recorded node
+ * state one object — and identically spelled recorded states and text
+ * entries decode to one shared value, as the in-memory model, readonly
+ * throughout, allows (a reader serves one item when its tables are the
+ * item's, so no spelling is shared across tables that differ).
  */
 class TableReader implements ItemMemberDecoder {
   private readonly stateMaps = new Map<string, RecordedState>();
@@ -2566,7 +2673,7 @@ function checkCanonicalReference(
 /**
  * SPEC 10.1: every node reference a format-1 item spells out, and every
  * recorded decomposition's, passes `checkCanonicalReference` (the items of
- * formats 2 and 3 index the reference tables, checked whole by
+ * formats 2 to 4 index the reference tables, checked whole by
  * `parseSessionTables` and, for an item's own, `parseItemTables`).
  */
 function checkCanonicalReferences(
@@ -2776,24 +2883,29 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     );
     return { ok: false, problems: problems.list };
   }
-  // Module header: formats 1 and 2 are read beside format 3, every
-  // write's; a document of any other version is judged against format 3's
+  // Module header: formats 1 to 3 are read beside format 4, every
+  // write's; a document of any other version is judged against format 4's
   // shape.
   const version = document["version"];
   const format1 = version === FORMAT_1_VERSION;
   const format2 = version === FORMAT_2_VERSION;
+  const format3 = version === FORMAT_3_VERSION;
   checkKeys(
     document,
     "the session document",
-    format1 ? FORMAT_1_DOCUMENT_KEYS : TABLE_DOCUMENT_KEYS,
+    format1
+      ? FORMAT_1_DOCUMENT_KEYS
+      : format2 || format3
+        ? TABLE_DOCUMENT_KEYS
+        : DOCUMENT_KEYS,
     [],
     problems,
   );
-  if (version !== SESSION_VERSION && !format1 && !format2) {
+  if (version !== SESSION_VERSION && !format1 && !format2 && !format3) {
     problems.add(
       `the session document's version must be ${String(SESSION_VERSION)} ` +
-        `(or ${String(FORMAT_2_VERSION)} or ${String(FORMAT_1_VERSION)}, ` +
-        `the earlier formats), found ` +
+        `(or ${String(FORMAT_3_VERSION)}, ${String(FORMAT_2_VERSION)}, or ` +
+        `${String(FORMAT_1_VERSION)}, the earlier formats), found ` +
         (typeof version === "number" ? String(version) : describeType(version)),
     );
   }
@@ -2832,14 +2944,19 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     0,
     problems,
   );
-  const nextItemId = requireCount(
-    document["nextItemId"],
-    "the session document's nextItemId",
-    1,
-    problems,
-  );
+  // Formats 1 to 3 store the counter their writes took `item-<n>` ids
+  // from (module header): checked as those formats were, then unused —
+  // format 4 stores none, every id it adds being derived.
+  if (format1 || format2 || format3) {
+    requireCount(
+      document["nextItemId"],
+      "the session document's nextItemId",
+      1,
+      problems,
+    );
+  }
 
-  // The items of formats 2 and 3 index the tables, decoded first; with a
+  // The items of formats 2 to 4 index the tables, decoded first; with a
   // malformed table they have nothing to resolve against, and the session
   // is already corrupt.
   const tables = format1
@@ -2851,7 +2968,7 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
       : tables === null
         ? null
         : new TableReader(tables);
-  // Format 3: an item's own tables extend the session's for that item
+  // Formats 3 and 4: an item's own tables extend the session's for that item
   // alone (module header); a reference the session's tables hold is never
   // an item's own.
   const sessionReferences =
@@ -2889,7 +3006,7 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
     const optional =
       sessionReferences === null
         ? ITEM_OPTIONAL_KEYS
-        : FORMAT_3_ITEM_OPTIONAL_KEYS;
+        : OWN_TABLE_ITEM_OPTIONAL_KEYS;
     itemsValue.forEach((value, index) => {
       const where = `items[${String(index)}]`;
       const decoder = itemMembers(value, where);
@@ -2919,7 +3036,6 @@ export function validateSessionDocument(document: unknown): SessionParseResult {
       parameters,
       decompositions,
       journalLength: journalLength as number,
-      nextItemId: nextItemId as number,
       items,
       // Module header: a format-1 file's tables are those its creating
       // traversal builds over its items as read — a function of the file
@@ -2948,6 +3064,12 @@ const TABLE_DOCUMENT_KEYS = [
   "states",
   "texts",
 ] as const;
+
+/** A format-4 document's members (module header): format 3's but the id
+ * counter `nextItemId`, which format 4 stores no longer. */
+const DOCUMENT_KEYS: readonly string[] = TABLE_DOCUMENT_KEYS.filter(
+  (key) => key !== "nextItemId",
+);
 
 /** Session names in byte order (SPEC 10.7 `list`; 12.0). */
 export function sortSessionNames(names: readonly string[]): string[] {
