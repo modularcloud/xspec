@@ -29,7 +29,7 @@ Archival — goals recorded at intake by Liaison on Developer's behalf (2026-10-
 
 - The `xspec` command name does not change.
 - No other configuration change. The file's name and location, `--config`, the encoding rules, the `defineConfig` binding and its aliasing, the excluded `type` and `defer` modifiers and import attributes, the default export's single call with its statically literal argument, and every key, value, and error rule of 7 and 14.14 stay as they are.
-- No programmatic interface beyond `defineConfig`. The new module surface specifies that one export: no command, graph, or configuration-loading API, and no named configuration type.
+- No programmatic interface beyond `defineConfig`. The new module exports exactly that one binding (change 2): no command, graph, or configuration-loading API, and no named configuration type.
 - The parked follow-up in issue #8 (TypeScript type errors for requirement paths naming members of TypeScript's global `Object` interface) stays separate.
 
 ## Proposed `SPEC.md` changes
@@ -38,27 +38,59 @@ The following describes the behavior `SPEC.md` is to define, at the rigor `SPEC.
 
 ### 1. Any module specifier
 
-The declarative form of 7 keeps its import constrained exactly as now: one import declaration binding `defineConfig`, optionally aliased, with no `type` or `defer` modifier and no import attributes. The one change is that its module specifier may be any string literal TypeScript's grammar admits in that position (14.20).
+The declarative form of 7 keeps its import constrained exactly as now: one import declaration binding `defineConfig`, optionally aliased, with no `type` or `defer` modifier and no import attributes. The one change is that its module specifier may be any static string literal (2.4).
 
-- xspec never interprets, resolves, or loads the specifier, and reads nothing on its account. Neither a configuration's validity nor any command's outcome depends on the specifier's spelling or on what, if anything, it designates.
-- Every spelling is therefore accepted alike: a bare or scoped package name, a relative or absolute path, a URL, the empty string, either quote style, and spellings carrying escape sequences, line continuations, or U+FFFD. None of them is a value this specification reads (2.4). A specifier designating nothing, an unreadable path, a workspace file (the configuration file itself included), or a network location is accepted equally, and xspec makes no read and no network access for it.
-- The rule holds wherever a configuration is read, a baseline's configuration (6.3) included.
+- **Reading the file as configuration.** Wherever xspec reads a configuration, a baseline's configuration (6.3) included, it never interprets, resolves, or loads the specifier, and reads nothing on its account. A configuration's validity, and everything xspec derives from the configuration, are independent of the specifier's spelling and of what, if anything, it designates.
+  - Every spelling is therefore accepted alike: a bare or scoped package name, a relative or absolute path, a URL, the empty string, either quote style, and spellings carrying escape sequences, line continuations, or U+FFFD.
+  - A specifier designating nothing, an unreadable path, a workspace file (the configuration file itself included), or a network location is accepted equally, and xspec makes no read and no network access for it.
+- **The one exception: the configuration file as a source.** Where a configured group discovers the configuration file, xspec analyzes it as it does every source it discovers (2.1, 4), its import declaration included, the specifier read as any source's (2.4).
+  - For a code group, a specifier ending in `.xspec`, or a relative one designating a derived-file path (13.4), is that source's invalid-import finding (14.15), while the configuration itself stays valid. The finding fails `build` and `check`, turns back the gated reads (13.3), and leaves a baseline whose workspace holds it unreconstructable (6.3).
+  - Likewise for a code group, while Markdown emission is enabled, a move whose destination would emit Markdown to a path the configuration file's relative specifier designates is refused (`refused-invalid-destination`, 6.5).
+  - No rewrite of 6 applies to the configuration file. Its declarative form holds no reference, and its import binds `defineConfig` itself, never a spec module's default or `text` export, so wherever the file is a source, an import of it ending in `.xspec` is invalid (14.15) and no workspace a rewrite runs on (6.4, 6.5) holds one.
 
 ### 2. The product's module
 
-The interface listed in `SPEC.md`'s opening gains one surface: the product's own module, which exports `defineConfig`.
+The interface listed in `SPEC.md`'s opening gains one surface: the product's own module, which exports exactly one binding, `defineConfig` — no other value and no type.
 
-- **Reach.** No literal package or distribution name names the module. It is the module a project reaches through whatever name the project installed the product under: installing the product under any name makes a module specifier spelling that name resolve to the module under TypeScript's resolution of installed dependencies, with no network access and nothing beyond the product's own installation. No name is privileged.
-- **Type contract.** Under TypeScript at release 5.9.3 (the release 14.20 names), with `strict` checking:
-  - A configuration file valid under 7 whose import names the product's module through that name type-checks with no errors. This holds for every spelling 7 permits: an aliased binding, string-literal keys, comments, and any group name, including one that spells a member of TypeScript's global `Object` interface or `__proto__`.
-  - For a file in 7's declarative form whose import names the product's module, each violation of 7's key-and-value shape that a static type can express is a type error in the file, its location and message unpinned. These violations are an unknown key (7) at any level; a missing required key, meaning `specs`, `markdown`'s `emit`, and the keys 7.4 and 7.5 mark required for a profile and a rule; and a value of a kind 7 does not admit in its position. That last class covers a boolean, string, list, or object where 7 gives the position another kind, and a string outside the values 7 enumerates for its position (`targets`, `boundaryKind`, `mode`, `type`, a selector's `kind`, an element of `edgeKinds` or `kinds`).
-  - Rules a static type cannot express stay xspec's own configuration errors (14.14), with no type-level requirement either way. They include glob validity and globs outside the root; cross-references between names (a profile's `target` and `boundary`, a selector's `group`, a kind that is required because a name is ambiguous); and the name and character rules (empty, duplicate, and U+FFFD-bearing names, `outDir`'s form). A key repeated within one object literal, the capture rules, and a file matched by both a spec and a code group belong to this class too.
-- **Runtime.** `defineConfig` returns its argument unchanged: the very value passed, neither copied nor modified.
+- **Package and installation.** The product is distributed as a package: a directory whose root holds a `package.json` manifest, the form TypeScript's and Node.js's resolution of installed dependencies read. The module is the package's root entry, the one a specifier naming the package with no subpath designates.
+  - Installing the product under a name `N` places that package, exactly as distributed, at `node_modules/N` in the importing file's directory or one of its ancestors, as the directory itself or as a symbolic link to it. A copy, a symbolic-link install, and an aliased install (one whose `N` differs from the name the package's manifest gives) are therefore alike.
+  - `N` is any name of one segment, or of two spelled `@scope/name`, each segment a non-empty run of lowercase ASCII letters, digits, `-`, `.`, and `_` beginning with a letter or digit, the whole at most 214 characters — except a name in the `@types` scope, which TypeScript reserves for declaration packages, and a name any release of the Node.js 22 line resolves to one of its own built-in modules (`fs`, `path`).
+  - Nothing else need be installed: the module's declarations and code reach nothing outside the package — no other package and no `@types` declarations. Installation is that placement alone, with no package-manager run, install-time step, or network access.
+- **Reach.** No literal package or distribution name names the module, and no name is privileged. With the product installed under `N`, and nothing else installed under `N` nearer the importing file, a module specifier spelling exactly `N` designates the module:
+  - under TypeScript's resolution, in every covered setup (below);
+  - under Node.js's resolution, through `import` — a static import in an ES module, or a dynamic `import()` in a module of either kind — and through `require` in a CommonJS module.
+- **Covered setups.** The type contract holds under TypeScript at release 5.9.3 (the release 14.20 names), in each setup that follows.
+  - Compiler options: `strict` on; `moduleResolution` one of `node10`, `node16`, `nodenext`, and `bundler`, the modes that find installed packages; `module` at its default under `node10` and, under the other modes, at a value the mode requires — `node16`, `node18`, `node20`, or `nodenext` under `node16` and `nodenext`, and `es2015`, `es2020`, `es2022`, `esnext`, or `preserve` under `bundler`. Every other option is at its default, so `skipLibCheck` is off and the product's own declaration files count.
+  - Program: the configuration file is the one root file, in a project whose only installed package is the product, with no other declarations visible. The project may be an ES-module or a CommonJS one (its `package.json` declaring `"type": "module"` or not), and TypeScript applies to the file whichever module format follows.
+  - A file type-checks when the compiler reports no error for that program.
+- **Covered files.** The type contract concerns a configuration file in 7's declarative form whose import names the module by a specifier spelling exactly `N`, whose path ends in `.ts`, `.mts`, `.cts`, or `.tsx` and is no declaration-file name (4.6's file-name rule), and which meets each of these conditions:
+  - It spells no `\` outside its comments: no identifier or string literal carries an escape sequence or line continuation, so every key, value, and the specifier read the same as spelled (2.4) and as TypeScript reads them. (Otherwise keys distinct as spelled, `"ab"` and `"a\x62"`, collide for TypeScript, and a key or value invalid as spelled, `"\x73pecs"` or `mode: "\x64irect"`, conforms for it.)
+  - It carries no comment TypeScript reads as a directive or pragma: a triple-slash directive (`/// <reference … />`), a comment directive in a line or block comment (`@ts-ignore`, `@ts-expect-error`), or a pragma (`@ts-nocheck`). Such comments suppress errors or raise their own.
+  - It imports `defineConfig` by that identifier, never by a string-literal import name (`{ "defineConfig" as d }`, a TypeScript error under `module` `es2015` and `es2020`), and binds it to a name strict module code admits as a binding — the first of 6.5's rules for an added import's identifiers: no ECMAScript reserved word (`await`, `yield`, `enum`, and `default` among them), and none of `let`, `static`, `implements`, `interface`, `package`, `private`, `protected`, `public`, `eval`, and `arguments` — and to neither `require` nor `exports`, which TypeScript reserves in a file it compiles as CommonJS.
+- **Type contract.** In every covered setup:
+  - **Valid configurations.** A covered file valid under 7 type-checks with no errors. This holds for every spelling a covered file can carry: an aliased binding, string-literal keys, comments, and any group name, including one that spells a member of TypeScript's global `Object` interface or `__proto__`.
+  - **Shape violations.** A covered file in 7's declarative form holding one or more violations of the type-error class does not type-check: TypeScript reports at least one error in the file, its locations and messages unpinned, possibly fewer errors than violations. The type-error class is exactly:
+    - an unknown key (7) at any level;
+    - a missing required key: `specs`, `markdown`'s `emit`, and the keys 7.4 and 7.5 mark required for a profile and a rule;
+    - a value of a kind 7 does not admit in its position, a list's element included: a boolean, string, list, or object where 7 gives the position another kind;
+    - a string outside the values 7 enumerates for its position: `targets`, `boundaryKind`, `mode`, `type`, a selector's `kind`, an element of `edgeKinds` or `kinds`;
+    - a selector not in exactly one of its forms (7.5): one using more than one of `group`, `files`, and `tags`, one using none of them, or one carrying `kind` without `group`;
+    - an empty list where 7.4 or 7.5 forbids one: `targetTags`, `edgeKinds`, a rule's `kinds`, or a selector's `tags`.
+  - **Every other configuration error** (14.14) carries no type-level requirement either way: a covered file whose violations all lie outside the class may type-check or not. Among them:
+    - cross-references between names: a profile's `target` and `boundary`, a selector's `group`, a kind required because a name is ambiguous;
+    - the name and character rules: empty, duplicate, and U+FFFD-bearing names, `outDir`'s form;
+    - glob validity and globs outside the root;
+    - a key repeated within one object literal;
+    - the capture rules;
+    - a file matched by both a spec and a code group.
+- **Runtime.** On every release of the Node.js 22 line, with the module loaded through `import` or `require` as Reach describes:
+  - The module's exports are exactly `defineConfig`: an `import` namespace holds that one export, and a `require` result has that one own enumerable property.
+  - `defineConfig` returns its first argument and does nothing else: the very value passed, whatever it is, neither examined, copied, nor modified; `undefined` when called with none; any further arguments ignored.
+  - Neither loading the module nor calling `defineConfig` reads or writes anything, accesses the network, or has any other effect.
+  - The guarantee holds on every release of the line, so it rests on no behavior a later 22.x release introduced, such as `require` of an ES module, on by default only from 22.12.
 - **xspec unchanged.** xspec still never executes or resolves the configuration, so no command's outcome depends on the module or on whether a project installed it.
-- **Testability.** `SPEC.md` states the module's reach so that the contract is blackbox-testable offline. A test can make the product's module resolvable under a name of its choosing in a scratch project, run the TypeScript compiler over configuration files importing that name, and load the module to observe `defineConfig`'s result. The seam is ordinary installation, so it adds no tester-only option and no security exposure.
-- **Settled in refinement**, together with the contract's wording and placement:
-  - the compiler settings the guarantee spans beyond `strict`: which module-resolution modes that resolve installed dependencies by name, and whether a configuration compiled or loaded as CommonJS is covered beside one compiled or loaded as an ES module;
-  - whether two rules a type can express join the shape violations or stay with the rules that carry no type-level requirement: a selector's single form (exactly one of `group`, `files`, and `tags`, with `kind` only beside `group`) and the empty-list rules.
+
+*Rationale, not carried into `SPEC.md`:* installation is defined as a placement so that the contract is blackbox-testable offline, the product installed under a name of a tester's choosing. The seam is ordinary installation, so it adds no tester-only option and no security exposure.
 
 ### 3. No package or distribution name
 
@@ -66,10 +98,11 @@ No rule or example of `SPEC.md` names a package or distribution. The example in 
 
 ## Interactions and compatibility
 
-- **Strict relaxation.** Every configuration valid today stays valid with identical results, one importing from `"xspec"` included. The only configurations whose outcome changes are those that conform in every respect but their specifier, an escape spelling of `xspec` (read as spelled, 2.4) among them. Each moves from configuration error (14.14) to valid, and a baseline whose configuration is such a file now reconstructs (6.3).
-- **Configuration file as a code source.** A code group that discovers the configuration file treats it as a TypeScript source like any other (4) and analyzes its import declaration as it does any code source's. A specifier ending in `.xspec`, or a relative one designating a derived-file path, is therefore that source's invalid-import finding (14.15), while the configuration itself stays valid. The configuration's import binds `defineConfig` itself, never a spec module's default or `text` export, so no workspace passing `build`'s validations holds such an import, and no rewrite of 6 applies to the configuration file.
+- **Strict relaxation.** Every configuration valid today stays valid with identical results, one importing from `"xspec"` included. The only configurations whose validity changes are those that conform in every respect but their specifier, an escape spelling of `xspec` (read as spelled, 2.4) among them.
+  - Each moves from configuration error (14.14) to valid, and then behaves as any valid configuration does, change 1's exception included. Where such a file is a discovered code source whose specifier ends in `.xspec` or designates a derived-file path, its workspace fails with that source's invalid-import finding (14.15, exit 1) in place of the configuration error (exit 2).
+  - Likewise, a baseline whose configuration is such a file is no longer refused for its configuration (6.3). It reconstructs exactly when its content validates as a workspace, so not while that finding stands.
 - **Generated modules.** They still carry no xspec runtime dependency (13.1). The product's module serves the configuration alone.
-- **Nothing else.** Beyond the module surface of change 2, no command gains a read, write, network access, or durable state. Determinism, JSON output, and the exit-code partition are unaffected beyond the relaxation. The machine-interface version (12.6) stays, since no JSON document form changes.
+- **Nothing else.** No command gains a read, write, network access, or durable state, and the module has no effect of its own (change 2, Runtime). Determinism, JSON output, and the exit-code partition are unaffected beyond the relaxation. The machine-interface version (12.6) stays, since no JSON document form changes.
 
 ## Documentation (outside `SPEC.md`)
 
