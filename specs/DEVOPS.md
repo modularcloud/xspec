@@ -14,7 +14,7 @@ This document defines how release, merge, and deploy actions are performed for t
 
 The normal Release-phase flow for a completed patch is:
 
-1. **Release commit.** One ordinary commit on the patch branch, pushed before the merge, that removes retired plans (Release-phase guidance → Release-commit cleanup), sets the version when the release warrants a minor bump (→ Versioning), drops any temporary CI trigger the branch was given (such as a `push:` entry used while its PR was conflicted — pull-request runs take over once the PR is mergeable), carries any DEVOPS.md update the release needed, and flips the patch's `Stage:` to `Complete`.
+1. **Release commit.** One ordinary commit on the patch branch, pushed before the merge, that removes retired plans (Release-phase guidance → Release-commit cleanup), sets the version when the release warrants a minor bump (→ Versioning), drops any temporary CI trigger the branch was given (such as a `push:` entry used while its PR was conflicted — pull-request runs take over once the PR is mergeable), carries the `docs/` and `README.md` updates for the patch's user-visible changes (→ Docs) so the docs land on `main` together with the change, carries any DEVOPS.md update the release needed, and flips the patch's `Stage:` to `Complete`.
 2. **Merge** the PR with a merge commit once CI is green on the PR's latest head (never with red CI; never squash or rebase).
 3. **After the merge lands:** open the parked-work issue (→ Parked work), post the run notes on the merged PR (→ Run notes), and delete the merged branch and any stale process branches (→ Branches).
 4. **Follow the release.** The standing npm release procedure below publishes the merge commit automatically; follow `main`'s CI and Release runs until the version is published and tagged. There is no other per-release tagging, publishing, or Developer step.
@@ -24,12 +24,17 @@ The normal Release-phase flow for a completed patch is:
 Recorded at IP 0001's release (PR #7) so that these situations are not asked again.
 
 - **Scaffold drift on main.** When a PR conflicts because `main` carries a newer process scaffold than the branch was cut from (agents and prompts, `CLAUDE.md`, `specs/PROCESS.md`, `specs/CLAUDE-PROCESS.md`, template resets of `specs/GOALS.md` or `specs/PHILOSOPHY.md`), the Developer decides how the PR lands: ask first. Precedent: for PR #7 against main's `63bcb3f`, the Developer chose to take main's version as it is. The one conflicting file, `specs/PHILOSOPHY.md`, was made byte-identical to main's on the branch by its owner, Liaison, so the PR merged cleanly with no merge from `main` into the branch, and main's other changes (the newer scaffold, the removal of `sdg-bootstrap/SKILL.md`, and the empty `GOALS.md`, which the Developer explicitly approved) landed unchanged.
-- **Versioning.** A release that adds commands or changes existing behavior bumps the minor version: the release commit sets `package.json`'s version to the next minor version (patch component 0), keeping `package-lock.json` consistent. Any other release takes the automatic patch bump (npm releases → Versioning). Precedent: IP 0001, which added commands, released as `0.2.0`.
+- **Versioning.** A release that adds commands or changes existing behavior bumps the minor version: the release commit sets `package.json`'s version to the next minor version (patch component 0), keeping `package-lock.json` consistent. Any other release, a docs-only follow-up included, takes the automatic patch bump (npm releases → Versioning). Precedent: IP 0001, which added commands, released as `0.2.0`.
 - **Release-commit cleanup.** Retired plans tracked under `deleted/` (finished `FIX_PLAN` files moved there when deleting them was refused) are removed with `git rm` in the release commit; git history keeps them.
 - **Parked work.** Follow-up proposals and deferred known gaps (accepted residuals) are recorded at release in one GitHub issue on this repository: each drafted follow-up proposal as approved, and each deferred gap as documented, saying whether a follow-up is planned. A parked follow-up is not started and gets no patch file at release; it enters the process later through its normal intake.
 - **Run notes.** The notes collected during the run for the release step (refusals and safety-rule slips, infrastructure incidents, points the specs leave unspecified, measured scale limits, stale documentation and leftovers) are posted as one comment on the merged PR when it merges. Nothing is scheduled from them unless the Developer says so.
 - **Branches.** After the merge has landed, the merged patch branch and any stale process branches (fully contained in the merged line, nothing pending) are deleted. Branches the process did not create are never touched.
-- **Docs.** Documentation updates (`docs/`, `README.md`) are the Developer's own work, outside the release flow; no docs-update step runs at release.
+- **Docs** (Developer instruction, 2026-10-28, superseding the earlier rule that documentation was the Developer's own work outside the release flow). Documentation is a standing part of every change: whenever a change alters what users see or do, `docs/` and `README.md` are updated alongside it. At release, the release commit carries those updates for the patch's changes (step 1 above), so the docs land on `main` together with the change. A follow-up for an already-merged patch is an ordinary commit pushed straight to `main` (→ Post-update actions). How the docs are written (Developer's clarification, 2026-10-28, given for IP 0001's follow-up):
+  - They cover every user-visible change the patch made: new or changed commands, options, outputs, findings, error behavior, configuration keys, and limits.
+  - `specs/SPEC.md` and the patch document are the authority, so the docs describe only what they specify.
+  - Commands and examples are checked, where practical, against a build of the released commit made in a scratch clone.
+  - Where a page would otherwise overclaim, it states the accepted residuals.
+  - Anything documenting shows to be wrong, unclear, or inconsistent in the product or its specs is reported, never fixed as part of the docs work.
 - **Repository secrets.** Checking and deleting repository secrets (such as the bootstrap-only `NPM_TOKEN`) is a manual Developer step: the session proxy refuses the GitHub Actions secrets API ("Access to this GitHub Actions path is not permitted through this proxy.", HTTP 403), and that refusal is never worked around.
 
 ## npm releases (standing procedure)
@@ -45,4 +50,12 @@ Recorded at IP 0001's release (PR #7) so that these situations are not asked aga
 
 ## Post-update actions
 
-None defined. Documentation updates are the Developer's own work outside the release flow (Release-phase guidance → Docs), and no deploy pipelines exist. Define further actions here as they are introduced.
+- **Docs follow-up for a merged patch** (Developer, 2026-10-28; precedent: IP 0001's docs, after PR #7 merged as `eaef7a7` and published `0.2.0`). When a patch has already merged and its docs still need updating (Release-phase guidance → Docs), the update is an ordinary commit pushed straight to `main`. There is no patch branch, no PR, and no patch `Stage:` change.
+  1. Fetch `main` by name (`git fetch origin main`), check it out, and bring it to `origin/main` by fast-forward only.
+  2. Commit the `docs/` and `README.md` changes, with any DEVOPS.md update the follow-up needs, as ordinary commits.
+     - Never force-push, never rewrite pushed history, and never merge anything.
+     - Push only to `origin main`, and leave every other branch alone.
+     - If `main` moved before the push, rebase only the follow-up's own unpushed commits onto it, then push.
+  3. Push with CI running normally (no `[skip ci]`). The push is a release under the standing npm procedure: CI runs, and once it is green the Release workflow publishes the next version. A docs-only push takes the automatic patch bump (Release-phase guidance → Versioning), which also refreshes the README shown on npm. The standing npm authorization covers it.
+  4. Follow `main`'s CI and Release runs until the version is published and tagged, and report the result.
+- No deploy pipelines exist. Define further actions here as they are introduced.
