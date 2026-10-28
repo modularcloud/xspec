@@ -48,7 +48,7 @@ Each impacted location is reported with one impact edge and **one shortest witne
 
 ## Reading a report
 
-An edit to the text of `auth.lockout` in the [getting-started project](getting-started.md):
+An edit to the text of `auth.lockout` in the [example project](getting-started.md#the-example-in-the-other-pages):
 
 ```sh
 $ xspec impact --base HEAD
@@ -109,7 +109,18 @@ baseline ba39f7296cccc1abc4c63ac33189505bb270857c
 
 — an empty report. The rename rewrote every reference and recorded the identity mapping; nothing *changed* in the graph's terms. Restructure specs by hand instead and the same operation reports a deletion plus an addition, with every dependent upstream-changed. This is the payoff of [`rename`/`move`](refactoring.md).
 
-A baseline that cannot be read or reconstructed — unknown ref, sources at the ref that don't validate, a journal whose baseline content is not a prefix of the current one — is a usage error (exit `2`) naming the offending entries or files.
+### How the baseline is found
+
+xspec takes the configuration file your command uses now (the one the upward search found, or `--config`) and reads the file at the same repository-relative path in the ref's tree. That file is the baseline configuration, and its directory is the baseline workspace root. The repository is the innermost one whose working tree contains the configuration file (a submodule or nested repository counts), wherever you run the command from.
+
+A baseline that can't be read or reconstructed is a usage error (exit `2`) that names the offending entries or files. That covers:
+
+- an unknown ref;
+- a configuration file outside any git working tree, or a ref with no file at that path;
+- sources at the ref that don't validate;
+- a journal whose baseline content isn't a prefix of the current one.
+
+A damaged current journal also fails the baseline this way, with the code `journal-error`.
 
 ## Where impact fits
 

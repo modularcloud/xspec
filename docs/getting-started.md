@@ -1,36 +1,30 @@
 # Getting started
 
-This walkthrough takes you from an empty directory to a validated, coverage-measured spec project. Every command and output shown here was produced by the real tool.
+This walkthrough takes you from an empty directory to a validated project with coverage measured. Every command and output shown here was produced by the real tool.
 
 ## Install
 
-xspec requires **Node.js ≥ 22**. It is not yet published to npm, so run it from a checkout of this repository:
+xspec requires **Node.js ≥ 22**. It's published on npm as `@modularcloud/xspec`. Install it into your project as a development dependency under the name `xspec`:
 
 ```sh
-git clone https://github.com/modularcloud/xspec.git
-cd xspec
-npm ci
-npm run build
+npm install --save-dev xspec@npm:@modularcloud/xspec
+npx xspec version
 ```
 
-The executable is `dist/cli/bin.js`. Either invoke it directly:
+The alias does two things. It installs the package as `xspec`, the module name that `xspec.config.ts` imports `defineConfig` from (see below), so your editor gets type support. It also puts the `xspec` command in `node_modules/.bin`.
 
-```sh
-node /path/to/xspec/dist/cli/bin.js <command>
-```
+Two other ways to run it:
 
-or link it once so `xspec` is on your `PATH`:
+- **Globally**: `npm install -g @modularcloud/xspec`.
+- **Once, without installing**: `npx @modularcloud/xspec <command>`.
 
-```sh
-npm link        # from the xspec checkout
-xspec build     # now available anywhere
-```
+The rest of the documentation writes `xspec <command>`. With a local install, run it as `npx xspec <command>` or from an npm script.
 
-The rest of the documentation writes `xspec <command>` and assumes one of the above.
+To work on xspec itself, build it from a checkout instead: clone `https://github.com/modularcloud/xspec`, then run `npm ci && npm run build && npm link`.
 
 ## Create a project
 
-An xspec project is any directory with an `xspec.config.ts` at its root. The config names your spec files and (optionally) the code that consumes them:
+An xspec project is any directory with an `xspec.config.ts` at its root. The config names your spec files and, optionally, the code that uses them:
 
 ```ts
 // xspec.config.ts
@@ -58,15 +52,14 @@ export default defineConfig({
 
 Two things to know about this file:
 
-- xspec **parses it statically and never executes it** — it must be purely declarative (literals only). See [Configuration](configuration.md) for the full schema.
-- The `import { defineConfig } from "xspec"` exists for editor type support. xspec itself never resolves it, so your project does not need xspec installed as a dependency for the CLI to work. If your own `tsc` run includes `xspec.config.ts`, either install the package (e.g. `npm install /path/to/xspec/checkout`) or exclude the config file from your tsconfig.
+- xspec **parses it statically and never executes it**, so it must be purely declarative (literals only). See [Configuration](configuration.md) for the full schema.
+- The `import { defineConfig } from "xspec"` exists for editor type support. xspec itself never resolves it, so the CLI works whether or not the import resolves. If your own `tsc` run includes `xspec.config.ts`, install the package under the `xspec` alias as above, or exclude the config file from your tsconfig.
 
 ## Write a first spec
 
-Spec files are MDX documents in which requirement sections are wrapped in `<S>` tags. Each section carries a structural dot-path `id`:
+Spec files are MDX documents in which requirement sections are wrapped in `<S>` tags. Each section carries a structural dot-path `id`. Create `specs/AUTH.mdx`:
 
 ```mdx
-{/* specs/AUTH.mdx */}
 <S id="auth">
 Authentication.
 
@@ -101,16 +94,15 @@ $ echo $?
 `build` validates the sources and generates everything (see [Workspace files](workspace.md) for details):
 
 ```
-specs/AUTH.mdx                 ← your source
-specs/AUTH.md                  ← pure Markdown (annotations stripped), because markdown.emit
-specs/AUTH.xspec.ts            ← generated typed module
-specs/AUTH.xspec.impl.js       ← companions of the generated module
-specs/AUTH.xspec.impl.d.ts
+specs/AUTH.mdx                   ← your source
+specs/AUTH.md                    ← pure Markdown (annotations stripped), because markdown.emit
+specs/AUTH.xspec.ts              ← generated typed module, runtime included
+specs/AUTH.xspec.impl.d.ts       ← companions of the generated module (types, go-to-definition)
 specs/AUTH.xspec.impl.d.ts.map
-.xspec/graph.json              ← the project graph
+.xspec/                          ← graph data: the project graph
 ```
 
-A failed `build` (invalid sources, exit `1`) modifies nothing — derived files stay exactly as they were.
+A failed `build` (invalid sources, exit `1`) modifies nothing: derived files stay exactly as they were.
 
 ## Reference requirements from code
 
@@ -140,7 +132,7 @@ export function testInvalidLogin(): void {
 }
 ```
 
-A marker is an ordinary property read at runtime (harmless, no tooling required) and a type-checked reference at compile time: if the requirement is renamed or deleted, your build breaks instead of silently drifting. Setup details and rules are in [Using specs from TypeScript](typescript.md).
+A marker is an ordinary property read at runtime (harmless, no tooling required) and a type-checked reference at compile time. If the requirement is renamed or deleted, your build breaks instead of silently drifting. Setup details and rules are in [Using specs from TypeScript](typescript.md).
 
 Re-run `xspec build` after adding code references so the graph includes them.
 
@@ -158,7 +150,7 @@ specs/AUTH.mdx
     auth.lockout
 ```
 
-Show one requirement — its text, tags, hashes, and every edge in and out:
+Show one requirement, with its text, tags, hashes, and every edge in and out:
 
 ```sh
 $ xspec show "specs/AUTH.mdx#auth.login.valid"
@@ -184,7 +176,13 @@ subtree text:
   A user submitting valid credentials is signed in.
 ```
 
-`xspec query` is the machine-facing equivalent (JSON only) — see the [CLI reference](cli.md#xspec-query-sub).
+Find every place that references it, with exact byte positions:
+
+```sh
+$ xspec occurrences --to "specs/AUTH.mdx#auth.login.valid"
+```
+
+`xspec query` is the machine-facing equivalent of `show` and `ids`; see the [CLI reference](cli.md#xspec-query-sub). `occurrences`, `view`, `at`, and `inventory` serve editors and other tools; see [Machine interface](machine-interface.md). All of them print JSON.
 
 ## Measure coverage
 
@@ -193,7 +191,7 @@ The `tested` profile above asks: which `product` requirements are directly refer
 ```sh
 $ xspec coverage
 profile tested
-  required: 3, covered: 2, uncovered: 1, ignored: 5
+  required: 3, covered: 2, uncovered: 1, ignored: 3
   covered:
     specs/AUTH.mdx#auth.login.valid
       path: test/auth.test.ts#testValidLogin -> specs/AUTH.mdx#auth.login.valid
@@ -203,10 +201,11 @@ profile tested
     specs/AUTH.mdx#auth.lockout
   ignored:
     specs/AUTH.mdx: root node; non-leaf under targets: "leaves"
-    ...
+    specs/AUTH.mdx#auth: non-leaf under targets: "leaves"
+    specs/AUTH.mdx#auth.login: non-leaf under targets: "leaves"
 ```
 
-`auth.lockout` has no test yet. `xspec coverage tested --check` exits `1` while that is true — wire it into CI to keep specs and tests honest. Details in [Coverage](coverage.md).
+`auth.lockout` has no test yet. While that's true, `xspec coverage tested --check` exits `1`, so wire it into CI to keep specs and tests honest. Details are in [Coverage](coverage.md).
 
 ## Validate continuously
 
@@ -216,21 +215,32 @@ $ echo $?
 0
 ```
 
-`check` runs every build validation without writing anything, and additionally verifies that generated files are up to date, references resolve, no dependency cycles exist, policy rules hold, the journal replays, and review sessions are intact. Any finding exits `1` with an actionable message:
+`check` runs every build validation without writing anything. That covers references, cycles, and the journal. It additionally verifies that generated files and graph data are up to date, policy rules hold, and review sessions are intact. Any finding exits `1`. Each finding names its location and stable code, with an actionable message:
 
 ```sh
 $ echo "// tampered" >> specs/AUTH.xspec.ts && xspec check
-specs/AUTH.xspec.ts: stale generated output (14.10): stale generated output:
-specs/AUTH.xspec.ts does not match what the current sources and configuration
-generate; run `xspec build` to regenerate every derived file (SPEC 14.10)
+specs/AUTH.xspec.ts: stale-output: stale generated output: specs/AUTH.xspec.ts does not match what the current sources and configuration generate; run `xspec build` to regenerate every derived file (SPEC 14.10)
 1 finding
 ```
 
 `xspec build && xspec check` is the everyday loop; `check` alone is the CI gate.
 
+## The example in the other pages
+
+The other pages extend this project with one more spec file, `specs/OVERVIEW.mdx`, which depends on the `auth` section and is excluded from coverage:
+
+```mdx
+import AUTH from "./AUTH.xspec"
+
+<S id="overview" coverage="none" d={AUTH.auth}>
+The product summary, for context.
+</S>
+```
+
 ## Where to go next
 
 - Track what a spec edit affects: [Impact analysis](impact.md)
 - Turn changes into a reviewable checklist: [Reviews](reviews.md)
-- Restructure specs without losing history: [Renaming and moving](refactoring.md)
+- Restructure specs without losing history, with a preview first: [Renaming and moving](refactoring.md)
 - Commit the right files: [Workspace files](workspace.md)
+- Build an editor integration or other tooling: [Machine interface](machine-interface.md)

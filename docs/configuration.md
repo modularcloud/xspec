@@ -2,18 +2,28 @@
 
 Every xspec project is configured by a single `xspec.config.ts`. Its directory is the **workspace root**: all globs and paths resolve relative to it, and every identity xspec prints is workspace-relative.
 
-Commands find the file by upward search from the working directory; `--config <path>` (available on every command) points at it explicitly. A missing or invalid configuration is a usage error — exit `2`, before any source is read.
+Commands find the file by searching upward from the working directory. The search stops at the nearest directory that has an entry named `xspec.config.ts`, and that entry must be a plain file: a directory or symbolic link there is a configuration error, never followed. `--config <path>` (available on every command) points at the file explicitly. A missing or invalid configuration is a usage error: exit `2`, before any source is read. `xspec inventory` shows which configuration file and root a given working directory resolves to. `xspec version` is the one command that reads no configuration.
 
 ## The file is data, not code
 
 xspec **parses the configuration statically and never executes or imports it**. The file must consist of exactly:
 
-1. an import of `defineConfig` from the module specifier `"xspec"` (aliasing allowed), and
+1. an import of `defineConfig` from the module specifier `"xspec"` (aliasing allowed; no `type` or `defer` modifier, no import attributes), and
 2. a default export of one call to that binding, whose argument is built only from object literals (plain identifier or string keys), array literals, plain quoted strings, and `true`/`false`.
 
-No spreads, no computed values, no other statements. This makes configuration incapable of side effects or environment-dependent behavior — a property the rest of the tool's byte-determinism relies on. Anything outside this form, and any unknown key anywhere in the argument, is a configuration error (exit `2`).
+No spreads, no computed values, and no other statements are allowed; comments are fine anywhere. String values are read exactly as written, with no escape sequences interpreted. The file must be valid UTF-8 without a byte-order mark.
 
-`defineConfig` is an identity function whose only job is editor type support while you author the file. Because xspec never resolves the import, the CLI works even when the `xspec` package is not installed in your project; install it (or exclude the config from your tsconfig) only to keep your own `tsc` happy.
+This makes configuration incapable of side effects or environment-dependent behavior, a property the rest of the tool's byte-determinism relies on. Each of these is a configuration error (exit `2`):
+
+- anything outside this form;
+- an unknown key anywhere in the argument, or a key repeated within one object;
+- an empty group, profile, or rule name, or one containing U+FFFD.
+
+`defineConfig` is an identity function whose only job is editor type support while you write the file. Because xspec never resolves the import, the CLI works even when the package isn't installed in your project. For type support (or to keep your own `tsc` happy if it includes the config file), the specifier `"xspec"` must resolve. The package is published as `@modularcloud/xspec`, so install it under that name with an alias, or exclude the config file from your tsconfig:
+
+```sh
+npm install --save-dev xspec@npm:@modularcloud/xspec
+```
 
 ## Full example
 
@@ -50,7 +60,7 @@ export default defineConfig({
 })
 ```
 
-`specs` is required. `code`, `markdown`, `coverage`, and `policy` are optional; omitting one simply means no code groups, no Markdown emission, no coverage profiles, or no policy rules. Empty `coverage`/`policy` arrays are valid and equivalent to omission.
+`specs` is required. `code`, `markdown`, `coverage`, and `policy` are optional; omitting one simply means no code groups, no Markdown emission, no coverage profiles, or no policy rules. Empty `coverage` and `policy` arrays are valid and equivalent to omitting them.
 
 ## `specs` — spec groups
 
@@ -64,16 +74,20 @@ specs: {
 ```
 
 - A file may belong to several groups.
-- Every matched file must end in `.mdx`; a glob matching anything else is an error.
-- A group whose globs match nothing is valid — discovery just yields fewer sources.
+- Every matched file must end in `.mdx`, and its path must not contain `"`, `'`, `\`, a line break, U+2028, or U+2029. A match that breaks either rule is reported as an invalid source path.
+- A group whose globs match nothing is valid; discovery just yields fewer sources.
 
 Group names are what coverage profiles, policy selectors, and `query nodes --group` refer to.
 
 ## `code` — code groups
 
-Named groups of TypeScript files. Code groups serve two purposes: they can be a coverage **boundary** ("covered = referenced from this code"), and they are the population reported by [impacted-code analysis](impact.md#impacted-code).
+Named groups of TypeScript files. Code groups serve two purposes: they can be a coverage **boundary** ("covered means referenced from this code"), and they are the population reported by [impacted-code analysis](impact.md#impacted-code).
 
-A file matched by both a spec group and a code group is a configuration error. Files whose names carry `.xspec.` (generated modules), files under `.xspec/`, and configured Markdown output destinations are never discovered as sources, so generated artifacts cannot sneak into groups via a broad glob.
+A file matched by both a spec group and a code group is a configuration error. Three kinds of path are never discovered as sources, so generated artifacts can't sneak into groups through a broad glob:
+
+- files whose names carry `.xspec.` (generated modules);
+- files under `.xspec/`;
+- configured Markdown output destinations.
 
 ## `markdown` — pure-Markdown emission
 
@@ -82,40 +96,42 @@ markdown: { emit: true, outDir: "build/md" }
 ```
 
 - `emit` (required boolean): whether each `NAME.mdx` compiles to a pure `NAME.md` ([what that means](writing-specs.md#markdown-compilation)).
-- `outDir` (optional): redirect emitted files into a directory, preserving workspace-relative paths. Must resolve inside the workspace root. Default: emit next to each source file.
+- `outDir` (optional): redirect emitted files into a directory, preserving workspace-relative paths. The default is to emit next to each source file.
+  - It must be a plain workspace-relative directory path: one or more `/`-separated names, with no leading `/`, no `.` or `..` segments, and no empty segments.
+  - It must not be `.xspec` or lie under it.
 
 ## `coverage` — coverage profiles
 
-Each profile is a named question of the form "is every requirement in *target* reachable from *boundary*?" — evaluated by `xspec coverage`. See [Coverage](coverage.md) for semantics; the fields:
+Each profile is a named question of the form "is every requirement in *target* reachable from *boundary*?", evaluated by `xspec coverage`. See [Coverage](coverage.md) for semantics. The fields:
 
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | Unique profile name; `xspec coverage <name>` runs just this one. |
 | `target` | yes | Spec group whose requirements must be covered. |
-| `targetTags` | no | Restrict targets to nodes carrying at least one of these tags. Empty list = error. |
-| `targets` | no | `"leaves"` (default: only childless nodes are targets) or `"all"`. |
+| `targetTags` | no | Restrict targets to nodes carrying at least one of these tags. An empty list is an error. |
+| `targets` | no | `"leaves"` (the default: only childless nodes are targets) or `"all"`. |
 | `boundary` | yes | Spec **or** code group that counts as "covering". |
 | `boundaryKind` | see below | `"spec"` or `"code"`. |
 | `mode` | yes | `"direct"` (one edge) or `"transitive"` (a path of edges). |
-| `edgeKinds` | no | Subset of `["depends", "embeds", "references"]`; default all three. Empty list = error. |
+| `edgeKinds` | no | Subset of `["depends", "embeds", "references"]`; the default is all three. An empty list is an error. |
 
-`boundaryKind` must be omitted when the group name is unambiguous and must be given when the same name exists as both a spec and a code group. Referring to a group that does not exist is a configuration error.
+`boundaryKind` must be omitted when the group name is unambiguous, and must be given when the same name exists as both a spec group and a code group. Referring to a group that doesn't exist is a configuration error. List-valued fields (`targetTags`, `edgeKinds`, and in policy `kinds` and `tags`) are sets: a repeated element counts once.
 
 ## `policy` — dependency policy rules
 
-Policy rules constrain which dependency edges (`depends`, `embeds`, `references`) may exist. They are evaluated by `xspec check` only — `build` regenerates output regardless, so a policy violation never blocks builds, it fails the gate.
+Policy rules constrain which dependency edges (`depends`, `embeds`, `references`) may exist. Only `xspec check` evaluates them, and only on a workspace that otherwise passes `build`'s validations. `build` regenerates output regardless, so a policy violation never blocks a build; it fails the gate.
 
 | Field | Required | Meaning |
 |---|---|---|
 | `name` | yes | Unique rule name, cited in findings. |
 | `type` | yes | `"forbidden"` or `"allowedOnly"`. |
 | `from`, `to` | yes | Selectors (below). |
-| `kinds` | no | Subset of the dependency edge kinds; default all three. Empty list = error. |
+| `kinds` | no | Subset of the dependency edge kinds; the default is all three. An empty list is an error. |
 
-Semantics over edges of the rule's kinds:
+Semantics, over edges of the rule's kinds:
 
-- **`forbidden`** — any edge whose source matches `from` *and* whose target matches `to` is a violation.
-- **`allowedOnly`** — every edge whose source matches `from` must have a target matching `to`; each edge that does not is a violation.
+- **`forbidden`**: any edge whose source matches `from` *and* whose target matches `to` is a violation.
+- **`allowedOnly`**: every edge whose source matches `from` must have a target matching `to`; each edge that doesn't is a violation.
 
 ### Selectors
 
@@ -130,7 +146,7 @@ A selector matches nodes or code locations by exactly one of:
 
 ### Capture wildcards in `files` selectors
 
-The `from` pattern may contain captures `$1`…`$9` (each at most once), and the `to` pattern may reference them — the way to express *parallel-structure* rules like "a module's spec may only be depended on by that module's own code":
+The `from` pattern may contain captures `$1` to `$9` (each at most once), and the `to` pattern may reference them. That's how to express *parallel-structure* rules like "a module's spec may only be depended on by that module's own code":
 
 ```ts
 {
@@ -141,26 +157,27 @@ The `from` pattern may contain captures `$1`…`$9` (each at most once), and the
 }
 ```
 
-A capture matches one or more bytes within a single path segment (never `/`). Matching is disambiguated left to right, each wildcard and capture taking as few bytes as possible — so every match and every capture value is unique. For example, `$1-$2.ts` against `a-b-c.ts` captures `$1 = a`, `$2 = b-c`. A `to` referencing a capture absent from `from` is a configuration error.
+- **Syntax**: a capture is exactly `$` followed by one digit `1`–`9`. Any other `$`, such as `$0` or a trailing `$`, is an ordinary character.
+- **Matching**: a capture matches one or more bytes within a single path segment, never across `/`.
+- **Disambiguation**: matching goes left to right, and each wildcard and capture takes as few bytes as possible, so every match and every capture value is unique. For example, `$1-$2.ts` against `a-b-c.ts` captures `$1 = a` and `$2 = b-c`.
+- **Errors**: a `to` that references a capture absent from `from` is a configuration error.
 
-A violation finding names the rule and the offending edge:
+A violation finding names the rule and the offending edge, and lists them as its context:
 
 ```
-policy violation (14.12): policy violation: rule "app-avoids-drafts": the
-references edge src/auth.ts#login -> specs/AUTH.mdx#auth.login.valid violates
-the rule — its source matches "from" and its target matches "to" of the
-forbidden rule (SPEC 7.5); remove or redirect the dependency, or revise the
-rule in the configuration (SPEC 14.12)
+policy-violation: policy violation: rule "app-avoids-drafts": the references edge src/auth.ts#login -> specs/AUTH.mdx#auth.login.valid violates the rule — its source matches "from" and its target matches "to" of the forbidden rule (SPEC 7.5); remove or redirect the dependency, or revise the rule in the configuration (SPEC 14.12) [app-avoids-drafts, src/auth.ts#login, references, specs/AUTH.mdx#auth.login.valid]
 ```
 
 ## Glob rules
 
-Globs appear in groups, selectors, `markdown.outDir` handling, and the `--file` flags of `ids`/`query nodes`. The language is deliberately small:
+Globs appear in groups, in selectors, and in the `--file` flags of `ids`, `query nodes`, `occurrences`, and `view`. The language is deliberately small:
 
-- `*` — any (possibly empty) run of bytes within one path segment
-- `?` — exactly one byte within a segment
-- `**` — any number of whole segments, including none
+- `*` matches any (possibly empty) run of bytes within one path segment;
+- `?` matches exactly one byte within a segment;
+- `**` matches any number of whole segments, including none. It has this meaning only as a whole pattern segment; inside a longer segment, each `*` is the ordinary single-segment wildcard.
 
-Matching is byte-wise and case-sensitive. A path segment beginning with `.` is matched only by a pattern segment that itself starts with `.` — `**/*.mdx` does not see `specs/.drafts/x.mdx`. A pattern that resolves outside the workspace root is an error.
+Matching is byte-wise and case-sensitive. A path segment beginning with `.` is matched only by a pattern segment that itself starts with `.`, so `**/*.mdx` doesn't see `specs/.drafts/x.mdx`.
 
-Discovery never follows symbolic links — a symlink (to a file or directory, broken or not) is never a discovered source and never traversed, so linked or cyclic directory structures cannot pull outside content into the workspace.
+Whether a pattern points outside the workspace root is decided by its spelling alone: a pattern that starts with `/`, or whose `..` segments climb above the root, is an error. That's a configuration error in the configuration, and an invalid flag value (exit `2`) in a `--file` flag. Discovered paths never contain `.`, `..`, or empty segments, so such segments inside an otherwise valid pattern simply match nothing.
+
+Discovery never follows symbolic links. A symlink (to a file or a directory, broken or not) is never a discovered source and is never traversed, so linked or cyclic directory structures can't pull outside content into the workspace. Discovery also lists only the directories some glob could match below, so unrelated parts of the tree are never read.
