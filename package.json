@@ -1,6 +1,6 @@
 {
   "name": "@modularcloud/xspec",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Requirement traceability for specifications written in MDX: typed spec modules, reference validation, dependency policy, coverage, impact analysis, and staged reviews.",
   "license": "MIT",
   "repository": {
