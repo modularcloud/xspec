@@ -10,8 +10,10 @@
 // SPEC 2.5: every non-root node without the attribute is coverage-required;
 // `coverage="none"` excludes the node as a coverage target (it can still be a
 // `d` target, still appears in impact reports, and its descendants retain
-// their own coverage behavior); the only defined values are `required`
-// (default) and `none` — anything else is invalid (14.17, 2.7).
+// their own coverage behavior) — as a target only: SPEC 8 bars roots alone
+// from coverage paths, so the node still serves on one as boundary node or
+// intermediate (T2.5-2's second workspace); the only defined values are
+// `required` (default) and `none` — anything else is invalid (14.17, 2.7).
 // SPEC 2.6: `tags` is a whitespace-separated list split on runs of 1.4
 // whitespace with leading/trailing whitespace ignored; duplicates collapse; a
 // value yielding no tags is equivalent to omitting the prop; tags are
@@ -29,6 +31,14 @@
 // (§VIOL-VALID-WIDE, §VIOL-VALID-CTRL): T2.6-1/T2.6-2 split only on the true
 // whitespace characters of SPEC 1.4 — U+00A0/U+0085/U+2028 and non-whitespace
 // control characters appear nowhere in their fixtures.
+//
+// Tag sets are compared literally in the 12.7 value form — an array in byte
+// order, duplicates collapsed, the datum the H-3 decode enforces
+// (`decodeTagSet`; T12.7-1) — never re-sorted or de-duplicated by the harness
+// (H-3): T2.6-1's reversed spelling `tags="b a"` and T2.6-2's `tags="a b a a"`
+// each report exactly `["a", "b"]` through `query node` and `query nodes`,
+// the surface where the form is asserted for those commands (CERTIFICATIONS.md
+// §CONF-VALID, §CONF-AVAIL: T11.4-3 asserts it on the `view` node).
 
 import type {
   CoverageProfileReport,
@@ -37,8 +47,10 @@ import type {
   NodeReport,
   NodeRow,
   NodeSummary,
+  SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
+  classifyIgnoredReasons,
   decodeCoverageReport,
   decodeEdgesReport,
   decodeFindingsReport,
@@ -55,16 +67,19 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
-  assertFindingLocated,
   assertSameJson,
   buildFindings,
   buildOk,
-  byteWindow,
   expectExit,
   runJson,
   sortedIdentities,
@@ -81,15 +96,20 @@ const FF = "\u000C";
 const CR = "\u000D";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group — the
-// CONF-VALID scope (T2.6-1, T2.6-2) and the negative 14.17 arms.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// CONF-VALID scope (T2.6-1, T2.6-2) and the negative 14.17 arms. A
+// staged-source record (S-9's timing clause): T2.5-3's invalid-value
+// workspaces are created after its first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T2.5-3 xspec.config.ts — the specs-only configuration of the invalid-value workspaces",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One coverage profile in default (`leaves`) targeting, boundary and target
 // both the sole spec group ("main" is unambiguous, so boundaryKind MUST be
@@ -147,8 +167,12 @@ export default defineConfig({
 
 // Tag selection surfaces (T2.6-3): a coverage profile restricted by
 // `targetTags` (SPEC 7.4) and a forbidden policy rule whose `from` and `to`
-// are both `tags` selectors (SPEC 7.5).
-const TAG_SELECT_CONFIG = `import { defineConfig } from "xspec"
+// are both `tags` selectors (SPEC 7.5). A staged-source record (S-9's timing
+// clause): that arm's workspace is created after the body's first
+// invocation.
+const TAG_SELECT_CONFIG = stagedTs(
+  "T2.6-3 xspec.config.ts — the `targetTags` profile and the `tags` policy rule",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -172,12 +196,13 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
-  files: Readonly<Record<string, string>>,
+  config: string | StagedTs,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -188,11 +213,6 @@ async function withWorkspace<T>(
   } finally {
     await workspace.dispose();
   }
-}
-
-/** Reported tags in byte order — SPEC fixes the set, not the row order. */
-function sortedTags(tags: readonly string[]): string[] {
-  return [...tags].sort();
 }
 
 /**
@@ -446,12 +466,13 @@ const T2_5_1 = defineProductTest({
 // T2.5-2
 // ---------------------------------------------------------------------------
 
-// One workspace observing every stated consequence of `coverage="none"`
-// (SPEC 2.5): `meta` carries the attribute and has a child (the child's own
-// coverage behavior is unaffected); `user` declares `d={"meta"}` (the node
-// can still be a `d` target); a committed git baseline lets an edit to
-// `meta`'s own text surface in `impact --base` (the node still appears in
-// impact reports when changed).
+// The first workspace observes the four consequences of `coverage="none"`
+// that TEST-SPEC makes observable in one workspace (SPEC 2.5): `meta` carries
+// the attribute and has a child (the child's own coverage behavior is
+// unaffected); `user` declares `d={"meta"}` (the node can still be a `d`
+// target); a committed git baseline lets an edit to `meta`'s own text surface
+// in `impact --base` (the node still appears in impact reports when changed).
+// The excluded-as-a-target-only arm has a second workspace (below).
 const T2_5_2_BASELINE = [
   '<S id="meta" coverage="none">',
   "Meta text.",
@@ -469,19 +490,259 @@ const T2_5_2_BASELINE = [
 
 // The same workspace with exactly one edit: `meta`'s own text (its ownHash
 // changes, so `meta` is `changed` relative to the baseline, SPEC 5.5/5.6).
-const T2_5_2_EDITED = T2_5_2_BASELINE.replace(
-  "Meta text.",
-  "Meta text, edited.",
+// Staged after the coverage queries — a staged-source record, judged before
+// any product exists (S-9, test/self/s9-staged-sources.test.ts).
+const T2_5_2_EDITED = stagedMdx(
+  "T2.5-2 specs/A.mdx with only the coverage-none node's own text edited",
+  T2_5_2_BASELINE.replace("Meta text.", "Meta text, edited."),
 );
 
 const T2_5_2_META = "specs/A.mdx#meta";
 const T2_5_2_CHILD = "specs/A.mdx#meta.child";
 const T2_5_2_USER = "specs/A.mdx#user";
 
+// The excluded-as-a-target-only arm, on a workspace of its own:
+// `coverage="none"` takes a node out of a profile's required set and out of
+// nothing else of coverage — SPEC 8 bars roots alone from coverage paths, as
+// boundary node, intermediate, or target. Spec groups `base` (base/A.mdx)
+// and `derived` (derived/B.mdx), under two profiles targeting `derived` with
+// boundary `base`, one `direct` and one `transitive`: A's `n`
+// (`coverage="none"`, `d={B.t1}`) is a boundary node whose one edge covers
+// `t1` in both modes; A's `k` (`d={B.m}`) reaches `t2` only through B's `m`
+// (`coverage="none"`, `d={"t2"}`), ignored in both profiles yet an
+// intermediate, so `t2` is covered in `transitive` mode, its path `k` → `m`
+// → `t2`, and uncovered in `direct` mode, its one edge sourced at `m`, no
+// boundary node; `m`, a leaf under no `targetTags` filter, is ignored for
+// the attribute alone (SPEC 8.2). A product dropping `coverage="none"` nodes
+// from the coverage graph rather than from the required set reports `t1`
+// uncovered in both profiles, and `t2` too. Each covering path is the only
+// path to its target, so no 12.0 tie-break is in play. The workspace is
+// created after the body's first invocation, so its initial sources are
+// staged-source records (S-9's timing clause).
+const T2_5_2_TARGET_ONLY_CONFIG = stagedTs(
+  "T2.5-2 xspec.config.ts — the excluded-as-a-target-only arm's `direct` and `transitive` profiles targeting `derived` with boundary `base`",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    base: ["base/**/*.mdx"],
+    derived: ["derived/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p-direct",
+      target: "derived",
+      boundary: "base",
+      mode: "direct"
+    },
+    {
+      name: "p-transitive",
+      target: "derived",
+      boundary: "base",
+      mode: "transitive"
+    }
+  ]
+})
+`,
+);
+
+const T2_5_2_TARGET_ONLY_A = stagedMdx(
+  'T2.5-2 base/A.mdx — the boundary nodes `n` (`coverage="none"`, `d={B.t1}`) and `k` (`d={B.m}`)',
+  [
+    'import B from "../derived/B.xspec"',
+    "",
+    '<S id="n" coverage="none" d={B.t1}>',
+    "Boundary node excluded as a coverage target.",
+    "</S>",
+    "",
+    '<S id="k" d={B.m}>',
+    "Boundary node depending on the ignored m.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const T2_5_2_TARGET_ONLY_B = stagedMdx(
+  'T2.5-2 derived/B.mdx — the target leaves `t1`, `t2`, and `m` (`coverage="none"`, `d={"t2"}`)',
+  [
+    '<S id="t1">',
+    "Target leaf covered from the excluded boundary node.",
+    "</S>",
+    "",
+    '<S id="t2">',
+    "Target leaf reached only through m.",
+    "</S>",
+    "",
+    '<S id="m" coverage="none" d={"t2"}>',
+    "Ignored leaf on the covering path to t2.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const T2_5_2_N = "base/A.mdx#n";
+const T2_5_2_K = "base/A.mdx#k";
+const T2_5_2_DERIVED_ROOT = "derived/B.mdx";
+const T2_5_2_T1 = "derived/B.mdx#t1";
+const T2_5_2_T2 = "derived/B.mdx#t2";
+const T2_5_2_M = "derived/B.mdx#m";
+
+/** One profile's expected report in the excluded-as-a-target-only arm. */
+interface TargetOnlyProfileExpectation {
+  readonly name: string;
+  readonly mode: "direct" | "transitive";
+  readonly counts: {
+    readonly required: number;
+    readonly covered: number;
+    readonly uncovered: number;
+    readonly ignored: number;
+  };
+  /** Covered rows sorted by identity, each with its one covering path. */
+  readonly covered: readonly {
+    readonly identity: string;
+    readonly path: readonly string[];
+  }[];
+  readonly uncovered: readonly string[];
+  /** Why the covered and uncovered rows are what they are (diagnostics). */
+  readonly why: string;
+}
+
+const T2_5_2_TARGET_ONLY_PROFILES: readonly TargetOnlyProfileExpectation[] = [
+  {
+    name: "p-direct",
+    mode: "direct",
+    counts: { required: 2, covered: 1, uncovered: 1, ignored: 2 },
+    covered: [{ identity: T2_5_2_T1, path: [T2_5_2_N, T2_5_2_T1] }],
+    uncovered: [T2_5_2_T2],
+    why:
+      "a single edge from a boundary node covers in `direct` mode — `n` → " +
+      '`t1` covers `t1`, the `coverage="none"` `n` serving as boundary node, ' +
+      "while `t2`'s one edge is sourced at `m`, no boundary node, so `t2` is " +
+      "uncovered (SPEC 2.5, 8)",
+  },
+  {
+    name: "p-transitive",
+    mode: "transitive",
+    counts: { required: 2, covered: 2, uncovered: 0, ignored: 2 },
+    covered: [
+      { identity: T2_5_2_T1, path: [T2_5_2_N, T2_5_2_T1] },
+      { identity: T2_5_2_T2, path: [T2_5_2_K, T2_5_2_M, T2_5_2_T2] },
+    ],
+    uncovered: [],
+    why:
+      "a path of one or more edges from a boundary node covers in " +
+      '`transitive` mode — `n` → `t1` covers `t1` through the `coverage="none"` ' +
+      "boundary node, and `k` → `m` → `t2` covers `t2` through the ignored " +
+      "`m` as intermediate, roots alone barred from coverage paths (SPEC 2.5, 8)",
+  },
+];
+
+/**
+ * T2.5-2's excluded-as-a-target-only arm (the constants above): after a
+ * clean `build` and the premise `depends` edges, one `coverage --json` run
+ * carries both profiles, each asserted whole — its counts, every covered
+ * node with its one covering path, every uncovered node, the ignored nodes
+ * (the root and `m`), and `m`'s reasons, exactly the `coverage="none"` one
+ * (SPEC 8, 8.1, 8.2). The root's reasons are T8.2-1's subject.
+ */
+async function runExcludedAsTargetOnlyArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    T2_5_2_TARGET_ONLY_CONFIG,
+    {
+      "base/A.mdx": T2_5_2_TARGET_ONLY_A,
+      "derived/B.mdx": T2_5_2_TARGET_ONLY_B,
+    },
+    async (workspace) => {
+      const arm = "T2.5-2 (excluded as a target only)";
+      await buildOk(product, workspace, `${arm} \`build\``);
+      const edgesLabel = `${arm} \`query edges --kinds depends\``;
+      assertEdgeSetEqual(
+        decodeEdgesReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "edges", "--kinds", "depends"],
+            edgesLabel,
+          ),
+          edgesLabel,
+        ),
+        [
+          { from: T2_5_2_N, to: T2_5_2_T1, kind: "depends" },
+          { from: T2_5_2_K, to: T2_5_2_M, kind: "depends" },
+          { from: T2_5_2_M, to: T2_5_2_T2, kind: "depends" },
+        ],
+        `${arm} the premise — the complete \`depends\` edge set, every edge ` +
+          'the covering paths need, `coverage="none"` nodes ordinary `d` ' +
+          "sources and targets (SPEC 2.2, 2.5)",
+      );
+
+      const label = `${arm} \`coverage --json\``;
+      const report = decodeCoverageReport(
+        await runJson(product, workspace, ["coverage", "--json"], label),
+        label,
+      );
+      assertSameJson(
+        report.profiles.map((profile) => profile.name).sort(),
+        T2_5_2_TARGET_ONLY_PROFILES.map((profile) => profile.name),
+        `${label}: the report carries each configured profile exactly once ` +
+          "(SPEC 8.2: `xspec coverage` runs all profiles)",
+      );
+      for (const expected of T2_5_2_TARGET_ONLY_PROFILES) {
+        const profile = report.profiles.find(
+          (candidate) => candidate.name === expected.name,
+        )!;
+        const context = `${label} profile ${expected.name} (\`${expected.mode}\` mode)`;
+        assertCoverageCounts(
+          profile,
+          expected.counts,
+          `${context} — \`t1\` and \`t2\` are required and \`m\` and the ` +
+            "root ignored (SPEC 8.1); " +
+            expected.why,
+        );
+        assertSameJson(
+          profile.covered
+            .map((row) => ({ identity: row.identity, path: [...row.path] }))
+            .sort((a, b) => (a.identity < b.identity ? -1 : 1)),
+          expected.covered,
+          `${context}: every covered node with its one covering path, ` +
+            `boundary node to target — ${expected.why}`,
+        );
+        assertSameJson(
+          [...profile.uncovered].sort(),
+          expected.uncovered,
+          `${context}: every uncovered node — ${expected.why}`,
+        );
+        assertSameJson(
+          sortedIdentities(profile.ignored),
+          [T2_5_2_DERIVED_ROOT, T2_5_2_M],
+          `${context}: the ignored nodes are exactly the root and \`m\`, the ` +
+            'target group\'s nodes 8.1 excludes — `coverage="none"` takes ' +
+            "`m` out of the required set alone (SPEC 2.5, 8.1, 8.2)",
+        );
+        const ignoredM = profile.ignored.find(
+          (row) => row.identity === T2_5_2_M,
+        )!;
+        assertSameJson(
+          classifyIgnoredReasons(
+            ignoredM.reasons,
+            `${context} ignored ${T2_5_2_M}`,
+          ),
+          ["coverage-none"],
+          `${context}: \`m\` is reported ignored with the \`coverage="none"\` ` +
+            "reason alone — a leaf under no `targetTags` filter, no other " +
+            "reason applies (SPEC 8.2: all that apply, in the fixed order)",
+        );
+      }
+    },
+  );
+}
+
 const T2_5_2 = defineProductTest({
   id: "T2.5-2",
   title:
-    '`coverage="none"`: the node is excluded from coverage targets (ignored with its reason), can still be a `d` target, still appears in impact reports when changed, and its children remain coverage-required — one workspace (SPEC 2.5, 8.1, 8.2, 9)',
+    '`coverage="none"`: the node is excluded from coverage targets (ignored with its reason), can still be a `d` target, still appears in impact reports when changed, and its children remain coverage-required — one workspace; and it is excluded as a target only — under a `direct` and a `transitive` profile targeting group `derived` with boundary `base`, the `coverage="none"` boundary node `n` covers `t1` in both modes (path `n` → `t1`) and the ignored `coverage="none"` intermediate `m` lies on `t2`\'s covering path in `transitive` mode (`k` → `m` → `t2`), `t2` uncovered in `direct` mode, `m` reported ignored with the `coverage="none"` reason alone (SPEC 2.5, 8, 8.1, 8.2, 9)',
   run: async (product) => {
     await withWorkspace(
       ALL_TARGETS_PROFILE_CONFIG,
@@ -627,6 +888,10 @@ const T2_5_2 = defineProductTest({
         );
       },
     );
+
+    // Excluded as a target only: a `coverage="none"` node still serves as
+    // boundary node and as intermediate on coverage paths (SPEC 2.5, 8).
+    await runExcludedAsTargetOnlyArm(product);
   },
 });
 
@@ -641,7 +906,12 @@ const T2_5_2 = defineProductTest({
 // (the coverage attribute is a metadataHash input, SPEC 5.5).
 const T2_5_3_EXPLICIT =
   '<S id="node" coverage="required">\nNode behavior.\n</S>\n';
-const T2_5_3_OMITTED = '<S id="node">\nNode behavior.\n</S>\n';
+// The omitted variant is staged after the explicit variant's build and
+// queries — a staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const T2_5_3_OMITTED = stagedMdx(
+  "T2.5-3 specs/A.mdx with the coverage prop omitted (the default variant)",
+  '<S id="node">\nNode behavior.\n</S>\n',
+);
 const T2_5_3_NODE = "specs/A.mdx#node";
 
 // Shared negative-arm template (the SUITE-02/03 discipline): a valid sibling
@@ -649,13 +919,131 @@ const T2_5_3_NODE = "specs/A.mdx#node";
 // location assertion has teeth.
 const SIBLING = '<S id="ok">\nA valid sibling section.\n</S>\n\n';
 
+/** `\` (U+005C), built from its code point (the SUITE-03 discipline). */
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+/**
+ * Verbatim spellings (SPEC 2.4): the six-character Unicode escape of `o`
+ * (backslash, `u`, `006F`) and the decimal character reference of `n`
+ * (`&#110;`), each embedded so that an interpreting reader would spell
+ * `none`. A quoted attribute value is the characters between its delimiters
+ * exactly as spelled — no escape sequence or character reference is
+ * interpreted — so each is neither `required` nor `none` (SPEC 2.4, 2.5 →
+ * 14.17).
+ */
+const ESCAPE_SPELLED_NONE = `n${BACKSLASH}u006Fne`;
+const REFERENCE_SPELLED_NONE = "&#110;one";
+
 // Representatives of "any other value" (SPEC 2.5, 2.7 → 14.17): an unknown
 // token, a case variant (values compare byte-wise, no case folding — SPEC
-// 12.0), and the empty string.
-const INVALID_COVERAGE_VALUES: readonly string[] = ["optional", "None", ""];
+// 12.0), the empty string, and the two verbatim spellings above.
+const INVALID_COVERAGE_VALUES: readonly string[] = [
+  "optional",
+  "None",
+  "",
+  ESCAPE_SPELLED_NONE,
+  REFERENCE_SPELLED_NONE,
+];
 
-function coverageConstruct(value: string): string {
-  return `<S id="sec" coverage="${value}">\nSection with the coverage value under test.\n</S>`;
+/** Why a staged value is invalid — the clause a diagnosis must cite. */
+function coverageValueRationale(value: string): string {
+  if (value === ESCAPE_SPELLED_NONE || value === REFERENCE_SPELLED_NONE) {
+    return (
+      "SPEC 2.4: a quoted attribute value is read verbatim — no escape sequence " +
+      "or character reference interpreted — so this spelling is neither " +
+      "`required` nor `none` (14.17)"
+    );
+  }
+  return "SPEC 2.5: the only defined values are `required` and `none` (14.17)";
+}
+
+/** A staged file whose `coverage` attribute is under test. */
+interface CoverageStaging {
+  readonly source: string;
+  /**
+   * The `coverage` attribute's own characters — name through closing quote,
+   * the attribute range of SPEC 11.4 — as byte offsets (SPEC 1.7).
+   */
+  readonly attribute: SourceRange;
+}
+
+/**
+ * One section after the sibling whose `coverage` attribute carries the value
+ * under test; the attribute is pinned by its own characters as the range a
+ * 14.17 finding on it must locate (SPEC 14; T14-11). Offsets are UTF-8 byte
+ * lengths of the text before the attribute.
+ */
+function coverageStaging(value: string): CoverageStaging {
+  const prefix = `${SIBLING}<S id="sec" `;
+  const attribute = `coverage="${value}"`;
+  const start = Buffer.byteLength(prefix, "utf8");
+  return {
+    source: `${prefix}${attribute}>\nSection with the coverage value under test.\n</S>\n`,
+    attribute: { start, end: start + Buffer.byteLength(attribute, "utf8") },
+  };
+}
+
+/** One invalid value's staging with its record. */
+interface InvalidCoverageStaging {
+  readonly value: string;
+  readonly staged: CoverageStaging;
+  /** `staged.source` as a staged-source record. */
+  readonly source: StagedMdx;
+}
+
+// The invalid values' stagings, computed once at module load: their
+// workspaces are created after the required-variant workspace's
+// invocations, so each is a staged-source record (S-9's timing clause).
+const INVALID_COVERAGE_STAGINGS: readonly InvalidCoverageStaging[] =
+  INVALID_COVERAGE_VALUES.map((value) => {
+    const staged = coverageStaging(value);
+    return {
+      value,
+      staged,
+      source: stagedMdx(
+        `T2.5-3 coverage=${JSON.stringify(value)} specs/A.mdx`,
+        staged.source,
+      ),
+    };
+  });
+
+/**
+ * Assert `build --json` reported exactly one finding, condition 14.17,
+ * locating exactly one range — the offending `coverage` attribute's own
+ * characters in `specs/A.mdx` (SPEC 14: an attribute condition locates the
+ * attribute range of 11.4; 12.7 locations).
+ */
+function assertSingle1417AtAttribute(
+  findings: readonly Finding[],
+  attribute: SourceRange,
+  context: string,
+): void {
+  assertConditionCounts(findings, { "14.17": 1 }, context);
+  const finding = findings[0]!;
+  if (finding.locations.length !== 1) {
+    fail(
+      `${context}: a 14.17 finding on a \`coverage\` value locates exactly one ` +
+        "construct — the offending attribute (SPEC 14: an attribute condition " +
+        "locates the attribute's own characters); got " +
+        `${String(finding.locations.length)} locations (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  const location = finding.locations[0]!;
+  if (location.file !== "specs/A.mdx") {
+    fail(
+      `${context}: the 14.17 finding must locate in the workspace-relative source ` +
+        `file (SPEC 14, 1.5, 12.7); expected "specs/A.mdx", got ` +
+        `${JSON.stringify(location.file)} (message: ${JSON.stringify(finding.message)})`,
+    );
+  }
+  assertSameJson(
+    { start: location.range.start, end: location.range.end },
+    attribute,
+    `${context}: the 14.17 finding locates exactly the \`coverage\` attribute's ` +
+      "own characters — name through closing quote, the attribute range of SPEC " +
+      "11.4 — as zero-based byte offsets, end-exclusive (SPEC 14, 1.7, 12.7)",
+  );
 }
 
 async function expectVariantRequired(
@@ -705,7 +1093,7 @@ async function expectVariantRequired(
 const T2_5_3 = defineProductTest({
   id: "T2.5-3",
   title:
-    '`coverage="required"` is accepted and behaves as the default (same required-set membership, reported attribute, and metadataHash as the omitted variant); any other value fails with 14.17 (SPEC 2.5, 2.7)',
+    '`coverage="required"` is accepted and behaves as the default (same required-set membership, reported attribute, and metadataHash as the omitted variant); any other value fails with 14.17 located at the attribute — a value spelled with an escape sequence or character reference included, read verbatim (SPEC 2.4, 2.5, 2.7, 14)',
   run: async (product) => {
     await withWorkspace(
       PROFILE_CONFIG,
@@ -744,21 +1132,16 @@ const T2_5_3 = defineProductTest({
       },
     );
 
-    for (const value of INVALID_COVERAGE_VALUES) {
-      const construct = coverageConstruct(value);
-      const context = `T2.5-3 \`build --json\` with coverage=${JSON.stringify(value)}`;
+    for (const { value, staged, source } of INVALID_COVERAGE_STAGINGS) {
+      const context =
+        `T2.5-3 \`build --json\` with coverage=${JSON.stringify(value)} ` +
+        `(${coverageValueRationale(value)})`;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": `${SIBLING}${construct}\n` },
+        { "specs/A.mdx": source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
-          assertConditionCounts(findings, { "14.17": 1 }, context);
-          assertFindingLocated(
-            findings[0]!,
-            { file: "specs/A.mdx", window: byteWindow(SIBLING, construct) },
-            `${context}: the 14.17 finding (SPEC 2.5: the only defined values are ` +
-              "`required` and `none`)",
-          );
+          assertSingle1417AtAttribute(findings, staged.attribute, context);
         },
       );
     }
@@ -769,20 +1152,26 @@ const T2_5_3 = defineProductTest({
 // T2.6-1
 // ---------------------------------------------------------------------------
 
-// Four spellings that must all yield exactly the tag set {a, b} (SPEC 2.6):
-// a single space; a run mixing tab, vertical tab, form feed, and space; a
-// run containing the line terminators CR LF plus a tab (line endings inside
-// a quoted attribute value are well-formed MDX in flow context, and both CR
-// and LF are 1.4 whitespace, so the split result is terminator-normalization
-// independent); and leading/trailing whitespace around a single-space
-// separator. Every separator character is drawn from SPEC 1.4's exact
-// whitespace class — never U+00A0/U+0085/U+2028 (CERTIFICATIONS.md
-// §VIOL-VALID-WIDE: T2.6-1 splits only on true 1.4 whitespace).
+// Five spellings that must all yield exactly the tag set {a, b} (SPEC 2.6),
+// reported as exactly `["a", "b"]` — the 12.7 tag-set form, byte order,
+// compared literally: a single space; a run mixing tab, vertical tab, form
+// feed, and space; a run containing the line terminators CR LF plus a tab
+// (line endings inside a quoted attribute value are well-formed MDX in flow
+// context, and both CR and LF are 1.4 whitespace, so the split result is
+// terminator-normalization independent); leading/trailing whitespace around
+// a single-space separator; and the reversed spelling `b a`, whose tokens
+// arrive in the opposite order — a product echoing the spelled order
+// (`["b", "a"]`) fails the form-exact decode (SPEC 12.7, 12.0), and its
+// metadataHash still equals the others' (SPEC 5.5 hashes the sorted tags).
+// Every separator character is drawn from SPEC 1.4's exact whitespace class
+// — never U+00A0/U+0085/U+2028 (CERTIFICATIONS.md §VIOL-VALID-WIDE: T2.6-1
+// splits only on true 1.4 whitespace).
 const T2_6_1_ARM_IDS = [
   "plain",
   "mixed",
   "terminators",
   "padded",
+  "reversed",
 ] as readonly string[];
 
 const T2_6_1_SOURCE = [
@@ -802,6 +1191,10 @@ const T2_6_1_SOURCE = [
   "Leading and trailing whitespace ignored.",
   "</S>",
   "",
+  '<S id="reversed" tags="b a">',
+  "Reversed spelling - reported in byte order.",
+  "</S>",
+  "",
   '<S id="other" tags="c">',
   "Different tag - the filter discriminator.",
   "</S>",
@@ -815,7 +1208,7 @@ const T2_6_1_SOURCE = [
 const T2_6_1 = defineProductTest({
   id: "T2.6-1",
   title:
-    '`tags="a b"`, runs of mixed 1.4 whitespace as separators, and leading/trailing whitespace all yield tags {a, b} — asserted via `query node` and `query nodes --tag` (SPEC 2.6, 1.4)',
+    '`tags="a b"`, runs of mixed 1.4 whitespace as separators, leading/trailing whitespace, and the reversed spelling `tags="b a"` all yield tags {a, b} — reported as exactly `["a", "b"]`, the 12.7 tag-set form in byte order, compared literally and never re-sorted, with one metadataHash across the five spellings — asserted via `query node` and `query nodes --tag` (SPEC 2.6, 1.4, 12.7, 5.5)',
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -827,10 +1220,12 @@ const T2_6_1 = defineProductTest({
           "T2.6-1 `build` over the tag-splitting spellings",
         );
 
-        // Every arm reports exactly the set {a, b} (as sorted tags), and —
-        // since the metadataHash input is the split, sorted tag set together
-        // with the (empty) `d` set and default coverage (SPEC 5.5) — all
-        // arms' metadataHashes are identical: the spellings are equivalent.
+        // Every arm reports exactly `["a", "b"]` — the 12.7 tag-set form,
+        // byte order, compared literally (the reversed spelling included) —
+        // and, since the metadataHash input is the split, sorted tag set
+        // together with the (empty) `d` set and default coverage (SPEC
+        // 5.5), all arms' metadataHashes are identical: the spellings are
+        // equivalent.
         const hashes = new Set<string>();
         for (const id of T2_6_1_ARM_IDS) {
           const identity = `specs/A.mdx#${id}`;
@@ -841,15 +1236,16 @@ const T2_6_1 = defineProductTest({
             "T2.6-1",
           );
           assertSameJson(
-            sortedTags(summary.tags),
+            summary.tags,
             ["a", "b"],
-            `T2.6-1 tags of ${identity} — the spelling splits to exactly {a, b} (SPEC 2.6)`,
+            `T2.6-1 tags of ${identity} — the spelling splits to exactly {a, b}, ` +
+              "reported in the 12.7 tag-set form, byte order (SPEC 2.6, 12.7)",
           );
           hashes.add(summary.metadataHash);
         }
         if (hashes.size !== 1) {
           fail(
-            "T2.6-1 all four spellings carry identical metadata (empty `d` set, " +
+            "T2.6-1 all five spellings carry identical metadata (empty `d` set, " +
               "default coverage, tag set {a, b}), so their metadataHashes must be " +
               `identical (SPEC 2.6, 5.5); got ${String(hashes.size)} distinct values: ` +
               JSON.stringify([...hashes]),
@@ -857,7 +1253,7 @@ const T2_6_1 = defineProductTest({
         }
 
         // The `--tag` filter view (SPEC 2.6, 11): each of `a` and `b`
-        // selects exactly the four arms — never `other` or `untagged` — and
+        // selects exactly the five arms — never `other` or `untagged` — and
         // `c` selects exactly `other`.
         const armIdentities = T2_6_1_ARM_IDS.map(
           (id) => `specs/A.mdx#${id}`,
@@ -872,14 +1268,15 @@ const T2_6_1 = defineProductTest({
           assertSameJson(
             sortedIdentities(rows),
             armIdentities,
-            `T2.6-1 \`query nodes --tag ${tag}\` lists exactly the four spellings' ` +
+            `T2.6-1 \`query nodes --tag ${tag}\` lists exactly the five spellings' ` +
               "nodes (SPEC 2.6, 11)",
           );
           for (const row of rows) {
             assertSameJson(
-              sortedTags(row.tags),
+              row.tags,
               ["a", "b"],
-              `T2.6-1 tags reported for ${row.identity} by \`query nodes --tag ${tag}\``,
+              `T2.6-1 tags reported for ${row.identity} by \`query nodes --tag ${tag}\` ` +
+                "— the 12.7 tag-set form, byte order (SPEC 12.7)",
             );
           }
         }
@@ -923,8 +1320,17 @@ const T2_6_2_STATIC = [
 // omitted (SPEC 2.6), observable as an equal metadataHash (SPEC 5.5). The
 // whitespace-only value uses only true 1.4 whitespace (§VIOL-VALID-WIDE).
 const T2_6_2_OMITTED = '<S id="node">\nVariant node.\n</S>\n';
-const T2_6_2_EMPTY = '<S id="node" tags="">\nVariant node.\n</S>\n';
-const T2_6_2_WS_ONLY = `<S id="node" tags=" ${TAB} ">\nVariant node.\n</S>\n`;
+// The two variants staged into specs/B.mdx after the tag queries —
+// staged-source records, one per row of the body's variant table, named
+// with the row's label (S-9, test/self/s9-staged-sources.test.ts).
+const T2_6_2_EMPTY = stagedMdx(
+  'T2.6-2 tags=""',
+  '<S id="node" tags="">\nVariant node.\n</S>\n',
+);
+const T2_6_2_WS_ONLY = stagedMdx(
+  "T2.6-2 whitespace-only tags value",
+  `<S id="node" tags=" ${TAB} ">\nVariant node.\n</S>\n`,
+);
 const T2_6_2_NODE = "specs/B.mdx#node";
 
 const T2_6_2 = defineProductTest({
@@ -942,9 +1348,10 @@ const T2_6_2 = defineProductTest({
           "T2.6-2 `build` with duplicate tags and the omitted-variant node",
         );
 
-        // Duplicates collapse: the reported tags are the two-element set, and
-        // the metadataHash equals the plain spelling's (the hash input is the
-        // collapsed, sorted tag set, SPEC 2.6, 5.5).
+        // Duplicates collapse: the reported tags are exactly `["a", "b"]` —
+        // the 12.7 tag-set form, compared literally — and the metadataHash
+        // equals the plain spelling's (the hash input is the collapsed,
+        // sorted tag set, SPEC 2.6, 5.5).
         const dup = await queryNodeMetadata(
           product,
           workspace,
@@ -952,10 +1359,10 @@ const T2_6_2 = defineProductTest({
           "T2.6-2",
         );
         assertSameJson(
-          sortedTags(dup.tags),
+          dup.tags,
           ["a", "b"],
           'T2.6-2 tags of the `tags="a b a a"` node — duplicates collapse to the set ' +
-            "{a, b} (SPEC 2.6)",
+            "{a, b}, reported in the 12.7 tag-set form (SPEC 2.6, 12.7)",
         );
         const plain = await queryNodeMetadata(
           product,
@@ -983,7 +1390,7 @@ const T2_6_2 = defineProductTest({
           "T2.6-2 the omitted-prop variant carries no tags (SPEC 2.6)",
         );
 
-        const variants: readonly { label: string; source: string }[] = [
+        const variants: readonly { label: string; source: StagedMdx }[] = [
           { label: 'tags=""', source: T2_6_2_EMPTY },
           { label: "whitespace-only tags value", source: T2_6_2_WS_ONLY },
         ];
@@ -1047,25 +1454,30 @@ const T2_6_3_MD_COMPILED = "Parent text.\n\nChild text.\n\nInline kept text.\n";
 // Tag-selection workspace (SPEC 7.4, 7.5): `tagged` carries the profile's
 // target tag; `src` carries the policy's `from` tag and depends on `tagged`;
 // `untagged` and `srcPlain` carry no tags — their edge is the negative
-// control for the policy rule, and `untagged` for `targetTags`.
-const T2_6_3_SELECT_SOURCE = [
-  '<S id="tagged" tags="core">',
-  "Core-tagged leaf.",
-  "</S>",
-  "",
-  '<S id="untagged">',
-  "Untagged leaf.",
-  "</S>",
-  "",
-  '<S id="src" tags="ui" d={"tagged"}>',
-  "The ui-tagged source depends on the core-tagged leaf.",
-  "</S>",
-  "",
-  '<S id="srcPlain" d={"untagged"}>',
-  "The untagged source depends on the untagged leaf.",
-  "</S>",
-  "",
-].join("\n");
+// control for the policy rule, and `untagged` for `targetTags`. Its
+// workspace is created after the rendering workspace's invocations, so the
+// source is a staged-source record (S-9's timing clause).
+const T2_6_3_SELECT_SOURCE = stagedMdx(
+  "T2.6-3 tag-selection specs/A.mdx",
+  [
+    '<S id="tagged" tags="core">',
+    "Core-tagged leaf.",
+    "</S>",
+    "",
+    '<S id="untagged">',
+    "Untagged leaf.",
+    "</S>",
+    "",
+    '<S id="src" tags="ui" d={"tagged"}>',
+    "The ui-tagged source depends on the core-tagged leaf.",
+    "</S>",
+    "",
+    '<S id="srcPlain" d={"untagged"}>',
+    "The untagged source depends on the untagged leaf.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T2_6_3_TAGGED = "specs/A.mdx#tagged";
 const T2_6_3_UNTAGGED = "specs/A.mdx#untagged";
@@ -1100,9 +1512,10 @@ const T2_6_3 = defineProductTest({
           "T2.6-3",
         );
         assertSameJson(
-          sortedTags(parent.tags),
+          parent.tags,
           ["ptag", "render-probe"],
-          "T2.6-3 the parent carries its own tags (the inheritance control)",
+          "T2.6-3 the parent carries its own tags (the inheritance control), " +
+            "in the 12.7 tag-set form (SPEC 12.7)",
         );
         const child = await queryNode(
           product,
@@ -1231,15 +1644,12 @@ const T2_6_3 = defineProductTest({
         );
         const violation = findings[0]!;
         assertSameJson(
-          violation.rule,
-          "no-ui-to-core",
-          "T2.6-3 the violation names its rule (SPEC 7.5)",
-        );
-        assertSameJson(
-          violation.edge,
-          { from: T2_6_3_SRC, to: T2_6_3_TAGGED, kind: "depends" },
-          "T2.6-3 the violation reports the offending edge — selected by the nodes' " +
-            "tags (SPEC 2.6, 7.5)",
+          violation.identities,
+          ["no-ui-to-core", T2_6_3_SRC, "depends", T2_6_3_TAGGED],
+          "T2.6-3 the violation's identities are, in order, the violated " +
+            "rule's name and the offending edge's source identity, kind " +
+            "token, and target identity — the edge selected by the nodes' " +
+            "tags (SPEC 2.6, 7.5, 14.12, 12.7)",
         );
       },
     );

@@ -28,6 +28,7 @@
 
 import type { Configuration, PolicyRule, PolicySelector } from "./config.js";
 import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 import type { CaptureValues, CompiledGlob } from "./glob.js";
 import type { GraphEdge, GraphNode, WorkspaceGraph } from "./graph.js";
 
@@ -138,16 +139,19 @@ function violationFinding(rule: PolicyRule, edge: GraphEdge): Finding {
         `forbidden rule`
       : `its source matches "from" but its target does not match "to" of ` +
         `the allowedOnly rule`;
-  return {
-    condition: 12,
-    message:
-      `policy violation: rule "${rule.name}": the ${edge.kind} edge ` +
+  // SPEC 14.12/12.7: the offending entity is a graph edge, not a spelling —
+  // no in-source locations, no concerned path; the identities are, in
+  // order, the violated rule's name and the edge's source identity, kind
+  // token, and target identity.
+  return pathFinding(
+    12,
+    `policy violation: rule "${rule.name}": the ${edge.kind} edge ` +
       `${edge.source} -> ${edge.target} violates the rule — ${description} ` +
       `(SPEC 7.5); remove or redirect the dependency, or revise the rule ` +
       `in the configuration (SPEC 14.12)`,
-    rule: rule.name,
-    edge: { kind: edge.kind, source: edge.source, target: edge.target },
-  };
+    null,
+    [rule.name, edge.source, edge.kind, edge.target],
+  );
 }
 
 /**

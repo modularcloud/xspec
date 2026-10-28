@@ -57,9 +57,13 @@
 // dependency or embedding target), structure, metadata, dependency, no-op —
 // so the fixed seed set (E-5) exercises every law deterministically; the
 // class mix under the committed seeds was verified by an implementation-time
-// dry-run (all six classes and every law-relevant prediction pattern occur,
-// and every staged source — before and after each edit — parses under
-// remark-mdx).
+// dry-run (all six classes and every law-relevant prediction pattern occur).
+// That every staged source — before and after each edit — derives (SPEC
+// 14.20) is S-9's live check: `P4_FORM_VECTORS` below spells the
+// rendering's forms for the S-9 self-test
+// (test/self/s9-fixture-well-formedness.test.ts), and every draw's sources,
+// the edited files included, are judged before the product sees them
+// (`drawSources`, helpers/property.ts).
 //
 // P-4 is outside every CERTIFICATIONS.md fixture scope (its preamble:
 // conformers for P-4/P-5/P-6 would be near-complete second products), so
@@ -105,12 +109,13 @@ import {
   decodeNodeRowsReport,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
@@ -120,14 +125,40 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. No
 // code groups and no Markdown emission — hashes are the subject.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// A TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), well-formed: every trial stages it afresh, from the
+// second trial on after the body's first product invocation — an initial
+// file S-7's sweep never reaches, so the ledger self-test judges it before
+// any product exists.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "P-4 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
+
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the property's one configuration file, the record above — judged
+ * as a record by test/self/s9-staged-sources.test.ts too, and here beside
+ * every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); P-4 composes no code
+ * source.
+ */
+export const P4_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-4 configuration (SPECS_ONLY_CONFIG)",
+    "xspec.config.ts",
+    SPECS_ONLY_CONFIG.source,
+  ],
+];
 
 // ---------------------------------------------------------------------------
 // Workspace model
@@ -206,10 +237,45 @@ export interface WorkspaceModel {
   files: FileModel[];
 }
 
-const FILE_NAMES = ["A", "B", "C"] as const;
+/**
+ * Model-space file names by file index. P-4, P-5, and P-6 draw at most three
+ * files; P-16 (section-16-p16.ts) appends files at later indices — the spec
+ * files it adds and the target files its section moves create — so the list
+ * runs past three, and an index past its end is a harness defect.
+ */
+const FILE_NAMES = [
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+  "J",
+  "K",
+  "L",
+  "M",
+  "N",
+  "O",
+  "P",
+] as const;
+
+/** The model-space file name of file `fileIndex` (`A` for index 0). */
+function fileName(fileIndex: number): string {
+  const name = FILE_NAMES[fileIndex] as string | undefined;
+  if (name === undefined) {
+    throw new Error(
+      `PROP-03 harness defect: no model-space file name for file index ` +
+        `${String(fileIndex)} (the model names ${String(FILE_NAMES.length)} files)`,
+    );
+  }
+  return name;
+}
 
 function filePath(fileIndex: number): string {
-  return `specs/${FILE_NAMES[fileIndex]}.mdx`;
+  return `specs/${fileName(fileIndex)}.mdx`;
 }
 
 /** Import binding of file `j` in every later file (never S/Spec/text, 2.1). */
@@ -217,7 +283,12 @@ function importBinding(fileIndex: number): string {
   return `M${String(fileIndex)}`;
 }
 
-function refIdentity(ref: RefModel): string {
+/**
+ * Workspace identity a reference resolves to (exported for the P-5
+ * section-move piece-tree builder, which must speak the same identities —
+ * section-16-p5-p6.ts).
+ */
+export function refIdentity(ref: RefModel): string {
   return ref.dotted === ""
     ? filePath(ref.file)
     : `${filePath(ref.file)}#${ref.dotted}`;
@@ -239,7 +310,12 @@ export function spellingVariants(ref: RefModel, hostFile: number): number {
   return ref.dotted === "" ? 1 : 3;
 }
 
-function renderRef(ref: RefModel, hostFile: number): string {
+/**
+ * Concrete spelling of a reference at its host file (exported for the P-5
+ * section-move piece-tree builder — byte-exact agreement with
+ * renderWorkspace is guarded there).
+ */
+export function renderRef(ref: RefModel, hostFile: number): string {
   if (ref.file === hostFile) {
     if (ref.dotted === "") {
       throw new Error(
@@ -261,7 +337,12 @@ function renderRef(ref: RefModel, hostFile: number): string {
   }
 }
 
-function renderOpenTag(
+/**
+ * A section's opening tag with its props, single-line (exported for the P-5
+ * section-move piece-tree builder — byte-exact agreement with
+ * renderWorkspace is guarded there).
+ */
+export function renderOpenTag(
   section: SectionItem,
   dotted: string,
   hostFile: number,
@@ -322,7 +403,7 @@ export function renderWorkspace(model: WorkspaceModel): Record<string, string> {
   model.files.forEach((file, fileIndex) => {
     const lines: string[] = [];
     for (let j = 0; j < fileIndex; j += 1) {
-      lines.push(`import ${importBinding(j)} from "./${FILE_NAMES[j]}.xspec"`);
+      lines.push(`import ${importBinding(j)} from "./${fileName(j)}.xspec"`);
     }
     // Mandatory blank line after the import block (module header).
     if (fileIndex > 0) lines.push("");
@@ -581,8 +662,11 @@ const PROSE_REST: ReadonlyArray<readonly [number, string]> = [
   [1, ":"],
 ];
 
-/** A prose run: anchored non-empty plain text (kept under SPEC 3, always). */
-const proseText: Gen<string> = (choices) => {
+/**
+ * A prose run: anchored non-empty plain text (kept under SPEC 3, always).
+ * Exported for P-16's edit and file generators (section-16-p16.ts).
+ */
+export const proseText: Gen<string> = (choices) => {
   const anchor = choices.pick(ANCHOR_CHARS);
   const rest = listOf((c: Choices) => c.weightedPick(PROSE_REST), { max: 7 })(
     choices,
@@ -606,8 +690,11 @@ const commentWords: Gen<string> = (choices) => {
   return anchor + rest;
 };
 
-/** 1.4-valid tag tokens (one dotted: tags MAY contain `.`). */
-const TAG_POOL = ["t1", "t2", "t3", "alpha", "beta.x", "zeta"] as const;
+/**
+ * 1.4-valid tag tokens (one dotted: tags MAY contain `.`). Exported for P-16's
+ * metadata edits (section-16-p16.ts).
+ */
+export const TAG_POOL = ["t1", "t2", "t3", "alpha", "beta.x", "zeta"] as const;
 
 /** A reference target available to a generator or edit site. */
 interface RefTarget {
@@ -1884,6 +1971,177 @@ export const genP4Trial: Gen<P4Trial> = (choices) => {
   return { model, edits };
 };
 
+// ---------------------------------------------------------------------------
+// Fixed form vectors (TEST-SPEC 17 S-9; 16 preamble)
+//
+// Every form renderWorkspace can spell — the import header, the first prose
+// line, prose hosting embeddings in every reference spelling (local quote
+// flavors; external dot, double- and single-quoted computed access; the bare
+// binding for a file root), blank and comment lines, sections with every
+// prop form (`tags` omitted, empty, dotted, duplicated; `coverage="none"`;
+// `d` omitted, empty, single as `d={ref}` and `d={[ref]}`, a pair, a
+// duplicate), nested three deep, and an empty section — in one fixed model,
+// plus the added section of an addChild edit; the S-9 self-test proves every
+// vector derives before any product exists, and each draw's sources are
+// judged the same way before the product sees them (`drawSources` below).
+// P-5 and P-6 stage through this rendering too (section-16-p5-p6.ts adds
+// its own decorated forms).
+
+function vectorProse(text: string): ProseItem {
+  return { kind: "prose", parts: [{ kind: "text", text }] };
+}
+
+function vectorSection(
+  seg: string,
+  items: BodyItem[],
+  props: Partial<
+    Pick<SectionItem, "tags" | "coverageNone" | "deps" | "depsSingle">
+  > = {},
+): SectionItem {
+  return {
+    kind: "section",
+    seg,
+    tags: null,
+    coverageNone: false,
+    deps: null,
+    depsSingle: false,
+    items,
+    ...props,
+  };
+}
+
+const P4_FORM_MODEL: WorkspaceModel = {
+  files: [
+    {
+      nextSeg: 5,
+      items: [
+        vectorProse("a0 first"),
+        vectorSection("s0", [vectorProse("k9 body")]),
+        { kind: "blank" },
+        { kind: "comment", words: "note am q" },
+        vectorSection("s1", [], { tags: [], coverageNone: true, deps: [] }),
+        vectorSection(
+          "s2",
+          [
+            {
+              kind: "prose",
+              parts: [
+                { kind: "text", text: "a0 lead " },
+                { kind: "embed", ref: { file: 0, dotted: "s0", spell: 0 } },
+                { kind: "text", text: " b1 mid " },
+                { kind: "embed", ref: { file: 0, dotted: "s0", spell: 1 } },
+                { kind: "text", text: " c2 tail" },
+              ],
+            },
+            vectorSection(
+              "s0",
+              [vectorSection("s0", [vectorProse("k9 deep")])],
+              {
+                tags: ["t1", "t2", "beta.x", "t1"],
+                deps: [{ file: 0, dotted: "s0", spell: 1 }],
+                depsSingle: true,
+              },
+            ),
+          ],
+          { deps: [{ file: 0, dotted: "s0", spell: 0 }], depsSingle: false },
+        ),
+        vectorSection("s3", [vectorProse("k9 pair")], {
+          deps: [
+            { file: 0, dotted: "s0", spell: 0 },
+            { file: 0, dotted: "s1", spell: 1 },
+          ],
+        }),
+        vectorSection("s4", [vectorProse("k9 dup")], {
+          deps: [
+            { file: 0, dotted: "s0", spell: 0 },
+            { file: 0, dotted: "s0", spell: 1 },
+          ],
+        }),
+      ],
+    },
+    {
+      nextSeg: 1,
+      items: [
+        {
+          kind: "prose",
+          parts: [
+            { kind: "text", text: "b0 first " },
+            { kind: "embed", ref: { file: 0, dotted: "", spell: 0 } },
+            { kind: "text", text: " root " },
+            { kind: "embed", ref: { file: 0, dotted: "s2.s0", spell: 0 } },
+            { kind: "text", text: " dot " },
+            { kind: "embed", ref: { file: 0, dotted: "s2.s0", spell: 1 } },
+            { kind: "text", text: " dq " },
+            { kind: "embed", ref: { file: 0, dotted: "s2.s0", spell: 2 } },
+            { kind: "text", text: " sq" },
+          ],
+        },
+        vectorSection("s0", [vectorProse("k9 ext")], {
+          deps: [{ file: 0, dotted: "s3", spell: 2 }],
+          depsSingle: true,
+        }),
+      ],
+    },
+    {
+      nextSeg: 1,
+      items: [
+        vectorProse("c0 first"),
+        vectorSection("s0", [], {
+          tags: ["zeta"],
+          coverageNone: true,
+          deps: [
+            { file: 0, dotted: "", spell: 0 },
+            { file: 1, dotted: "s0", spell: 1 },
+          ],
+        }),
+      ],
+    },
+  ],
+};
+
+/** The fixed form-vector set of the PROP-03 rendering (S-9): name, source. */
+export const P4_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ...Object.entries(renderWorkspace(P4_FORM_MODEL)).map(
+    ([path, source]): readonly [string, string] => [
+      `rendering forms of ${path}`,
+      source,
+    ],
+  ),
+  ...Object.entries(
+    renderWorkspace(
+      applyEdit(P4_FORM_MODEL, {
+        kind: "addChild",
+        node: "specs/A.mdx",
+        at: 1,
+        text: "added body alpha",
+      }).after,
+    ),
+  )
+    .filter(([path]) => path === "specs/A.mdx")
+    .map(([path, source]): readonly [string, string] => [
+      `rendering forms of ${path} after an addChild edit`,
+      source,
+    ]),
+];
+
+/**
+ * S-9's per-draw check (helpers/property.ts `drawSources`): the staged
+ * workspace and, per edit, the files the edit rewrites — every source the
+ * trial stages, judged before the product sees it.
+ */
+function stagedP4Sources(trial: P4Trial): DrawSource[] {
+  const sources: DrawSource[] = Object.entries(renderWorkspace(trial.model));
+  for (const edit of trial.edits) {
+    const { after, description } = applyEdit(trial.model, edit);
+    for (const [path, source] of Object.entries(renderWorkspace(after))) {
+      sources.push([path, source, `after the edit — ${description}`]);
+    }
+  }
+  return sources;
+}
+
 /** Counterexample rendering: staged sources plus the edit data. */
 function renderTrial(trial: P4Trial): string {
   return JSON.stringify({
@@ -1990,9 +2248,14 @@ async function runP4Trial(
   const beforeSem = semanticsOf(trial.model);
   const beforeIds = [...beforeSem.keys()].sort();
   const staged = { "xspec.config.ts": SPECS_ONLY_CONFIG, ...beforeFiles };
-  const first = await TestWorkspace.create({ files: staged });
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedP4Sources` above) — declared per draw, as every initial
+  // `.mdx` file a trial stages after the body's first product invocation
+  // must be (helpers/workspace.ts).
+  const mdx = { perDraw: mdxPathsOf(staged) };
+  const first = await TestWorkspace.create({ files: staged, mdx });
   try {
-    const second = await TestWorkspace.create({ files: staged });
+    const second = await TestWorkspace.create({ files: staged, mdx });
     try {
       await buildOk(
         product,
@@ -2046,7 +2309,10 @@ async function runP4Trial(
           );
         }
         for (const path of changedPaths) {
-          await first.file(path, afterFiles[path]);
+          // S-9: a draw's source, judged per draw by the property runner
+          // (stagedP4Sources) — `per-draw` exempts it from the builder's
+          // undeclared-staging guard.
+          await first.file(path, afterFiles[path], { mdx: "per-draw" });
         }
         const context = `P-4 after the single edit — ${description} —`;
         await buildOk(
@@ -2074,7 +2340,7 @@ async function runP4Trial(
         // Restore the pristine workspace: each edit applies independently
         // to the same before-state ("random single edits", not sequences).
         for (const path of changedPaths) {
-          await first.file(path, beforeFiles[path]);
+          await first.file(path, beforeFiles[path], { mdx: "per-draw" });
         }
       }
     } finally {
@@ -2097,10 +2363,6 @@ const P_4 = defineProductTest({
     "changed; ownHash insensitive to embedded-target edits; effectiveHash propagating over " +
     "the dependency closure — and identical workspaces hash identically " +
     "(SPEC 5.5, 5.4, 1.6, 11; TEST-SPEC §16 P-4)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two
-  // workspaces, up to four builds and ~5·|nodes| `query node` invocations
-  // per trial, plus the shrink budget on falsification.
-  timeoutMs: 420_000,
   run: async (product) => {
     await checkProperty(
       "P-4 hash laws",
@@ -2108,7 +2370,12 @@ const P_4 = defineProductTest({
       async (trial) => {
         await runP4Trial(product, trial);
       },
-      { runs: 6, maxShrinkExecutions: 100, render: renderTrial },
+      {
+        runs: 6,
+        maxShrinkExecutions: 100,
+        render: renderTrial,
+        drawSources: stagedP4Sources,
+      },
     );
   },
 });

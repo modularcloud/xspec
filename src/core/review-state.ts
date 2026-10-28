@@ -9,16 +9,30 @@
 //
 // The per-kind relevant hashes (SPEC 10.4):
 //
-// - `subtree-coherence` — subtreeHash and metadataHash of each scope node.
-//   The scope is the root and all its descendants (10.5, 10.6), so the
-//   scope-node set is derived from the graph the state is computed against:
-//   a present root contributes itself and every current descendant, an
-//   absent root contributes itself alone. Deriving the set identically at
-//   record and at check keeps the two computations structurally aligned —
-//   a descendant added or removed since the record surfaces as a key
-//   difference (and through the root's subtreeHash), while a
-//   metadata-only edit on a descendant, which changes no subtreeHash
-//   (SPEC 5.5), still invalidates through that scope node's metadataHash.
+// - `subtree-coherence` — subtreeHash and metadataHash of each scope node:
+//   the scope root and the scope nodes beneath it as last assigned
+//   (`ItemStateSpec.scopeDescendants`, the item's stored scope), never a
+//   walk of the graph the state is recorded against. SPEC 10.4: a resolve
+//   records "its relevant hashes per the list above" while `scope` stays
+//   as last assigned — by `create`, a re-derivation (10.5), or a `split`
+//   (10.7) — an `updated` resolve recording against the item as
+//   re-derived. The scope is "N and all descendants" (10.5, 10.6) as its
+//   strategy generated it: in a baseline session over 10.5's links
+//   (src/core/path-blocks.ts), so a deleted descendant is a scope node
+//   (absent, recorded with the explicit absent marker) and a node a
+//   journaled move took out of the subtree is not; in a session without
+//   a baseline, the root's current descendants at that assignment. The
+//   check judges the recorded nodes alone (below): a node authored
+//   beneath the root since the scope was last assigned is no scope node
+//   of the item, and one a re-derivation joined to it since `current`
+//   was last written has no recorded presence until a resolve records it
+//   (10.4) — either way it has no entry and surfaces only through the
+//   root's recorded subtreeHash (SPEC 5.5: it changes whenever a node in
+//   the subtree is added, removed, or reordered), so a metadata-only edit
+//   on it, which changes no subtreeHash (SPEC 5.5), invalidates nothing.
+//   A removed scope node surfaces through its own recorded presence and
+//   the root's subtreeHash, and a metadata-only edit on a recorded scope
+//   node through that node's recorded metadataHash.
 // - `parent-consistency` — ownHash and metadataHash of the scope node;
 //   subtreeHash of each context node (the branch children, 10.5).
 // - `dependency-consistency` — ownHash and metadataHash of the scope node;
@@ -43,18 +57,32 @@
 // itself, while its deletion, a presence change, does.
 //
 // Invalidation (SPEC 10.4): a resolved item becomes `invalidated` when its
-// recorded state differs from the same state computed against the current
-// graph — a recorded hash changed, a node's presence changed in either
-// direction, or the item's context set changed. The recorded context set is
-// the item's `context` field (10.2), rewritten only where a strategy
-// assigns it — creation and re-derivation (10.5) — and the current context
-// set is the one the session's strategy generators, re-run with the
-// recorded creation parameters and decompositions against the current
-// workspace, assign to the item; callers supply it (`ItemValidityInputs`)
-// and an item the generators no longer produce retains its recorded set. A
-// node that was already absent when the state was recorded does not
-// invalidate by remaining absent — the absent marker compares equal — so
-// deletion review stays resolvable (SPEC 10.4, 10.2).
+// recorded state differs from the current graph — a recorded hash changed,
+// a recorded presence changed in either direction, or its current context
+// set differs from its recorded context set. Each node recorded in
+// `current` is judged alone, against the current graph, under the presence
+// and the hash names recorded for it (`recordedNodesHold`), whether or not
+// the item still names it; a node of the item's scope, context, or origin
+// with no recorded entry — one that joined the item after `current` was
+// last written, at a re-derivation (10.5) — has no recorded presence until
+// a resolve records it and contributes nothing, so a changed origin by
+// itself invalidates nothing (10.5). The recorded context set is the
+// item's `recordedContext` (src/core/review.ts): the context nodes
+// recorded with `current` — at creation, and at each resolve, which
+// assigns the item its current context set as `context` and records
+// `current` over it (10.4: "the context a read of the same workspace
+// presents", review-derive.ts `resolveSessionItem`; an `updated` resolve
+// once the re-derivation it triggers is done, against the item as
+// re-derived) — and kept, with `current`, where `context` alone is
+// reassigned: a re-derivation (10.5) or a `split` reusing the item (10.7).
+// The current context set is the one the session's strategy generators,
+// re-run with the recorded creation parameters and decompositions against
+// the current workspace, assign to the item — callers supply it
+// (`ItemValidityInputs`) — and, for an item the generators no longer
+// produce, its `context` as last assigned. A node that was already absent
+// when the state was recorded does not invalidate by remaining absent —
+// the absent marker compares equal — so deletion review stays resolvable
+// (SPEC 10.4, 10.2).
 //
 // Identity policy (src/core/review.ts header; SPEC 10.4, 5.4): sessions
 // store every node reference as a canonical identity in the injective key
@@ -67,9 +95,11 @@
 // status, and by itself invalidates nothing, while a spelling vacated by a
 // manual deletion (SPEC 6.6) and later recaptured by a journaled rename
 // denotes two distinct canonical identities that never collide. The state
-// computation here keys its result canonically — descendants and impact
-// targets enumerated from the current graph are canonicalized against the
-// full current journal — and judges presence by canonical resolution
+// computation here keys its result canonically — every node it records is
+// a stored canonical reference: the item's scope (the root and the nodes
+// beneath it), context, and origin entries, and the caller-supplied
+// impact targets (review-derive.ts canonicalizes every generated node,
+// `canonicalizeGeneration`) — and judges presence by canonical resolution
 // (SPEC 10.4: "a node is absent when it is deleted or its identity ceases
 // to resolve through the journal"): a recorded node is present iff its
 // canonical identity still resolves through the journal
@@ -85,12 +115,13 @@
 // Everything here is pure: item validity is recomputed against the current
 // graph on every read (`status`, `next`, `show`, `export`) and never
 // persisted — reads never write the session file; sessions change only
-// through the mutating subcommands (SPEC 10.4, 13.5). The one computation
-// (`computeRecordedState`) serves both sides: the mutating subcommands
-// record its result (item creation and each resolve, 10.2), and reads
-// compare the recorded value against a fresh run.
+// through the mutating subcommands (SPEC 10.4, 13.5). One per-node
+// computation (`recordedNodeState`) serves both sides: the mutating
+// subcommands record `computeRecordedState`'s result (item creation and
+// each resolve, 10.2), and reads judge each recorded node against a fresh
+// run of it over the current graph.
 
-import type { RequirementNode, WorkspaceGraph } from "./graph.js";
+import type { WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
 import type { CanonicalIdentity, Journal } from "./journal.js";
 import {
@@ -140,12 +171,21 @@ export interface ReviewStateInputs {
 
 /**
  * The item fields the state computation reads (SPEC 10.4): the kind and the
- * scope, context, and origin nodes, each a stored canonical reference
- * (module header). `ReviewItem` satisfies this shape.
+ * scope — its root and the scope nodes beneath it — context, and origin
+ * nodes, each a stored canonical reference (module header). `ReviewItem`
+ * satisfies this shape, its scope as last assigned (SPEC 10.4).
  */
 export interface ItemStateSpec {
   readonly kind: ItemKind;
+  /** The scope node — a `subtree-coherence` item's scope root. */
   readonly scope: string;
+  /**
+   * The scope nodes beneath the scope root (`ReviewItem.scopeDescendants`:
+   * a `subtree-coherence` item's scope is "N and all descendants",
+   * SPEC 10.5, 10.6, as its strategy generated it); empty for a leaf and
+   * for every other kind, whose scope is its scope node alone.
+   */
+  readonly scopeDescendants: readonly string[];
   readonly context: readonly string[];
   readonly origin: readonly string[];
 }
@@ -154,9 +194,15 @@ export interface ItemStateSpec {
  * Compute the SPEC 10.4 recorded state of one item against `inputs`: the
  * item's relevant hashes per the kind table (module header) and, for every
  * scope, context, and origin node, whether the node is present — an absent
- * node's hashes recorded as the explicit absent marker. This is the value
- * the mutating subcommands record (item creation and each resolve, 10.2)
- * and the value reads recompute for the invalidation comparison.
+ * node's hashes recorded as the explicit absent marker. The nodes are the
+ * item's as given — its scope (the root and `scopeDescendants`), context,
+ * and origin, plus a `code-impact` item's impact targets from `inputs` —
+ * so `inputs` supplies each node's presence and hash values, never which
+ * nodes are recorded: a node of `inputs`' graph beneath the scope root that
+ * the item's scope does not hold gets no entry. This is the value the
+ * mutating subcommands record (item creation and each resolve, 10.2: a
+ * resolve over the scope as last assigned, SPEC 10.4); reads judge each
+ * node it records against the current graph (`recordedNodesHold`).
  */
 export function computeRecordedState(
   item: ItemStateSpec,
@@ -179,6 +225,9 @@ export function computeRecordedState(
   // SPEC 10.4: presence is recorded for every scope, context, and origin
   // node, whatever hashes the kind's table assigns them.
   record(item.scope);
+  for (const identity of item.scopeDescendants) {
+    record(identity);
+  }
   for (const identity of item.context) {
     record(identity);
   }
@@ -189,9 +238,12 @@ export function computeRecordedState(
   switch (item.kind) {
     case "subtree-coherence": {
       // SPEC 10.4: subtreeHash and metadataHash of each scope node — the
-      // root and all current descendants (10.5), derived from the graph.
-      for (const reference of scopeSubtreeReferences(inputs, item.scope)) {
-        record(reference, "subtreeHash", "metadataHash");
+      // root and the scope nodes beneath it as given (the scope as last
+      // assigned, module header), an absent one recorded with the absent
+      // marker (`recordedNodeState`).
+      record(item.scope, "subtreeHash", "metadataHash");
+      for (const identity of item.scopeDescendants) {
+        record(identity, "subtreeHash", "metadataHash");
       }
       break;
     }
@@ -235,48 +287,53 @@ export function computeRecordedState(
 
   const nodes: Record<string, RecordedNodeState> = {};
   for (const [identity, names] of required) {
-    nodes[identity] = recordedNodeState(item, identity, names, inputs);
+    nodes[identity] = memoizedNodeState(item, identity, names, inputs);
   }
   return { nodes };
 }
 
+/** Per graph state, `memoizedNodeState`'s values by reference and key. */
+const NODE_STATES = new WeakMap<
+  ReviewStateInputs,
+  Map<string, Map<string, RecordedNodeState>>
+>();
+
 /**
- * The scope-node references of a `subtree-coherence` item (SPEC 10.5: the
- * root and all descendants), in document order: the stored scope reference
- * canonically resolved to a current node, the subtree derived from the
- * graph the state is computed against, and each member canonicalized
- * against the full journal (module header). A root that does not resolve
- * to a current node — deleted, or its identity ceased to resolve
- * (SPEC 10.4) even though its derived spelling is borne by a distinct
- * recaptured node — has no descendants and contributes its stored
- * reference alone. Deriving the set identically at record and at check
- * keeps the two computations structurally aligned (module header).
+ * `recordedNodeState`, computed once per graph state (`inputs`, immutable),
+ * stored reference, role, and hash-name set — the values it is a function
+ * of (the item enters only through whether the reference is a
+ * `code-impact` item's scoped location) — so every item recording a node
+ * under one graph state shares one state object, and each node is resolved
+ * and looked up once rather than once per item holding it: an n-deep
+ * section chain's audit items hold O(n²) node entries over n + 1 nodes.
  */
-function scopeSubtreeReferences(
+function memoizedNodeState(
+  item: Pick<ItemStateSpec, "kind" | "scope">,
+  reference: string,
+  names: ReadonlySet<RecordedHashName>,
   inputs: ReviewStateInputs,
-  scope: string,
-): string[] {
-  const resolution = resolveReference(inputs.journal, scope);
-  const root = resolution.resolves
-    ? inputs.graph.requirementNode(resolution.spelling)
-    : undefined;
-  if (root === undefined) {
-    return [scope];
+): RecordedNodeState {
+  let byReference = NODE_STATES.get(inputs);
+  if (byReference === undefined) {
+    byReference = new Map();
+    NODE_STATES.set(inputs, byReference);
   }
-  const references: string[] = [];
-  const stack: RequirementNode[] = [root];
-  while (stack.length > 0) {
-    const node = stack.pop();
-    if (node === undefined) {
-      break;
-    }
-    references.push(canonicalKeyOfCurrent(inputs.journal, node.identity));
-    const children = inputs.graph.childrenOf(node);
-    for (let index = children.length - 1; index >= 0; index -= 1) {
-      stack.push(children[index]);
-    }
+  let byKey = byReference.get(reference);
+  if (byKey === undefined) {
+    byKey = new Map();
+    byReference.set(reference, byKey);
   }
-  return references;
+  let key =
+    item.kind === "code-impact" && reference === item.scope ? "location" : "";
+  for (const name of RECORDED_HASH_NAMES) {
+    if (names.has(name)) key += ` ${name}`;
+  }
+  let state = byKey.get(key);
+  if (state === undefined) {
+    state = recordedNodeState(item, reference, names, inputs);
+    byKey.set(key, state);
+  }
+  return state;
 }
 
 /** One node's recorded state (SPEC 10.4): presence judged by canonical
@@ -286,7 +343,7 @@ function scopeSubtreeReferences(
  * node, the absent marker otherwise. Hashes are read only for a resolving,
  * present node. */
 function recordedNodeState(
-  item: ItemStateSpec,
+  item: Pick<ItemStateSpec, "kind" | "scope">,
   reference: string,
   names: ReadonlySet<RecordedHashName>,
   inputs: ReviewStateInputs,
@@ -327,31 +384,39 @@ function recordedNodeState(
 }
 
 // ---------------------------------------------------------------------------
-// Comparing recorded states (SPEC 10.4)
+// Judging recorded states (SPEC 10.4)
 // ---------------------------------------------------------------------------
 
 /**
- * SPEC 10.4: whether two recorded states agree — the same node set, each
- * node with the same presence and, when present, the same recorded hash
- * values. Any difference is an invalidation cause: a recorded hash changed,
- * a node's presence changed in either direction, or the derived node set
- * itself moved (a scope subtree or impact-target set gaining or losing a
- * member). Both states must be in one identity space — recorded states
- * mapped forward before comparing (module header).
+ * SPEC 10.4: whether every node an item's `current` records still holds
+ * against the graph `inputs` describes — each recorded node judged alone,
+ * under its recorded presence and the hash names recorded for it: a node
+ * recorded absent must still be absent (an already-absent node does not
+ * invalidate by remaining absent), and a node recorded present must still
+ * be present, each recorded hash value unchanged. A recorded node the item
+ * no longer names keeps its entry and is judged all the same. A node with
+ * no recorded entry — one that joined the item's scope, context, or origin
+ * after `current` was last written (10.5), a descendant authored since, an
+ * impact-edge target gained since — contributes nothing: it "has no
+ * recorded presence until a resolve records it", so a changed origin by
+ * itself invalidates nothing (10.5). Recorded keys are stored canonical
+ * references, judged by canonical resolution (module header).
  */
-export function recordedStatesEqual(
-  a: RecordedState,
-  b: RecordedState,
+export function recordedNodesHold(
+  item: Pick<ReviewItem, "kind" | "scope" | "current">,
+  inputs: ReviewStateInputs,
 ): boolean {
-  const aEntries = Object.entries(a.nodes);
-  if (aEntries.length !== Object.keys(b.nodes).length) {
-    return false;
-  }
-  for (const [identity, aNode] of aEntries) {
-    if (!Object.hasOwn(b.nodes, identity)) {
-      return false;
+  for (const [reference, recorded] of Object.entries(item.current.nodes)) {
+    const names = new Set<RecordedHashName>();
+    if (recorded.present) {
+      for (const name of RECORDED_HASH_NAMES) {
+        if (recorded.hashes[name] !== undefined) {
+          names.add(name);
+        }
+      }
     }
-    if (!recordedNodeStatesEqual(aNode, b.nodes[identity])) {
+    const now = memoizedNodeState(item, reference, names, inputs);
+    if (!recordedNodeStatesEqual(recorded, now)) {
       return false;
     }
   }
@@ -378,10 +443,9 @@ function recordedNodeStatesEqual(
 
 /**
  * SPEC 10.4: whether two context sets agree, as sets of node references —
- * the recorded context set (the item's `context` field, 10.2) against the
- * generator-derived current one. Both sides are canonical references
- * (module header), so string equality is canonical-identity equality
- * (SPEC 5.4).
+ * the recorded context set (the item's `recordedContext`) against its
+ * current one. Both sides are canonical references (module header), so
+ * string equality is canonical-identity equality (SPEC 5.4).
  */
 export function identitySetsEqual(
   a: readonly string[],
@@ -413,7 +477,46 @@ export function canonicalKeyOfCurrent(
   journal: Journal,
   spelling: string,
 ): string {
-  return encodeCanonicalIdentity(journal.canonicalIdentity(spelling));
+  const memo = codecMemo(journal);
+  let key = memo.keysOfCurrent.get(spelling);
+  if (key === undefined) {
+    key = encodeCanonicalIdentity(journal.canonicalIdentity(spelling));
+    memo.keysOfCurrent.set(spelling, key);
+  }
+  return key;
+}
+
+/** One journal's codec results (`codecMemo`). */
+interface CodecMemo {
+  readonly keysOfCurrent: Map<string, string>;
+  readonly resolutions: Map<string, ReferenceResolution>;
+  readonly resolutionsAt: Map<number, Map<string, ReferenceResolution>>;
+}
+
+const CODEC_MEMOS = new WeakMap<Journal, CodecMemo>();
+
+/**
+ * The codec seam's results for one journal, by argument
+ * (`canonicalKeyOfCurrent`, `resolveReference`, `resolveReferenceAt`):
+ * each is a function of the journal — immutable once parsed — and its
+ * string arguments alone, so a reference or spelling is decoded once per
+ * journal, and every caller shares one string per derived key or spelling.
+ * A shared string's hash and identity let the maps and graph lookups keyed
+ * by it run in constant time, where a fresh copy per call costs its whole
+ * length, and an n-deep section chain's identities are O(n) long and its
+ * audit items' node references O(n²).
+ */
+function codecMemo(journal: Journal): CodecMemo {
+  let memo = CODEC_MEMOS.get(journal);
+  if (memo === undefined) {
+    memo = {
+      keysOfCurrent: new Map(),
+      resolutions: new Map(),
+      resolutionsAt: new Map(),
+    };
+    CODEC_MEMOS.set(journal, memo);
+  }
+  return memo;
 }
 
 /**
@@ -444,7 +547,7 @@ export function spellingOfReference(
   journal: Journal,
   reference: string,
 ): string {
-  return currentSpellingOf(journal, parseReference(reference));
+  return resolveReference(journal, reference).spelling;
 }
 
 /** A stored reference's current resolution (`resolveReference`). */
@@ -471,10 +574,70 @@ export function resolveReference(
   journal: Journal,
   reference: string,
 ): ReferenceResolution {
+  const memo = codecMemo(journal);
+  let resolution = memo.resolutions.get(reference);
+  if (resolution === undefined) {
+    const canonical = parseReference(reference);
+    resolution = {
+      spelling: currentSpellingOf(journal, canonical),
+      resolves: resolvesCurrently(journal, canonical),
+    };
+    memo.resolutions.set(reference, resolution);
+  }
+  return resolution;
+}
+
+/**
+ * Resolve a stored reference as of the journal's first `length` entries —
+ * the recorded-baseline side of a baseline session, whose journal is that
+ * prefix of the current one (SPEC 6.3): the identity the referenced node
+ * bore then (its canonical identity mapped forward through the prefix
+ * alone), and whether the reference resolves there — `resolveReference`'s
+ * round trip, judged against the prefix (SPEC 5.4, 10.4). It does not
+ * resolve when the reference's chain begins past the prefix (the node
+ * entered the workspace after it) or when, at the prefix, its spelling is
+ * borne by a different chain; a baseline-graph lookup then finds no node
+ * of this reference.
+ */
+export function resolveReferenceAt(
+  journal: Journal,
+  length: number,
+  reference: string,
+): ReferenceResolution {
+  const memo = codecMemo(journal);
+  let atLength = memo.resolutionsAt.get(length);
+  if (atLength === undefined) {
+    atLength = new Map();
+    memo.resolutionsAt.set(length, atLength);
+  }
+  let resolution = atLength.get(reference);
+  if (resolution === undefined) {
+    resolution = resolveReferenceAtUncached(journal, length, reference);
+    atLength.set(reference, resolution);
+  }
+  return resolution;
+}
+
+function resolveReferenceAtUncached(
+  journal: Journal,
+  length: number,
+  reference: string,
+): ReferenceResolution {
   const canonical = parseReference(reference);
+  if (canonical.position > length) {
+    return { spelling: canonical.identity, resolves: false };
+  }
+  const spelling = journal.mapForward(
+    canonical.identity,
+    canonical.position,
+    length,
+  );
+  const roundTrip = journal.canonicalIdentity(spelling, length);
   return {
-    spelling: currentSpellingOf(journal, canonical),
-    resolves: resolvesCurrently(journal, canonical),
+    spelling,
+    resolves:
+      roundTrip.identity === canonical.identity &&
+      roundTrip.position === canonical.position,
   };
 }
 
@@ -522,21 +685,23 @@ export interface ItemValidityInputs {
    * decompositions (10.5, 10.7) against the current workspace, computed
    * without persisting anything, as canonical references (module header).
    * An item the generators no longer produce MUST be absent from the map:
-   * it retains its recorded context set and cannot invalidate through it.
+   * its current context set is then its `context` as last assigned.
    */
   readonly currentContexts: ReadonlyMap<string, readonly string[]>;
 }
 
 /**
  * SPEC 10.4: the status a read reports for one item. A resolved item
- * (SPEC 10.3) is reported `invalidated` when its recorded `current` state
- * differs from the same state computed against the current graph — both
- * keyed canonically (module header), so the comparison is the canonical
- * one SPEC 10.4 requires — or when its context set changed
- * (`ItemValidityInputs`). An item needing review (`unresolved`,
- * `invalidated`) reports its stored status unchanged. This function never
- * rewrites anything: a stale resolution is reported `invalidated`, never
- * persisted.
+ * (SPEC 10.3) is reported `invalidated` when its recorded state differs
+ * from the current graph: a node its `current` records no longer holds —
+ * a recorded hash changed, or a recorded presence changed in either
+ * direction (`recordedNodesHold`, keyed canonically, module header, so the
+ * comparison is the canonical one SPEC 10.4 requires) — or its current
+ * context set (`ItemValidityInputs`, else its `context` as last assigned)
+ * differs from its recorded context set. An item needing review
+ * (`unresolved`, `invalidated`) reports its stored status unchanged. This
+ * function never rewrites anything: a stale resolution is reported
+ * `invalidated`, never persisted.
  */
 export function effectiveItemStatus(
   item: ReviewItem,
@@ -545,15 +710,17 @@ export function effectiveItemStatus(
   if (!isResolvedStatus(item.status)) {
     return item.status;
   }
-  const fresh = computeRecordedState(item, inputs.state);
-  if (!recordedStatesEqual(item.current, fresh)) {
+  // SPEC 10.4: "a recorded hash changed, a recorded presence changed in
+  // either direction" — over the recorded nodes alone; a node that joined
+  // the item since has no recorded presence (10.5).
+  if (!recordedNodesHold(item, inputs.state)) {
     return "invalidated";
   }
-  const currentContext = inputs.currentContexts.get(item.id);
-  if (
-    currentContext !== undefined &&
-    !identitySetsEqual(item.context, currentContext)
-  ) {
+  // SPEC 10.4: "or its current context set differs from its recorded
+  // context set" — the generators' context, else `context` as last
+  // assigned, against the context recorded with `current`.
+  const currentContext = inputs.currentContexts.get(item.id) ?? item.context;
+  if (!identitySetsEqual(item.recordedContext, currentContext)) {
     return "invalidated";
   }
   return item.status;

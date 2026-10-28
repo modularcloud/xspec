@@ -1,4 +1,4 @@
-// Findings-report rendering (SPEC 12.0, 14).
+// Findings-report rendering (SPEC 12.0, 12.7, 14).
 //
 // IMPLEMENTATION (cross-cutting rules): reports are built as data (the
 // Finding model, core/findings.ts) and rendered once per output form —
@@ -9,98 +9,111 @@
 // messages (exit 2) are standard-error content; the exit-2 renderer for
 // them lives here too so every command reports them identically.
 //
+// Every emitter applies the SPEC 12.7 findings-array discipline through one
+// choke point (core/findings.ts `orderFindings`): the pinned total order and
+// duplicate collapse, identically in the human and JSON forms. The JSON
+// finding is exactly the five-member 12.7 finding form; the human line
+// presents the same information — code, every location, concerned path,
+// context identities, message (SPEC 14, 12.0).
+//
 // All rendering is byte-deterministic for identical findings (SPEC 12.0):
 // static text, workspace-relative paths, and byte offsets only — no
 // absolute paths, no wall clock, no environment-dependent content.
 
+import type { ResolvedOccurrence } from "../core/availability.js";
 import { canonicalJson } from "../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../core/canonical-json.js";
-import type { ConditionNumber, Finding } from "../core/findings.js";
-import { conditionName } from "../core/findings.js";
-import type { CliWriter } from "./io.js";
+import type {
+  Finding,
+  FindingCode,
+  FindingLocation,
+} from "../core/findings.js";
+import { orderFindings } from "../core/findings.js";
+import type { IdentityMapping } from "../core/journal.js";
+import { pathTextJson, renderPathText } from "../core/path-text.js";
+import type { PreviewDelta, PreviewFileEdits } from "../core/preview.js";
+import type { CliWriter, CommandIo } from "./io.js";
 
-/** The SPEC 14 condition identity of a finding (`3` → `"14.3"`). */
-export function conditionIdentity(condition: ConditionNumber): string {
-  return `14.${String(condition)}`;
+/**
+ * A location as human text: `FILE:START-END` — the file through the shared
+ * deterministic path spelling (core/path-text.ts): a non-UTF-8 path (SPEC
+ * 14.19) renders as its exact bytes in the marked byte form, never lossily,
+ * and no plain path renders as a marked byte form (SPEC 12.0).
+ */
+function renderLocation(location: FindingLocation): string {
+  return `${renderPathText(location.file)}:${String(location.range.start)}-${String(location.range.end)}`;
 }
 
 /**
- * One finding as a human report line (SPEC 14: actionable — file, location,
- * and correction): `FILE:START-END: NAME (14.N): MESSAGE — CORRECTION`.
- * Location falls back to `line[:column]` when the finding carries no byte
- * range; both parts are omitted when absent.
+ * One finding as a human report line, presenting the same information as
+ * the 12.7 JSON finding form (SPEC 14, 12.0): the primary location (or the
+ * concerned path) as the prefix, the stable code as the label, the
+ * actionable message, any further locations, and the context identities.
  */
 function renderFindingLine(finding: Finding): string {
-  let location = "";
-  if (finding.file !== undefined) {
-    location = finding.file;
-    if (finding.range !== undefined) {
-      location += `:${String(finding.range.start)}-${String(finding.range.end)}`;
-    } else if (finding.line !== undefined) {
-      location += `:${String(finding.line)}`;
-      if (finding.column !== undefined) {
-        location += `:${String(finding.column)}`;
-      }
-    }
-    location += ": ";
+  let prefix = "";
+  if (finding.locations.length > 0) {
+    prefix = `${renderLocation(finding.locations[0]!)}: `;
+  } else if (finding.path !== null) {
+    prefix = `${renderPathText(finding.path)}: `;
   }
-  const label =
-    `${conditionName(finding.condition)} ` +
-    `(${conditionIdentity(finding.condition)})`;
-  const correction =
-    finding.correction === undefined ? "" : ` — ${finding.correction}`;
-  return `${location}${label}: ${finding.message}${correction}\n`;
+  const label = finding.code ?? "finding";
+  const more =
+    finding.locations.length > 1
+      ? ` (also at ${finding.locations
+          .slice(1)
+          .map(renderLocation)
+          .join(", ")})`
+      : "";
+  const identities =
+    finding.identities.length > 0 ? ` [${finding.identities.join(", ")}]` : "";
+  return `${prefix}${label}: ${finding.message}${more}${identities}\n`;
 }
 
 /**
- * The human findings report: one line per finding, in the given (already
- * deterministic) order, closed by a one-line count. Standard-output content
- * (SPEC 12.0).
+ * The human findings report: the SPEC 12.7 order and collapse, one line per
+ * finding, closed by a one-line count. Standard-output content (SPEC 12.0).
  */
 export function renderFindingsHuman(findings: readonly Finding[]): string {
-  const lines = findings.map(renderFindingLine);
-  const count = findings.length;
+  const ordered = orderFindings(findings);
+  const lines = ordered.map(renderFindingLine);
+  const count = ordered.length;
   lines.push(`${String(count)} finding${count === 1 ? "" : "s"}\n`);
   return lines.join("");
 }
 
-/** One finding as JSON data — the same information as the human line. */
-function findingToJson(finding: Finding): JsonObject {
+/**
+ * One finding as JSON data — exactly the five-member finding form of SPEC
+ * 12.7: `{"code", "message", "locations", "path", "identities"}`, `null`
+ * never omitted, empty lists `[]`. Location files and the concerned path go
+ * through the one shared path-value renderer (core/path-text.ts): a plain
+ * JSON string, or the marked byte form for a non-UTF-8 path (SPEC 12.0,
+ * 12.7, 14.19).
+ */
+export function findingToJson(finding: Finding): JsonObject {
   return {
-    condition: conditionIdentity(finding.condition),
+    code: finding.code,
     message: finding.message,
-    correction: finding.correction,
-    file: finding.file,
-    location:
-      finding.range === undefined
-        ? undefined
-        : { start: finding.range.start, end: finding.range.end },
-    line: finding.line,
-    column: finding.column,
-    cycle: finding.cycle === undefined ? undefined : [...finding.cycle],
-    // SPEC 7.5 → 14.12: a policy violation carries the rule name and the
-    // offending edge; the JSON form holds the same information as the
-    // human message (SPEC 12.0), structured.
-    rule: finding.rule,
-    edge:
-      finding.edge === undefined
-        ? undefined
-        : {
-            from: finding.edge.source,
-            to: finding.edge.target,
-            kind: finding.edge.kind,
-          },
+    locations: finding.locations.map((location) => ({
+      file: pathTextJson(location.file),
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    path: finding.path === null ? null : pathTextJson(finding.path),
+    identities: [...finding.identities],
   };
 }
 
 /**
- * The findings report as the single JSON document of `--json` (SPEC 12.0:
- * same information as the human report; the canonical serializer keeps it
- * byte-deterministic). An empty findings list is the exit-0 document of a
- * command whose report is its findings (`build`, `check`).
+ * The findings report as the single JSON document of `--json` (SPEC 12.0,
+ * 12.7: `{"findings": […]}` in the pinned order, duplicates collapsed; the
+ * canonical serializer keeps it byte-deterministic). An empty findings list
+ * is the exit-0 document of a command whose report is its findings
+ * (`build`, `check`).
  */
 export function findingsReportJson(findings: readonly Finding[]): string {
-  const document: JsonValue = { findings: findings.map(findingToJson) };
+  const document: JsonValue = {
+    findings: orderFindings(findings).map(findingToJson),
+  };
   return canonicalJson(document);
 }
 
@@ -120,31 +133,309 @@ export function emitFindingsReport(
 }
 
 /**
+ * The applied-mapping report of a successful `rename`/`move` (SPEC 6.4,
+ * 6.5): the complete identity mapping the operation journaled — the
+ * information of the preview's `mapping` (6.6), carried in JSON per 12.0.
+ * The JSON document carries the mapping under the preview's pinned
+ * `mapping` member encoding (SPEC 12.7): one `{"from", "to"}` per mapped
+ * identity, ordered by `from` bytes — exactly the journal entry's canonical
+ * order (core/journal.ts) — beside the consulted domain's (empty) findings.
+ * The human form presents the same information (SPEC 12.0): one
+ * `FROM -> TO` line per pair in the same order, closed by a one-line count.
+ * Identities and paths are workspace-relative and the mapping order is
+ * canonical, so both forms are byte-deterministic (SPEC 12.0).
+ */
+export function emitAppliedMappingReport(
+  json: boolean,
+  stdout: CliWriter,
+  mapping: readonly IdentityMapping[],
+): void {
+  if (json) {
+    const document: JsonValue = {
+      findings: [],
+      mapping: mapping.map((pair) => ({ from: pair.from, to: pair.to })),
+    };
+    stdout.write(canonicalJson(document));
+    return;
+  }
+  const lines = mapping.map((pair) => `${pair.from} -> ${pair.to}\n`);
+  const count = mapping.length;
+  lines.push(`${String(count)} identit${count === 1 ? "y" : "ies"} mapped\n`);
+  stdout.write(lines.join(""));
+}
+
+/** The SPEC 12.7 unavailability marker — the one explicit-absence form. */
+export function unavailableJson(): JsonObject {
+  return { unavailable: true };
+}
+
+/**
+ * A successful preview's plan (SPEC 6.6): the complete identity mapping the
+ * operation would journal (canonical `from`-byte order, core/journal.ts),
+ * the classed per-file edits (core/preview.ts), and the derived-file delta
+ * — the record-supplied datum, `"unavailable"` exactly where recorded state
+ * exists but cannot be read as a record (SPEC 14.23).
+ */
+export interface PreviewPlanReport {
+  readonly mapping: readonly IdentityMapping[];
+  readonly files: readonly PreviewFileEdits[];
+  readonly delta: PreviewDelta | "unavailable";
+}
+
+/**
+ * Emit the `rename`/`move` preview report (SPEC 6.6, 12.7): the four-member
+ * preview document `{"findings", "mapping", "files", "delta"}` under
+ * `--json` — `mapping`, `files`, and `delta` null together exactly on
+ * refusal (`plan` null), the delta the unavailability marker where the
+ * record cannot be read — and a human report presenting the same
+ * information (SPEC 12.0). Both forms are byte-deterministic: identities,
+ * workspace-relative paths, byte offsets, and static text only.
+ */
+export function emitPreviewReport(
+  json: boolean,
+  stdout: CliWriter,
+  findings: readonly Finding[],
+  plan: PreviewPlanReport | null,
+): void {
+  const ordered = orderFindings(findings);
+  if (json) {
+    const document: JsonValue = {
+      findings: ordered.map(findingToJson),
+      mapping:
+        plan === null
+          ? null
+          : plan.mapping.map((pair) => ({ from: pair.from, to: pair.to })),
+      files:
+        plan === null
+          ? null
+          : plan.files.map((entry) => ({
+              file: entry.path,
+              edits: entry.edits.map((edit) => ({
+                class: edit.class,
+                range: { start: edit.range.start, end: edit.range.end },
+              })),
+            })),
+      delta:
+        plan === null
+          ? null
+          : plan.delta === "unavailable"
+            ? unavailableJson()
+            : {
+                generated: [...plan.delta.generated],
+                removed: [...plan.delta.removed],
+              },
+    };
+    stdout.write(canonicalJson(document));
+    return;
+  }
+  const lines: string[] = ordered.map(renderFindingLine);
+  if (plan === null) {
+    // SPEC 6.6: a refused preview reports the refusal findings alone.
+    const count = ordered.length;
+    lines.push(`${String(count)} finding${count === 1 ? "" : "s"}\n`);
+    stdout.write(lines.join(""));
+    return;
+  }
+  lines.push("mapping:\n");
+  for (const pair of plan.mapping) {
+    lines.push(`  ${pair.from} -> ${pair.to}\n`);
+  }
+  // Every path in the human form goes through the one human path renderer
+  // (core/path-text.ts), so no plain path reads as a marked byte form
+  // (SPEC 12.0).
+  lines.push("files:\n");
+  for (const entry of plan.files) {
+    lines.push(`  ${renderPathText(entry.path)}\n`);
+    for (const edit of entry.edits) {
+      lines.push(
+        `    ${String(edit.range.start)}-${String(edit.range.end)} ${edit.class}\n`,
+      );
+    }
+  }
+  if (plan.delta === "unavailable") {
+    lines.push("delta: unavailable\n");
+  } else {
+    lines.push("delta:\n");
+    for (const path of plan.delta.generated) {
+      lines.push(`  generated ${renderPathText(path)}\n`);
+    }
+    for (const path of plan.delta.removed) {
+      lines.push(`  removed ${renderPathText(path)}\n`);
+    }
+  }
+  stdout.write(lines.join(""));
+}
+
+/**
+ * One reference occurrence record as JSON data — exactly the five-member
+ * record form of SPEC 12.7: `{"file", "range", "kind", "source", "target"}`
+ * — the referencing file through the shared path-value renderer (marked
+ * byte form for a non-UTF-8 path, SPEC 12.0), the occurrence's own range,
+ * its edge kind, the source graph node as `{"identity", "range"}` or the
+ * unavailability marker (one datum per SPEC 11.2 — never `null`), and the
+ * resolved target's identity. Shared by every emitter of occurrence
+ * records (SPEC 11.3, 11.4, 11.5).
+ */
+export function occurrenceRecordJson(record: ResolvedOccurrence): JsonObject {
+  return {
+    file: pathTextJson(record.file),
+    range: { start: record.range.start, end: record.range.end },
+    kind: record.kind,
+    source:
+      record.source === null
+        ? unavailableJson()
+        : {
+            identity: record.source.identity,
+            range: {
+              start: record.source.range.start,
+              end: record.source.range.end,
+            },
+          },
+    target: record.target,
+  };
+}
+
+/**
+ * A plain usage error as the finding form of SPEC 12.7: `code` and `path`
+ * null — SPEC 14 assigns usage errors no stable code and no concerned
+ * workspace path (they describe the invocation the consuming tool itself
+ * composed) — locations and identities empty, the diagnostic as the
+ * message.
+ */
+export function usageErrorFinding(message: string): Finding {
+  return { code: null, message, locations: [], path: null, identities: [] };
+}
+
+/**
+ * The exit-2 error document of SPEC 12.0/12.7 — `{"error": …}` holding one
+ * finding form — as the entire standard output. Emitted exactly when JSON
+ * output is in effect (a `--json` token read as a flag, or a JSON-only
+ * surface); the caller writes the stderr diagnostics and exits 2 either
+ * way.
+ */
+export function emitErrorDocument(stdout: CliWriter, finding: Finding): void {
+  const document: JsonValue = { error: findingToJson(finding) };
+  stdout.write(canonicalJson(document));
+}
+
+/**
+ * The one condition-14 finding of an exit-2 configuration error (SPEC 12.7:
+ * "One invocation reports one error" — a configuration file with several
+ * distinct defects is a single finding, its message deterministic but
+ * otherwise unpinned). The concerned path is the found or named
+ * configuration path in the anchoring form of 11.6, relative to the
+ * invocation working directory, whatever occupies it; `.` for a failed
+ * upward search with no `--config`; or a `--config` path nothing occupies
+ * as the argument value exactly as given (SPEC 14, 12.0). Locations stay
+ * empty — a configuration error is an unlocated condition (SPEC 14).
+ */
+export function configurationErrorFinding(
+  findings: readonly Finding[],
+  concernedPath: string,
+): Finding {
+  // The per-defect messages joined in the pinned findings order (SPEC 12.7)
+  // keep the merged message deterministic (SPEC 12.0).
+  const message = orderFindings(findings)
+    .map((finding) => finding.message)
+    .join("; ");
+  return {
+    code: "configuration-error",
+    message,
+    locations: [],
+    path: concernedPath,
+    identities: [],
+  };
+}
+
+/**
  * SPEC 12.0/14.14: render one configuration-error finding as a diagnostic
  * line. Configuration errors are usage errors: the message is
- * standard-error content, and standard output stays empty.
+ * standard-error content.
  */
 export function renderConfigurationError(finding: Finding): string {
   const location =
-    finding.file === undefined
-      ? ""
-      : finding.line === undefined
-        ? `${finding.file}: `
-        : `${finding.file}:${String(finding.line)}: `;
-  return `xspec: ${conditionName(finding.condition)}: ${location}${finding.message}\n`;
+    finding.path === null ? "" : `${renderPathText(finding.path)}: `;
+  return `xspec: configuration error: ${location}${finding.message}\n`;
+}
+
+/**
+ * The diagnostic label of a coded refusal's condition (SPEC 14.24–14.26,
+ * and 14.13 where a given baseline's resolution reports it, 6.3): each
+ * condition's own, so the stderr line names which one stopped the command.
+ */
+function codedRefusalLabel(code: FindingCode | null): string {
+  switch (code) {
+    case "journal-error":
+      return "journal error"; // 14.13 at a given baseline (6.3)
+    case "write-failure":
+      return "write failure"; // 14.24
+    case "read-failure":
+      return "read failure"; // 14.25
+    case "workspace-busy":
+      return "workspace busy"; // 14.26
+    default:
+      return "usage error"; // unreachable: no other code is thrown (12.0)
+  }
+}
+
+/**
+ * SPEC 14.24–14.26/12.0: render a coded refusal — the environment's
+ * refusal of a write or a read, a mutating command refused at acquisition,
+ * its workspace busy, or a journal error failing a given baseline's
+ * resolution (6.3) — as a diagnostic line, a usage error's standard-error
+ * content, under its condition's own label and naming the concerned path,
+ * as a configuration error's line does.
+ */
+export function renderCodedRefusal(finding: Finding): string {
+  const label = codedRefusalLabel(finding.code);
+  const location =
+    finding.path === null ? "" : `${renderPathText(finding.path)}: `;
+  return `xspec: ${label}: ${location}${finding.message}\n`;
+}
+
+/**
+ * Report a coded refusal — a write or a read the environment refused (SPEC
+ * 14.24, 14.25), the busy refusal at acquisition (14.26), or a journal
+ * error failing a given baseline's resolution (14.13, 6.3) — the way every
+ * command must: a usage error (12.0), not a finding — the diagnostic on
+ * standard error and, when JSON output is in effect, the exit-2 error
+ * document of 12.0/12.7 as the entire standard output, its one finding
+ * carrying the condition's stable code and concerned path; without JSON
+ * output standard output stays empty. The caller exits 2.
+ */
+export function emitCodedRefusal(
+  io: CommandIo,
+  jsonInEffect: boolean,
+  finding: Finding,
+): void {
+  io.stderr.write(renderCodedRefusal(finding));
+  if (jsonInEffect) {
+    emitErrorDocument(io.stdout, finding);
+  }
 }
 
 /**
  * Report configuration errors (SPEC 14.14) the way every command must: each
- * as a standard-error diagnostic line, standard output untouched (with
- * `--json`, the exit-2 error prevents emitting the single JSON document, so
- * standard output stays empty — SPEC 12.0). The caller exits 2.
+ * defect as a standard-error diagnostic line and, when JSON output is in
+ * effect, the exit-2 error document of 12.0/12.7 as the entire standard
+ * output — one finding however many defects, its concerned path the
+ * anchored configuration path, `.`, or an unoccupied `--config` value as
+ * given (SPEC 14). The caller exits 2; stderr diagnostics are identical
+ * whatever the output form (SPEC 12.0).
  */
 export function emitConfigurationErrors(
-  stderr: CliWriter,
+  io: CommandIo,
+  jsonInEffect: boolean,
+  concernedPath: string,
   findings: readonly Finding[],
 ): void {
   for (const finding of findings) {
-    stderr.write(renderConfigurationError(finding));
+    io.stderr.write(renderConfigurationError(finding));
+  }
+  if (jsonInEffect) {
+    emitErrorDocument(
+      io.stdout,
+      configurationErrorFinding(findings, concernedPath),
+    );
   }
 }

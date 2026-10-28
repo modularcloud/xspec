@@ -16,15 +16,20 @@
 // - the identity mapping the operation produces, as the journal entry the
 //   workspace layer appends (SPEC 6.1, 6.4).
 //
-// Rewrites are minimal in-place edits (SPEC 6.4): each affected part is
-// replaced within its recorded byte range, preserving the reference's quote
-// style and access form (2.4); where a form cannot be kept — a dot-access
-// chain segment whose new name is not a valid TypeScript identifier — the
-// rewritten part uses double-quoted computed access, and rewritten string
-// content is escaped so the literal re-parses to exactly the new value.
-// Every byte outside the affected parts is preserved verbatim, and the
-// rewritten content is a deterministic function of the operation and the
-// analyzed workspace state (SPEC 6.1, 12.0).
+// Rewrites are minimal in-place edits (SPEC 6.4): the affected parts are
+// tokens — an `id` attribute's value characters, a local reference's
+// string literal, a chain segment's name token (its identifier, or its
+// index literal with the quotes) — each replaced within its recorded byte
+// range, preserving the reference's quote style and access form (2.4);
+// where a form cannot be kept — a dot-access chain segment whose new name
+// is not a valid TypeScript identifier — the segment becomes double-quoted
+// computed access, its `.` token replaced by `[` and its name token by the
+// literal and the `]`, and each rewritten literal spells the new value
+// verbatim (2.4). Every byte outside the affected tokens is preserved
+// verbatim — the whitespace, comments, and line terminators between a
+// chain's tokens included, so `A /* c */ .a` becomes `A /* c */ ["x-y"]` —
+// and the rewritten content is a deterministic function of the operation
+// and the analyzed workspace state (SPEC 6.1, 12.0).
 //
 // Callers validate first (SPEC 6.4): the workspace passes `build`
 // validation, the old ID exists, and the new ID is valid, differs,
@@ -41,11 +46,14 @@ import {
   EditCollector,
   jsStringLiteral,
 } from "./edits.js";
+import type { ByteRange } from "./bytes.js";
 import type { SpecFileAnalysis } from "./graph.js";
 import type { IdentityMapping, JournalEntry } from "./journal.js";
 import { createJournalEntry } from "./journal.js";
 import type { SpecAttributeValue, SpecDocument } from "./mdx.js";
-import { classifyReference, parseExpressionText } from "./references.js";
+import type { PreviewFileEdits } from "./preview.js";
+import { PreviewCollector } from "./preview.js";
+import { classifyReferenceText } from "./references.js";
 import type {
   ReferenceSpelling,
   SegmentSpelling,
@@ -62,6 +70,13 @@ export interface RenamePlan {
   readonly entry: JournalEntry;
   /** Every source file with edits, byte-ordered rewrites applied. */
   readonly rewrites: readonly SourceRewrite[];
+  /**
+   * The preview plan surface (SPEC 6.6): every file the operation would
+   * rewrite, with every edit classed and located in pre-operation
+   * coordinates — collected in the same pass that derives the applied
+   * edits, so the real operation and its preview share one plan.
+   */
+  readonly previewFiles: readonly PreviewFileEdits[];
 }
 
 // ---------------------------------------------------------------------------
@@ -71,28 +86,23 @@ export interface RenamePlan {
 /**
  * Whether `name` can be written as a dot-access segment (`.name`) that the
  * static-reference grammar (SPEC 2.4) reads back as exactly this segment.
- * Decided by the analyzer itself — parse `a.<name>` and require a one-
- * segment dot chain naming `name` — so a kept dot form always round-trips:
+ * Decided by the analyzer itself — classify `a.<name>` and require a one-
+ * segment dot chain naming `name`, which `classifyReferenceText` gives only
+ * where the chain spans the whole spelling — so a kept dot form always
+ * round-trips:
  * keywords are valid property names (TypeScript's IdentifierName), while
  * any name needing quoting fails and falls back to computed access
  * (SPEC 6.4: dot access for segments that are valid TypeScript
  * identifiers, double-quoted computed access otherwise).
  */
 export function isDotAccessSegmentName(name: string): boolean {
-  const text = `a.${name}`;
-  const { sourceFile, expression } = parseExpressionText(text);
-  if (expression === null) {
-    return false;
-  }
-  const classified = classifyReference(expression, sourceFile);
+  const { classified } = classifyReferenceText(`a.${name}`);
   return (
     classified.kind === "chain" &&
     classified.rootName === "a" &&
     classified.segments.length === 1 &&
     classified.segments[0].access === "dot" &&
-    classified.segments[0].name === name &&
-    classified.span.start === 0 &&
-    classified.span.end === text.length
+    classified.segments[0].name === name
   );
 }
 
@@ -103,35 +113,45 @@ export function isDotAccessSegmentName(name: string): boolean {
 const encoder = new TextEncoder();
 
 /**
- * The edit rewriting one affected chain segment to `newName` (SPEC 6.4):
- * a dot access keeps its form when the new name is a valid segment of dot
- * access, and otherwise becomes double-quoted computed access (the whole
- * access — `.old` — is replaced); a computed access keeps its form and
+ * The edits rewriting one affected chain segment to `newName` (SPEC 6.4),
+ * tokens only: a dot access keeps its form when the new name is a valid
+ * segment of dot access, its name token replaced; otherwise it becomes
+ * double-quoted computed access — its `.` token replaced by `[`, its name
+ * token by the literal and the `]` — every byte between the two tokens
+ * kept where it stands (`A . a` becomes `A [ "x-y"]`, a comment between
+ * them staying inside the brackets); a computed access keeps its form and
  * quote style, its index literal rewritten in place. Shared with the
  * section-form move (SPEC 6.5: rewrites mirror rename's minimal edits).
  */
 export function segmentEdit(
   segment: SegmentSpelling,
   newName: string,
-): SourceEdit {
+): SourceEdit[] {
   if (segment.access === "dot") {
     if (isDotAccessSegmentName(newName)) {
-      return { range: segment.nameRange, replacement: newName };
+      return [{ range: segment.nameRange, replacement: newName }];
     }
     // SPEC 6.4: the dot form cannot hold the new name — double-quoted
     // computed access for segments that are not valid TypeScript
-    // identifiers.
-    return {
-      range: segment.accessRange,
-      replacement: `[${jsStringLiteral(newName, '"')}]`,
-    };
+    // identifiers. The access's first byte is its one-byte `.` token
+    // (`SegmentSpelling.accessRange`).
+    const dot = segment.accessRange.start;
+    return [
+      { range: { start: dot, end: dot + 1 }, replacement: "[" },
+      {
+        range: segment.nameRange,
+        replacement: `${jsStringLiteral(newName, '"')}]`,
+      },
+    ];
   }
   // SPEC 6.4: computed access keeps its form and quote style; escaping
   // keeps the literal exact whatever the new segment contains.
-  return {
-    range: segment.nameRange,
-    replacement: jsStringLiteral(newName, segment.quote ?? '"'),
-  };
+  return [
+    {
+      range: segment.nameRange,
+      replacement: jsStringLiteral(newName, segment.quote ?? '"'),
+    },
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -182,13 +202,13 @@ function chainAffected(
 // The plan
 // ---------------------------------------------------------------------------
 
-/** The affected chain-reference edit, if the reference is affected. */
-function chainReferenceEdit(
+/** The affected chain-reference edits, if the reference is affected. */
+function chainReferenceEdits(
   spelling: ReferenceSpelling,
   segments: readonly string[],
   oldSegments: readonly string[],
   newLastSegment: string,
-): SourceEdit | null {
+): SourceEdit[] | null {
   if (!chainAffected(segments, oldSegments)) {
     return null;
   }
@@ -207,15 +227,32 @@ function chainReferenceEdit(
   return segmentEdit(affected, newLastSegment);
 }
 
+/** One reference with its SPEC 5.7 occurrence span (preview ranges). */
+interface SpannedReference {
+  readonly reference: SpecReference;
+  /**
+   * The occurrence span (SPEC 5.7): a `d` entry's own expression; an MDX
+   * embedding's full braced container — the construct a preview's
+   * `reference-rewrite` edit spans (SPEC 6.6).
+   */
+  readonly occurrence: ByteRange;
+}
+
 /** One spec file's references, `d` and `text(...)` alike (SPEC 2.2, 2.3). */
-function specReferencesOf(spec: SpecFileAnalysis): SpecReference[] {
-  const references: SpecReference[] = [];
+function specReferencesOf(spec: SpecFileAnalysis): SpannedReference[] {
+  const references: SpannedReference[] = [];
   for (const dependency of spec.references.dependencies) {
-    references.push(dependency.reference);
+    references.push({
+      reference: dependency.reference,
+      occurrence: dependency.reference.range,
+    });
   }
   for (const embedding of spec.references.embeddings) {
     if (embedding.reference !== null) {
-      references.push(embedding.reference);
+      references.push({
+        reference: embedding.reference,
+        occurrence: embedding.embedding.range,
+      });
     }
   }
   return references;
@@ -277,6 +314,10 @@ export function planRename(
   // descendant, re-identified by prefix replacement.
   const mapping: IdentityMapping[] = [];
   const edits = new EditCollector();
+  // SPEC 6.6: the preview edits, collected beside the applied edits — one
+  // classed entry per construct the operation rewrites, at the construct's
+  // own pre-operation span.
+  const preview = new PreviewCollector();
   for (const section of origin.document.sections) {
     if (section.id === null) {
       continue;
@@ -300,6 +341,9 @@ export function planRename(
       range: attribute.valueRange,
       replacement: attributeValueText(mapped, attribute.quote),
     });
+    // SPEC 6.6: an `id`-attribute rewrite spans the attribute's own
+    // characters, name through closing quote.
+    preview.add(originPath, "id-rewrite", attribute.attributeRange);
   }
   if (mapping.length === 0) {
     throw new Error(
@@ -310,10 +354,12 @@ export function planRename(
 
   // SPEC 6.4: rewrite every reference to the affected identities across all
   // configured spec sources — local string references in the origin file,
-  // external chain references everywhere.
+  // external chain references everywhere. SPEC 6.6: each rewritten
+  // reference contributes one preview `reference-rewrite` edit spanning its
+  // occurrence (SPEC 5.7).
   for (const spec of specs) {
     const path = spec.document.path;
-    for (const reference of specReferencesOf(spec)) {
+    for (const { reference, occurrence } of specReferencesOf(spec)) {
       if (reference.target.kind === "local") {
         if (path !== originPath) {
           continue; // the local form names an ID in its own file (SPEC 2.2)
@@ -332,19 +378,23 @@ export function planRename(
           range: reference.spelling.range,
           replacement: jsStringLiteral(mapped, reference.spelling.quote),
         });
+        preview.add(path, "reference-rewrite", occurrence);
         continue;
       }
       if (reference.target.modulePath !== originPath) {
         continue;
       }
-      const edit = chainReferenceEdit(
+      const referenceEdits = chainReferenceEdits(
         reference.spelling,
         reference.target.segments,
         oldSegments,
         newLastSegment,
       );
-      if (edit !== null) {
-        edits.add(path, edit);
+      if (referenceEdits !== null) {
+        for (const edit of referenceEdits) {
+          edits.add(path, edit);
+        }
+        preview.add(path, "reference-rewrite", occurrence);
       }
     }
   }
@@ -357,14 +407,23 @@ export function planRename(
       if (reference.modulePath !== originPath) {
         continue;
       }
-      const edit = chainReferenceEdit(
+      const referenceEdits = chainReferenceEdits(
         reference.spelling,
         reference.segments,
         oldSegments,
         newLastSegment,
       );
-      if (edit !== null) {
-        edits.add(analysis.path, edit);
+      if (referenceEdits !== null) {
+        for (const edit of referenceEdits) {
+          edits.add(analysis.path, edit);
+        }
+        // SPEC 6.6/5.7: a marker occurrence spans the bare chain, a TS
+        // `text(...)` occurrence the whole call expression.
+        preview.add(
+          analysis.path,
+          "reference-rewrite",
+          reference.occurrenceRange,
+        );
       }
     }
   }
@@ -404,5 +463,6 @@ export function planRename(
       mapping,
     ),
     rewrites,
+    previewFiles: preview.files(),
   };
 }

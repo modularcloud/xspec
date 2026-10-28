@@ -1,0 +1,6035 @@
+// TEST-SPEC §14 II (the environment refusals: the reporting contract of a
+// refused write, and the outcomes of a refused read) — SUITE-49: T14-9,
+// T14-10.
+//
+// T14-9 (write failures, 14.24) is the reporting-contract test of a write the
+// environment refuses: a usage error — exit 2, the 12.7 error document as
+// stdout (`code` `"write-failure"`, `path` the concerned path), the
+// diagnostic on stderr, never a finding — from every command that makes the
+// write and from none that writes nothing, met only at the write it refuses
+// (12.0: after every check and validation). The per-command states a refused
+// write leaves are T13.5-7's subject (section-13.5.ts); the stagings,
+// fixtures, twins, and seam choreography are shared through
+// write-refusal-staging.ts, and every arm here is contract and recovery:
+// stage, refuse, decode, then — the permissions restored — `build` exits 0
+// and `check` is clean (12.1, 13.4). The concerned-path arms follow
+// T13.5-7's stagings in its order, each on a freshly prepared workspace of
+// its own staged as T13.5-7 stages it through write-refusal-staging.ts's
+// exported fixtures and pre-invocation stagings: (a); (b); (c)'s move and
+// its rename, `out/specs/b/B.md` deleted once built
+// (`deleteRenameOutMarkdown`); (d)'s two writes; (e); (f)'s `build`; (g)'s
+// created target file in both of its byte orders (`CREATED_TARGET_ORDERS`);
+// and (h)'s removal owed alone, from `build` and from a rename's finishing
+// regeneration, emission disabled once built (`disableMoveEmission`).
+//
+// Staging discipline (E-1, Linux leg): permission removal alone, applied at
+// the seam of 13.5 for a mutating command (`runHeldWithStaging`: after
+// acquisition, before any modification) and before the invocation for
+// `build` and the reads (`runStaged`) — and for acquisition's own writes,
+// whose stagings precede the invocation too (T13.5-10(a), (d): the shared
+// stagings of helpers/acquisition-staging.ts and section-13.5-ii.ts's area
+// obstruction) — each staging verified on the harness's own process first —
+// an ineffective one, a privileged runner, is a `HarnessStagingError`
+// (H-11), never a pass or a skip (H-9). Elsewhere the arms are not staged
+// (the NU3_STAGED pattern of section-11.5, here `WRITE_REFUSALS_STAGED`),
+// and the Windows subset (E-6) selects T14-9 nowhere.
+//
+// T14-9's exit-2 stagings hand each exit-2 invocation to a visitor
+// (support.ts `ErrorInvocationVisitor`; `visitWriteFailure`,
+// `visitUsageError`): T14-9's body runs them with `ERROR_INVOCATION_HOME`,
+// its own check at each invocation and every other run and assertion of
+// the arm beside them — the never-reporters, the failing twin and the
+// validation refusal (exit 1, no write attempted), the state assertions
+// beyond the contract, and the recoveries — while T12.0-15's exit-2 family
+// (section-12.0-iv.ts) runs them through `runT149WriteFailureStagings` with
+// its human twin at each invocation instead. Each staging stands around one
+// run alone — at the seam for a held command, before the invocation for
+// `build`, the reads, and acquisition's writes, the reporter sweep's
+// graph-data staging made and restored around each of its runs (`.xspec`'s
+// own occupant, a byte staging, put in place once before the invocation) —
+// so a compare taken outside it reads every path. A refused write stops the
+// command with every earlier write complete (14.24), so the twin's two forms
+// cannot share one state: each write failure is handed over `fresh`, each
+// form then running on its own fresh copy of the pre-invocation state made
+// at the workspace root itself, compared modifies-nothing there where T14-9
+// asserts nothing modified — (a), (d)'s destination production, the
+// reporter sweep and its held `review create`, and acquisition's writes —
+// while the precedence clause's plain usage errors (the given baselines, the
+// hold file), which precede every write, share the state; a JSON-only
+// surface's run (`query`, `occurrences`, `view`, `at`), which has no human
+// form (SPEC 11), is T14-9's alone. The twin's compares leave out what
+// T14-9's snapshots leave out, the harness's own git baseline `.git`
+// (write-refusal-staging.ts `excludeGitTree`).
+//
+// Conservative operationalizations (H-3):
+// - Arm (a)'s rename is `b.k` → `b.k2` in `specs/b/B.mdx` — the child
+//   identity, referenced nowhere — so the refused source rewrite is the
+//   operation's first write: the state 13.5 pins is "nothing written", and
+//   the recovery clause ("after every arm ... `build` exits 0") holds on it.
+//   The staging is (a)'s (`specs/b` unwritable) and the concerned path the
+//   same `specs/b/B.mdx`; T13.5-7 (a) drives the multi-file rename whose
+//   partly applied rewrite leaves the workspace failing validation.
+// - "stderr the diagnostic": wording is free, so the assertion is presence —
+//   a non-empty stderr beside the error document on stdout (12.0: usage
+//   error messages and diagnostics are standard-error content).
+// - The reporter sweep pins every refreshing read's concerned path to the
+//   graph-data area `.xspec` exactly: a refresh writes graph data alone
+//   (13.3: no TypeScript or Markdown is generated or removed), and the
+//   mutating `review create` refreshes before its session write (13.5), so
+//   on the stale workspace with `.xspec` unwritable — T14-9's graph-data
+//   staging (write-refusal-staging.ts `graphDataRefusal`: `.xspec` itself
+//   and every directory of T13.3-2's operational path set read-only and
+//   every file of it unwritable, whatever layout graph data takes; the
+//   journal, the session directory, and the lock path keeping their modes)
+//   — the area is the first refused write of each, never a path inside it
+//   (14.24, 11.6). The reads take no hold and meet the staging from their
+//   invocation on; `review create`, a mutating command, meets it at the
+//   seam, after acquisition — staged before its invocation, the read-only
+//   `.xspec` would refuse acquisition's creation of the lock directory
+//   first, the lock path then concerned (13.5). The lock directory and the
+//   held run's entry keep their modes, so release deletes the entry; its
+//   deletion of the emptied lock directory, an entry of the read-only area,
+//   is refused, which changes no outcome (13.5, 14.24); the empty lock
+//   directory left behind is a leftover, bearing on neither the recovery
+//   `build` nor `check` (13.4: the lock path bears on no comparison of
+//   graph data, and neither acquires).
+// - Acquisition's writes, one arm each (T14-9: the entry's addition, a
+//   leftover's removal, and the lock directory's creation concerning
+//   `.xspec/lock`, no entry ever named; the area directory's creation and
+//   an occupant of the area's own path concerning `.xspec`), run on
+//   T13.5-10's session staging — a fresh CONF-CORE-shaped workspace, built,
+//   holding the audit session `s` — or, for the area directory's creation,
+//   an unbuilt one, so the CONF-CORE reference can run them; each with one
+//   of T13.5-10's five mutating commands, in turn (the sixth arm's wrapping
+//   to the first), so every mutating command reports one of acquisition's
+//   refused writes — each an operation succeeding on T13.5-10's unstaged
+//   twin, but for `review split` on the unbuilt workspace, which names the
+//   absent session `s`, acquisition preceding that check (12.0). A
+//   leftover's removal is staged both ways T13.5-10(d) stages it: a
+//   subdirectory refusing writes in a writable lock directory, and a plain
+//   file at the lock path under T14-9's full discipline. Beyond the
+//   contract each arm asserts nothing modified — every path but the lock
+//   path byte-identical, H-6 leaving out the lock path a mutating run
+//   touched (its residue is T13.5-10(d)'s subject), `.xspec` itself
+//   compared — and recovery: the permissions restored, or, for the
+//   occupant of the area's own path, the occupant deleted by hand (13.4:
+//   the remedy for an occupant obstructing acquisition), `build` exits 0
+//   and `check` is clean.
+// - The never-reporter `check` on that state asserts condition 10 alone,
+//   every finding concerning a path with `locations` `[]` and instructing
+//   rebuilding — its message names `build` (14.10; no recorded file
+//   obstructs a rebuild write there) — and B's generated module
+//   `specs/b/B.xspec.ts` among the paths — the edited text changes it
+//   (4.2, 13.1) — membership alone, since which companions and other
+//   derived files also differ is the product's
+//   (`assertEditedBStalenessConcerns`, shared with T13.5-7 (f)).
+// - The validation refusal's one finding asserts its concerned identity
+//   exactly — the unchanged `specs/b/B.mdx#b` as the sole `identities`
+//   element — with `locations` `[]` and `path` null (14, 1.5, 12.7).
+// - The precedence clause's given baselines (`BASELINE_ARMS`): `impact
+//   --base nope` (a ref naming no commit, 6.3) and `impact --base <the
+//   prepared workspace's baseline commit>` — a commit the repository holds,
+//   written loose by `git commit` — under T6.3-6(e)'s object-store staging
+//   (section-6.3.ts `stageObjectStoreUnsearchable`: `.git/objects` mode
+//   000, verified on the harness), made around that run alone, on the
+//   reporter sweep's state with the graph-data staging standing: each the
+//   baseline's plain usage error — exit 2, the error document, `code` and
+//   `path` `null`, T6.3-6's form — never `write-failure`. Their writable
+//   twins run each invocation, under its own staging alike, on a fresh byte
+//   copy of the stale state made before the sweep (`.git` included, so the
+//   baseline is the copy's repository's too; checked against the original's
+//   snapshot, a difference a harness error): the same usage error, T13.3-2's
+//   operational path set (`isGraphDataKey`) byte-identical around it, and
+//   `check` afterwards condition 10 alone, B's module among the per-file
+//   paths and exactly one finding the graph-data unit form
+//   (`assertGraphDataStillStale`), then recovery on the copy. A product
+//   attempting the refresh first fails the unwritable run with
+//   `write-failure` and its writable twin with graph data refreshed.
+// - The refused writes of the precedence arms and the state assertions
+//   beyond the contract (nothing written where the refused write is the
+//   operation's first; the journal or the session file byte-unchanged) are
+//   whole-entry byte compares against the workspace's own pre-invocation
+//   snapshot, never harness-composed content (H-6).
+//
+// T14-10 (read failures, 14.25): the object read decides the outcome, one
+// arm per row of 14.25, each refusal staged by permission removal alone
+// (E-1, Linux leg; `stageReadRefusalOfFile`: mode 0o200, the write
+// permission kept so a regeneration replacing or rewriting the object is
+// never itself refused; `stageReadRefusalOfDirectory`: mode 0o100, search
+// kept so entries stay reachable by name; nonexistence never staged as a
+// refusal), each staging verified on the harness's own process first —
+// arm (f)'s graph-data directories taking mode 0o300 instead
+// (`stageDirectoryMode`, `-wx`: the listing refused, write and search kept,
+// so a regeneration's writes there are never refused), and its second half
+// `.xspec` itself so (T7-8's carve-out staging, helpers/acquisition-staging.ts
+// `stageUnlistableArea`); arm (i)'s acquisition arms T13.5-10(d)'s stagings
+// (helpers/acquisition-staging.ts: the lock directory, or a subdirectory
+// under it, unlistable but writable, `-wx`; `.xspec` or the lock directory
+// unsearchable, `rw-`); arm (j)'s git directories mode 000, T6.3-6(e)'s
+// stagings (section-6.3.ts: `stageObjectStoreUnsearchable`'s `.git/objects`
+// and `stageInnerGitUnsearchable`'s nested repository's inner `.git`); and
+// arms (k) and (l)'s directories staged where both routes are refused
+// alike, stripped of their read and search permission both (mode 000,
+// `stageDirectoryMode`: the harness's own listing of the directory and
+// examination of the entry concerned refused, and, that entry a plain file,
+// its own read of it) — (k)'s working directory `R/tools` and (l)(iii)'s
+// root `R` each entered first and only then staged
+// (helpers/subprocess.ts `runProductInEnteredDirectory`: the harness's
+// wrapper spawned there, the staging made once it stands there, the wrapper
+// then replaced by the product, which keeps the working directory it
+// entered before the permissions went), (l)(i)'s `.xspec` and (l)(ii)'s
+// `.xspec/reviews` staged before a run from the root — each verified on the
+// harness itself alike.
+// Snapshots for the "nothing modified" laws are taken outside the staging
+// windows (a staged object cannot be snapshotted), before staging and after
+// restoring.
+// T14-10's exit-2 stagings — (b)'s given baselines, (d), (g), (h), (i),
+// (k), and (l) — hand each exit-2 invocation to a visitor (support.ts
+// `ErrorInvocationVisitor`; `visitExitTwo`): T14-10's body runs each arm
+// with `ERROR_INVOCATION_HOME`, its own check at each invocation and every
+// other run and assertion of the arm beside them, while T12.0-15's exit-2
+// family (section-12.0-iv.ts) runs them through `runT1410ReadFailureStagings`
+// with its human twin at each invocation instead. Their stagings stand
+// around each run alone — made just before the run, verified, and restored
+// once it ends (`runStaged`, `bothRoutesRefusedRun`'s run; (i)'s a later
+// run first clearing the lock path an earlier one left, `clearLockPath`) —
+// so a compare taken outside them reads every path; a JSON-only surface's
+// run (`inventory`, `occurrences`, `view`, `at`), which has no human form
+// (SPEC 11), is T14-10's alone.
+//
+// Conservative operationalizations (H-3):
+// - Arm (a)'s fixture: `specs/A.mdx` → `specs/B.mdx` → `specs/C.mdx` ←
+//   `specs/D.mdx`, plus the code source `src/app.ts` marking A's section.
+//   A premise asserts that B's `d` reference and the marker each record an
+//   occurrence when readable, so "no record for its spellings" under the
+//   refusal is the masking of 14.25, not an absence; D's record stays as
+//   the per-file answer the surface keeps.
+// - "`ids` exits 1 answering nothing" (b) and "`review status` reports
+//   exactly one finding" (c) are the findings-only document `{"findings":
+//   […]}` (12.7: a report whose defined content is findings alone), decoded
+//   form-exact.
+// - Arm (b)'s given baseline is the prepared workspace's baseline commit
+//   (`prepareRefusalWorkspace`'s, its tree holding the journal), at both
+//   baseline-taking commands — `impact --base` and `review create --base …
+//   --name n` — each T6.3-6(c)'s form-exact journal error: `code`
+//   `journal-error`, `path` `.xspec/journal`, `locations` [] (condition 13's
+//   concerned path). Its surfaces of 11.2 are bare `occurrences`, `view
+//   specs/a/A.mdx`, and `at specs/a/A.mdx 0`, each a complete answer —
+//   exit 0, `findings` [] — and `view` exactly A's view; "nothing
+//   modified" is the arm's whole-tree compare once the journal's mode is
+//   restored, a session written by the refused `review create` included.
+// - Arm (c)'s three reporters assert one concern contract (TEST-SPEC line
+//   9's rule for an error report): `check`'s and `review status s`'s
+//   reports and the `review list` listing each hold exactly one finding,
+//   condition 21 — its exact stable code `corrupt-session`, which the
+//   condition count reads — concerning the session file
+//   `.xspec/reviews/s.json` as its 12.7 `path`, with no in-source location
+//   (`locations` []: a session condition has none; SPEC 14, 12.7). The
+//   listing's finding comes from the decoded listing's `"findings"` member,
+//   with no invocation of its own: `list` reports condition 21 for each
+//   corrupt session (14.21, exit 1) under that member (12.7), which the
+//   decoder requires while a session is listed corrupt (H-3). Exactly one
+//   from each reporter: the one staged corruption is a refused content
+//   read — no session content is read, so no invariant violation stands
+//   beside it as a distinct finding — and `s` is the workspace's only
+//   session.
+// - Arm (f)'s "every path under `.xspec/` other than the journal, the
+//   session directory, and the lock path staged unreadable" is T13.3-2's
+//   operational path set (`isGraphDataKey`, walked by the adapter layer's
+//   `collectGraphDataEntries`: the lock path and everything under it never
+//   staged, 13.4), recursively, each path reached at its exact name bytes
+//   (the names are the product's, 13.3): every plain file at mode 0o200
+//   (`-w-------`) and every directory by its read permission alone removed
+//   (0o300, `-wx`: its listing refused, its write and search kept — never
+//   the discipline's `--x`), so only reads are refused and the
+//   regeneration `ids` owes (13.3) is never itself refused, whatever the
+//   product's layout; `.xspec` itself is no path under it and keeps its
+//   mode. Where graph data holds no directory, files alone are staged, and
+//   the staging's description — quoted by every diagnosis under it — says
+//   so. A staged path the regeneration has since removed is not restored
+//   (nothing to reinstate). After `build` exits 0 nothing is asserted about
+//   the record it wrote, neither an `inventory` nor a recovery `check`:
+//   what a later read meets turns on the modes `build`'s writes leave,
+//   which SPEC.md fixes nowhere (a successful build's replacement of an
+//   unreadable record is T12.2-2's, staged shape-blind). The preview is the
+//   file-form `move specs/c/C.mdx specs/c/D.mdx` — same directory, C
+//   imported nowhere — a plan valid on the readable record.
+// - Arm (f)'s second half runs on a freshly prepared workspace of its own,
+//   the area's own occupant staged `-wx`: its unstaged twin is the same
+//   workspace read before the staging — the same state, the twin's reads
+//   writing nothing (asserted) — and each answer under the staging is judged
+//   by its exit code (`judgeAreaOccupantAnswer`): exit 0, the decoded answer
+//   equal to the twin's whole; exit 1, exactly one condition-23 finding
+//   concerning `.xspec` with `locations` [], the datum exactly the
+//   unavailability marker, and every other decoded member equal to the
+//   twin's; anything else fails, `read-failure`'s exit 2 above all. The
+//   preview is (f)'s own move.
+// - Arm (g)'s "a malformed value" is `at specs/a/A.mdx zz` (an offset
+//   spelled as anything but decimal digits, 11.5 — a syntax-class member,
+//   12.0); "nothing modified" is the whole-tree snapshot around the sweep.
+// - Arm (h)'s workspace failing `build`'s validations is its own
+//   session-bearing workspace with A's reference respelled to resolve
+//   nowhere (14.5), as (g)'s failing twin respells it; "exactly the gate's
+//   findings" is those `build --json` reports on the same state, compared by
+//   condition, code, path, and locations (message wording free), as
+//   T10.7-15 compares them; the reference is then restored.
+// - Arm (i)'s acquisition arms run on T13.5-10's session staging — a fresh
+//   CONF-CORE-shaped workspace (`CORE_DECL`), built, holding the audit
+//   session `s`, so the CONF-CORE reference can run them — one of
+//   T13.5-10's five mutating commands each, in turn, so every mutating
+//   command reports one of acquisition's refused reads: the lock directory
+//   unlistable (`rename`), a subdirectory under it unlistable (`move`),
+//   `.xspec` unsearchable holding no `lock` (`review create`) and,
+//   separately, an empty lock directory (`resolve`) — T13.5-10(d)'s two
+//   stagings of it — and the lock directory unsearchable, holding a
+//   directory that holds a file (`split`). "The nested path never named" is
+//   the error document's `path` exactly `.xspec/lock` and its `locations`
+//   `[]` (12.7: none for a condition without in-source locations), the
+//   message's wording free. "Nothing modified" is every path but the lock
+//   path byte-identical, the lock path pruned from both walks (H-6:
+//   acquisition and release touch it; the residue each staging leaves there
+//   is T13.5-10(d)'s subject). The second-discovery arm holds `rename
+//   specs/A.mdx a a2` — the next command in turn, one representative,
+//   T13.5-12(e) running each — on a session staging of T13.5-8's valid
+//   workspace (`ACQUISITION_DECL`), makes `specs/sub` unlistable during the
+//   hold as T13.5-12(e) does, and asserts arm (g)'s contract at that
+//   directory and nothing modified from the state during the hold on.
+// - Arm (j)'s two stagings are T6.3-6(e)'s: the repository's stored data —
+//   `.git/objects` mode 000 on the prepared, journal-bearing workspace
+//   holding a baseline session `s` created before the staging, at `impact
+//   --base`, `review create --base … --name n`, and `review status s` (a
+//   recorded baseline's resolution, 10.7) — and, separately, its discovery:
+//   T6.3-5(b)'s nested repository (section-6.3.ts `NESTED_REPOSITORY_FILES`,
+//   `stageNestedRepositories`), the inner workspace built first, its inner
+//   `.git` mode 000, at `impact --base v1` and `review create --base v1
+//   --name n` from `R` with `--config inner/xspec.config.ts`. Each staging
+//   is made just before its run and restored once it ends; "nothing
+//   modified" is a compare around each run with the repositories' git
+//   directories left out (git data is no workspace file, SPEC 6.3).
+// - Arm (k)'s valid workspace `R` is the CONF-CORE-shaped one (`CORE_DECL`:
+//   its one glob `specs/**/*.mdx` reaching nothing below `tools`), built,
+//   `check` clean, holding the empty directory `tools`; its second staging
+//   is a fresh workspace holding `specs/A.mdx` and `tools` alone — no
+//   configuration in `R` — H-1's ancestor precondition verified on it first
+//   (helpers/self-contained-root.ts `assertSelfContainedRoot`: no
+//   `xspec.config.ts` above `R`, no working tree around it). Under each,
+//   every run — `build --json`, `ids --json`, `inventory`, and `coverage
+//   no-such-profile --json` (`read-failure` at `.`), `ids extra --json`
+//   (the syntax class, `code` null), and `version` (exit 0, one JSON
+//   document) — enters `R/tools` and only then stages it, its own staging
+//   verified and restored once it ends: `ids extra` and `version` run under
+//   both stagings, "there" being the staged working directory. "Nothing
+//   modified" is a compare of `R`'s snapshots around each run.
+// - Arm (l)(i)'s workspace is the CONF-CORE-shaped one made journal-bearing
+//   by the prior journaled rename `g` → `g2` in `specs/A.mdx` and committed
+//   (`prepareRefusalWorkspace`: `c1` its baseline commit, `impact --base`
+//   given its hash); `.xspec` is staged just before each run and restored
+//   once it ends, the harness's own examination and read of the journal
+//   refused beside its listing. The surfaces of 11.2 are bare
+//   `occurrences`, `view specs/A.mdx`, and `at specs/A.mdx 0`; every
+//   concerned path is exactly `.xspec/journal` but the inventory's and the
+//   twin's `check`'s, either of `.xspec/journal` and `.xspec/reviews`. The
+//   failing twin is the same workspace after the valid runs, each having
+//   modified nothing, its product-written `specs/A.mdx` given a top-level
+//   `<S>` with no `id` (14.1) through `workspace.edit`. Arm (l)(ii)'s
+//   session is `review create --strategy audit --name s` on a built
+//   CONF-CORE-shaped workspace, its file first required to be the plain
+//   file `.xspec/reviews/s.json` (a premise, so a product storing it
+//   elsewhere fails diagnosed, never at the staging's own precondition),
+//   the harness's own examination and read of it refused beside its
+//   listing of `.xspec/reviews`. Arm (l)(iii) runs `build --json`, `ids
+//   --json`, and `inventory`, each with `--config xspec.config.ts`, from a
+//   built CONF-CORE-shaped workspace's root `R`, entered and only then
+//   staged, the harness's own examination and read of `xspec.config.ts`
+//   refused beside its listing of `R`. "Nothing modified" is the snapshot
+//   compare around each run, as in (j).
+// - Unstageable, recorded here as T14-10 records them (and as T6.5-6
+//   records its unstageable clauses): a refused read of a path occupant's
+//   kind — the area's own occupant's at acquisition included (13.5), though
+//   not the lock path's there, which arm (i) stages, a conforming
+//   acquisition taking that kind from no listing (T13.5-10(h)); whether a
+//   product learns a kind by a separate examination the environment can
+//   refuse or from a listing it already made is its own (7, 13.4) — save
+//   where both routes are refused alike: a directory stripped of its read
+//   and search permission both refuses its listing and the examination of
+//   every kind below it, so a product judging a kind there meets a refusal
+//   whatever its route, only the concerned path, the directory's or a path
+//   below it, turning on its read order (T11.2-6's unreadable emit
+//   directory; arm (k)'s working directory; arm (l)'s three paths, each
+//   staged so); and a refused read of a directory above the workspace
+//   root, or any the anchoring resolution makes (11.6) — whether a product
+//   makes such a read at all is its own: it may spell a physical path by
+//   examining its components or take it from the working directory the
+//   process holds (11.6), and reach the directories the upward search
+//   examines by a walk from that working directory or by an absolute one
+//   from the filesystem root (7), so a directory above the root made
+//   unsearchable once the working directory is entered refuses only the
+//   absolute walk, the search stopping at the root (7) — the working
+//   directory itself, which every route examines, being arm (k)'s. Neither
+//   is asserted beyond those stagings.
+
+import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
+import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
+import {
+  stageReadOnlyArea,
+  stageReadOnlyRoot,
+  stageUnlistableArea,
+  stageUnlistableLeftoverDirectory,
+  stageUnlistableLockDirectory,
+  stageUnremovableLockFile,
+  stageUnsearchableArea,
+  stageUnsearchableLockDirectory,
+  stageUnwritableLeftoverDirectory,
+  stageUnwritableLockDirectory,
+} from "../../helpers/acquisition-staging.js";
+import type {
+  Finding,
+  InventoryDocument,
+  OccurrencesReport,
+  PreviewReport,
+} from "../../helpers/adapters/index.js";
+import {
+  collectGraphDataEntries,
+  decodeAtReport,
+  decodeFindingsReport,
+  decodeIdsReport,
+  decodeInventoryDocument,
+  decodeOccurrencesReport,
+  decodePreviewReport,
+  decodeSessionListReport,
+  decodeViewReport,
+  isGraphDataKey,
+  renderPathValue,
+} from "../../helpers/adapters/index.js";
+import {
+  assertExitCode,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
+import {
+  EXCLUDE_LOCK_PATH,
+  LOCK_PATH,
+  isLockPathBytes,
+} from "../../helpers/lock-path.js";
+import { AREA_PATH } from "../../helpers/lock-staging.js";
+import type {
+  DirectoryModeProbe,
+  PermissionStaging,
+} from "../../helpers/permissions.js";
+import {
+  HarnessStagingError,
+  stageDirectoryMode,
+  stageReadRefusalOfDirectory,
+  stageReadRefusalOfFile,
+  stageWriteRefusal,
+} from "../../helpers/permissions.js";
+import { defineProductTest } from "../../helpers/registry.js";
+import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
+import type {
+  DirectorySnapshot,
+  SnapshotOptions,
+} from "../../helpers/snapshot.js";
+import {
+  assertSnapshotsEqual,
+  diffSnapshots,
+  displaySnapshotPath,
+  snapshotDirectory,
+  snapshotKeyBytes,
+} from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
+import {
+  ProductRunTimeoutError,
+  pathExists,
+  runProductInEnteredDirectory,
+} from "../../helpers/subprocess.js";
+import { copyTreeBytes } from "../../helpers/tree-copy.js";
+import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import { TestWorkspace } from "../../helpers/workspace.js";
+import {
+  J6_INNER_CONFIG_ARGS as NESTED_INNER_CONFIG_ARGS,
+  NESTED_REPOSITORY_FILES,
+  R5_INNER as NESTED_INNER_ROOT,
+  R5_TAG as NESTED_TAG,
+  stageInnerGitUnsearchable,
+  stageNestedRepositories,
+  stageObjectStoreUnsearchable,
+} from "./section-6.3.js";
+import type { SessionOperation } from "./section-13.5.js";
+import {
+  ACQUISITION_DECL,
+  CORE_A_STAGED,
+  CORE_DECL,
+  SUB_DIR as SECOND_DISCOVERY_DIR,
+  UNLISTABLE_SUB_DIR,
+} from "./section-13.5.js";
+import {
+  ABSENT_SESSION_ITEMS,
+  T13_5_10_OPERATIONS,
+  obstructArea,
+  stageArmWorkspace,
+} from "./section-13.5-ii.js";
+import { liftAndWait, withHeldRun } from "./section-13.5-iii.js";
+import type { ErrorInvocation, ErrorInvocationVisitor } from "./support.js";
+import {
+  ERROR_INVOCATION_HOME,
+  assertConditionCounts,
+  assertFindingConcernsPath,
+  assertFindingLocated,
+  assertRefusalIdentities,
+  assertSameJson,
+  buildOk,
+  expectConfigurationError,
+  expectErrorDocument,
+  expectExit,
+  runJson,
+} from "./support.js";
+import type {
+  CreatedTargetOrder,
+  RefusalFixture,
+  StagingApplier,
+} from "./write-refusal-staging.js";
+import {
+  CREATED_TARGET_ORDERS,
+  GRAPH_DATA_AREA,
+  JOURNAL_PATH,
+  MOVE_ARGV,
+  MOVE_DESTINATION,
+  MOVE_DESTINATION_DIR,
+  MOVE_FIXTURE,
+  MOVE_MARKDOWN_DIR,
+  MOVE_MARKDOWN_WRITES,
+  MOVE_ORIGIN,
+  ORPHAN_RENAME_ARGV,
+  ORPHANED_MARKDOWN,
+  RENAME_A_PATH,
+  RENAME_B_DIR,
+  RENAME_B_MODULE,
+  RENAME_B_PATH,
+  RENAME_C_PATH,
+  RENAME_FIXTURE,
+  RENAME_OLD_IDENTITY,
+  RENAME_OUT_FIXTURE,
+  RENAME_OUT_MARKDOWN,
+  RENAME_OUT_MARKDOWN_DIR,
+  REVIEWS_DIR,
+  SECTION_MOVE_TARGET,
+  SECTION_MOVE_TARGET_DIR,
+  WRITE_FAILURE_CODE,
+  WRITE_REFUSALS_STAGED,
+  assertEditedBStalenessConcerns,
+  assertStalenessAlone,
+  checkFindings,
+  deleteRenameOutMarkdown,
+  disableMoveEmission,
+  excludeGitTree,
+  expectWriteFailure,
+  graphDataRefusal,
+  isDerivedFile,
+  prepareRefusalWorkspace,
+  refusalAt,
+  refusalUnder,
+  requireItemByScope,
+  runHeldWithStaging,
+  runSettled,
+  runStaged,
+  sessionStatus,
+  snapshotWorkspace,
+} from "./write-refusal-staging.js";
+
+// ---------------------------------------------------------------------------
+// Shared constants and helpers
+// ---------------------------------------------------------------------------
+
+/** The arms' full rename, `b` → `b2` in `specs/b/B.mdx` (SPEC 6.4). */
+const RENAME_B_TO_B2: readonly string[] = [
+  "rename",
+  RENAME_B_PATH,
+  "b",
+  "b2",
+  "--json",
+];
+/** Arm (a)'s rename: the child identity `b.k`, referenced nowhere. */
+const RENAME_CHILD: readonly string[] = [
+  "rename",
+  RENAME_B_PATH,
+  "b.k",
+  "b.k2",
+  "--json",
+];
+const MOVE_JSON: readonly string[] = [...MOVE_ARGV, "--json"];
+
+// Text-only staleness edits of built sources: the workspace stays valid, its
+// graph data and the edited source's derived files stale (SPEC 13.3).
+const B_EDIT_FROM = "Beta text.";
+const B_EDIT_TO = "Beta text, edited.";
+const A_EDIT_FROM = "Alpha text.";
+const A_EDIT_TO = "Alpha text, edited.";
+/** A's `d` reference into B after the fixture's prior rename (`b0` → `b`). */
+const A_REFERENCE = "d={B.b}";
+/** The same reference respelled to resolve nowhere (SPEC 14.5). */
+const A_UNRESOLVED = "d={B.nope}";
+
+const SESSION = "s";
+const NEW_SESSION = "n";
+const SESSION_FILE = `${REVIEWS_DIR}/${SESSION}.json`;
+/** An unblocked leaf item's scope (SPEC 10.6) — not the edited source's. */
+const RESOLVE_SCOPE = "specs/c/C.mdx#c";
+/** A requirement node of the built rename fixture, `show`'s operand. */
+const SHOW_IDENTITY = "specs/b/B.mdx#b";
+
+/**
+ * A refused write's 14.24 contract with its diagnostic: exit 2, the error
+ * document as stdout (`write-failure`, a concerned path — `expectWriteFailure`,
+ * whose admissible paths are snapshot keys compared with the reported path
+ * by bytes), and a non-empty stderr (12.0: the diagnostic is
+ * standard-error content).
+ */
+function expectRefusal(
+  result: RunResult,
+  concerned: readonly string[],
+  context: string,
+): Finding {
+  const finding = expectWriteFailure(result, concerned, context);
+  if (result.stderr.trim().length === 0) {
+    fail(
+      `${context} — the diagnostic accompanies the error document on ` +
+        `standard error (SPEC 14.24, 12.0: usage-error messages are ` +
+        `standard-error content); got an empty stderr beside ` +
+        `${JSON.stringify(finding.message)}`,
+    );
+  }
+  return finding;
+}
+
+/**
+ * Recovery (SPEC 12.1, 13.4): with the permissions restored — every staging
+ * is restored the moment its command exits — the next `build` exits 0 and
+ * `check` is clean.
+ */
+async function assertRecovers(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(
+    product,
+    workspace,
+    `${context}: recovery — the permissions restored, the next \`build\` ` +
+      `exits 0 (SPEC 12.1, 13.4)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["check"],
+    0,
+    `${context}: recovery — after the next \`build\`, \`check\` is clean ` +
+      `(SPEC 12.2, 13.4)`,
+  );
+}
+
+/** The bytes of the snapshot's plain file at `rel`. */
+function fileBytes(
+  snapshot: DirectorySnapshot,
+  rel: string,
+  context: string,
+): Uint8Array {
+  const entry = snapshot.entries.get(rel);
+  if (entry === undefined || entry.kind !== "file") {
+    return fail(
+      `${context}: ${rel} must be a plain file (SPEC 13.4); found ` +
+        (entry === undefined ? "absent" : entry.kind),
+    );
+  }
+  return entry.bytes;
+}
+
+/** One plain file byte-unchanged between two snapshots. */
+function assertFileUnchanged(
+  before: DirectorySnapshot,
+  after: DirectorySnapshot,
+  rel: string,
+  context: string,
+): void {
+  const prior = fileBytes(before, rel, context);
+  const current = fileBytes(after, rel, context);
+  if (Buffer.compare(Buffer.from(prior), Buffer.from(current)) !== 0) {
+    fail(`${context}: ${rel} must be byte-unchanged; found it rewritten`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Exit-2 invocations handed to a visitor (TEST-SPEC T12.0-15's exit-2 family)
+// ---------------------------------------------------------------------------
+
+/**
+ * SPEC 11's JSON-only surfaces among the commands T14-9's and T14-10's
+ * exit-2 stagings run: each emits one JSON document whatever its flags
+ * (SPEC 11; H-5), so an invocation of one has no human form to twin
+ * (TEST-SPEC T12.0-15).
+ */
+const JSON_ONLY_SURFACES: ReadonlySet<string> = new Set([
+  "query",
+  "inventory",
+  "occurrences",
+  "view",
+  "at",
+]);
+
+/** The parts of an exit-2 invocation its staging gives `visitExitTwo`. */
+interface ExitTwoInvocation {
+  /** Leads every diagnosis of the invocation. */
+  readonly label: string;
+  /** The command line as the home test runs it, `--json` among its tokens. */
+  readonly jsonArgv: readonly string[];
+  /** The workspace root whose tree the invocation runs in. */
+  readonly root: string;
+  /** A run at the invocation's pre-invocation state, its staging around it. */
+  readonly run: (argv: readonly string[]) => Promise<RunResult>;
+  /**
+   * What the compare under `root` leaves out (T14-10(i)'s lock path;
+   * T14-9's `.git`).
+   */
+  readonly exclude?: SnapshotOptions["exclude"];
+  /**
+   * T14-9's write failures: each form on its own fresh copy of the
+   * pre-invocation state, compared where T14-9 asserts nothing modified
+   * (support.ts `ErrorInvocation.fresh`).
+   */
+  readonly fresh?: ErrorInvocation["fresh"];
+}
+
+/**
+ * Hand one exit-2 invocation of T14-9's or T14-10's stagings to `visitor`
+ * (support.ts `ErrorInvocationVisitor`; TEST-SPEC T12.0-15's exit-2 family)
+ * at the state it runs on — its human form the same command line without
+ * its `--json` token, `home` the home test's own check of it — or, a
+ * JSON-only surface's ({@link JSON_ONLY_SURFACES}), which has no human
+ * form, run `home` alone where `visitor.home` holds: that run is the home
+ * test's.
+ */
+async function visitExitTwo(
+  visitor: ErrorInvocationVisitor,
+  invocation: ExitTwoInvocation,
+  home: () => Promise<void>,
+): Promise<void> {
+  if (JSON_ONLY_SURFACES.has(invocation.jsonArgv[0] ?? "")) {
+    if (visitor.home) await home();
+    return;
+  }
+  await visitor.error(
+    {
+      ...invocation,
+      argv: invocation.jsonArgv.filter((token) => token !== "--json"),
+    },
+    home,
+  );
+}
+
+/** One of T14-9's exit-2 invocations as its arm hands it over. */
+type T149Invocation = Omit<ExitTwoInvocation, "exclude" | "fresh">;
+
+/**
+ * Hand one of T14-9's write failures to `visitor` (`visitExitTwo`): its two
+ * forms each on its own fresh copy of the pre-invocation state — a refused
+ * write stops the command with every earlier write complete (SPEC 14.24),
+ * so the forms cannot share one state — each form's modifies-nothing
+ * compare kept where `unchanged` says T14-9 asserts nothing modified (the
+ * refused write the run's first, or acquisition's), leaving out what
+ * T14-9's snapshots leave out, the harness's own git baseline `.git`
+ * (write-refusal-staging.ts `snapshotWorkspace`, `excludeGitTree`).
+ */
+async function visitWriteFailure(
+  visitor: ErrorInvocationVisitor,
+  invocation: T149Invocation & { readonly unchanged: boolean },
+  home: () => Promise<void>,
+): Promise<void> {
+  const { unchanged, ...handed } = invocation;
+  await visitExitTwo(
+    visitor,
+    { ...handed, exclude: excludeGitTree, fresh: { compare: unchanged } },
+    home,
+  );
+}
+
+/**
+ * Hand one of T14-9's plain usage errors to `visitor` (`visitExitTwo`): it
+ * precedes every write (SPEC 12.0; 6.3: a given baseline's resolution
+ * precedes the gate, and so the refresh; 13.5: the hold file is created
+ * before any modification), so its two forms run on the state itself inside
+ * one compare, `.git` left out as T14-9's snapshots leave it.
+ */
+async function visitUsageError(
+  visitor: ErrorInvocationVisitor,
+  invocation: T149Invocation,
+  home: () => Promise<void>,
+): Promise<void> {
+  await visitExitTwo(visitor, { ...invocation, exclude: excludeGitTree }, home);
+}
+
+// ---------------------------------------------------------------------------
+// The concerned paths, one arm each (T13.5-7's stagings)
+// ---------------------------------------------------------------------------
+
+/**
+ * (a) A rewritten source: `rename specs/b/B.mdx b.k b.k2` with `specs/b`
+ * staged unwritable at the seam — the error document concerns
+ * `specs/b/B.mdx`; the refused rewrite being the operation's first write
+ * (the child identity is referenced nowhere), nothing is written: no
+ * journal entry, nothing regenerated (13.5). The run is handed to `visitor`
+ * (`visitWriteFailure`), nothing modified; the recovery where
+ * `visitor.home` holds.
+ */
+async function rewrittenSourceArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (a) `rename specs/b/B.mdx b.k b.k2 --json` with specs/b unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-a.tmp",
+        refusalUnder(RENAME_B_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: RENAME_CHILD,
+        root: workspace.root,
+        run,
+        unchanged: true,
+      },
+      async () => {
+        expectRefusal(
+          await run(RENAME_CHILD),
+          [RENAME_B_PATH],
+          `${context} — the rewritten source is the concerned path (SPEC 14.24, 6.4)`,
+        );
+        assertSnapshotsEqual(
+          prepared.before,
+          await snapshotWorkspace(workspace.root),
+          `${context}: nothing written — the child identity \`b.k\` is ` +
+            `referenced nowhere, so B's refused rewrite is the operation's ` +
+            `first write and the command stops there: no journal entry (the ` +
+            `append follows every source edit), nothing regenerated (SPEC ` +
+            `13.5, 14.24)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (b) The journal: the full rename with `.xspec/journal` staged unwritable
+ * (`.xspec` read-only, its occupant unwritable) — the error document
+ * concerns `.xspec/journal`, the journal byte-unchanged (no entry); restored,
+ * the consistently rewritten sources build clean (T13.5-7 (b)). The run is
+ * handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
+ */
+async function journalArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (b) `rename specs/b/B.mdx b b2 --json` with .xspec/journal unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-b.tmp",
+        refusalAt(JOURNAL_PATH),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: RENAME_B_TO_B2,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(RENAME_B_TO_B2),
+          [JOURNAL_PATH],
+          `${context} — the journal is the concerned path (SPEC 14.24, 6.1)`,
+        );
+        assertFileUnchanged(
+          prepared.before,
+          await snapshotWorkspace(workspace.root),
+          JOURNAL_PATH,
+          `${context}: the refused append leaves no entry (SPEC 13.5, 6.1)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (c) An emitted Markdown file's creation or removal: the file-form move
+ * with `out/specs` staged unwritable — the error document concerns one of
+ * the two Markdown writes the finishing regeneration owes there,
+ * `out/specs/sub/B.md`'s creation (the directory it needs is part of that
+ * write, 13.4) or `out/specs/A.md`'s removal, the order among a
+ * regeneration's derived-file writes being unpinned (13.5). The run is
+ * handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
+ */
+async function markdownArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (c) `move specs/A.mdx specs/sub/B.mdx --json` with out/specs unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    MOVE_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-c.tmp",
+        refusalUnder(MOVE_MARKDOWN_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: MOVE_JSON,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(MOVE_JSON),
+          MOVE_MARKDOWN_WRITES,
+          `${context} — an emitted Markdown file's creation or removal under ` +
+            `${MOVE_MARKDOWN_DIR} is the concerned path (SPEC 14.24, 13.2, 13.5)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (c) The rename's emitted Markdown file, staged as T13.5-7 (c) stages its
+ * rename: the rename fixture's emitted-Markdown variant
+ * (`RENAME_OUT_FIXTURE`: `markdown: { emit: true, outDir: "out" }`), built,
+ * `out/specs/b/B.md` then deleted once `out/specs/b` is checked to hold it
+ * alone (`deleteRenameOutMarkdown`), so that the rename's finishing
+ * regeneration owes a write there, that file's creation; the full rename
+ * with `out/specs/b` staged unwritable at the seam — the error document
+ * concerns `out/specs/b/B.md`, the file the refused write would have
+ * produced (14.24). The state the stopped rename leaves is T13.5-7 (c)'s.
+ * The run is handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
+ */
+async function renameMarkdownArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (c) `rename specs/b/B.mdx b b2 --json` with out/specs/b/B.md deleted and out/specs/b unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_OUT_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await deleteRenameOutMarkdown(workspace, `${context} staging`);
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-c-rename.tmp",
+        refusalUnder(RENAME_OUT_MARKDOWN_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: RENAME_B_TO_B2,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(RENAME_B_TO_B2),
+          [RENAME_OUT_MARKDOWN],
+          `${context} — the creation of ${RENAME_OUT_MARKDOWN}, the write the ` +
+            `rename's finishing regeneration owes under ` +
+            `${RENAME_OUT_MARKDOWN_DIR}, is the concerned path (SPEC 14.24, 6.4, ` +
+            `12.1, 13.2)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (d) A relocation's second write, the origin's removal: the file-form move
+ * with `specs/sub` present and writable and `specs` staged unwritable — the
+ * destination produced, the origin's removal refused, the error document
+ * concerning `specs/A.mdx`, the origin's own path (14.24: each of a
+ * relocation's two writes concerns its own path). The run is handed to
+ * `visitor` (`visitWriteFailure`); the recovery where `visitor.home` holds.
+ */
+async function originRemovalArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (d) `move specs/A.mdx specs/sub/B.mdx --json` with specs unwritable, specs/sub present and writable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    MOVE_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await workspace.dir(MOVE_DESTINATION_DIR);
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-d.tmp",
+        refusalAt(MOVE_ORIGIN),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: MOVE_JSON,
+        root: workspace.root,
+        run,
+        unchanged: false,
+      },
+      async () => {
+        expectRefusal(
+          await run(MOVE_JSON),
+          [MOVE_ORIGIN],
+          `${context} — the origin's removal, the relocation's second write, ` +
+            `concerns the origin's own path (SPEC 14.24, 13.5)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (d) A relocation's first write, the destination's production: the same
+ * move with `specs/sub` the directory staged unwritable instead — the error
+ * document concerns `specs/sub/B.mdx`, the origin still present and nothing
+ * relocated: the relocation's entry precedes `src/` in `files` order (6.6,
+ * 12.7), so its refused first write leaves the whole workspace
+ * byte-unchanged (13.5). The run is handed to `visitor`
+ * (`visitWriteFailure`), nothing modified; the recovery where
+ * `visitor.home` holds.
+ */
+async function destinationProductionArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (d) `move specs/A.mdx specs/sub/B.mdx --json` with specs/sub unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    MOVE_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await workspace.dir(MOVE_DESTINATION_DIR);
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-d2.tmp",
+        refusalUnder(MOVE_DESTINATION_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: context,
+        jsonArgv: MOVE_JSON,
+        root: workspace.root,
+        run,
+        unchanged: true,
+      },
+      async () => {
+        const staged = await snapshotWorkspace(workspace.root);
+        expectRefusal(
+          await run(MOVE_JSON),
+          [MOVE_DESTINATION],
+          `${context} — the destination's production, the relocation's first ` +
+            `write, concerns the destination's own path (SPEC 14.24, 13.5)`,
+        );
+        assertSnapshotsEqual(
+          staged,
+          await snapshotWorkspace(workspace.root),
+          `${context}: the origin still present, nothing relocated — the ` +
+            `relocation's entry precedes src/ in files order (SPEC 6.6, 12.7), ` +
+            `so its refused first write leaves every source, the journal, ` +
+            `derived files, and graph data byte-unchanged (SPEC 13.5, 14.24)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (e) A session file: on a stale, valid workspace holding an audit session,
+ * `review resolve s <item> --status no-change` with `.xspec/reviews` and the
+ * session file staged unwritable at the seam (`.xspec` itself writable, so
+ * the refresh preceding the session write succeeds, 13.5) — the error
+ * document concerns `.xspec/reviews/s.json`, the session file
+ * byte-unchanged. The run is handed to `visitor` (`visitWriteFailure`); the
+ * recovery where `visitor.home` holds.
+ */
+async function sessionFileArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (e) `review resolve s <item> --status no-change --json` with .xspec/reviews and the session file unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    // The item lookup precedes the staleness edit: `review status` is itself
+    // a refreshing read (SPEC 13.3), so it runs while nothing is stale.
+    const item = requireItemByScope(
+      await sessionStatus(product, workspace, SESSION, `${context} staging`),
+      RESOLVE_SCOPE,
+      `${context} staging`,
+    );
+    await workspace.edit(RENAME_A_PATH, A_EDIT_FROM, A_EDIT_TO);
+    const jsonArgv = [
+      "review",
+      "resolve",
+      SESSION,
+      item.id,
+      "--status",
+      "no-change",
+      "--json",
+    ];
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-e.tmp",
+        refusalAt(SESSION_FILE),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: false },
+      async () => {
+        const staged = await snapshotWorkspace(workspace.root);
+        expectRefusal(
+          await run(jsonArgv),
+          [SESSION_FILE],
+          `${context} — the session file is the concerned path (SPEC 14.24, 10.7)`,
+        );
+        assertFileUnchanged(
+          staged,
+          await snapshotWorkspace(workspace.root),
+          SESSION_FILE,
+          `${context}: the session write, the mutator's last write, refused ` +
+            `(SPEC 13.5, 14.24)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (f) A generated module or companion: `build` on the B-edited workspace
+ * with `specs/b` staged unwritable before the invocation (`build` takes no
+ * hold) — the error document concerns a derived path under `specs/b/`, the
+ * first `specs/b/` write in the product's order: the set a regeneration
+ * writes there is the set the prior build left (12.1 rewrites every derived
+ * file; the edit changes content, not the set). The set is the prior
+ * snapshot's keys, so a companion whose suffix the product chose (13.1)
+ * matches the reported path by its exact bytes, whatever they are. The run
+ * is handed to `visitor` (`visitWriteFailure`); the recovery where
+ * `visitor.home` holds.
+ */
+async function derivedPathArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 (f) `build --json` with specs/b unwritable on the B-edited workspace";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const derivedUnderB = [...prepared.before.entries.keys()].filter(
+      (rel) =>
+        isDerivedFile(rel, prepared.before.entries.get(rel)) &&
+        rel.startsWith(`${RENAME_B_DIR}/`),
+    );
+    if (derivedUnderB.length === 0) {
+      fail(
+        `${context}: the built workspace holds B's generated module and ` +
+          `companions beside its source under ${RENAME_B_DIR}/ (SPEC 13.1, ` +
+          `13.2); found none among ` +
+          JSON.stringify(
+            [...prepared.before.entries.keys()].map(displaySnapshotPath),
+          ),
+      );
+    }
+    await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
+    const jsonArgv = ["build", "--json"];
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runStaged(product, workspace, argv, refusalUnder(RENAME_B_DIR), context);
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: false },
+      async () => {
+        expectRefusal(
+          await run(jsonArgv),
+          derivedUnderB,
+          `${context} — a generated module or companion under ${RENAME_B_DIR}/, ` +
+            `the first ${RENAME_B_DIR}/ write in the product's order, is the ` +
+            `concerned path (SPEC 14.24, 12.1, 13.1)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (g) A section-form move's created target file, on either side of the
+ * origin's rewrite in `files` order (T13.5-7 (g)'s two fixtures,
+ * `CREATED_TARGET_ORDERS`): `move <origin>#x specs/n/N.mdx#x`, `x` a
+ * top-level section of the origin that nothing references and `specs/n` an
+ * empty directory from the start, so the move creates the target file
+ * (6.5), with `specs/n` staged unwritable at the seam — the error document
+ * concerns `specs/n/N.mdx`, the file the refused creation would have
+ * produced (14.24), whether the origin `specs/a/A.mdx`, listed before it
+ * (6.6, 12.7), is rewritten first or the creation, listed before
+ * `specs/z/Z.mdx`, is the run's first write (13.5). The state each stopped
+ * move leaves is T13.5-7 (g)'s. The run is handed to `visitor`
+ * (`visitWriteFailure`); the recovery where `visitor.home` holds.
+ */
+async function createdTargetFileArm(
+  product: ProductBinding,
+  order: CreatedTargetOrder,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    `T14-9 (g) \`${order.argv.join(" ")} --json\` with ` +
+    `${SECTION_MOVE_TARGET_DIR} unwritable (` +
+    (order.originFirst
+      ? `the origin's rewrite listed first in \`files\``
+      : `the created file listed first in \`files\``) +
+    ")";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    order.fixture,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const jsonArgv = [...order.argv, "--json"];
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        order.holdName,
+        refusalUnder(SECTION_MOVE_TARGET_DIR),
+        context,
+      );
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: false },
+      async () => {
+        expectRefusal(
+          await run(jsonArgv),
+          [SECTION_MOVE_TARGET],
+          `${context} — the target file's creation, a source edit made in its ` +
+            `\`files\` place, is the concerned path (SPEC 14.24, 6.5, 13.5)`,
+        );
+      },
+    );
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (h) An emitted Markdown file's removal owed alone, staged as T13.5-7 (h)
+ * stages it: the move fixture, built under `markdown: { emit: true, outDir:
+ * "out" }` — `out/specs` holding `A.md` alone — then emission disabled
+ * (`disableMoveEmission`: `out/specs` checked first, the configuration
+ * rewritten with `markdown` removed), so that a regeneration owes nothing
+ * under `out/specs` but the removal of `out/specs/A.md`, a recorded derived
+ * file the current configuration no longer generates (12.1, 13.4); with
+ * `out/specs` staged unwritable, from `build` — staged before the
+ * invocation, `build` taking no hold — and from a rename's finishing
+ * regeneration, `rename specs/A.mdx a a2` staged at the seam, each on a
+ * workspace of its own: the error document concerns `out/specs/A.md`, the
+ * file the refused removal would have removed (14.24). The states the
+ * stopped runs leave are T13.5-7 (h)'s. Each run is handed to `visitor`
+ * (`visitWriteFailure`); the recoveries where `visitor.home` holds.
+ */
+async function removalOwedAloneArms(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const renameArgv = [...ORPHAN_RENAME_ARGV, "--json"];
+  const runs: readonly {
+    readonly what: string;
+    readonly jsonArgv: readonly string[];
+    readonly run: (
+      workspace: TestWorkspace,
+      argv: readonly string[],
+      context: string,
+    ) => Promise<RunResult>;
+  }[] = [
+    {
+      what: "`build --json`",
+      jsonArgv: ["build", "--json"],
+      run: async (workspace, argv, context) =>
+        await runStaged(
+          product,
+          workspace,
+          argv,
+          refusalUnder(MOVE_MARKDOWN_DIR),
+          context,
+        ),
+    },
+    {
+      what: `\`${renameArgv.join(" ")}\``,
+      jsonArgv: renameArgv,
+      run: async (workspace, argv, context) =>
+        await runHeldWithStaging(
+          product,
+          workspace,
+          argv,
+          "hold-t14-9-h.tmp",
+          refusalUnder(MOVE_MARKDOWN_DIR),
+          context,
+        ),
+    },
+  ];
+  for (const { what, jsonArgv, run } of runs) {
+    const context = `T14-9 (h) ${what} with emission disabled and ${MOVE_MARKDOWN_DIR} unwritable`;
+    const prepared = await prepareRefusalWorkspace(
+      product,
+      MOVE_FIXTURE,
+      context,
+    );
+    const { workspace } = prepared;
+    try {
+      await disableMoveEmission(workspace, `${context} staging`);
+      const runHere = (argv: readonly string[]): Promise<RunResult> =>
+        run(workspace, argv, context);
+      await visitWriteFailure(
+        visitor,
+        {
+          label: context,
+          jsonArgv,
+          root: workspace.root,
+          run: runHere,
+          unchanged: false,
+        },
+        async () => {
+          expectRefusal(
+            await runHere(jsonArgv),
+            [ORPHANED_MARKDOWN],
+            `${context} — the one write the regeneration owes under ` +
+              `${MOVE_MARKDOWN_DIR}, ${ORPHANED_MARKDOWN}'s removal, is refused: ` +
+              `the file it would have removed is the concerned path (SPEC ` +
+              `14.24, 12.1, 13.4)`,
+          );
+        },
+      );
+      if (visitor.home) await assertRecovers(product, workspace, context);
+    } finally {
+      await workspace.dispose();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The reporter set, the never-reporters, and precedence (SPEC 14.24, 12.0)
+// ---------------------------------------------------------------------------
+
+// The precedence fixture: the rename fixture plus a code group — `app`, one
+// code source importing A's generated module — so that `query nodes --group
+// app` names a code group, an invalid flag value (SPEC 11.1: `--group`
+// accepts only a configured spec group's name). The prior journaled rename
+// is the rename fixture's; the code source references nothing it rewrites.
+// T14-9 prepares it after its first product invocation, and so does
+// T12.0-15, whose exit-2 family restages the reporter sweep, so its
+// configuration and code source are TypeScript staged-source records
+// named with both (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses).
+const CODE_GROUP = "app";
+const PRECEDENCE_CONFIG = stagedTs(
+  "T12.0-15/T14-9 the precedence fixture xspec.config.ts (one spec group, the code group app, Markdown emission next to sources)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    ${CODE_GROUP}: ["src/**/*.ts"]
+  },
+  markdown: { emit: true }
+})
+`,
+);
+const PRECEDENCE_APP = stagedTs(
+  "T12.0-15/T14-9 the precedence fixture src/app.ts (importing specs/a/A.mdx's module)",
+  ['import A from "../specs/a/A.xspec";', "", "A.a;", ""].join("\n"),
+);
+const PRECEDENCE_FIXTURE: RefusalFixture = {
+  decl: {
+    files: {
+      ...RENAME_FIXTURE.decl.files,
+      "xspec.config.ts": PRECEDENCE_CONFIG,
+      "src/app.ts": PRECEDENCE_APP,
+    },
+  },
+  priorRename: RENAME_FIXTURE.priorRename,
+};
+
+/** An exit-2 error the checks of 12.0 report with no stable code. */
+function expectPlainUsageError(
+  result: RunResult,
+  why: string,
+  context: string,
+): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — ${why} is a usage error, exit 2, reported before any ` +
+      `write: a write failure is met only at the write it refuses, after ` +
+      `every check and validation, so a product attempting the refresh ` +
+      `first fails here (SPEC 12.0, 14.24)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  if (finding.code !== null) {
+    fail(
+      `${context} — ${why} carries no stable code: \`code\` is null where ` +
+        `14 assigns none, never \`write-failure\` (SPEC 14, 12.7); got ` +
+        `${JSON.stringify(finding.code)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+/** A given baseline naming no commit (SPEC 6.3: an unresolvable ref). */
+const UNRESOLVABLE_REF = "nope";
+
+/**
+ * One of the precedence clause's given baselines that cannot be resolved
+ * (TEST-SPEC T14-9; SPEC 6.3, 12.0, 13.3): `impact --base <ref> --json`, the
+ * ref naming no commit, or naming the commit the repository holds — the
+ * prepared workspace's baseline, written loose by `git commit` — with the
+ * repository's object store refused, its git data unreadable.
+ */
+interface BaselineArm {
+  /** The baseline and what fails its resolution, for diagnoses. */
+  readonly what: string;
+  /** The invocation, given the prepared workspace's baseline commit. */
+  readonly argv: (baseline: string) => readonly string[];
+  /**
+   * The refusal the run carries, made just before it and restored once it
+   * ends, verified on the harness itself (E-1): T6.3-6(e)'s staging
+   * (section-6.3.ts `stageObjectStoreUnsearchable`: `.git/objects` mode 000,
+   * its listing and the read of the commit's loose object refused).
+   */
+  readonly stage?: (
+    workspace: TestWorkspace,
+    baseline: string,
+  ) => Promise<PermissionStaging>;
+}
+
+/** The precedence clause's two given baselines, in TEST-SPEC's order. */
+const BASELINE_ARMS: readonly BaselineArm[] = [
+  {
+    what: `\`--base ${UNRESOLVABLE_REF}\`, a ref naming no commit`,
+    argv: () => ["impact", "--base", UNRESOLVABLE_REF, "--json"],
+  },
+  {
+    what:
+      "`--base <the commit the repository holds>` with the repository's " +
+      "object store refused (`.git/objects` mode 000, T6.3-6(e)'s staging)",
+    argv: (baseline) => ["impact", "--base", baseline, "--json"],
+    stage: async (workspace, baseline) =>
+      await stageObjectStoreUnsearchable(workspace, baseline),
+  },
+];
+
+/**
+ * Run a baseline arm's command line from the workspace root — `arm.argv`'s
+ * `--json` form or its human twin (TEST-SPEC T12.0-15) — its staging, where
+ * it has one, made just before the run and restored in a `finally` once it
+ * ends, inside `around`'s where given (the reporter sweep's graph-data
+ * staging, made and restored around the run alike) — before anything is
+ * asserted on its result, so no assertion and no snapshot meets a staging.
+ */
+async function runBaselineArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  arm: BaselineArm,
+  baseline: string,
+  argv: readonly string[],
+  context: string,
+  around?: StagingApplier,
+): Promise<RunResult> {
+  const outer = await around?.(workspace.root);
+  try {
+    const staging = await arm.stage?.(workspace, baseline);
+    try {
+      return await runSettled(product, workspace, argv, context);
+    } finally {
+      if (staging !== undefined) await staging.restore();
+    }
+  } finally {
+    if (outer !== undefined) await outer.restore();
+  }
+}
+
+/**
+ * The baseline's plain usage error (SPEC 6.3, 12.0, 12.7; T6.3-6): exit 2,
+ * the error document as the entire stdout, `code` and `path` `null` —
+ * never `write-failure`: a given baseline's resolution precedes the gate,
+ * and so the refresh (12.0, 13.3), so a product attempting the refresh
+ * first — or resolving the ref's name before it and reading the baseline's
+ * git data after it — meets the graph-data staging's refusal there.
+ */
+function expectBaselineUsageError(result: RunResult, context: string): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a given baseline that cannot be resolved is a usage ` +
+      `error, exit 2, its resolution preceding the gate and so the refresh ` +
+      `(SPEC 6.3, 12.0, 13.3)`,
+  );
+  const error = expectErrorDocument(result, context);
+  if (error.code === WRITE_FAILURE_CODE) {
+    fail(
+      `${context} — never \`write-failure\`: a given baseline's resolution ` +
+        `precedes the gate, and so the refresh, so its failure is reported ` +
+        `before any graph-data write is attempted (SPEC 12.0, 13.3, 14.24); ` +
+        `a product attempting the refresh first meets the staged refusal ` +
+        `there — got \`write-failure\` concerning ` +
+        `${renderPathValue(error.path)} (message: ` +
+        `${JSON.stringify(error.message)})`,
+    );
+  }
+  assertSameJson(
+    { code: error.code, path: error.path },
+    { code: null, path: null },
+    `${context}: the baseline's plain usage error — the error document's ` +
+      `\`code\` and \`path\` \`null\` (SPEC 6.3, 12.7; T6.3-6), never a ` +
+      `numbered condition's code nor \`read-failure\` (message: ` +
+      `${JSON.stringify(error.message)})`,
+  );
+}
+
+/**
+ * `check`'s report on a writable copy of the stale state once a baseline
+ * arm has run there (TEST-SPEC T14-9: "`check` afterwards still reporting
+ * the graph-data unit form", as T10.7-15(f)(ii) pins for `review create
+ * --base`): condition 10 alone — nothing but the staleness of B's edited
+ * text stands in the workspace — every finding concerning its path with
+ * `locations` `[]` and instructing rebuilding, B's generated module among
+ * them (`assertEditedBStalenessConcerns`), and exactly one finding the
+ * graph-data unit form, concerning the area `.xspec` (SPEC 14.10, 13.3) —
+ * where a product refreshing before it resolves the given baseline leaves
+ * graph data refreshed and no unit form reported.
+ */
+function assertGraphDataStillStale(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  for (const finding of findings) {
+    if (finding.condition !== "14.10") {
+      fail(
+        `${context}: \`check\` reports the staleness of B's edited text ` +
+          `alone — condition 10 (SPEC 14.10, 12.2); got ` +
+          `${JSON.stringify(finding.code)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+  assertEditedBStalenessConcerns(
+    findings,
+    `${context} — the staleness of B's edited text`,
+  );
+  const unitForms = findings.filter(
+    (finding) => finding.path === GRAPH_DATA_AREA,
+  ).length;
+  if (unitForms !== 1) {
+    fail(
+      `${context}: graph data is still stale — the failed resolution ended ` +
+        `the command before the refresh of 13.3 — so \`check\` reports the ` +
+        `graph-data unit form, exactly one condition-10 finding concerning ` +
+        `the area ${GRAPH_DATA_AREA} (SPEC 13.3, 14.10, 12.0), where a ` +
+        `product refreshing before it resolves the given baseline leaves ` +
+        `graph data refreshed and no unit form reported; got ` +
+        `${String(unitForms)} among the findings concerning ` +
+        JSON.stringify(
+          findings.map((finding) => renderPathValue(finding.path)),
+        ),
+    );
+  }
+}
+
+/**
+ * Precedence, a given baseline on a writable copy of the stale state
+ * (TEST-SPEC T14-9, as T10.7-15(f)(ii) pins for `review create --base`): a
+ * fresh byte copy of the whole stale tree (helpers/tree-copy.ts
+ * `copyTreeBytes`, `.git` included, so the baseline is the repository's
+ * there too), made before anything runs on the original and checked
+ * against its snapshot — a difference is a harness error, never a product
+ * verdict — with no staging of `.xspec`: the arm's run, its own staging
+ * around it, answers the baseline's plain usage error
+ * (`expectBaselineUsageError`), handed to `visitor` (`visitUsageError`);
+ * where `visitor.home` holds, T13.3-2's operational path set
+ * (`isGraphDataKey`) is byte-identical around it — snapshots taken outside
+ * the staging — and `check` afterwards still reports the graph-data unit
+ * form (`assertGraphDataStillStale`); then recovery on the copy, its
+ * staging restored: `build` exits 0 and `check` is clean (12.1, 13.4).
+ */
+async function baselineWritableCopyArm(
+  product: ProductBinding,
+  stale: DirectorySnapshot,
+  arm: BaselineArm,
+  baseline: string,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const jsonArgv = arm.argv(baseline);
+  const label =
+    `T14-9 precedence on a writable copy of the stale, session-bearing ` +
+    `workspace: \`${jsonArgv.join(" ")}\` — ${arm.what}`;
+  const copy = await TestWorkspace.create();
+  try {
+    await copyTreeBytes(Buffer.from(stale.root), Buffer.from(copy.root));
+    const before = await snapshotDirectory(copy.root);
+    const differences = diffSnapshots(stale, before);
+    if (differences.length > 0) {
+      throw new Error(
+        `harness error: ${label}: the copy of ${stale.root} at ${copy.root} ` +
+          `differs from it: ` +
+          differences
+            .slice(0, 10)
+            .map((change) => `${change.change} ${change.path}`)
+            .join(", "),
+      );
+    }
+    const run = (argv: readonly string[]): Promise<RunResult> =>
+      runBaselineArm(product, copy, arm, baseline, argv, label);
+    await visitUsageError(
+      visitor,
+      { label, jsonArgv, root: copy.root, run },
+      async () => {
+        expectBaselineUsageError(await run(jsonArgv), label);
+      },
+    );
+    if (!visitor.home) return;
+    const refreshed = diffSnapshots(
+      before,
+      await snapshotDirectory(copy.root),
+    ).filter((change) => isGraphDataKey(change.key));
+    if (refreshed.length > 0) {
+      fail(
+        `${label}: T13.3-2's operational path set stays byte-identical — a ` +
+          `given baseline's resolution precedes the gate, and so the ` +
+          `refresh of 13.3, and its failure ends the command before any ` +
+          `graph-data write (SPEC 12.0, 13.3, 6.3) — where a product ` +
+          `refreshing first leaves graph data refreshed; found ` +
+          `${String(refreshed.length)} change(s):\n` +
+          refreshed
+            .map(
+              (change) => `  ${change.change} ${change.path}: ${change.detail}`,
+            )
+            .join("\n"),
+      );
+    }
+    assertGraphDataStillStale(
+      await checkFindings(product, copy, `${label}: afterwards`),
+      `${label}: \`check\` afterwards`,
+    );
+    await assertRecovers(product, copy, label);
+  } finally {
+    await copy.dispose();
+  }
+}
+
+/**
+ * Graph data, the reporter set, the never-reporters, and the check-first
+ * precedence, all on one state: the built precedence fixture holding an
+ * audit session and a git baseline, B text-edited (stale, valid), `.xspec`
+ * staged unwritable by T14-9's graph-data staging (`graphDataRefusal`: the
+ * area and every path of T13.3-2's operational path set, the journal, the
+ * session directory, and the lock path keeping their modes) before each
+ * read's invocation (the reads take no hold), made and restored around each
+ * run alone, and, for the mutating `review create`, at the seam of 13.5 —
+ * after acquisition, before any modification (T14-9;
+ * `runHeldWithStaging`), the staging otherwise refusing acquisition's
+ * creation of the lock directory first. Every refreshing read of 13.3 and
+ * `review create` exit 2 with the error document concerning `.xspec`
+ * (14.24: a graph-data write concerns the area); `check` exits 1 with the
+ * staleness alone — every finding condition 10 concerning a path with
+ * `locations` `[]` and instructing rebuilding, B's generated module
+ * `specs/b/B.xspec.ts` among them (14.10, 14, 12.7;
+ * `assertEditedBStalenessConcerns`) — `inventory` and `version` exit 0, a
+ * `rename --preview` exits 0 writing nothing; the invalid-flag-value and
+ * unknown-node usage errors precede the refresh (`code` null), and so does
+ * a given baseline's resolution (12.0, 13.3): `impact --base nope` and
+ * `impact --base <the workspace's baseline commit>` with the repository's
+ * object store refused (T6.3-6(e)'s staging, made around that run alone)
+ * each answer the baseline's plain usage error, `code` and `path` null,
+ * never `write-failure` (`expectBaselineUsageError`) — and, each on a
+ * writable copy of the stale state made before the sweep, leave T13.3-2's
+ * operational path set byte-identical, `check` afterwards still reporting
+ * the graph-data unit form (`baselineWritableCopyArm`); nothing in the
+ * workspace changes around the sweep. Each exit-2 invocation is handed to
+ * `visitor` — a refreshing read with a human form and the held `review
+ * create` through `visitWriteFailure`, nothing modified; the given
+ * baselines through `visitUsageError`; `query`, JSON-only, T14-9's alone —
+ * and the never-reporters, the compare, and the recovery are made where
+ * `visitor.home` holds.
+ */
+async function reportersArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 reporters: the stale, session-bearing workspace with .xspec unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    PRECEDENCE_FIXTURE,
+    context,
+  );
+  const { workspace, baseline } = prepared;
+  // A run on the stale state under T14-9's graph-data staging, made just
+  // before it and restored once it ends, so a compare taken outside it
+  // reads every path.
+  const underGraphData = (
+    argv: readonly string[],
+    label: string,
+  ): Promise<RunResult> =>
+    runStaged(product, workspace, argv, graphDataRefusal(), label);
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
+    const staged = await snapshotWorkspace(workspace.root);
+
+    // Precedence, the given baselines on writable copies of the stale state,
+    // each copied before anything runs on it (`.git` included).
+    const stale = await snapshotDirectory(workspace.root);
+    for (const arm of BASELINE_ARMS) {
+      await baselineWritableCopyArm(product, stale, arm, baseline, visitor);
+    }
+
+    const reporters: readonly (readonly string[])[] = [
+      ["ids", "--json"],
+      ["show", SHOW_IDENTITY, "--json"],
+      ["coverage", "--json"],
+      ["impact", "--base", baseline, "--json"],
+      ["review", "status", SESSION, "--json"],
+      ["query", "nodes"],
+      ["occurrences"],
+      ["view", RENAME_A_PATH],
+      ["at", RENAME_A_PATH, "0"],
+    ];
+    for (const argv of reporters) {
+      const label = `${context} \`${argv.join(" ")}\``;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        underGraphData(runArgv, label);
+      await visitWriteFailure(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run, unchanged: true },
+        async () => {
+          expectRefusal(
+            await run(argv),
+            [GRAPH_DATA_AREA],
+            `${label} — a refreshing read of 13.3 whose graph-data write the ` +
+              `environment refuses reports the write failure concerning the ` +
+              `graph-data area, never a path inside it, and answers nothing ` +
+              `(SPEC 14.24, 11.6, 13.3)`,
+          );
+        },
+      );
+    }
+
+    if (visitor.home) {
+      // Never-reporters on the same state (14.24: never `check` or any other
+      // command that writes nothing; 6.6: a preview writes nothing).
+      const checkLabel = `${context} \`check --json\``;
+      const checkResult = await underGraphData(["check", "--json"], checkLabel);
+      assertExitCode(
+        checkResult,
+        1,
+        `${checkLabel} — \`check\` writes nothing, so it is never a 14.24 ` +
+          `reporter: on the same state it exits 1 with the staleness ` +
+          `(SPEC 14.24, 12.2)`,
+      );
+      const checkFindings = decodeFindingsReport(
+        parseJsonStdout(checkResult, checkLabel),
+        checkLabel,
+      ).findings;
+      if (checkFindings.length === 0) {
+        fail(
+          `${checkLabel}: exit 1 carries the staleness findings (SPEC 12.2, 14.10)`,
+        );
+      }
+      for (const finding of checkFindings) {
+        if (finding.condition !== "14.10") {
+          fail(
+            `${checkLabel}: \`check\` reports the staleness alone — ` +
+              `condition 10, never a write failure (SPEC 14.24, 14.10); got ` +
+              `${JSON.stringify(finding.code)} (message: ` +
+              `${JSON.stringify(finding.message)})`,
+          );
+        }
+      }
+      assertEditedBStalenessConcerns(
+        checkFindings,
+        `${checkLabel} — the staleness of B's edited text`,
+      );
+      await stagedDocument(
+        product,
+        workspace,
+        ["inventory"],
+        0,
+        `${context} \`inventory\` — \`inventory\` parses no sources and ` +
+          `writes nothing: exit 0 with its answer on the stale workspace ` +
+          `whose graph-data area is unwritable (SPEC 14.24, 11.6)`,
+        graphDataRefusal(),
+      );
+      await stagedDocument(
+        product,
+        workspace,
+        ["version"],
+        0,
+        `${context} \`version\` — \`version\` writes nothing and loads no ` +
+          `configuration: exit 0 (SPEC 14.24, 12.6)`,
+        graphDataRefusal(),
+      );
+      const previewArgv = [
+        "rename",
+        RENAME_B_PATH,
+        "b",
+        "b2",
+        "--preview",
+        "--json",
+      ];
+      const previewLabel = `${context} \`${previewArgv.join(" ")}\``;
+      assertExitCode(
+        await underGraphData(previewArgv, previewLabel),
+        0,
+        `${previewLabel} — a preview writes nothing — no sources, no ` +
+          `journal, no derived files, no graph data — so it exits 0 on the ` +
+          `valid, stale workspace, refreshing nothing (SPEC 6.6, 14.24)`,
+      );
+    }
+
+    // Precedence: the checks of 12.0 precede the write (and the refresh) —
+    // `query`'s, JSON-only, T14-9's alone (`visitExitTwo`).
+    const missing = `${RENAME_A_PATH}#missing`;
+    const precedence: readonly (readonly [readonly string[], string])[] = [
+      [
+        ["query", "nodes", "--group", CODE_GROUP],
+        `an invalid flag value — a code group's name under \`--group\` (SPEC 11.1)`,
+      ],
+      [
+        ["query", "node", missing],
+        "an unknown node identity named in an argument (SPEC 12.0)",
+      ],
+    ];
+    for (const [argv, why] of precedence) {
+      const label = `${context} \`${argv.join(" ")}\``;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        underGraphData(runArgv, label);
+      await visitUsageError(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run },
+        async () => {
+          expectPlainUsageError(await run(argv), why, label);
+        },
+      );
+    }
+    // A given baseline's resolution precedes the gate, and so the refresh
+    // (SPEC 12.0, 13.3): each arm's own staging made around its run, inside
+    // the graph-data staging's.
+    for (const arm of BASELINE_ARMS) {
+      const jsonArgv = arm.argv(baseline);
+      const label = `${context} \`${jsonArgv.join(" ")}\` — ${arm.what}`;
+      const run = (argv: readonly string[]): Promise<RunResult> =>
+        runBaselineArm(
+          product,
+          workspace,
+          arm,
+          baseline,
+          argv,
+          label,
+          graphDataRefusal(),
+        );
+      await visitUsageError(
+        visitor,
+        { label, jsonArgv, root: workspace.root, run },
+        async () => {
+          expectBaselineUsageError(await run(jsonArgv), label);
+        },
+      );
+    }
+
+    // The mutating `review create` on the same state, the same staging
+    // applied at the seam (T14-9: after acquisition, before any
+    // modification), restored once it exits.
+    const createArgv = [
+      "review",
+      "create",
+      "--strategy",
+      "audit",
+      "--name",
+      NEW_SESSION,
+      "--json",
+    ];
+    const createLabel = `${context} \`${createArgv.join(" ")}\` held at the seam`;
+    const runCreate = (argv: readonly string[]): Promise<RunResult> =>
+      runHeldWithStaging(
+        product,
+        workspace,
+        argv,
+        "hold-t14-9-reporters.tmp",
+        graphDataRefusal(),
+        createLabel,
+      );
+    await visitWriteFailure(
+      visitor,
+      {
+        label: createLabel,
+        jsonArgv: createArgv,
+        root: workspace.root,
+        run: runCreate,
+        unchanged: true,
+      },
+      async () => {
+        expectRefusal(
+          await runCreate(createArgv),
+          [GRAPH_DATA_AREA],
+          `${createLabel} — a review mutator refreshes before its session write ` +
+            `(13.5): with \`.xspec\` staged unwritable once it has acquired, its ` +
+            `refused graph-data write reports the write failure concerning the ` +
+            `graph-data area, never a path inside it — nor the lock path, ` +
+            `release's refused deletion of the emptied lock directory changing ` +
+            `no outcome — and no session is created (SPEC 14.24, 11.6, 13.3, ` +
+            `13.5)`,
+        );
+      },
+    );
+    if (!visitor.home) return;
+    assertSnapshotsEqual(
+      staged,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing in the workspace changes around the sweep and ` +
+        `the held \`review create\` — a refresh writes graph data alone ` +
+        `(refused), a preview writes nothing, the usage errors precede every ` +
+        `write, and a session is written last, never once a write is refused ` +
+        `(SPEC 13.3, 6.6, 12.0, 13.5; H-6: the lock path, which the held ` +
+        `run's acquisition and release touch, left out)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * Precedence, the failing twin: an identically prepared workspace whose
+ * sources also fail validation (A's `d` reference respelled to resolve
+ * nowhere, 14.5) beside the staleness edit — with `.xspec` staged
+ * unwritable by T14-9's graph-data staging (`graphDataRefusal`), `ids`
+ * exits 1 with the findings: nothing is written on a failing workspace
+ * (13.3), so no write is refused, and a product attempting the refresh
+ * first fails here.
+ */
+async function failingTwinArm(product: ProductBinding): Promise<void> {
+  const context =
+    "T14-9 precedence: `ids --json` on the failing, stale twin with .xspec unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    PRECEDENCE_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
+    await workspace.edit(RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
+    const staged = await snapshotWorkspace(workspace.root);
+    const result = await runStaged(
+      product,
+      workspace,
+      ["ids", "--json"],
+      graphDataRefusal(),
+      context,
+    );
+    assertExitCode(
+      result,
+      1,
+      `${context} — the gate of 13.3 turns the read back with the ` +
+        `workspace's findings, exit 1: nothing is written on a failing ` +
+        `workspace, so no write is refused (SPEC 13.3, 14.24, 12.0)`,
+    );
+    assertConditionCounts(
+      decodeFindingsReport(parseJsonStdout(result, context), context).findings,
+      { "14.5": 1 },
+      `${context} — exactly the staged condition, A's unresolved \`d\` ` +
+        `reference (SPEC 14.5, 13.3)`,
+    );
+    assertSnapshotsEqual(
+      staged,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing written on the failing workspace (SPEC 13.3)`,
+    );
+    // Recovery: the harness's own invalidity reverted, then `build`/`check`.
+    await workspace.edit(RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * Precedence, a validation refusal under (a)'s staging: an
+ * identity-unchanged rename (T6.4-3) with `specs/b` staged unwritable at the
+ * seam exits 1 with its refusal reported alone — exactly one finding,
+ * `refused-identity-unchanged`, concerning the unchanged identity: its
+ * `identities` exactly `["specs/b/B.mdx#b"]`, `locations` `[]`, `path`
+ * null (14, 1.5, 12.7) — and attempts no write: the workspace
+ * byte-unchanged (6.4, 13.5).
+ */
+async function validationRefusalArm(product: ProductBinding): Promise<void> {
+  const context =
+    "T14-9 precedence: `rename specs/b/B.mdx b b --json` refused by validation with specs/b unwritable";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const result = await runHeldWithStaging(
+      product,
+      workspace,
+      ["rename", RENAME_B_PATH, "b", "b", "--json"],
+      "hold-t14-9-refused.tmp",
+      refusalUnder(RENAME_B_DIR),
+      context,
+    );
+    assertExitCode(
+      result,
+      1,
+      `${context} — an identity-unchanged rename is refused by validation: ` +
+        `exit 1 with its refusal, before any write (SPEC 6.4, 12.0, 14.24)`,
+    );
+    const findings = decodeFindingsReport(
+      parseJsonStdout(result, context),
+      context,
+    ).findings;
+    const codes = findings.map((finding) => finding.code);
+    if (codes.length !== 1 || codes[0] !== "refused-identity-unchanged") {
+      fail(
+        `${context} — the refusal is reported alone: exactly one finding, ` +
+          `its stable code \`refused-identity-unchanged\`, never a write ` +
+          `failure beside it (SPEC 6.4, 14); got ${JSON.stringify(codes)}`,
+      );
+    }
+    // The reason concerns the unchanged identity alone: the sole element of
+    // its `identities`, in 1.5's form over the rename's file, with no
+    // in-source location and no concerned path (SPEC 14, 1.5, 6.4; 12.7).
+    const refusal = findings[0]!;
+    const concern =
+      `${context} — the identity-unchanged refusal concerns the unchanged ` +
+      `identity ${RENAME_OLD_IDENTITY}`;
+    assertRefusalIdentities(
+      refusal,
+      "refused-identity-unchanged",
+      [RENAME_OLD_IDENTITY],
+      `${concern}, carried as the sole element of its \`identities\` in ` +
+        `1.5's form over the rename's file, \`<file>#id\` (SPEC 14, 1.5, 6.4)`,
+    );
+    assertSameJson(
+      refusal.locations,
+      [],
+      `${concern}, locating nothing in source: \`locations\` [] (SPEC 14, ` +
+        `1.5, 6.4; 12.7)`,
+    );
+    if (refusal.path !== null) {
+      fail(
+        `${concern}, never a path: \`path\` null (SPEC 14, 1.5, 6.4; 12.7); ` +
+          `got ${JSON.stringify(refusal.path)} (message: ` +
+          `${JSON.stringify(refusal.message)})`,
+      );
+    }
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: no write attempted — the refused rename modifies ` +
+        `nothing (SPEC 6.4, 13.5)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * Precedence, the hold file: `--test-hold` naming a path in a read-only
+ * directory (staged under T14-9's path-form discipline, beside the
+ * workspace, just before each run and restored once it ends) — the hold
+ * file cannot be created, 13.5's usage error: exit 2, the error document
+ * with `code` null, never this condition; nothing modified. The run is
+ * handed to `visitor` (`visitUsageError`); the compare and the recovery
+ * where `visitor.home` holds.
+ */
+async function holdFileArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context =
+    "T14-9 precedence: `rename specs/b/B.mdx b b2 --test-hold <read-only directory>/hold.tmp --json`";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const holdDir = path.join(workspace.tempRoot, "t14-9-read-only");
+    await fsp.mkdir(holdDir);
+    const hold = path.join(holdDir, "hold.tmp");
+    const jsonArgv = [...RENAME_B_TO_B2, "--test-hold", hold];
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      const staging = await stageWriteRefusal(hold);
+      try {
+        return await runSettled(product, workspace, argv, context);
+      } finally {
+        await staging.restore();
+      }
+    };
+    await visitUsageError(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run },
+      async () => {
+        expectPlainUsageError(
+          await run(jsonArgv),
+          "a hold file that cannot be created — the usage error of 13.5, " +
+            "never a write of 14.24 (SPEC 13.5, 14.24)",
+          context,
+        );
+      },
+    );
+    if (!visitor.home) return;
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — the hold file is created before any ` +
+        `modification, and its failure stops the command (SPEC 13.5)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Acquisition's writes (SPEC 13.5, 14.24), staged before the invocation
+// ---------------------------------------------------------------------------
+
+/** What the plain file an arm stages at `.xspec` holds. */
+const AREA_OCCUPANT_BYTES =
+  "Not the graph-data area: an occupant T14-9 deletes by hand.\n";
+
+/**
+ * One of acquisition's writes refused (TEST-SPEC T14-9; SPEC 13.5, 14.24):
+ * the write, the staging refusing it — T13.5-10(a)'s or (d)'s, applied
+ * before the invocation and verified on the harness itself — the concerned
+ * path, and the mutating command run against it.
+ */
+interface AcquisitionWriteArm {
+  /** The write the staging refuses, as T14-9 names it. */
+  readonly write: string;
+  /** The staging, as T13.5-10 words it. */
+  readonly staging: string;
+  /**
+   * The concerned path (SPEC 14.24): the lock path for a write of
+   * acquisition, never an entry's or a leftover's own path; the area's own
+   * path for the write producing the area's directory and for one its
+   * occupant obstructs.
+   */
+  readonly path: typeof LOCK_PATH | typeof AREA_PATH;
+  /** The mutating command run against it: its index in T13.5-10's five. */
+  readonly operation: number;
+  /**
+   * Staged on an unbuilt workspace — no `.xspec`, no session — rather than
+   * on T13.5-10's session staging (`stageArmWorkspace`).
+   */
+  readonly unbuilt?: true;
+  /**
+   * The staging's modes (and what it places at the lock path), made just
+   * before each run of the command and verified on the harness itself; its
+   * `restore()`, once the run ends, reinstates every mode the staging
+   * changed (idempotent). Absent for the area's own occupant, which
+   * `occupy` stages.
+   */
+  readonly stage?: (workspace: TestWorkspace) => Promise<AcquisitionStaging>;
+  /**
+   * A byte staging made once before the invocation, nothing to restore —
+   * part of the state every run of the command meets: the plain file at
+   * `.xspec` in place of the area's directory (`obstructArea`).
+   */
+  readonly occupy?: (
+    workspace: TestWorkspace,
+    context: string,
+  ) => Promise<void>;
+  /**
+   * Its undoing beyond the permissions, before recovery: the occupant of
+   * the area's own path deleted by hand (SPEC 13.4: the remedy for an
+   * occupant obstructing acquisition, T13.4-12).
+   */
+  readonly remedy?: (workspace: TestWorkspace) => Promise<void>;
+}
+
+/**
+ * T14-9's acquisition-write arms, one per write (two stagings for a
+ * leftover's removal, as T13.5-10(d) stages it), each with the next of
+ * T13.5-10's mutating commands — `rename`, `move`, `review create`,
+ * `resolve`, `split`, the sixth arm's wrapping to `rename` — so that each
+ * reports one of acquisition's refused writes.
+ */
+const ACQUISITION_WRITE_ARMS: readonly AcquisitionWriteArm[] = [
+  {
+    write: "the entry's addition",
+    staging: "an empty leftover lock directory refusing writes (`r-x`)",
+    path: LOCK_PATH,
+    operation: 0,
+    stage: (workspace) => stageUnwritableLockDirectory(workspace),
+  },
+  {
+    write: "a leftover's removal",
+    staging:
+      "a lock directory holding a subdirectory that holds a file, the " +
+      "subdirectory refusing writes (`r-x`)",
+    path: LOCK_PATH,
+    operation: 1,
+    stage: (workspace) => stageUnwritableLeftoverDirectory(workspace),
+  },
+  {
+    write: "a leftover's removal",
+    staging:
+      "a plain file at `.xspec/lock` with `.xspec` read-only and the file " +
+      "unwritable (T14-9's full discipline)",
+    path: LOCK_PATH,
+    operation: 2,
+    stage: (workspace) => stageUnremovableLockFile(workspace),
+  },
+  {
+    write: "the lock directory's creation",
+    staging: "a read-only `.xspec` holding no `lock`",
+    path: LOCK_PATH,
+    operation: 3,
+    stage: (workspace) => stageReadOnlyArea(workspace),
+  },
+  {
+    write: "the area directory's creation",
+    staging:
+      "an unbuilt workspace, its root read-only (`review split` naming the " +
+      "absent session `s`, acquisition preceding that check, 12.0)",
+    path: AREA_PATH,
+    operation: 4,
+    unbuilt: true,
+    stage: (workspace) => stageReadOnlyRoot(workspace),
+  },
+  {
+    write: "an occupant of the area's own path",
+    staging: "`.xspec` a plain file",
+    path: AREA_PATH,
+    operation: 0,
+    occupy: async (workspace, context) => {
+      await obstructArea(
+        workspace,
+        { kind: "file", content: AREA_OCCUPANT_BYTES },
+        context,
+      );
+    },
+    remedy: async (workspace) => {
+      await fsp.unlink(path.join(workspace.root, AREA_PATH));
+    },
+  },
+];
+
+/**
+ * T13.5-10's mutating command at `index` (a harness error where none):
+ * T14-9's acquisition-write arms and T14-10's arm (i) each name theirs so.
+ */
+function acquisitionOperation(index: number): SessionOperation {
+  const operation = T13_5_10_OPERATIONS[index];
+  if (operation === undefined) {
+    throw new Error(
+      `acquisitionOperation: T13.5-10 runs no mutating command at index ` +
+        String(index),
+    );
+  }
+  return operation;
+}
+
+/**
+ * One acquisition-write arm (TEST-SPEC T14-9): on a fresh CONF-CORE-shaped
+ * workspace — T13.5-10's session staging, or unbuilt where the arm says so
+ * (`resolve` and `split` then naming the absent session `s`) — the area's
+ * occupant, where the arm stages one, put in place once; its command under
+ * `--json`, settled, the arm's staging of modes made just before the run
+ * and verified on the harness itself, its modes restored once it exits →
+ * the 14.24 contract (`expectRefusal`: exit 2, the error document as
+ * stdout, `code` `"write-failure"`, `path` the arm's concerned path
+ * exactly, a non-empty stderr); nothing modified — every path but the lock
+ * path byte-identical, the compare bracketing this run and its staging
+ * alone (H-6: the lock path a mutating run touched, where the staging also
+ * places its leftovers, left out, its residue T13.5-10(d)'s subject;
+ * `.xspec` itself compared); and recovery — the arm's remedy where it has
+ * one, then `build` exits 0 and `check` is clean (12.1, 13.4). The run is
+ * handed to `visitor` (`visitWriteFailure`), nothing modified; the remedy
+ * and the recovery where `visitor.home` holds.
+ */
+async function acquisitionWriteRun(
+  product: ProductBinding,
+  arm: AcquisitionWriteArm,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const operation = acquisitionOperation(arm.operation);
+  const context =
+    `T14-9 acquisition's writes: ${operation.what} --json with ` +
+    `${arm.staging} — ${arm.write} refused`;
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    const items =
+      arm.unbuilt === true
+        ? ABSENT_SESSION_ITEMS
+        : await stageArmWorkspace(product, workspace, context);
+    await arm.occupy?.(workspace, context);
+    const jsonArgv = [...operation.argv(items), "--json"];
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      const staging = await arm.stage?.(workspace);
+      try {
+        return await runSettled(product, workspace, argv, context);
+      } finally {
+        await staging?.restore();
+      }
+    };
+    await visitWriteFailure(
+      visitor,
+      { label: context, jsonArgv, root: workspace.root, run, unchanged: true },
+      async () => {
+        const before = await snapshotWorkspace(workspace.root);
+        expectRefusal(
+          await run(jsonArgv),
+          [arm.path],
+          arm.path === LOCK_PATH
+            ? `${context} — a write of acquisition the environment refuses ` +
+                `concerns the lock path \`${LOCK_PATH}\`, never an entry's or ` +
+                `a leftover's own path, its entries' names being opaque (SPEC ` +
+                `14.24, 13.5, 13.4)`
+            : `${context} — a write of acquisition producing the area's ` +
+                `directory, or obstructed by the area's own path holding ` +
+                `anything but a directory, concerns that path, ` +
+                `\`${AREA_PATH}\` (SPEC 14.24, 13.5)`,
+        );
+        assertSnapshotsEqual(
+          before,
+          await snapshotWorkspace(workspace.root),
+          `${context}: modifies nothing — acquisition precedes every ` +
+            `modification and the command stops at the refused write, so every ` +
+            `path but the lock path is byte-identical, the area's own path ` +
+            `included (SPEC 13.5, 14.24; H-6: the lock path, which acquisition ` +
+            `and release touch, left out)`,
+        );
+      },
+    );
+    if (!visitor.home) return;
+    if (arm.remedy !== undefined) await arm.remedy(workspace);
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T14-9's acquisition-write arms, in turn (TEST-SPEC T14-9: acquisition's
+ * writes, staged before the invocation, T13.5-10(a), (d)), each invocation
+ * handed to `visitor` — `ERROR_INVOCATION_HOME` by default, T14-9's own
+ * checks. Exported so scratch probes can run them alone, against the
+ * CONF-CORE reference among others; Linux leg only, as T14-9's other arms
+ * (E-1).
+ */
+export async function runT149AcquisitionArms(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor = ERROR_INVOCATION_HOME,
+): Promise<void> {
+  for (const arm of ACQUISITION_WRITE_ARMS) {
+    await acquisitionWriteRun(product, arm, visitor);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T14-9's exit-2 stagings, for T12.0-15's exit-2 family
+// ---------------------------------------------------------------------------
+
+/**
+ * T14-9's stagings, in T14-9's order (TEST-SPEC T12.0-15's exit-2 family:
+ * "T14-9's write failure"): the concerned-path arms — (a), (b), (c)'s move
+ * and rename, (d)'s two writes, (e), (f), (g) in both byte orders, and
+ * (h)'s `build` and rename — then the reporter sweep, its precedence arms,
+ * and the held `review create`; the failing twin and the validation
+ * refusal, which exit 1 with no write attempted and hand nothing over,
+ * where `visitor.home` holds alone; the hold file; and acquisition's
+ * writes — each exit-2 invocation with a human form handed to `visitor`
+ * (`visitWriteFailure`, `visitUsageError`), every other run and assertion
+ * made where `visitor.home` holds. T14-9's body runs it with
+ * `ERROR_INVOCATION_HOME`; T12.0-15 runs it with its human twin
+ * (section-12.0-iv.ts). Linux leg only (E-1): elsewhere nothing is staged
+ * or handed over.
+ */
+export async function runT149WriteFailureStagings(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  if (!WRITE_REFUSALS_STAGED) return;
+  await rewrittenSourceArm(product, visitor);
+  await journalArm(product, visitor);
+  await markdownArm(product, visitor);
+  await renameMarkdownArm(product, visitor);
+  await originRemovalArm(product, visitor);
+  await destinationProductionArm(product, visitor);
+  await sessionFileArm(product, visitor);
+  await derivedPathArm(product, visitor);
+  for (const order of CREATED_TARGET_ORDERS) {
+    await createdTargetFileArm(product, order, visitor);
+  }
+  await removalOwedAloneArms(product, visitor);
+  await reportersArm(product, visitor);
+  if (visitor.home) {
+    await failingTwinArm(product);
+    await validationRefusalArm(product);
+  }
+  await holdFileArm(product, visitor);
+  await runT149AcquisitionArms(product, visitor);
+}
+
+// ---------------------------------------------------------------------------
+// T14-9 — write failures (14.24)
+// ---------------------------------------------------------------------------
+
+const T14_9 = defineProductTest({
+  id: "T14-9",
+  title:
+    "write failures (14.24): a write the environment refuses is a usage error — exit 2, the error document (`code` `write-failure`, `path` the concerned path) on stdout, the diagnostic on stderr, never a finding — from every command making the write and met only at the write it refuses; one arm per concerned path through T13.5-7's stagings: a derived path under specs/b/ (`build`), an emitted Markdown file's creation or removal under out/specs (`move`) and the rename's out/specs/b/B.md (its creation, the file deleted once built), the removal owed alone of out/specs/A.md with emission disabled (`build`, and a rename's finishing regeneration), the rewritten source specs/b/B.mdx and the journal (`rename`), a section-form move's created target file specs/n/N.mdx on either side of the origin's rewrite in `files` order (`move`), the session file (`review resolve`), a relocation's origin removal and destination production (`move`), and the graph-data area `.xspec` from every refreshing read of 13.3 and `review create` (staged at the seam) on a stale workspace under the graph-data staging (`.xspec` and every directory of T13.3-2's operational path set read-only, every file of it unwritable, the journal, the session directory, and the lock path keeping their modes) — while `check` exits 1 with the staleness, `inventory` and `version` exit 0, and a `--preview` exits 0 writing nothing; acquisition's writes through T13.5-10's stagings, each staged before the invocation, each mutating command in turn: the entry's addition, a leftover's removal (an `r-x` leftover directory; a plain file at the lock path under the full discipline), and the lock directory's creation concerning `.xspec/lock`, never an entry's path, and the area directory's creation (an unbuilt workspace, its root read-only) and an occupant of the area's own path (`.xspec` a plain file) concerning `.xspec`, each modifying nothing; precedence: the invalid-flag-value and unknown-node usage errors (`code` null), `impact --base nope` and `impact --base` naming a commit the repository holds with its object store refused (`.git/objects` mode 000), each the baseline's plain usage error (`code` and `path` null, never `write-failure`) and, on a writable copy of the stale state, each leaving T13.3-2's operational path set byte-identical, `check` afterwards still reporting the graph-data unit form, the failing twin's findings (`ids` exit 1), a validation refusal under (a)'s staging (exit 1, no write), and a hold file in a read-only directory (13.5's usage error, `code` null); after every arm, permissions restored (an occupant of the area's own path deleted by hand), `build` exits 0 and `check` is clean (SPEC 14.24, 6.3, 12.0, 12.7, 13.3, 13.5)",
+  run: async (product) => {
+    // E-1: permission stagings belong to the Linux leg; elsewhere the arms
+    // are not staged (the NU3_STAGED pattern of section-11.5) and no other
+    // leg selects T14-9 (E-6).
+    if (!WRITE_REFUSALS_STAGED) return;
+    await runT149WriteFailureStagings(product, ERROR_INVOCATION_HOME);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T14-10 — read failures (14.25): fixtures and shared helpers
+// ---------------------------------------------------------------------------
+
+/** E-1: the read-refusal stagings belong to the same Linux leg (T14-9's gate). */
+const READ_REFUSALS_STAGED = WRITE_REFUSALS_STAGED;
+
+/** 14.25's stable code, carried only by the exit-2 error document (SPEC 14). */
+const READ_FAILURE_CODE = "read-failure";
+/** The configuration path in the anchoring form, from the root (SPEC 11.6). */
+const CONFIG_PATH = "xspec.config.ts";
+/** Arm (f)'s file-form move of C within its own directory (SPEC 6.5, 6.6). */
+const MOVE_C_DESTINATION = "specs/c/D.mdx";
+
+// Arm (a)'s fixture: `specs/A.mdx` references `specs/B.mdx` (a `d`
+// reference — the one 14.5 the masking leaves), B references `specs/C.mdx`
+// (B's own spelling, the occurrence the masking hides), `specs/D.mdx`
+// references C too (the record that stays on view), and the code source
+// `src/app.ts` marks A's section (the marker's occurrence, hidden when the
+// code source is the refused one). No cycle: A → B → C ← D.
+const SOURCE_A_PATH = "specs/A.mdx";
+const SOURCE_B_PATH = "specs/B.mdx";
+const SOURCE_C_PATH = "specs/C.mdx";
+const SOURCE_D_PATH = "specs/D.mdx";
+const SOURCE_CODE_PATH = "src/app.ts";
+const SOURCE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    ${CODE_GROUP}: ["src/**/*.ts"]
+  }
+})
+`;
+const SOURCE_DECL: WorkspaceDecl = {
+  files: {
+    [CONFIG_PATH]: SOURCE_CONFIG,
+    [SOURCE_A_PATH]: [
+      'import B from "./B.xspec"',
+      "",
+      '<S id="a" d={B.b}>',
+      "Alpha text.",
+      "</S>",
+      "",
+    ].join("\n"),
+    [SOURCE_B_PATH]: [
+      'import C from "./C.xspec"',
+      "",
+      '<S id="b" d={C.c}>',
+      "Beta text.",
+      "</S>",
+      "",
+    ].join("\n"),
+    [SOURCE_C_PATH]: ['<S id="c">', "Ceta text.", "</S>", ""].join("\n"),
+    [SOURCE_D_PATH]: [
+      'import C from "./C.xspec"',
+      "",
+      '<S id="d" d={C.c}>',
+      "Delta text.",
+      "</S>",
+      "",
+    ].join("\n"),
+    [SOURCE_CODE_PATH]: [
+      'import A from "../specs/A.xspec";',
+      "",
+      "A.a;",
+      "",
+    ].join("\n"),
+  },
+};
+
+// Arm (g)'s fixture: the rename fixture plus a source under `specs/sub`, a
+// directory the discovery of SPEC 7 lists under the glob `specs/**/*.mdx`.
+// Arm (g) follows T14-10's earlier arms' invocations, so the source is a
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts), staged
+// by the prepared workspace and the invalid-configuration one alike — and
+// by T12.0-15's exit-2 family, which restages arm (g).
+const SUB_DIR = "specs/sub";
+const SUB_PATH = `${SUB_DIR}/S.mdx`;
+const LISTING_FIXTURE: RefusalFixture = {
+  decl: {
+    files: {
+      ...RENAME_FIXTURE.decl.files,
+      [SUB_PATH]: stagedMdx(
+        "T12.0-15/T14-10 specs/sub/S.mdx (arm (g)'s listing fixture: the source under the unlistable directory)",
+        ['<S id="s">', "Sub text.", "</S>", ""].join("\n"),
+      ),
+    },
+  },
+  priorRename: RENAME_FIXTURE.priorRename,
+};
+/**
+ * The rename fixture's configuration with an unknown top-level key (14.14):
+ * a staged-source record (S-9), since arm (g)'s invalid-configuration
+ * workspace follows the body's first product invocation — in T14-10, and in
+ * T12.0-15, which restages arm (g).
+ */
+const INVALID_CONFIG = stagedTs(
+  "T12.0-15/T14-10 (g) xspec.config.ts (the rename fixture's configuration with an unknown top-level key, 14.14)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`,
+);
+
+/** A freshly built, valid workspace and its pre-staging snapshot. */
+interface BuiltWorkspace {
+  readonly workspace: TestWorkspace;
+  readonly before: DirectorySnapshot;
+}
+
+/** Stage a declared workspace, `build` it, and see `check` clean (SPEC 12.1, 12.2). */
+async function prepareBuiltWorkspace(
+  product: ProductBinding,
+  decl: WorkspaceDecl,
+  context: string,
+): Promise<BuiltWorkspace> {
+  const workspace = await TestWorkspace.create(decl);
+  try {
+    await buildOk(
+      product,
+      workspace,
+      `${context} staging \`build\` (SPEC 12.1)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context} staging \`check\` — a freshly built, valid workspace (SPEC 12.2)`,
+    );
+    return { workspace, before: await snapshotWorkspace(workspace.root) };
+  } catch (error) {
+    await workspace.dispose();
+    throw error;
+  }
+}
+
+/**
+ * A refused read's 14.25 contract: exit 2; the error document as the entire
+ * stdout, its finding's stable code `read-failure` and `path` the object's
+ * concerned path — its workspace-relative path, or, for a directory
+ * examined before the root is known, its anchoring form (11.6): exactly
+ * `concerned`, or, given several, one of them, where TEST-SPEC leaves the
+ * concerned path to the product's read order or route (T14-10(l)); the
+ * diagnostic on stderr (12.0).
+ */
+function expectReadFailure(
+  result: RunResult,
+  concerned: string | readonly string[],
+  context: string,
+): Finding {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a read the environment refuses is a usage error: the ` +
+      `command stops at that read, attempting nothing further, and exits ` +
+      `2 — never a finding, never an internal error (SPEC 14.25, 12.0)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  if (finding.code !== READ_FAILURE_CODE) {
+    fail(
+      `${context} — the error document's finding carries the stable code ` +
+        `${JSON.stringify(READ_FAILURE_CODE)} (SPEC 14.25, 14, 12.7); got ` +
+        `${JSON.stringify(finding.code)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  const admissible = typeof concerned === "string" ? [concerned] : concerned;
+  if (typeof finding.path !== "string" || !admissible.includes(finding.path)) {
+    fail(
+      `${context} — the concerned path is the refused object's ` +
+        (admissible.length === 1
+          ? `path ${JSON.stringify(admissible[0])}`
+          : `path, as the product's read order or route decides: one of ` +
+            admissible.map((admitted) => JSON.stringify(admitted)).join(", ")) +
+        ` — workspace-relative, or the anchoring form for a directory ` +
+        `examined before the root is known (SPEC 14.25, 11.6, 12.7); got ` +
+        `${JSON.stringify(finding.path)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  if (result.stderr.trim().length === 0) {
+    fail(
+      `${context} — the diagnostic accompanies the error document on ` +
+        `standard error (SPEC 14.25, 12.0: usage-error messages are ` +
+        `standard-error content); got an empty stderr beside ` +
+        `${JSON.stringify(finding.message)}`,
+    );
+  }
+  return finding;
+}
+
+/** An exit-2 error of the syntax class: `code` null, no configuration loaded. */
+function expectSyntaxClassError(
+  result: RunResult,
+  why: string,
+  context: string,
+): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — ${why} is a syntax-class usage error, exit 2, reported ` +
+      `without loading configuration and so before the configuration ` +
+      `search's and discovery's reads, the one the environment refuses ` +
+      `among them (SPEC 12.0, 14.25)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  if (finding.code !== null) {
+    fail(
+      `${context} — ${why} carries no stable code: \`code\` is null where ` +
+        `14 assigns none, never \`read-failure\` (SPEC 14, 12.7, 12.0); got ` +
+        `${JSON.stringify(finding.code)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+/**
+ * Run `argv` from the workspace root under a staging: `apply`'s, made just
+ * before the run and restored once it ends (write-refusal-staging.ts
+ * `runStaged`), where given — the exit-2 stagings', each run under its own
+ * — else the caller's, standing around it. A hang becomes a diagnosed
+ * failure either way.
+ */
+async function runUnderStaging(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+  apply?: StagingApplier,
+): Promise<RunResult> {
+  return apply === undefined
+    ? await runSettled(product, workspace, argv, context)
+    : await runStaged(product, workspace, argv, apply, context);
+}
+
+/**
+ * A findings-report surface under a staging (`runUnderStaging`: `apply`'s
+ * around the run where given): the exact exit code (a hang becomes a
+ * diagnosed failure), the findings-only document `{"findings": […]}` as the
+ * entire stdout, decoded form-exact (SPEC 12.7).
+ */
+async function stagedFindings(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  exitCode: number,
+  context: string,
+  apply?: StagingApplier,
+): Promise<readonly Finding[]> {
+  const result = await runUnderStaging(
+    product,
+    workspace,
+    argv,
+    context,
+    apply,
+  );
+  assertExitCode(result, exitCode, context);
+  return decodeFindingsReport(parseJsonStdout(result, context), context)
+    .findings;
+}
+
+/**
+ * A staged run (`runUnderStaging`: `apply`'s around the run where given)
+ * expected to exit `exitCode`, its stdout parsed as one document.
+ */
+async function stagedDocument(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  exitCode: number,
+  context: string,
+  apply?: StagingApplier,
+): Promise<unknown> {
+  const result = await runUnderStaging(
+    product,
+    workspace,
+    argv,
+    context,
+    apply,
+  );
+  assertExitCode(result, exitCode, context);
+  return parseJsonStdout(result, context);
+}
+
+/** A file's content read refused at the workspace-relative `rel` (mode 0o200). */
+function readRefusalOfFileAt(rel: string): StagingApplier {
+  return async (root) => await stageReadRefusalOfFile(path.join(root, rel));
+}
+
+/**
+ * A directory's listing refused at the workspace-relative `rel` (mode
+ * 0o100, search kept).
+ */
+function readRefusalOfDirectoryAt(rel: string): StagingApplier {
+  return async (root) =>
+    await stageReadRefusalOfDirectory(path.join(root, rel));
+}
+
+/**
+ * The one condition-20 finding for the refused source `file`: its one
+ * location the zero-length range at offset 0 (SPEC 14: an unparseable
+ * source carries one zero-length range at the failure's offset — for a
+ * refused read, 0; 14.25).
+ */
+function requireRefusedSourceFinding(
+  findings: readonly Finding[],
+  file: string,
+  context: string,
+): Finding {
+  const matching = findings.filter((finding) => finding.condition === "14.20");
+  const finding = matching[0];
+  if (matching.length !== 1 || finding === undefined) {
+    return fail(
+      `${context}: exactly one condition-20 finding — the refused source, ` +
+        `masked exactly as an unparseable one (SPEC 14.25, 14.20); got ` +
+        `${String(matching.length)}: ` +
+        JSON.stringify(
+          matching.map(({ code, message }) => ({ code, message })),
+        ),
+    );
+  }
+  assertSameJson(
+    finding.locations,
+    [{ file, range: { start: 0, end: 0 } }],
+    `${context}: the refused read's one location is the zero-length range ` +
+      `at offset 0 in ${file} — content that cannot be read parses as ` +
+      `nothing (SPEC 14, 14.20, 14.25, 12.7)`,
+  );
+  return finding;
+}
+
+/** Nothing inside the refused source reports: no other finding locates in it. */
+function assertMaskedFile(
+  findings: readonly Finding[],
+  file: string,
+  context: string,
+): void {
+  for (const finding of findings) {
+    if (finding.condition === "14.20") continue;
+    if (finding.locations.some((location) => location.file === file)) {
+      fail(
+        `${context}: nothing inside the refused source reports — its ` +
+          `content parses as nothing, so the file is masked exactly as an ` +
+          `unparseable one (SPEC 14.20, 14.25, 11.2); got ` +
+          `${JSON.stringify(finding.code)} located in ${file} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+}
+
+/** The occurrence records a report lists for `file`. */
+function recordsIn(report: OccurrencesReport, file: string): number {
+  return report.occurrences.filter((record) => record.file === file).length;
+}
+
+/**
+ * Restore each staging whose object still exists — a regeneration may have
+ * replaced or removed a staged file or directory: a path occupied again
+ * gets its recorded mode back, an absent one has nothing to reinstate.
+ * Reverse order of staging.
+ */
+async function restoreSurviving(
+  stagings: readonly PermissionStaging[],
+): Promise<void> {
+  for (let i = stagings.length - 1; i >= 0; i--) {
+    const staging = stagings[i]!;
+    if (await pathExists(staging.path)) await staging.restore();
+  }
+}
+
+/**
+ * Arm (f)'s directory mode, `-wx`: a graph-data directory's read permission
+ * alone removed — its listing refused, its write and search permission kept
+ * (TEST-SPEC T14-10(f): never the discipline's `--x`).
+ */
+const GRAPH_DATA_DIRECTORY_MODE = 0o300;
+
+/** How many staged paths of each kind arm (f)'s description names. */
+const STAGED_PATHS_NAMED = 6;
+
+/** Arm (f)'s staging in effect: its stagings, and what it staged. */
+interface GraphDataUnreadable {
+  /** Every file's staging, then every directory's, each kind in byte order. */
+  readonly stagings: readonly PermissionStaging[];
+  /** What was staged, quoted by every diagnosis made under the staging. */
+  readonly staged: string;
+}
+
+/** A count of staged paths and their names — the first few, then a count. */
+function describeStagedPaths(
+  keys: readonly string[],
+  noun: readonly [one: string, many: string],
+  mode: string,
+): string {
+  const named = keys.slice(0, STAGED_PATHS_NAMED).map(displaySnapshotPath);
+  const rest = keys.length - named.length;
+  return (
+    `${String(keys.length)} ${keys.length === 1 ? noun[0] : noun[1]} at ` +
+    `${mode} (${named.join(", ")}${rest > 0 ? `, and ${String(rest)} more` : ""})`
+  );
+}
+
+/**
+ * Arm (f)'s staging: every path under `.xspec/` other than the journal, the
+ * session directory, and the lock path unreadable — T13.3-2's operational
+ * path set, walked by the adapter layer's `collectGraphDataEntries`
+ * (anything but a plain file or a directory in the set is skipped, the
+ * lock path and everything under it never staged: no graph data, 13.4).
+ * Every plain file at mode 0o200 (`-w-------`, its write permission kept)
+ * and then every directory of the set by its read permission alone removed
+ * ({@link GRAPH_DATA_DIRECTORY_MODE}, `-wx`: the harness's own listing of it
+ * refused, its own creation and removal of a file in it kept), so only
+ * reads are refused and the regeneration a refreshing read owes (13.3) is
+ * never itself refused, whatever layout graph data takes; `.xspec` itself
+ * is no path under it and keeps its mode. Every staging is verified on the
+ * harness itself (E-1) and reaches its object at its exact name bytes,
+ * whatever the name the product chose (SPEC 13.3). Where graph data holds
+ * no directory, files alone are staged, and the description says so. At
+ * least one file must exist: the staging applies to record files the
+ * product itself wrote (H-3), and staging nothing would be no staging
+ * (H-11). A staging that fails restores every one made before it.
+ */
+async function stageGraphDataUnreadable(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<GraphDataUnreadable> {
+  const { files, directories } = await collectGraphDataEntries(workspace.root);
+  if (files.length === 0) {
+    throw new HarnessStagingError(
+      "read-refusal-of-file",
+      workspace.path(GRAPH_DATA_AREA),
+      `${context}: no graph-data file found under ${GRAPH_DATA_AREA}/ ` +
+        `outside the journal, the session directory, and the lock path — ` +
+        `the staging applies to record files the product itself wrote ` +
+        `after a successful build (SPEC 13.3, 12.1)`,
+    );
+  }
+  const stagings: PermissionStaging[] = [];
+  try {
+    for (const key of files) {
+      stagings.push(
+        await stageReadRefusalOfFile(workspace.bytePath(snapshotKeyBytes(key))),
+      );
+    }
+    for (const key of directories) {
+      stagings.push(
+        await stageDirectoryMode(
+          workspace.bytePath(snapshotKeyBytes(key)),
+          GRAPH_DATA_DIRECTORY_MODE,
+          [
+            { attempt: "list", refused: true },
+            { attempt: "create", refused: false },
+          ],
+        ),
+      );
+    }
+  } catch (error) {
+    await restoreSurviving(stagings).catch(() => undefined);
+    throw error;
+  }
+  const fileText = describeStagedPaths(files, ["file", "files"], "-w-------");
+  const staged =
+    directories.length === 0
+      ? `graph data unreadable: ${fileText}; graph data holds no directory ` +
+        `under ${GRAPH_DATA_AREA}/, so files alone are staged`
+      : `graph data unreadable: ${fileText} and ` +
+        describeStagedPaths(directories, ["directory", "directories"], "-wx");
+  return { stagings, staged };
+}
+
+// ---------------------------------------------------------------------------
+// (a) A discovered source's content — condition 20 (SPEC 14.25, 14.20, 11.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The spec source `specs/B.mdx` staged unreadable: `build` and `check`
+ * report the one condition-20 finding at offset 0 beside A's unresolved
+ * reference (14.5) and nothing from inside B; `view` serves A's view, B
+ * contributing none; `occurrences` lists no record for B's spelling while
+ * D's stays; `at` on B reports the resolution explicitly unavailable at 0,
+ * 7, and 999999 — never the out-of-range usage error. Nothing is modified;
+ * restored, the workspace builds clean.
+ */
+async function specSourceSubArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const before = await snapshotWorkspace(workspace.root);
+  const staging = await stageReadRefusalOfFile(workspace.path(SOURCE_B_PATH));
+  try {
+    for (const argv of [
+      ["build", "--json"],
+      ["check", "--json"],
+    ] as const) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SOURCE_B_PATH} unreadable`;
+      const findings = await stagedFindings(
+        product,
+        workspace,
+        argv,
+        1,
+        `${label} — a discovered source whose content the environment ` +
+          `refuses is condition 20, a finding: exit 1 (SPEC 14.25, 14.20, ` +
+          `12.0)`,
+      );
+      assertConditionCounts(
+        findings,
+        { "14.20": 1, "14.5": 1 },
+        `${label} — the refused source is one condition-20 finding and A's ` +
+          `reference into it reports as unresolved, nothing else (SPEC ` +
+          `14.25, 14.20, 14.5)`,
+      );
+      requireRefusedSourceFinding(findings, SOURCE_B_PATH, label);
+      const unresolved = findings.find(
+        (finding) => finding.condition === "14.5",
+      )!;
+      assertFindingLocated(
+        unresolved,
+        { file: SOURCE_A_PATH },
+        `${label} — the unresolved reference locates in ${SOURCE_A_PATH}, ` +
+          `the referencing file (SPEC 14, 14.5)`,
+      );
+      assertMaskedFile(findings, SOURCE_B_PATH, label);
+    }
+
+    const viewArgv = ["view", SOURCE_A_PATH, SOURCE_B_PATH];
+    const viewLabel = `${context} \`${viewArgv.join(" ")}\` with ${SOURCE_B_PATH} unreadable`;
+    const view = decodeViewReport(
+      await stagedDocument(
+        product,
+        workspace,
+        viewArgv,
+        1,
+        `${viewLabel} — an answer carrying a finding exits 1 with the full ` +
+          `answer document still emitted (SPEC 11.2, 12.0)`,
+      ),
+      { text: false },
+      viewLabel,
+    );
+    assertSameJson(
+      view.views.map((fileView) => fileView.file),
+      [SOURCE_A_PATH],
+      `${viewLabel} — the surface still answers per file: A's view is ` +
+        `served and the refused B contributes none (SPEC 11.2, 11.4, 14.25)`,
+    );
+    assertConditionCounts(
+      view.findings,
+      { "14.20": 1, "14.5": 1 },
+      `${viewLabel} — the findings of every domain file accompany the ` +
+        `answer: B's condition-20 finding and A's unresolved reference ` +
+        `(SPEC 11.2, 14.25)`,
+    );
+    requireRefusedSourceFinding(view.findings, SOURCE_B_PATH, viewLabel);
+
+    const occLabel = `${context} \`occurrences\` with ${SOURCE_B_PATH} unreadable`;
+    const occurrences = decodeOccurrencesReport(
+      await stagedDocument(
+        product,
+        workspace,
+        ["occurrences"],
+        1,
+        `${occLabel} — the domain's findings accompany the answer, exit 1 ` +
+          `(SPEC 11.3, 11.2)`,
+      ),
+      occLabel,
+    );
+    if (recordsIn(occurrences, SOURCE_B_PATH) !== 0) {
+      fail(
+        `${occLabel} — no record for B's spellings: a spelling inside the ` +
+          `refused source is hidden with the rest of it, pointed to only ` +
+          `by the condition-20 finding (SPEC 11.2, 5.7, 14.25); got ` +
+          `${String(recordsIn(occurrences, SOURCE_B_PATH))} record(s)`,
+      );
+    }
+    if (recordsIn(occurrences, SOURCE_D_PATH) === 0) {
+      fail(
+        `${occLabel} — the surface still answers per file: D's resolving ` +
+          `reference keeps its record while B is masked (SPEC 11.2, 11.3)`,
+      );
+    }
+    assertConditionCounts(
+      occurrences.findings,
+      { "14.20": 1, "14.5": 1 },
+      `${occLabel} — the entire discovered set's findings accompany the ` +
+        `answer (SPEC 11.3, 11.2)`,
+    );
+
+    for (const offset of ["0", "7", "999999"]) {
+      const atArgv = ["at", SOURCE_B_PATH, offset];
+      const atLabel = `${context} \`${atArgv.join(" ")}\` with ${SOURCE_B_PATH} unreadable`;
+      const report = decodeAtReport(
+        await stagedDocument(
+          product,
+          workspace,
+          atArgv,
+          1,
+          `${atLabel} — the resolution is reported explicitly unavailable ` +
+            `beside the condition-20 finding, exit 1 — never the ` +
+            `out-of-range usage error: the offset bound is judged only ` +
+            `where the content was read (SPEC 11.5, 14.25)`,
+        ),
+        atLabel,
+      );
+      assertSameJson(
+        report.resolution,
+        { unavailable: true },
+        `${atLabel} — the resolution is exactly the unavailability marker: ` +
+          `never null, never a fabricated root resolution (SPEC 11.5, 11.2, ` +
+          `12.7)`,
+      );
+      assertConditionCounts(
+        report.findings,
+        { "14.20": 1 },
+        `${atLabel} — the consulted domain is the named file alone, its ` +
+          `condition-20 finding accompanying (SPEC 11.5, 11.2)`,
+      );
+      requireRefusedSourceFinding(report.findings, SOURCE_B_PATH, atLabel);
+    }
+  } finally {
+    await staging.restore();
+  }
+  assertSnapshotsEqual(
+    before,
+    await snapshotWorkspace(workspace.root),
+    `${context}: nothing modified — a failing build and check, and the ` +
+      `surfaces of 11.2 on a failing workspace, write nothing (SPEC 12.1, ` +
+      `13.3, 11.2)`,
+  );
+  await assertRecovers(product, workspace, context);
+}
+
+/**
+ * Separately, the code source `src/app.ts` staged unreadable: `build` and
+ * `check` report its one condition-20 finding at offset 0 alone (no spec
+ * source references a code source), and `occurrences` lists no record for
+ * its marker while D's record stays. Nothing is modified; restored, the
+ * workspace builds clean.
+ */
+async function codeSourceSubArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const before = await snapshotWorkspace(workspace.root);
+  const staging = await stageReadRefusalOfFile(
+    workspace.path(SOURCE_CODE_PATH),
+  );
+  try {
+    for (const argv of [
+      ["build", "--json"],
+      ["check", "--json"],
+    ] as const) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SOURCE_CODE_PATH} unreadable`;
+      const findings = await stagedFindings(
+        product,
+        workspace,
+        argv,
+        1,
+        `${label} — a discovered code source whose content the environment ` +
+          `refuses is condition 20, a finding: exit 1 (SPEC 14.25, 14.20, ` +
+          `12.0)`,
+      );
+      assertConditionCounts(
+        findings,
+        { "14.20": 1 },
+        `${label} — the refused code source is one condition-20 finding ` +
+          `and nothing else: nothing inside it reports, and no spec source ` +
+          `references a code source (SPEC 14.25, 14.20)`,
+      );
+      requireRefusedSourceFinding(findings, SOURCE_CODE_PATH, label);
+    }
+    const occLabel = `${context} \`occurrences\` with ${SOURCE_CODE_PATH} unreadable`;
+    const occurrences = decodeOccurrencesReport(
+      await stagedDocument(
+        product,
+        workspace,
+        ["occurrences"],
+        1,
+        `${occLabel} — the entire discovered set is the domain, the code ` +
+          `source's condition-20 finding accompanying: exit 1 (SPEC 11.3, ` +
+          `11.2)`,
+      ),
+      occLabel,
+    );
+    if (recordsIn(occurrences, SOURCE_CODE_PATH) !== 0) {
+      fail(
+        `${occLabel} — no record for the refused code source's marker: a ` +
+          `spelling inside a masked file is hidden with the rest of it ` +
+          `(SPEC 11.2, 5.7, 14.25); got ` +
+          `${String(recordsIn(occurrences, SOURCE_CODE_PATH))} record(s)`,
+      );
+    }
+    if (recordsIn(occurrences, SOURCE_D_PATH) === 0) {
+      fail(
+        `${occLabel} — the surface still answers per file: D's resolving ` +
+          `reference keeps its record (SPEC 11.2, 11.3)`,
+      );
+    }
+    assertConditionCounts(
+      occurrences.findings,
+      { "14.20": 1 },
+      `${occLabel} — the domain's findings are the code source's ` +
+        `condition-20 finding alone (SPEC 11.3, 11.2)`,
+    );
+  } finally {
+    await staging.restore();
+  }
+  assertSnapshotsEqual(
+    before,
+    await snapshotWorkspace(workspace.root),
+    `${context}: nothing modified on the failing workspace (SPEC 12.1, 13.3, 11.2)`,
+  );
+  await assertRecovers(product, workspace, context);
+}
+
+/**
+ * (a) A discovered source's content: the fixture built and clean, the
+ * premise that B's `d` reference and the code source's marker each record an
+ * occurrence when readable (so "no record" below is a masking, not an
+ * absence), then the spec source and the code source each refused in turn.
+ */
+async function sourceContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (a) a discovered source's content";
+  const { workspace } = await prepareBuiltWorkspace(
+    product,
+    SOURCE_DECL,
+    context,
+  );
+  try {
+    const premiseLabel = `${context} premise \`occurrences\` on the readable workspace`;
+    const premise = decodeOccurrencesReport(
+      await runJson(product, workspace, ["occurrences"], premiseLabel),
+      premiseLabel,
+    );
+    for (const file of [SOURCE_B_PATH, SOURCE_CODE_PATH, SOURCE_D_PATH]) {
+      if (recordsIn(premise, file) === 0) {
+        fail(
+          `${premiseLabel}: ${file}'s resolving reference records an ` +
+            `occurrence — a \`d\` reference or a dependency marker whose ` +
+            `target resolves (SPEC 5.7, 4.5) — so that its absence under ` +
+            `the refusal below is the masking of 14.25, not an absence`,
+        );
+      }
+    }
+    await specSourceSubArm(product, workspace, `${context}, the spec source`);
+    await codeSourceSubArm(product, workspace, `${context}, the code source`);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (b) The journal's content — condition 13 (SPEC 14.25, 14.13, 13.3, 6.4,
+// 6.3, 11.2)
+// ---------------------------------------------------------------------------
+
+/** Condition 13's stable code (SPEC 14, 14.13). */
+const JOURNAL_ERROR_CODE = "journal-error";
+
+/**
+ * A given baseline's resolution meeting the journal's refused read (TEST-SPEC
+ * T14-10(b), T6.3-6(c); SPEC 6.3, 14.13, 14.25, 12.0, 12.7): it reads the
+ * current journal before any other cause can fail it, and the journal error
+ * there — content the environment refuses to deliver included — fails it as
+ * its usage error: exit 2, the error document as the entire stdout, its
+ * finding condition 13's stable code `journal-error` and concerned path
+ * `.xspec/journal` with `locations` `[]` (a journal condition has no
+ * in-source location, 14) — never the code-less baseline error nor
+ * `read-failure`.
+ */
+function expectBaselineJournalError(result: RunResult, context: string): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a given baseline's resolution reads the current journal ` +
+      `before any other cause can fail it, and a journal error there — ` +
+      `content the environment refuses included — fails it as a usage ` +
+      `error, exit 2 (SPEC 6.3, 12.0, 14.25)`,
+  );
+  const error = expectErrorDocument(result, context);
+  assertSameJson(
+    { code: error.code, path: error.path, locations: error.locations },
+    { code: JOURNAL_ERROR_CODE, path: JOURNAL_PATH, locations: [] },
+    `${context}: the error reported is condition 13 with its stable code ` +
+      `and concerned path — \`code\` "${JOURNAL_ERROR_CODE}", \`path\` ` +
+      `"${JOURNAL_PATH}", \`locations\` [] — never the code-less baseline ` +
+      `error nor \`read-failure\` (SPEC 6.3, 14.13, 14.25, 12.7; T6.3-6(c)) ` +
+      `(message: ${JSON.stringify(error.message)})`,
+  );
+}
+
+/**
+ * (b)'s surfaces of 11.2 on the journal-staged, otherwise valid workspace:
+ * bare `occurrences`, `view specs/a/A.mdx`, and `at specs/a/A.mdx 0` —
+ * JSON-only surfaces (SPEC 11) — each a complete, finding-free answer, exit
+ * 0: their judgement makes the journal's read and meets the refusal as
+ * condition 13 (11.2: past their argument checks they judge the workspace
+ * as the gate does, making every read it makes), a gate condition that is
+ * no domain file's finding and so accompanies none of their answers —
+ * never 14.25's usage error (exit 2), never the finding beside the answer
+ * (exit 1). `view` answers exactly the requested file's view. Each run is
+ * made under `apply`'s staging, made just before it and restored once it
+ * ends.
+ */
+async function assertSurfacesAnswerFindingFree(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staged: string,
+  context: string,
+  apply: StagingApplier,
+): Promise<void> {
+  const why =
+    `the surfaces' judgement makes the journal's read and meets the ` +
+    `refusal as condition 13, a gate condition that is no domain file's ` +
+    `finding and accompanies none of their answers: a complete, ` +
+    `finding-free answer exits 0 — never 14.25's exit 2 (SPEC 11.2, ` +
+    `14.13, 14.25, 12.0)`;
+  const findingFree =
+    "finding-free: condition 13 is no domain file's finding and " +
+    "accompanies no answer of these surfaces (SPEC 11.2, 14.13)";
+
+  const occLabel = `${context} \`occurrences\` ${staged}`;
+  const occurrences = decodeOccurrencesReport(
+    await stagedDocument(
+      product,
+      workspace,
+      ["occurrences"],
+      0,
+      `${occLabel} — ${why}`,
+      apply,
+    ),
+    occLabel,
+  );
+  assertSameJson(occurrences.findings, [], `${occLabel} — ${findingFree}`);
+
+  const viewArgv = ["view", RENAME_A_PATH];
+  const viewLabel = `${context} \`${viewArgv.join(" ")}\` ${staged}`;
+  const view = decodeViewReport(
+    await stagedDocument(
+      product,
+      workspace,
+      viewArgv,
+      0,
+      `${viewLabel} — ${why}`,
+      apply,
+    ),
+    { text: false },
+    viewLabel,
+  );
+  assertSameJson(view.findings, [], `${viewLabel} — ${findingFree}`);
+  assertSameJson(
+    view.views.map((fileView) => fileView.file),
+    [RENAME_A_PATH],
+    `${viewLabel} — exactly the requested spec source's view (SPEC 11.4)`,
+  );
+
+  const atArgv = ["at", RENAME_A_PATH, "0"];
+  const atLabel = `${context} \`${atArgv.join(" ")}\` ${staged}`;
+  const at = decodeAtReport(
+    await stagedDocument(
+      product,
+      workspace,
+      atArgv,
+      0,
+      `${atLabel} — ${why}`,
+      apply,
+    ),
+    atLabel,
+  );
+  assertSameJson(at.findings, [], `${atLabel} — ${findingFree}`);
+}
+
+/**
+ * `.xspec/journal` staged unreadable on the journal-bearing rename fixture:
+ * `build`, `check`, the gated `ids` (answering nothing), and the `rename`
+ * (refused) each report the one condition-13 finding concerning the journal
+ * and exit 1; a given baseline's resolution — `impact --base` and `review
+ * create --base … --name n`, the prepared baseline commit given — reports
+ * it as its usage error, exit 2, `code` `journal-error` concerning the
+ * journal (`expectBaselineJournalError`); the surfaces of 11.2 — bare
+ * `occurrences`, `view specs/a/A.mdx`, and `at specs/a/A.mdx 0` — each
+ * answer finding-free, exit 0 (`assertSurfacesAnswerFindingFree`); and
+ * `inventory` reports `journal` exactly `{"path": ".xspec/journal",
+ * "occupied": true}`, finding-free, exit 0 — the kind read, permitted, is
+ * the only read it makes there. Nothing is modified; restored, the
+ * workspace builds clean. The staging stands around each run alone, made
+ * just before it and restored once it ends; each given baseline's run is
+ * handed to `visitor` (`visitExitTwo`), its `home` the journal error's
+ * check, and every other run and assertion is made where `visitor.home`
+ * holds.
+ */
+async function journalContentArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (b) the journal's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  const unreadable = readRefusalOfFileAt(JOURNAL_PATH);
+  try {
+    if (visitor.home) {
+      const reporters: readonly (readonly string[])[] = [
+        ["build", "--json"],
+        ["check", "--json"],
+        ["ids", "--json"],
+        RENAME_B_TO_B2,
+      ];
+      for (const argv of reporters) {
+        const label = `${context} \`${argv.join(" ")}\` with ${JOURNAL_PATH} unreadable`;
+        const findings = await stagedFindings(
+          product,
+          workspace,
+          argv,
+          1,
+          `${label} — a journal the environment refuses to read is ` +
+            `condition 13, a finding the workspace fails on: \`build\` and ` +
+            `\`check\` report it, a gated read answers nothing but the ` +
+            `findings, and a \`rename\` is refused — exit 1 with the ` +
+            `findings-only document (SPEC 14.25, 14.13, 13.3, 6.4, 12.7)`,
+          unreadable,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.13": 1 },
+          `${label} — the journal error alone (SPEC 14.13, 14.25)`,
+        );
+        assertFindingConcernsPath(
+          findings[0]!,
+          JOURNAL_PATH,
+          `${label} — the journal is the concerned path (SPEC 14, 14.13)`,
+        );
+      }
+    }
+    // A given baseline's resolution reads the current journal before any
+    // other cause can fail it: the refused read is the journal error it
+    // reports as its usage error (SPEC 6.3) — at both baseline-taking
+    // commands, the prepared baseline commit given.
+    const baselineCommands: readonly (readonly string[])[] = [
+      ["impact", "--base", prepared.baseline, "--json"],
+      [
+        "review",
+        "create",
+        "--base",
+        prepared.baseline,
+        "--name",
+        NEW_SESSION,
+        "--json",
+      ],
+    ];
+    for (const argv of baselineCommands) {
+      const label = `${context} \`${argv.join(" ")}\` with ${JOURNAL_PATH} unreadable`;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        runStaged(product, workspace, runArgv, unreadable, label);
+      await visitExitTwo(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run },
+        async () => {
+          expectBaselineJournalError(await run(argv), label);
+        },
+      );
+    }
+    if (!visitor.home) return;
+    await assertSurfacesAnswerFindingFree(
+      product,
+      workspace,
+      `with ${JOURNAL_PATH} unreadable`,
+      context,
+      unreadable,
+    );
+    const invLabel = `${context} \`inventory\` with ${JOURNAL_PATH} unreadable`;
+    const inventory = decodeInventoryDocument(
+      await stagedDocument(
+        product,
+        workspace,
+        ["inventory"],
+        0,
+        `${invLabel} — the inventory reads the journal path's kind alone, ` +
+          `permitted, never its content: a complete, finding-free ` +
+          `answer, exit 0 (SPEC 11.6, 14.25)`,
+        unreadable,
+      ),
+      invLabel,
+    );
+    assertSameJson(
+      inventory.findings,
+      [],
+      `${invLabel} — finding-free: the inventory reads no journal ` +
+        `content, so it meets no condition-13 (SPEC 11.6, 14.25)`,
+    );
+    assertSameJson(
+      inventory.journal,
+      { path: JOURNAL_PATH, occupied: true },
+      `${invLabel} — the journal member is exactly {"path": ` +
+        `"${JOURNAL_PATH}", "occupied": true}: the journal path, occupied ` +
+        `— occupancy by presence alone, the content unread (SPEC 11.6, ` +
+        `12.7)`,
+    );
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — a failing build, a gated read, a ` +
+        `refused rename, a given baseline's failed resolution (no session ` +
+        `written), the surfaces of 11.2 on a failing workspace, and the ` +
+        `inventory write nothing (SPEC 12.1, 13.3, 6.4, 6.3, 10.7, 11.2, ` +
+        `11.6)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (c) A session file's content — condition 21 (SPEC 14.25, 14.21, 10.1, 10.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * Arm (c)'s one corruption report, asked of each of its three reporters
+ * (TEST-SPEC line 9's rule for an error report; the module header): exactly
+ * one finding, condition 21 — its exact stable code `corrupt-session`, which
+ * the condition count reads (the derived 14.21) — concerning the session
+ * file `.xspec/reviews/s.json` as its 12.7 `path`, with no in-source
+ * location (`locations` []; SPEC 14, 12.7). `label` names the reporter and
+ * the staging.
+ */
+function assertSessionCorruptionAlone(
+  findings: readonly Finding[],
+  label: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.21": 1 },
+    `${label} — exactly one finding, \`corrupt-session\` (SPEC 14.21, 10.1)`,
+  );
+  const finding = findings[0]!;
+  assertFindingConcernsPath(
+    finding,
+    SESSION_FILE,
+    `${label} — the session file is the concerned path (SPEC 14, 14.21)`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${label} — a session condition has no in-source location: ` +
+      `\`locations\` [] (SPEC 14, 12.7)`,
+  );
+}
+
+/**
+ * The audit session `s` created, its file staged unreadable: `check` and
+ * `review status s` each report exactly one condition-21 finding concerning
+ * the session file with no location, exit 1, nothing modified; `review
+ * list` reports the session corrupt by name, exit 1, its listing carrying
+ * that one `corrupt-session` finding likewise; `inventory` lists the
+ * session, finding-free, exit 0 (selected by name alone, content unread).
+ * Each of the three reports is judged by `assertSessionCorruptionAlone`.
+ */
+async function sessionContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (c) a session file's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    const before = await snapshotWorkspace(workspace.root);
+    const staging = await stageReadRefusalOfFile(workspace.path(SESSION_FILE));
+    try {
+      for (const argv of [
+        ["check", "--json"],
+        ["review", "status", SESSION, "--json"],
+      ] as const) {
+        const label = `${context} \`${argv.join(" ")}\` with ${SESSION_FILE} unreadable`;
+        const findings = await stagedFindings(
+          product,
+          workspace,
+          argv,
+          1,
+          `${label} — a session file the environment refuses to read is ` +
+            `corrupt, condition 21: reported by \`check\` and by the ` +
+            `\`review\` subcommand naming it, exit 1, the findings-only ` +
+            `document (SPEC 14.25, 14.21, 10.1, 12.7)`,
+        );
+        assertSessionCorruptionAlone(findings, label);
+      }
+      const listLabel = `${context} \`review list --json\` with ${SESSION_FILE} unreadable`;
+      const list = decodeSessionListReport(
+        await stagedDocument(
+          product,
+          workspace,
+          ["review", "list", "--json"],
+          1,
+          `${listLabel} — \`list\` exits 1 when any session is corrupt ` +
+            `(SPEC 10.7, 14.21)`,
+        ),
+        listLabel,
+      );
+      assertSameJson(
+        list.sessions,
+        [{ name: SESSION, corrupt: true }],
+        `${listLabel} — the session reported corrupt by name, in place of ` +
+          `its fields (SPEC 10.7, 14.21)`,
+      );
+      // The listing's condition 21, with no invocation of its own: `list`
+      // reports the corrupt session (SPEC 14.21, exit 1) and carries its
+      // finding under the document's "findings" member (12.7), which the
+      // decoder requires while a session is listed corrupt — as `s` now
+      // is. Exactly one finding, `corrupt-session` concerning the session
+      // file with `locations` [], as `check` and `review status` report it
+      // (the module header).
+      const listFindings = list.findings;
+      if (listFindings === undefined) {
+        fail(
+          `${listLabel} — the listing must carry the corrupt session's ` +
+            `condition 21 under its "findings" member (SPEC 14.21, 12.7); ` +
+            `the decoded document carries no such member`,
+        );
+      }
+      assertSessionCorruptionAlone(
+        listFindings,
+        `${listLabel} — the listing's findings`,
+      );
+      const invLabel = `${context} \`inventory\` with ${SESSION_FILE} unreadable`;
+      const inventory = decodeInventoryDocument(
+        await stagedDocument(
+          product,
+          workspace,
+          ["inventory"],
+          0,
+          `${invLabel} — the inventory lists sessions by name alone, ` +
+            `reading no session content: finding-free, exit 0 (SPEC 11.6, ` +
+            `14.25)`,
+        ),
+        invLabel,
+      );
+      assertSameJson(
+        inventory.findings,
+        [],
+        `${invLabel} — finding-free (SPEC 11.6)`,
+      );
+      assertSameJson(
+        inventory.sessions,
+        [SESSION_FILE],
+        `${invLabel} — the session listed by its file path (SPEC 11.6)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+    assertSnapshotsEqual(
+      before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — a corrupt session is reported, never ` +
+        `repaired or replaced, and the reads write nothing (SPEC 14.21, ` +
+        `10.1, 11.6)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (d) The configuration file's content — condition 14 (SPEC 14.25, 14.14, 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * `xspec.config.ts` staged unreadable: `build`, `ids`, `inventory`, and
+ * `view` (representatives of every command but `version`) exit 2 with the
+ * error document — `code` `configuration-error`, `path` the configuration
+ * path in the anchoring form — while `version` answers, exit 0. Nothing is
+ * modified; restored, the workspace builds clean. The staging stands around
+ * each run alone; each configuration error is handed to `visitor`
+ * (`visitExitTwo`: `inventory` and `view`, JSON-only, run as T14-10's
+ * alone), its `home` the configuration error's check, and `version`, the
+ * compare, and the recovery are made where `visitor.home` holds.
+ */
+async function configurationContentArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (d) the configuration file's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  const unreadable = readRefusalOfFileAt(CONFIG_PATH);
+  try {
+    const loaders: readonly (readonly string[])[] = [
+      ["build"],
+      ["ids"],
+      ["inventory"],
+      ["view", RENAME_A_PATH],
+    ];
+    for (const argv of loaders) {
+      const jsonArgv = [...argv, "--json"];
+      const label = `${context} \`${jsonArgv.join(" ")}\` with ${CONFIG_PATH} unreadable`;
+      await visitExitTwo(
+        visitor,
+        {
+          label,
+          jsonArgv,
+          root: workspace.root,
+          run: (runArgv) =>
+            runStaged(product, workspace, runArgv, unreadable, label),
+        },
+        async () => {
+          const staging = await unreadable(workspace.root);
+          let result: RunResult;
+          try {
+            result = await expectConfigurationError(
+              product,
+              workspace,
+              argv,
+              `${label} — a configuration file the environment refuses to ` +
+                `read is invalid configuration, condition 14, from every ` +
+                `command that loads it (SPEC 14.25, 14.14, 7)`,
+            );
+          } finally {
+            await staging.restore();
+          }
+          const finding = expectErrorDocument(result, label);
+          if (finding.path !== CONFIG_PATH) {
+            fail(
+              `${label} — the concerned path is the configuration path in ` +
+                `the anchoring form, ${JSON.stringify(CONFIG_PATH)} from the ` +
+                `root (SPEC 14, 11.6); got ${JSON.stringify(finding.path)} ` +
+                `(message: ${JSON.stringify(finding.message)})`,
+            );
+          }
+        },
+      );
+    }
+    if (!visitor.home) return;
+    const versionLabel = `${context} \`version\` with ${CONFIG_PATH} unreadable`;
+    await stagedDocument(
+      product,
+      workspace,
+      ["version"],
+      0,
+      `${versionLabel} — \`version\` loads no configuration, so the ` +
+        `refused read never occurs: exit 0 with its answer (SPEC 12.6, ` +
+        `14.14, 14.25)`,
+      unreadable,
+    );
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — a configuration error precedes every ` +
+        `write (SPEC 14.14, 12.0)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (e) A derived file's content — condition 10 (SPEC 14.25, 14.10, 12.1, 13.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * B's generated module staged unreadable: `check` reports exactly one
+ * condition-10 finding, the per-file form concerning that path (the graph
+ * data matches, so no unit form), exit 1; `build` exits 0 — it reads no
+ * derived file, and its write replaces the occupant; afterwards `check` is
+ * clean.
+ */
+async function derivedContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (e) a derived file's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const kind = await workspace.kind(RENAME_B_MODULE);
+    if (kind !== "file") {
+      fail(
+        `${context}: the built workspace holds B's generated module as a ` +
+          `plain file at ${RENAME_B_MODULE} (SPEC 13.1, 13.4); found ${kind}`,
+      );
+    }
+    const staging = await stageReadRefusalOfFile(
+      workspace.path(RENAME_B_MODULE),
+    );
+    try {
+      const checkLabel = `${context} \`check --json\` with ${RENAME_B_MODULE} unreadable`;
+      const findings = await stagedFindings(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkLabel} — a derived file whose content the environment ` +
+          `refuses to deliver is stale: condition 10, exit 1 (SPEC 14.25, ` +
+          `14.10, 12.2)`,
+      );
+      assertStalenessAlone(
+        findings,
+        { perFile: [RENAME_B_MODULE], unit: false },
+        `${checkLabel} — exactly one condition-10 finding, the per-file ` +
+          `form concerning the unreadable module; the graph data matches, ` +
+          `so no unit form (SPEC 14.10, 14.25)`,
+      );
+      const buildLabel = `${context} \`build\` with ${RENAME_B_MODULE} unreadable`;
+      assertExitCode(
+        await runSettled(product, workspace, ["build"], buildLabel),
+        0,
+        `${buildLabel} — \`build\` reads no derived file: its write ` +
+          `replaces the occupant, so the refused content read never occurs ` +
+          `and the build exits 0 (SPEC 14.25, 12.1, 13.4)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: after the build, \`check\` is clean — the module ` +
+        `regenerated (SPEC 12.2, 13.4)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (f) Graph data — the state of condition 23 (SPEC 14.25, 14.23, 14.10, 13.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Graph data staged unreadable (`stageGraphDataUnreadable`: its files
+ * `-w-------`, its directories `-wx`): `inventory` reports `recorded`
+ * unavailable with the condition-23 finding concerning `.xspec`, exit 1; a
+ * `move --preview` reports its `delta` unavailable likewise; `check`
+ * reports one condition-10 finding in the unit form alone; `ids` exits 0
+ * with its answer, regenerating the data rather than failing; and `build`
+ * exits 0 — nothing asserted about the record it wrote, neither under the
+ * staging nor after it: what a later read meets turns on the modes
+ * `build`'s writes leave, which SPEC.md fixes nowhere (a successful
+ * build's replacement of an unreadable record is T12.2-2's, staged
+ * shape-blind).
+ */
+async function graphDataArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (f) graph data";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const intactLabel = `${context} premise \`inventory\` on the readable record`;
+    const intact = decodeInventoryDocument(
+      await runJson(product, workspace, ["inventory"], intactLabel),
+      intactLabel,
+    );
+    if (intact.recorded.state !== "value") {
+      fail(
+        `${intactLabel}: on the freshly built workspace the record is ` +
+          `readable and \`recorded\` lists the recorded derived paths ` +
+          `(SPEC 11.6, 13.3); got state ${intact.recorded.state}`,
+      );
+    }
+    const { stagings, staged } = await stageGraphDataUnreadable(
+      workspace,
+      context,
+    );
+    try {
+      const invLabel = `${context} \`inventory\` [${staged}]`;
+      const inventory = decodeInventoryDocument(
+        await stagedDocument(
+          product,
+          workspace,
+          ["inventory"],
+          1,
+          `${invLabel} — a refused read of graph data is the state of ` +
+            `condition 23 to a surface consulting the record: the finding ` +
+            `accompanies the answer, exit 1 (SPEC 14.25, 14.23, 11.6)`,
+        ),
+        invLabel,
+      );
+      assertConditionCounts(
+        inventory.findings,
+        { "14.23": 1 },
+        `${invLabel} — exactly the one condition-23 finding (SPEC 14.23, 11.6)`,
+      );
+      assertFindingConcernsPath(
+        inventory.findings[0]!,
+        GRAPH_DATA_AREA,
+        `${invLabel} — the concerned path is the graph-data area (SPEC 14.23, 11.6)`,
+      );
+      assertSameJson(
+        inventory.findings[0]!.locations,
+        [],
+        `${invLabel} — no path inside the area is named (SPEC 14.23, 13.3, 12.7)`,
+      );
+      assertSameJson(
+        inventory.recorded,
+        { state: "unavailable" },
+        `${invLabel} — \`recorded\` is explicitly unavailable, never ` +
+          `fabricated and never read as an empty record (SPEC 14.23, 11.6, ` +
+          `12.7)`,
+      );
+
+      const previewArgv = [
+        "move",
+        RENAME_C_PATH,
+        MOVE_C_DESTINATION,
+        "--preview",
+        "--json",
+      ];
+      const previewLabel = `${context} \`${previewArgv.join(" ")}\` [${staged}]`;
+      const preview = decodePreviewReport(
+        await stagedDocument(
+          product,
+          workspace,
+          previewArgv,
+          1,
+          `${previewLabel} — a preview consulting the record reports its ` +
+            `delta unavailable beside the condition-23 finding, exit 1, ` +
+            `the full preview still emitted (SPEC 14.23, 6.6, 12.0)`,
+        ),
+        previewLabel,
+      );
+      assertConditionCounts(
+        preview.findings,
+        { "14.23": 1 },
+        `${previewLabel} — exactly the one condition-23 finding (SPEC 14.23, 6.6)`,
+      );
+      assertFindingConcernsPath(
+        preview.findings[0]!,
+        GRAPH_DATA_AREA,
+        `${previewLabel} — the concerned path is the graph-data area (SPEC 14.23, 11.6)`,
+      );
+      if (
+        preview.mapping === null ||
+        preview.files === null ||
+        preview.delta === null
+      ) {
+        fail(
+          `${previewLabel} — the plan is reported: \`mapping\`, \`files\`, ` +
+            `and \`delta\` are null exactly on refusal, and this move is ` +
+            `not refused (SPEC 6.6, 12.7)`,
+        );
+      }
+      if (!("unavailable" in preview.delta)) {
+        fail(
+          `${previewLabel} — the record-supplied datum, the delta, is ` +
+            `reported explicitly unavailable as one datum, never read as ` +
+            `an empty record (SPEC 14.23, 6.6, 12.7); got ` +
+            `${JSON.stringify(preview.delta)}`,
+        );
+      }
+
+      const checkLabel = `${context} \`check --json\` [${staged}]`;
+      assertStalenessAlone(
+        await stagedFindings(
+          product,
+          workspace,
+          ["check", "--json"],
+          1,
+          `${checkLabel} — unreadable recorded state is staleness to ` +
+            `\`check\`: exit 1 (SPEC 14.25, 14.10)`,
+        ),
+        { perFile: [], unit: true },
+        `${checkLabel} — one condition-10 finding in the unit form alone: ` +
+          `the unreadable-record form, never the mismatch form beside it, ` +
+          `and no per-file form — every derived file is intact (SPEC ` +
+          `14.10, 14.25)`,
+      );
+
+      const idsLabel = `${context} \`ids --json\` [${staged}]`;
+      decodeIdsReport(
+        await stagedDocument(
+          product,
+          workspace,
+          ["ids", "--json"],
+          0,
+          `${idsLabel} — to a refreshing read, graph data it cannot read ` +
+            `is graph data that does not match: it regenerates the data ` +
+            `and answers, exit 0, never a failure (SPEC 14.25, 13.3)`,
+        ),
+        idsLabel,
+      );
+
+      // The arm's last assertion: no read of the record `build` writes is
+      // asserted, under the staging or after it — what that read meets
+      // turns on the modes `build`'s writes leave, which SPEC.md fixes
+      // nowhere (a successful build's replacement of an unreadable record
+      // is T12.2-2's, staged shape-blind).
+      const buildLabel = `${context} \`build\` after the refreshing read [${staged}]`;
+      assertExitCode(
+        await runSettled(product, workspace, ["build"], buildLabel),
+        0,
+        `${buildLabel} — \`build\` regenerates graph data whatever state it ` +
+          `finds there, and the staging refuses reads alone, every write ` +
+          `and search kept, so the regeneration is never itself refused: ` +
+          `exit 0 (SPEC 12.1, 13.4, 14.25)`,
+      );
+    } finally {
+      await restoreSurviving(stagings);
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * A surface of (f)'s second half — one consulting the record without
+ * refreshing it (SPEC 14.23: the inventory, 11.6, and a preview, 6.6): its
+ * invocation, its form-exact decode, and its record-supplied datum, the
+ * inventory's `recorded` or the preview's `delta`.
+ */
+interface AreaOccupantSurface<
+  T extends { readonly findings: readonly Finding[] },
+> {
+  /** The invocation from the workspace root, JSON output in effect. */
+  readonly argv: readonly string[];
+  /** The record-supplied datum's member name. */
+  readonly datum: string;
+  readonly decode: (doc: unknown, context: string) => T;
+  /** Whether a decoded answer carries its datum, never unavailable. */
+  readonly available: (answer: T) => boolean;
+  /** Whether a decoded answer reports its datum explicitly unavailable. */
+  readonly unavailable: (answer: T) => boolean;
+}
+
+/** (f)'s second half's inventory: `recorded` its record-supplied datum. */
+const AREA_INVENTORY: AreaOccupantSurface<InventoryDocument> = {
+  argv: ["inventory"],
+  datum: "recorded",
+  decode: (doc, context) => decodeInventoryDocument(doc, context),
+  available: (answer) => answer.recorded.state === "value",
+  unavailable: (answer) => answer.recorded.state === "unavailable",
+};
+
+/** (f)'s second half's preview of (f)'s valid move: `delta` its datum. */
+const AREA_PREVIEW: AreaOccupantSurface<PreviewReport> = {
+  argv: ["move", RENAME_C_PATH, MOVE_C_DESTINATION, "--preview", "--json"],
+  datum: "delta",
+  decode: (doc, context) => decodePreviewReport(doc, context),
+  available: (answer) =>
+    answer.delta !== null && !("unavailable" in answer.delta),
+  unavailable: (answer) =>
+    answer.delta !== null && "unavailable" in answer.delta,
+};
+
+/** A decoded answer's member `name`, for diagnoses. */
+function memberOf(answer: object, name: string): unknown {
+  return (answer as Readonly<Record<string, unknown>>)[name];
+}
+
+/** Every member of a decoded answer but those named, in decode order. */
+function membersBut(
+  answer: object,
+  left: readonly string[],
+): Readonly<Record<string, unknown>> {
+  return Object.fromEntries(
+    Object.entries(answer).filter(([name]) => !left.includes(name)),
+  );
+}
+
+/**
+ * The unstaged twin's answer of a surface of (f)'s second half: the same
+ * freshly built workspace, read before the staging — exit 0, the document
+ * decoded form-exact, its datum available (TEST-SPEC T14-10(f): "as on the
+ * unstaged twin — exit 0, `recorded`, respectively `delta`, available").
+ */
+async function areaOccupantTwin<
+  T extends { readonly findings: readonly Finding[] },
+>(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  surface: AreaOccupantSurface<T>,
+  context: string,
+): Promise<T> {
+  const label = `${context} \`${surface.argv.join(" ")}\` on the unstaged twin`;
+  const twin = surface.decode(
+    await stagedDocument(
+      product,
+      workspace,
+      surface.argv,
+      0,
+      `${label} — on a freshly built, valid workspace whose record reads, ` +
+        `a complete, finding-free answer, exit 0 (SPEC 11.6, 6.6, 12.0)`,
+    ),
+    label,
+  );
+  if (!surface.available(twin)) {
+    fail(
+      `${label}: \`${surface.datum}\` is available on the readable record ` +
+        `(SPEC 11.6, 6.6, 13.3); got ` +
+        `${JSON.stringify(memberOf(twin, surface.datum))}`,
+    );
+  }
+  return twin;
+}
+
+/**
+ * One answer of (f)'s second half, `.xspec` staged `-wx`, judged against
+ * its unstaged twin's (TEST-SPEC T14-10(f); SPEC 14.25, 14.23, 13.3): either
+ * exit 0, the decoded answer equal to the twin's whole — the datum
+ * available — or exit 1, exactly one condition-23 finding concerning
+ * `.xspec` with `locations` `[]`, the datum exactly the unavailability
+ * marker, and every other decoded member equal to the twin's; anything else
+ * fails, `read-failure`'s exit 2 above all: a refused read of the area's own
+ * occupant is condition 23's state to a surface consulting the record,
+ * never 14.25's usage error, and whether a product's record read lists the
+ * area at all is its own (13.3).
+ */
+function judgeAreaOccupantAnswer<
+  T extends { readonly findings: readonly Finding[] },
+>(
+  result: RunResult,
+  twin: T,
+  surface: AreaOccupantSurface<T>,
+  context: string,
+): void {
+  if (result.exitCode !== 1) {
+    assertExitCode(
+      result,
+      0,
+      `${context} — a refused read of the area's own occupant is ` +
+        `condition 23's state to a surface consulting the record, never ` +
+        `14.25's usage error: exit 0, the answer as on the unstaged twin, ` +
+        `or exit 1, \`${surface.datum}\` unavailable beside the ` +
+        `condition-23 finding — never \`read-failure\`'s exit 2, whether ` +
+        `a product's record read lists the area being its own (SPEC 14.25, ` +
+        `14.23, 13.3)`,
+    );
+    assertSameJson(
+      surface.decode(parseJsonStdout(result, context), context),
+      twin,
+      `${context} — exit 0: the answer as on the unstaged twin, every ` +
+        `member equal, \`${surface.datum}\` available (SPEC 13.3, 14.25)`,
+    );
+    return;
+  }
+  const answer = surface.decode(parseJsonStdout(result, context), context);
+  assertConditionCounts(
+    answer.findings,
+    { "14.23": 1 },
+    `${context} — exit 1: exactly the one condition-23 finding (SPEC 14.23, ` +
+      `14.25)`,
+  );
+  const finding = answer.findings[0]!;
+  assertFindingConcernsPath(
+    finding,
+    GRAPH_DATA_AREA,
+    `${context} — exit 1: the condition-23 finding concerns the graph-data ` +
+      `area (SPEC 14.23, 11.6)`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${context} — exit 1: no location, no path inside the area named (SPEC ` +
+      `14.23, 13.3, 12.7)`,
+  );
+  if (!surface.unavailable(answer)) {
+    fail(
+      `${context} — exit 1: \`${surface.datum}\`, the record-supplied ` +
+        `datum, is reported explicitly unavailable beside the finding, ` +
+        `never fabricated and never read as an empty record (SPEC 14.23, ` +
+        `12.7); got ${JSON.stringify(memberOf(answer, surface.datum))}`,
+    );
+  }
+  const left = ["findings", surface.datum];
+  assertSameJson(
+    membersBut(answer, left),
+    membersBut(twin, left),
+    `${context} — exit 1: every other member of the answer equal to the ` +
+      `unstaged twin's, emitted in full (SPEC 14.23)`,
+  );
+}
+
+/**
+ * (f)'s second half (TEST-SPEC T14-10(f): "and, separately, on a freshly
+ * built, valid workspace, the area's own occupant"): `.xspec` itself staged
+ * unlistable but searchable and writable (`-wx`, T7-8's carve-out staging:
+ * helpers/acquisition-staging.ts `stageUnlistableArea`, verified on the
+ * harness itself — its own listing of `.xspec` refused, its own creation
+ * and removal of a file there kept), every path under it readable:
+ * `inventory` and the preview of (f)'s valid move each answer either as on
+ * the unstaged twin or with their record-supplied datum unavailable beside
+ * the condition-23 finding concerning `.xspec`, every other member the
+ * twin's, never `read-failure` (`judgeAreaOccupantAnswer`). The unstaged
+ * twin is the same workspace read before the staging — the same state, the
+ * twin's reads writing nothing (asserted). Nothing is modified.
+ */
+async function areaOccupantArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (f) the area's own occupant";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const inventoryTwin = await areaOccupantTwin(
+      product,
+      workspace,
+      AREA_INVENTORY,
+      context,
+    );
+    const previewTwin = await areaOccupantTwin(
+      product,
+      workspace,
+      AREA_PREVIEW,
+      context,
+    );
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: the unstaged twin's reads write nothing — the inventory ` +
+        `and a preview never write (SPEC 11.6, 6.6)`,
+    );
+    const staged =
+      "with .xspec itself unlistable but searchable and writable (`-wx`), " +
+      "every path under it readable";
+    const inventoryLabel = `${context} \`${AREA_INVENTORY.argv.join(" ")}\` ${staged}`;
+    const previewLabel = `${context} \`${AREA_PREVIEW.argv.join(" ")}\` ${staged}`;
+    const staging = await stageUnlistableArea(workspace);
+    let inventory: RunResult;
+    let preview: RunResult;
+    try {
+      inventory = await runSettled(
+        product,
+        workspace,
+        AREA_INVENTORY.argv,
+        inventoryLabel,
+      );
+      preview = await runSettled(
+        product,
+        workspace,
+        AREA_PREVIEW.argv,
+        previewLabel,
+      );
+    } finally {
+      await staging.restore();
+    }
+    judgeAreaOccupantAnswer(
+      inventory,
+      inventoryTwin,
+      AREA_INVENTORY,
+      inventoryLabel,
+    );
+    judgeAreaOccupantAnswer(preview, previewTwin, AREA_PREVIEW, previewLabel);
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — the inventory and a preview write ` +
+        `nothing (SPEC 11.6, 6.6)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (g) A directory discovery lists — a usage error (SPEC 14.25, 7, 12.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * `specs/sub` staged unlistable under the glob `specs/**\/*.mdx`: every
+ * command that loads the configuration — `build`, `check`, `ids`, `view`,
+ * `inventory`, `review list`, and a `rename` — exits 2 with the error
+ * document (`code` `read-failure`, `path` `specs/sub`), nothing modified.
+ * Precedence, at the read in read order: with A also failing validation,
+ * `build` still exits 2 with the read failure; `coverage <unknown-profile>`
+ * reports the read failure; the syntax class — a surplus operand, a
+ * `--file` pattern outside the root, a malformed offset — is reported
+ * without loading configuration (`code` null); and with the configuration
+ * file itself invalid the configuration error precedes the read. The
+ * staging stands around each run alone; every exit-2 run is handed to
+ * `visitor` (`visitExitTwo`: `view`, `inventory`, and `at`, JSON-only, run
+ * as T14-10's alone), its `home` T14-10's check of it, and the compare and
+ * the recovery are made where `visitor.home` holds.
+ */
+async function discoveryListingArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (g) a directory discovery lists";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    LISTING_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  const unlistable = readRefusalOfDirectoryAt(SUB_DIR);
+  // One exit-2 run on the workspace under the staging, handed over: its
+  // `home` judges the run (`judge`) at its label.
+  const visitListingRun = async (
+    argv: readonly string[],
+    label: string,
+    judge: (result: RunResult) => void,
+  ): Promise<void> => {
+    const run = (runArgv: readonly string[]): Promise<RunResult> =>
+      runStaged(product, workspace, runArgv, unlistable, label);
+    await visitExitTwo(
+      visitor,
+      { label, jsonArgv: argv, root: workspace.root, run },
+      async () => {
+        judge(await run(argv));
+      },
+    );
+  };
+  try {
+    const loaders: readonly (readonly string[])[] = [
+      ["build", "--json"],
+      ["check", "--json"],
+      ["ids", "--json"],
+      ["view", RENAME_A_PATH],
+      ["inventory"],
+      ["review", "list", "--json"],
+      RENAME_B_TO_B2,
+    ];
+    for (const argv of loaders) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
+      await visitListingRun(argv, label, (result) => {
+        expectReadFailure(
+          result,
+          SUB_DIR,
+          `${label} — a directory the discovery of 7 lists, refused: every ` +
+            `command that loads the configuration stops at the read (SPEC ` +
+            `14.25, 7, 12.0)`,
+        );
+      });
+    }
+    const coverageArgv = ["coverage", "no-such-profile", "--json"];
+    const coverageLabel = `${context} \`${coverageArgv.join(" ")}\` with ${SUB_DIR} unlistable`;
+    await visitListingRun(coverageArgv, coverageLabel, (result) => {
+      expectReadFailure(
+        result,
+        SUB_DIR,
+        `${coverageLabel} — discovery precedes every error consulting the ` +
+          `configuration: the unknown profile is judged after the reads ` +
+          `its load makes, so the read failure is reported (SPEC 12.0, ` +
+          `14.25, 7.4)`,
+      );
+    });
+    const syntaxClass: readonly (readonly [readonly string[], string])[] = [
+      [["ids", "extra", "--json"], "a surplus operand"],
+      [
+        ["ids", "--file", "../x", "--json"],
+        "a `--file` pattern outside the workspace root, decided by its spelling alone",
+      ],
+      [
+        ["at", RENAME_A_PATH, "zz"],
+        "an offset spelled as anything but decimal digits — a malformed value",
+      ],
+    ];
+    for (const [argv, why] of syntaxClass) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
+      await visitListingRun(argv, label, (result) => {
+        expectSyntaxClassError(result, why, label);
+      });
+    }
+    if (visitor.home) {
+      assertSnapshotsEqual(
+        prepared.before,
+        await snapshotWorkspace(workspace.root),
+        `${context}: nothing modified — every command stops at the refused ` +
+          `read, attempting nothing further, the rename included (SPEC ` +
+          `14.25, 13.5)`,
+      );
+    }
+
+    // The failing twin on the same workspace: A's reference respelled to
+    // resolve nowhere (14.5) — the read failure is still what `build`
+    // reports, never the findings.
+    await workspace.edit(RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
+    const twinLabel = `${context} \`build --json\` with ${SUB_DIR} unlistable and ${RENAME_A_PATH} failing validation`;
+    await visitListingRun(["build", "--json"], twinLabel, (result) => {
+      expectReadFailure(
+        result,
+        SUB_DIR,
+        `${twinLabel} — a read failure is met at the read, in read order: ` +
+          `the discovery of 7 precedes every validation consulting it, so ` +
+          `the findings are never reported (SPEC 12.0, 14.25)`,
+      );
+    });
+    await workspace.edit(RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
+    if (visitor.home) await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+
+  // With the configuration file itself invalid, the configuration error
+  // precedes the read: the configuration is read before discovery (14.14).
+  const invalid = await TestWorkspace.create({
+    files: { ...LISTING_FIXTURE.decl.files, [CONFIG_PATH]: INVALID_CONFIG },
+  });
+  try {
+    const label = `${context} \`build --json\` with the configuration invalid and ${SUB_DIR} unlistable`;
+    await visitExitTwo(
+      visitor,
+      {
+        label,
+        jsonArgv: ["build", "--json"],
+        root: invalid.root,
+        run: (runArgv) =>
+          runStaged(product, invalid, runArgv, unlistable, label),
+      },
+      async () => {
+        const staging = await unlistable(invalid.root);
+        let result: RunResult;
+        try {
+          result = await expectConfigurationError(
+            product,
+            invalid,
+            ["build"],
+            `${label} — a configuration error precedes every other error of ` +
+              `exit class 2, the read failure included: the configuration ` +
+              `is read before the discovery it defines (SPEC 14.14, 12.0, ` +
+              `14.25)`,
+          );
+        } finally {
+          await staging.restore();
+        }
+        assertFindingConcernsPath(
+          expectErrorDocument(result, label),
+          CONFIG_PATH,
+          `${label} — the configuration path is the concerned path (SPEC 14, 14.14)`,
+        );
+      },
+    );
+  } finally {
+    await invalid.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (h) The session directory's listing — a usage error (SPEC 14.25, 10.1),
+// behind the gate (13.3, 10.7)
+// ---------------------------------------------------------------------------
+
+/** The gate's findings as compared: condition, code, path, locations (H-3). */
+function gateForm(findings: readonly Finding[]): unknown {
+  return findings.map((finding) => ({
+    condition: finding.condition,
+    code: finding.code,
+    path: finding.path,
+    locations: finding.locations,
+  }));
+}
+
+/**
+ * (h)'s gated side (TEST-SPEC T14-10(h), T10.7-15(f)): the session-bearing
+ * workspace with A's reference respelled to resolve nowhere (14.5), so that
+ * it fails `build`'s validations, and `.xspec/reviews` staged unlistable:
+ * `review list` reports exactly the gate's findings — those `build --json`
+ * reports on the same state, compared by condition, code, path, and
+ * locations (message wording free, H-3) — exit 1, the listing never
+ * reached, never the refused listing's `read-failure` (SPEC 13.3, 10.7,
+ * 12.0); nothing modified; the reference then restored.
+ */
+async function gatedListingRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const label =
+    `${context} on the failing twin (${RENAME_A_PATH}'s reference ` +
+    `respelled to resolve nowhere, 14.5)`;
+  await workspace.edit(RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
+  const before = await snapshotWorkspace(workspace.root);
+  const gate = await stagedFindings(
+    product,
+    workspace,
+    ["build", "--json"],
+    1,
+    `${label} premise \`build --json\` — the workspace fails \`build\`'s ` +
+      `validations: exit 1 with its findings, the gate's reference (SPEC ` +
+      `12.1, 13.3, 14.5)`,
+  );
+  if (gate.length === 0) {
+    fail(
+      `${label} premise: the failing \`build\` reports at least one ` +
+        `validation finding (SPEC 14)`,
+    );
+  }
+  const listLabel = `${label} \`review list --json\` with ${REVIEWS_DIR} unlistable`;
+  const staging = await stageReadRefusalOfDirectory(
+    workspace.path(REVIEWS_DIR),
+  );
+  let result: RunResult;
+  try {
+    result = await runSettled(
+      product,
+      workspace,
+      ["review", "list", "--json"],
+      listLabel,
+    );
+  } finally {
+    await staging.restore();
+  }
+  assertExitCode(
+    result,
+    1,
+    `${listLabel} — on a workspace failing \`build\`'s validations the ` +
+      `gate's report ends \`review list\` before its listing: exit 1 with ` +
+      `the gate's findings, the listing never reached — never the refused ` +
+      `listing's \`read-failure\` (SPEC 13.3, 10.7, 12.0, 14.25)`,
+  );
+  assertSameJson(
+    gateForm(
+      decodeFindingsReport(parseJsonStdout(result, listLabel), listLabel)
+        .findings,
+    ),
+    gateForm(gate),
+    `${listLabel} — exactly the gate's findings: those \`build --json\` ` +
+      `reports on the same state, compared by condition, code, path, and ` +
+      `locations (SPEC 13.3, 10.7; message wording free, H-3)`,
+  );
+  assertSnapshotsEqual(
+    before,
+    await snapshotWorkspace(workspace.root),
+    `${label}: nothing modified — a failing \`build\` and the gated ` +
+      `listing write nothing (SPEC 12.1, 13.3)`,
+  );
+  await workspace.edit(RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
+}
+
+/**
+ * `.xspec/reviews` staged unlistable on a valid workspace holding a session:
+ * `review list`, `inventory`, and `check` each exit 2 with the error
+ * document concerning `.xspec/reviews`, while `build` (reading no session)
+ * and `ids` exit 0; and on its failing twin `review list` reports exactly
+ * the gate's findings, exit 1, the listing never reached
+ * (`gatedListingRun`). `review status <name>`, which may find its session
+ * by name without listing, is asserted nowhere. The staging stands around
+ * each run alone; each listing's read failure is handed to `visitor`
+ * (`visitExitTwo`: `inventory`, JSON-only, run as T14-10's alone), its
+ * `home` the read failure's check, and every other run and assertion is
+ * made where `visitor.home` holds.
+ */
+async function sessionDirectoryArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (h) the session directory's listing";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  const unlistable = readRefusalOfDirectoryAt(REVIEWS_DIR);
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    const listers: readonly (readonly string[])[] = [
+      ["review", "list", "--json"],
+      ["inventory"],
+      ["check", "--json"],
+    ];
+    for (const argv of listers) {
+      const label = `${context} \`${argv.join(" ")}\` with ${REVIEWS_DIR} unlistable`;
+      const run = (runArgv: readonly string[]): Promise<RunResult> =>
+        runStaged(product, workspace, runArgv, unlistable, label);
+      await visitExitTwo(
+        visitor,
+        { label, jsonArgv: argv, root: workspace.root, run },
+        async () => {
+          expectReadFailure(
+            await run(argv),
+            REVIEWS_DIR,
+            `${label} — the session directory's listing, refused, is a ` +
+              `usage error from every command making it (SPEC 14.25, 10.1, ` +
+              `11.6, 14.21)`,
+          );
+        },
+      );
+    }
+    if (!visitor.home) return;
+    const buildLabel = `${context} \`build\` with ${REVIEWS_DIR} unlistable`;
+    assertExitCode(
+      await runStaged(product, workspace, ["build"], unlistable, buildLabel),
+      0,
+      `${buildLabel} — \`build\` reads no session, so the refused listing ` +
+        `never occurs: exit 0 (SPEC 14.21, 12.1, 14.25)`,
+    );
+    const idsLabel = `${context} \`ids --json\` with ${REVIEWS_DIR} unlistable`;
+    decodeIdsReport(
+      await stagedDocument(
+        product,
+        workspace,
+        ["ids", "--json"],
+        0,
+        `${idsLabel} — a refreshing read lists no session: exit 0 with ` +
+          `its answer (SPEC 13.3, 14.25)`,
+        unlistable,
+      ),
+      idsLabel,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: recovery — the listing permitted again, \`check\` is ` +
+        `clean and the session intact (SPEC 12.2, 14.21)`,
+    );
+    await gatedListingRun(product, workspace, context);
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: recovery — the reference restored and the listing ` +
+        `permitted again, \`check\` is clean and the session intact (SPEC ` +
+        `12.2, 12.1, 14.21)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (i) At acquisition, and at the second discovery of 13.5 — usage errors
+// (SPEC 14.25, 14.24, 13.5)
+// ---------------------------------------------------------------------------
+
+/**
+ * One of acquisition's refused reads (TEST-SPEC T14-10(i)): the staging —
+ * T13.5-10(d)'s, applied before the invocation on T13.5-10's session
+ * staging and verified on the harness itself (helpers/acquisition-
+ * staging.ts) — what it refuses, the codes a conforming acquisition
+ * reports there, and the mutating command run against it.
+ */
+interface AcquisitionReadArm {
+  /** The staging, as T13.5-10(d) words it. */
+  readonly staging: string;
+  /** What the staging refuses, as T14-10(i) words it. */
+  readonly refused: string;
+  /**
+   * The codes a conforming acquisition reports: `read-failure` alone, or
+   * `write-failure` beside it where the product may meet the refusal first
+   * at a write (SPEC 14.24, 14.25).
+   */
+  readonly codes: readonly string[];
+  /** The mutating command run against it: its index in T13.5-10's five. */
+  readonly operation: number;
+  /**
+   * Stage it before the invocation, verified on the harness itself; its
+   * `restore()` reinstates every mode the staging changed (idempotent).
+   */
+  readonly stage: (workspace: TestWorkspace) => Promise<AcquisitionStaging>;
+}
+
+/**
+ * T14-10(i)'s refused reads at acquisition, the lock path's occupant and
+ * everything under it — the lock directory unlistable, a subdirectory under
+ * it unlistable; `.xspec` unsearchable (holding no `lock` and, separately,
+ * an empty lock directory: T13.5-10(d)'s two stagings of it); the lock
+ * directory unsearchable — each with the next of T13.5-10's mutating
+ * commands (`rename`, `move`, `review create`, `resolve`, `split`), so that
+ * every mutating command reports one of acquisition's refused reads.
+ */
+const ACQUISITION_READ_ARMS: readonly AcquisitionReadArm[] = [
+  {
+    staging:
+      "an empty leftover lock directory unlistable but writable (mode `-wx`)",
+    refused: "the lock directory's listing",
+    codes: [READ_FAILURE_CODE],
+    operation: 0,
+    stage: (workspace) => stageUnlistableLockDirectory(workspace),
+  },
+  {
+    staging:
+      "a lock directory holding a subdirectory that holds a file, the " +
+      "subdirectory unlistable (`-wx`)",
+    refused: "the listing of a subdirectory under the lock directory",
+    codes: [READ_FAILURE_CODE],
+    operation: 1,
+    stage: (workspace) => stageUnlistableLeftoverDirectory(workspace),
+  },
+  {
+    staging: "`.xspec` unsearchable (mode `rw-`) holding no `lock`",
+    refused: "the lock path's kind and every write there",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    operation: 2,
+    stage: (workspace) => stageUnsearchableArea(workspace, "nothing"),
+  },
+  {
+    staging:
+      "`.xspec` unsearchable (mode `rw-`) holding an empty lock directory",
+    refused: "the lock path's kind and every write there",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    operation: 3,
+    stage: (workspace) =>
+      stageUnsearchableArea(workspace, "an empty lock directory"),
+  },
+  {
+    staging:
+      "a lock directory unsearchable (`rw-`) holding a directory that holds " +
+      "a file",
+    refused: "its occupants' kinds and every route below it",
+    codes: [READ_FAILURE_CODE, WRITE_FAILURE_CODE],
+    operation: 4,
+    stage: (workspace) => stageUnsearchableLockDirectory(workspace),
+  },
+];
+
+/**
+ * Acquisition's refused read's contract (TEST-SPEC T14-10(i); SPEC 14.25,
+ * 14.24, 13.5): exit 2; the error document as the entire stdout, its
+ * finding's `code` among `codes`, its `path` the lock path `.xspec/lock`
+ * exactly — the lock path's occupant or anything under it concerning the
+ * lock path, so the nested path is never named — and its `locations` `[]`
+ * (12.7: empty for a condition without in-source locations, so no location
+ * names a nested path either); the diagnostic on stderr (12.0).
+ */
+function expectAcquisitionReadFailure(
+  result: RunResult,
+  codes: readonly string[],
+  context: string,
+): Finding {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a read the environment refuses at acquisition is a ` +
+      `usage error: the command stops at that read, attempting nothing ` +
+      `further but release, and exits 2 — never a finding, never an ` +
+      `internal error (SPEC 14.25, 14.24, 13.5, 12.0)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  const admitted = codes.map((code) => JSON.stringify(code)).join(" or ");
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    {
+      code: codes.find((code) => code === finding.code) ?? codes[0],
+      path: LOCK_PATH,
+      locations: [],
+    },
+    `${context} — the error document's finding carries the stable code ` +
+      `${admitted}` +
+      (codes.length > 1
+        ? ` (SPEC 14.25; 14.24: a write failure where the product meets ` +
+          `the refusal first at a write)`
+        : ` (SPEC 14.25)`) +
+      `, the concerned path the lock path "${LOCK_PATH}" — for the lock ` +
+      `path's occupant or anything under it the lock path, the nested path ` +
+      `never named (SPEC 14.25, 13.5) — and no locations (SPEC 12.7: none ` +
+      `for a condition without in-source locations); message: ` +
+      JSON.stringify(finding.message),
+  );
+  if (result.stderr.trim().length === 0) {
+    fail(
+      `${context} — the diagnostic accompanies the error document on ` +
+        `standard error (SPEC 14.25, 12.0: usage-error messages are ` +
+        `standard-error content); got an empty stderr beside ` +
+        `${JSON.stringify(finding.message)}`,
+    );
+  }
+  return finding;
+}
+
+/**
+ * Clear whatever stands at the workspace's lock path once a run of (i) has
+ * ended and its staging's modes are restored — what the staging placed
+ * there and what the run's acquisition and release left beside it, the
+ * residue T13.5-10(d) judges (H-6) — so the next run of the same
+ * invocation meets the state the first one met, nothing at `.xspec/lock`
+ * before the staging (TEST-SPEC T12.0-15: each form on the same
+ * pre-invocation state). Nothing there, nothing to do.
+ */
+async function clearLockPath(workspace: TestWorkspace): Promise<void> {
+  await fsp.rm(workspace.path(LOCK_PATH), { recursive: true, force: true });
+}
+
+/**
+ * One of (i)'s refused reads at acquisition (TEST-SPEC T14-10(i)): on a
+ * fresh CONF-CORE-shaped workspace — T13.5-10's session staging
+ * (`stageArmWorkspace`: built, holding the audit session `s`, nothing at
+ * `.xspec/lock`) — the arm staged before the invocation, verified on the
+ * harness itself; its command under `--json`, settled; the staging's modes
+ * restored once it exits → the contract (`expectAcquisitionReadFailure`),
+ * and nothing modified — every path but the lock path byte-identical once
+ * the modes are restored, `.xspec` itself compared, the compare bracketing
+ * this run and its staging alone (H-6: the lock path, which acquisition
+ * and release touch and the staging occupies, pruned from both walks; its
+ * residue T13.5-10(d)'s subject). The invocation is handed to `visitor`
+ * (`visitExitTwo`), its `home` that check, its `run` the staged run — a
+ * later run of it first clearing the lock path an earlier one left
+ * (`clearLockPath`), so each meets the staging on the same state — and its
+ * compare leaving the lock path out as the home test's does.
+ */
+async function acquisitionReadRun(
+  product: ProductBinding,
+  arm: AcquisitionReadArm,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const operation = acquisitionOperation(arm.operation);
+  const context =
+    `T14-10 (i) at acquisition: ${operation.what} --json with ` +
+    `${arm.staging} — ${arm.refused} refused`;
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    const items = await stageArmWorkspace(product, workspace, context);
+    const jsonArgv = [...operation.argv(items), "--json"];
+    let runs = 0;
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      if (runs > 0) await clearLockPath(workspace);
+      runs += 1;
+      const staging = await arm.stage(workspace);
+      try {
+        return await runSettled(product, workspace, argv, context);
+      } finally {
+        await staging.restore();
+      }
+    };
+    await visitExitTwo(
+      visitor,
+      {
+        label: context,
+        jsonArgv,
+        root: workspace.root,
+        run,
+        exclude: isLockPathBytes,
+      },
+      async () => {
+        const before = await snapshotDirectory(
+          workspace.root,
+          EXCLUDE_LOCK_PATH,
+        );
+        const result = await run(jsonArgv);
+        expectAcquisitionReadFailure(result, arm.codes, context);
+        assertSnapshotsEqual(
+          before,
+          await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+          `${context}: modifies nothing — acquisition precedes every ` +
+            `modification and the command stops at the refused read, ` +
+            `attempting nothing further but release, so every path but the ` +
+            `lock path is byte-identical once the staging's modes are ` +
+            `restored, \`.xspec\` itself compared (SPEC 13.5, 14.25, 14.24; ` +
+            `H-6: the lock path, which acquisition and release touch, left ` +
+            `out — its residue T13.5-10(d)'s subject)`,
+        );
+      },
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (i)'s second-discovery arm (TEST-SPEC T14-10(i), T13.5-12(e)): on a fresh
+ * session staging of T13.5-8's valid workspace (section-13.5.ts
+ * `ACQUISITION_DECL`, whose `specs/sub` the discovery of 7 lists),
+ * `rename specs/A.mdx a a2 --json` — an operation otherwise succeeding
+ * there, the next of T13.5-10's commands after (i)'s fifth — held at the
+ * seam (section-13.5-iii.ts `withHeldRun`: its hold path outside the
+ * workspace, the held-state comparison once it holds); `specs/sub` made
+ * unlistable during the hold (`UNLISTABLE_SUB_DIR`: mode `--x`, T14-10's
+ * discipline, verified on the harness itself), the hold lifted, and the
+ * mode restored once the run has ended → the 14.25 contract at that
+ * directory (`expectReadFailure`: exit 2, the error document, `code`
+ * `"read-failure"`, `path` `"specs/sub"`, a non-empty stderr) — the
+ * discovery 13.5 makes again holding exclusivity meeting the refusal, which
+ * the first discovery, before the hold, did not — and nothing modified: the
+ * workspace once the run has ended and the mode is restored byte-identical
+ * to its state during the hold before the change (the change and its
+ * undoing restore a directory's mode alone, never a byte; H-6: the run's
+ * lock path pruned from both walks, the held-state comparison having
+ * judged it once the run held). The invocation is handed to `visitor`
+ * (`visitExitTwo`), its `home` that held run and its checks, its `run` the
+ * same held run with the same change during the hold — a later run of it
+ * first clearing the lock path an earlier one left (`clearLockPath`) — and
+ * its compare leaving the lock path out as the home test's does.
+ */
+async function secondDiscoveryRun(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const operation = acquisitionOperation(0);
+  const context =
+    `T14-10 (i) at the second discovery of 13.5: ${operation.what} --json ` +
+    `--test-hold <path> on a freshly built valid workspace holding an ` +
+    `\`audit\` session \`s\`, with ${SECOND_DISCOVERY_DIR}, a directory ` +
+    `discovery lists, made unlistable during the hold (mode \`--x\`)`;
+  const workspace = await TestWorkspace.create(ACQUISITION_DECL);
+  try {
+    const items = await stageArmWorkspace(product, workspace, context);
+    const jsonArgv = [...operation.argv(items), "--json"];
+    let runs = 0;
+    const run = async (argv: readonly string[]): Promise<RunResult> => {
+      if (runs > 0) await clearLockPath(workspace);
+      runs += 1;
+      return await withHeldRun(
+        product,
+        workspace,
+        argv,
+        context,
+        async (held) => {
+          const undo = await UNLISTABLE_SUB_DIR.make(workspace, context);
+          try {
+            return await liftAndWait(held, context);
+          } finally {
+            await undo();
+          }
+        },
+      );
+    };
+    await visitExitTwo(
+      visitor,
+      {
+        label: context,
+        jsonArgv,
+        root: workspace.root,
+        run,
+        exclude: isLockPathBytes,
+      },
+      () => secondDiscoveryHome(product, workspace, jsonArgv, context),
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (i)'s second-discovery arm's own check (`secondDiscoveryRun`): the held
+ * run of `jsonArgv` on `workspace`, `specs/sub` made unlistable during the
+ * hold and the mode restored once the run has ended → the 14.25 contract
+ * at that directory and nothing modified from the state during the hold
+ * on, the lock path pruned (H-6).
+ */
+async function secondDiscoveryHome(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  jsonArgv: readonly string[],
+  context: string,
+): Promise<void> {
+  await withHeldRun(product, workspace, jsonArgv, context, async (held) => {
+    const before = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+    const undo = await UNLISTABLE_SUB_DIR.make(workspace, context);
+    let result: RunResult;
+    try {
+      result = await liftAndWait(held, context);
+    } finally {
+      await undo();
+    }
+    expectReadFailure(
+      result,
+      SECOND_DISCOVERY_DIR,
+      `${context} — holding exclusivity, past its hold, the command ` +
+        `discovers its sources again, and that discovery's refused ` +
+        `listing of a directory it lists is a read failure concerning ` +
+        `that directory (SPEC 13.5, 14.25, 7)`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH),
+      `${context}: modifies nothing — the command stops at the ` +
+        `refused read, attempting nothing further but release, so the ` +
+        `workspace once the run has ended and the mode is restored is ` +
+        `byte-identical to its state during the hold before the change, ` +
+        `which with its undoing restores a directory's mode alone (SPEC ` +
+        `14.25, 13.5; H-6: the run's lock path left out)`,
+    );
+  });
+}
+
+/**
+ * T14-10's arm (i), in turn: acquisition's refused reads, each staged
+ * before the invocation (T13.5-10(d)'s stagings), then the second
+ * discovery's (T13.5-12(e)'s staging, during a hold) — each invocation
+ * handed to `visitor` (T14-10's body: `ERROR_INVOCATION_HOME`). Exported so
+ * scratch probes can run the arm alone, against the CONF-CORE reference
+ * among others; Linux leg only, as T14-10's other arms (E-1).
+ */
+export async function runT1410ArmI(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  for (const arm of ACQUISITION_READ_ARMS) {
+    await acquisitionReadRun(product, arm, visitor);
+  }
+  await secondDiscoveryRun(product, visitor);
+}
+
+// ---------------------------------------------------------------------------
+// (j) Git data — no condition: the baseline unreadable (SPEC 14.25, 6.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Refused git data's outcome (TEST-SPEC T14-10(j), T6.3-6(e); SPEC 14.25,
+ * 6.3, 12.0, 12.7): no condition — the baseline unreadable, a plain usage
+ * error: exit 2, the error document as the entire stdout, its `code` and
+ * `path` `null` — never `read-failure`: git data, the repository's
+ * discovery and its stored data, is no file this specification models
+ * (6.3), so its refused read is none of 14.25's read failures.
+ */
+function expectGitDataUnreadable(
+  result: RunResult,
+  why: string,
+  context: string,
+): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — ${why}: git data the environment refuses leaves the ` +
+      `baseline unreadable, a usage error, exit 2 — never an answer (SPEC ` +
+      `14.25, 6.3, 12.0)`,
+  );
+  const error = expectErrorDocument(result, context);
+  if (error.code === READ_FAILURE_CODE) {
+    fail(
+      `${context} — never \`read-failure\`: git data is no file this ` +
+        `specification models, so its refused read is no condition — the ` +
+        `baseline unreadable, a plain usage error (SPEC 14.25, 6.3); got ` +
+        `\`read-failure\` concerning ${renderPathValue(error.path)} ` +
+        `(message: ${JSON.stringify(error.message)})`,
+    );
+  }
+  assertSameJson(
+    { code: error.code, path: error.path },
+    { code: null, path: null },
+    `${context}: the baseline's plain usage error — the error document's ` +
+      `\`code\` and \`path\` \`null\` (SPEC 6.3, 12.7, 14.25; T6.3-6(e)), ` +
+      `never a numbered condition's code (message: ` +
+      `${JSON.stringify(error.message)})`,
+  );
+}
+
+/**
+ * One run of (j): `argv` from the workspace root under the refusal `stage`
+ * makes — made just before the run, verified on the harness itself, and
+ * restored once it ends, before anything is asserted or snapshotted — its
+ * outcome (`expectGitDataUnreadable`), and nothing modified: `snapshot`'s
+ * compare, taken outside the staging, the repositories' git directories
+ * left out (git data is no workspace file, SPEC 6.3) and H-6's lock-path
+ * exclusion applied by the compare.
+ */
+async function gitDataRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  stage: () => Promise<PermissionStaging>,
+  snapshot: () => Promise<DirectorySnapshot>,
+  why: string,
+  context: string,
+): Promise<void> {
+  const label = `${context}: \`${argv.join(" ")}\``;
+  const before = await snapshot();
+  const staging = await stage();
+  let result: RunResult;
+  try {
+    result = await runSettled(product, workspace, argv, label);
+  } finally {
+    await staging.restore();
+  }
+  expectGitDataUnreadable(result, why, label);
+  assertSnapshotsEqual(
+    before,
+    await snapshot(),
+    `${label}: nothing modified — a baseline that cannot be read fails ` +
+      `modifying nothing: no session written; sources, journal, derived ` +
+      `files, and graph data byte-identical (SPEC 6.3, 10.7, 12.0)`,
+  );
+}
+
+/**
+ * (j)'s stored data (T6.3-6(e)'s object-store staging, section-6.3.ts
+ * `stageObjectStoreUnsearchable`: `.git/objects` mode 000, the harness's own
+ * listing of it and read of the baseline commit's loose object refused): on
+ * the prepared, journal-bearing workspace — its sources, configuration, and
+ * journal valid and readable — holding the baseline session `s` created
+ * before the staging, `impact --base <baseline>`, `review create --base
+ * <baseline> --name n`, and `review status s`, a recorded baseline's
+ * resolution (10.7), each the baseline's plain usage error.
+ */
+async function storedGitDataRun(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (j) git data: the repository's stored data";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace, baseline } = prepared;
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--base", baseline, "--name", SESSION],
+      0,
+      `${context} staging \`review create --base <the baseline commit> ` +
+        `--name ${SESSION}\` — the baseline session created before the ` +
+        `staging (premise: the baseline resolves on the unstaged ` +
+        `repository, SPEC 6.3, 10.7)`,
+    );
+    const commands: readonly (readonly string[])[] = [
+      ["impact", "--base", baseline, "--json"],
+      ["review", "create", "--base", baseline, "--name", NEW_SESSION, "--json"],
+      ["review", "status", SESSION, "--json"],
+    ];
+    for (const argv of commands) {
+      await gitDataRun(
+        product,
+        workspace,
+        argv,
+        async () => await stageObjectStoreUnsearchable(workspace, baseline),
+        async () => await snapshotWorkspace(workspace.root),
+        "the repository's object store is unreadable and unsearchable (mode " +
+          "000), the sources, configuration, and journal valid and " +
+          "readable — a given baseline, or the recorded one the baseline " +
+          "session names (SPEC 10.7), unreadable",
+        context,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** The nested repositories' git directories, `.git` and the inner one. */
+const NESTED_GIT_DIRECTORIES: readonly Buffer[] = [
+  ".git",
+  `${NESTED_INNER_ROOT}/.git`,
+].map((rel) => Buffer.from(rel, "utf8"));
+
+/** Exclude exactly the two repositories' git directories (and their trees). */
+function excludeNestedGitDirectories(relPathBytes: Uint8Array): boolean {
+  return NESTED_GIT_DIRECTORIES.some(
+    (dir) => Buffer.compare(Buffer.from(relPathBytes), dir) === 0,
+  );
+}
+
+/**
+ * (j)'s discovery (T6.3-6(e)'s nested-repository staging, section-6.3.ts
+ * `stageNestedRepositories` and `stageInnerGitUnsearchable`: T6.3-5(b)'s
+ * nested repository — an outer repository at the root `R` and an inner one
+ * at `inner/`, each tagging its own `v1` — the inner `.git` mode 000, the
+ * harness's own listing of it and read of its `HEAD` refused): the inner
+ * workspace built first, `impact --base v1` and `review create --base v1
+ * --name n`, each from `R` with `--config inner/xspec.config.ts`, each the
+ * baseline's plain usage error — never `read-failure`, and never an answer
+ * computed against the outer repository's `v1`: the inner repository,
+ * whose working tree contains the configuration file, is still the
+ * innermost (6.3).
+ */
+async function gitDiscoveryRun(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (j) git data: the repository's discovery";
+  const workspace = await TestWorkspace.create({
+    files: NESTED_REPOSITORY_FILES,
+  });
+  try {
+    await stageNestedRepositories(workspace, context);
+    await expectExit(
+      product,
+      workspace,
+      ["build", ...NESTED_INNER_CONFIG_ARGS],
+      0,
+      `${context} staging \`build ${NESTED_INNER_CONFIG_ARGS.join(" ")}\` ` +
+        `from R (premise: the inner workspace's sources are valid, SPEC ` +
+        `12.1)`,
+    );
+    const commands: readonly (readonly string[])[] = [
+      ["impact", "--base", NESTED_TAG, ...NESTED_INNER_CONFIG_ARGS, "--json"],
+      [
+        "review",
+        "create",
+        "--base",
+        NESTED_TAG,
+        "--name",
+        NEW_SESSION,
+        ...NESTED_INNER_CONFIG_ARGS,
+        "--json",
+      ],
+    ];
+    for (const argv of commands) {
+      await gitDataRun(
+        product,
+        workspace,
+        argv,
+        async () => await stageInnerGitUnsearchable(workspace),
+        async () =>
+          await snapshotDirectory(workspace.root, {
+            exclude: excludeNestedGitDirectories,
+          }),
+        `the inner repository's .git directory is unreadable and ` +
+          `unsearchable (mode 000), so its discovery is refused — the ` +
+          `inner repository, whose working tree contains the configuration ` +
+          `file, still the innermost, never skipped for the outer ` +
+          `repository's ${NESTED_TAG}`,
+        context,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T14-10's arm (j), in turn: git data's stored data, then its discovery
+ * (TEST-SPEC T14-10(j): "T6.3-6(e): the repository's stored data and,
+ * separately, its discovery"); Linux leg only, as T14-10's other arms (E-1).
+ */
+async function gitDataArm(product: ProductBinding): Promise<void> {
+  await storedGitDataRun(product);
+  await gitDiscoveryRun(product);
+}
+
+// ---------------------------------------------------------------------------
+// (k) and (l): stagings where both routes are refused alike — a directory
+// stripped of its read and search permission both (mode 000)
+// ---------------------------------------------------------------------------
+
+/**
+ * A directory staged where both routes are refused alike (TEST-SPEC
+ * T14-10(k), (l)): stripped of its read and search permission both (mode
+ * `000`), so its listing, the examination of every kind below it, and every
+ * read below it are refused, spelled relative to it or walked absolutely
+ * from the filesystem root (helpers/permissions.ts, Directory modes) — no
+ * route learns an occupant's kind there, and no content read below it
+ * begins. An `entered` staging's runs are made from the directory itself,
+ * entered before it is staged (helpers/subprocess.ts
+ * `runProductInEnteredDirectory`: a process keeps a working directory it
+ * entered before the permissions went); every other staging's runs start
+ * from the workspace root, the directory staged before the invocation.
+ */
+interface BothRoutesRefused {
+  /** The staged directory, workspace-relative (`""`: the root itself). */
+  readonly dir: string;
+  /**
+   * The entry whose examination the harness verifies refused on itself,
+   * beside its own listing of the directory (E-1): the object of the kind
+   * read TEST-SPEC names there.
+   */
+  readonly entry: string;
+  /**
+   * `entry` is a plain file standing there, so the harness verifies its own
+   * read of it refused too (TEST-SPEC T14-10(l): "no content read begins").
+   */
+  readonly read: boolean;
+  /** The runs enter the staged directory first: it is their working directory. */
+  readonly entered: boolean;
+  /** The staging as diagnoses name it. */
+  readonly what: string;
+}
+
+/** The staging's E-1 verification: the listing, the entry's kind, its read. */
+function bothRoutesRefusedProbes(
+  staging: BothRoutesRefused,
+): readonly DirectoryModeProbe[] {
+  return [
+    { attempt: "list", refused: true },
+    { attempt: "examine", name: staging.entry, refused: true },
+    ...(staging.read
+      ? [{ attempt: "read", name: staging.entry, refused: true } as const]
+      : []),
+  ];
+}
+
+/**
+ * `runSettled`'s counterpart for a run from a working directory it entered
+ * before `stage` staged it (helpers/subprocess.ts
+ * `runProductInEnteredDirectory`; TEST-SPEC T14-10(k), (l)(iii)): the
+ * staging is made once the run stands in `cwd`, verified on the harness
+ * itself, and undone once the run has ended, before anything is asserted.
+ * The driver's default hang guard covers the product's own run (S-3), its
+ * kill a diagnosed failure (H-8); everything else the run rejects with
+ * propagates unchanged — a `HarnessAssertionError` (the driver's in-run
+ * checks, the missing product) as the diagnosed failure it is, and the
+ * staging's own `HarnessStagingError`, the wrapper's failure, a harness
+ * step's tripped guard, or the capture limit as the harness error it is
+ * (H-11): an entered-directory run ending before its product starts is
+ * never the product's outcome.
+ */
+async function runEnteredSettled(
+  product: ProductBinding,
+  cwd: string,
+  argv: readonly string[],
+  stage: () => Promise<PermissionStaging>,
+  context: string,
+): Promise<RunResult> {
+  try {
+    return await runProductInEnteredDirectory(product, { cwd, argv }, stage);
+  } catch (error) {
+    if (!(error instanceof ProductRunTimeoutError)) throw error;
+    return fail(
+      `${context}: the command must terminate on its own rather than block ` +
+        `or hang (SPEC 12.0; H-8: hangs become diagnosed failures) — ` +
+        error.message,
+    );
+  }
+}
+
+/**
+ * One run of (k) or (l) under `staging`: `argv` from the staged directory,
+ * entered first, or from the workspace root with the directory staged just
+ * before the invocation — either way the staging made, verified on the
+ * harness itself (E-1), and restored once the run ends, before anything is
+ * asserted or snapshotted (a staged directory cannot be snapshotted). Then
+ * `judge` decides the run's outcome, and nothing is modified: the
+ * workspace's snapshots before and after the run byte-identical (the
+ * repository's git directory left out, `snapshotWorkspace`). An exit-2
+ * run (`exitTwo`: every run but `version`'s) is handed to `visitor`
+ * (`visitExitTwo`: a JSON-only surface's run as T14-10's alone), its `home`
+ * that run, judgement, and compare, its `run` the staged run; `version`'s
+ * is made where `visitor.home` holds.
+ */
+async function bothRoutesRefusedRun(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  staging: BothRoutesRefused,
+  argv: readonly string[],
+  judge: (result: RunResult, label: string) => void,
+  context: string,
+  visitor: ErrorInvocationVisitor,
+  exitTwo = true,
+): Promise<void> {
+  const label = `${context} \`${argv.join(" ")}\` ${staging.what}`;
+  const dir = workspace.path(staging.dir);
+  const stage = async (): Promise<PermissionStaging> =>
+    await stageDirectoryMode(dir, 0o000, bothRoutesRefusedProbes(staging));
+  const run = async (runArgv: readonly string[]): Promise<RunResult> => {
+    if (staging.entered) {
+      return await runEnteredSettled(product, dir, runArgv, stage, label);
+    }
+    const staged = await stage();
+    try {
+      return await runSettled(product, workspace, runArgv, label);
+    } finally {
+      await staged.restore();
+    }
+  };
+  const home = async (): Promise<void> => {
+    const before = await snapshotWorkspace(workspace.root);
+    judge(await run(argv), label);
+    assertSnapshotsEqual(
+      before,
+      await snapshotWorkspace(workspace.root),
+      `${label}: nothing modified — a command stops at the read the ` +
+        `environment refuses, attempting nothing further, and neither a ` +
+        `syntax-class error nor \`version\` writes anything (SPEC 14.25, ` +
+        `12.0, 12.6)`,
+    );
+  };
+  if (!exitTwo) {
+    if (visitor.home) await home();
+    return;
+  }
+  await visitExitTwo(
+    visitor,
+    { label, jsonArgv: argv, root: workspace.root, run },
+    home,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// (k) The directories the upward search examines — a usage error at the
+// working directory's anchoring form (SPEC 14.25, 7, 11.6, 12.0, 12.6)
+// ---------------------------------------------------------------------------
+
+/**
+ * (k)'s working directory `R/tools`, below the root `R`, no glob reaching
+ * below it (`specs/**\/*.mdx` alone, SPEC 7), entered and only then
+ * stripped of its read and search permission both — the harness verifying
+ * on itself that its own lookup of `xspec.config.ts` there and its own
+ * listing of the directory are both refused (TEST-SPEC T14-10(k)).
+ */
+const ENTERED_WORKING_DIRECTORY: BothRoutesRefused = {
+  dir: "tools",
+  entry: CONFIG_PATH,
+  read: false,
+  entered: true,
+  what:
+    "from R/tools, entered and only then stripped of its read and search " +
+    "permission (mode 000)",
+};
+
+/**
+ * The working directory's anchoring form (SPEC 11.6, 14.25): (k)'s
+ * concerned path, a directory examined before the root is known, and, run
+ * from the root, the root's own — one of (l)(iii)'s.
+ */
+const WORKING_DIRECTORY_ANCHOR = ".";
+
+/**
+ * (k)'s commands that search for the configuration (TEST-SPEC T14-10(k)):
+ * `build`, `ids`, `inventory` (a JSON-only surface, SPEC 11.6), and
+ * `coverage <unknown-profile>`, whose profile is judged only against the
+ * configuration the search would locate (12.0).
+ */
+const SEARCHING_COMMANDS: readonly (readonly string[])[] = [
+  ["build", "--json"],
+  ["ids", "--json"],
+  ["inventory"],
+  ["coverage", "no-such-profile", "--json"],
+];
+
+/**
+ * One of (k)'s two stagings, every run from `R/tools` entered and then
+ * staged mode 000 ({@link ENTERED_WORKING_DIRECTORY}): each searching
+ * command exits 2 with `read-failure` at `.` — the search stops at the
+ * working directory, the first directory it examines, refused (`why` says
+ * what a product taking the refusal for absence meets instead); `ids
+ * extra`, of the syntax class, exits 2 code-less, reported without loading
+ * configuration (T12.0-10); and `version`, loading none, exits 0 with its
+ * document — each modifying nothing. Every exit-2 run is handed to
+ * `visitor` (`bothRoutesRefusedRun`: `inventory`, JSON-only, run as
+ * T14-10's alone); `version`'s is made where `visitor.home` holds.
+ */
+async function enteredSearchSweep(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  why: string,
+  context: string,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  for (const argv of SEARCHING_COMMANDS) {
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      ENTERED_WORKING_DIRECTORY,
+      argv,
+      (result, label) => {
+        expectReadFailure(
+          result,
+          WORKING_DIRECTORY_ANCHOR,
+          `${label} — ${why}`,
+        );
+      },
+      context,
+      visitor,
+    );
+  }
+  await bothRoutesRefusedRun(
+    product,
+    workspace,
+    ENTERED_WORKING_DIRECTORY,
+    ["ids", "extra", "--json"],
+    (result, label) => {
+      expectSyntaxClassError(result, "a surplus operand", label);
+    },
+    context,
+    visitor,
+  );
+  await bothRoutesRefusedRun(
+    product,
+    workspace,
+    ENTERED_WORKING_DIRECTORY,
+    ["version"],
+    (result, label) => {
+      assertExitCode(
+        result,
+        0,
+        `${label} — \`version\` loads no configuration, so the search ` +
+          `never runs: exit 0 with its answer, in any working directory ` +
+          `(SPEC 12.6, 7)`,
+      );
+      parseJsonStdout(result, label);
+    },
+    context,
+    visitor,
+    false,
+  );
+}
+
+/**
+ * (k) (TEST-SPEC T14-10(k): "the directories the upward search examines
+ * (7) — examined before the root is known, so concerned in their anchoring
+ * form"): `enteredSearchSweep` on a freshly built, valid workspace `R`
+ * holding the empty directory `tools` — every searching command
+ * `read-failure` at `.`, none loading `R`'s configuration and answering,
+ * none reporting `configuration-error` — and, separately, the same staging
+ * with no configuration in `R` or in any ancestor, H-1's precondition
+ * verified first (helpers/self-contained-root.ts): `read-failure` at `.`
+ * likewise, never T7-1's missing configuration. Each fails a product whose
+ * search takes a refused examination for absence and walks on upward. The
+ * sweeps' exit-2 runs are handed to `visitor` (`enteredSearchSweep`).
+ */
+async function upwardSearchArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (k) the directories the upward search examines";
+  const configured = await prepareBuiltWorkspace(
+    product,
+    { ...CORE_DECL, dirs: [ENTERED_WORKING_DIRECTORY.dir] },
+    context,
+  );
+  try {
+    await enteredSearchSweep(
+      product,
+      configured.workspace,
+      `the working directory, the first directory the upward search ` +
+        `examines, refused by both routes alike, stops the search with a ` +
+        `read failure concerning it in its anchoring form, \`.\` — never ` +
+        `taken for absence, the search walking on upward to R's ` +
+        `configuration to load and answer from, and never ` +
+        `\`configuration-error\` (SPEC 14.25, 7, 11.6, 12.0)`,
+      `${context} (R's configuration at its root)`,
+      visitor,
+    );
+  } finally {
+    await configured.workspace.dispose();
+  }
+  const bare = await TestWorkspace.create({
+    files: { [CORE_SOURCE_PATH]: CORE_A_STAGED },
+    dirs: [ENTERED_WORKING_DIRECTORY.dir],
+  });
+  try {
+    const bareContext = `${context} (no configuration in R or in any ancestor)`;
+    await assertSelfContainedRoot(product, bare.root, bareContext);
+    await enteredSearchSweep(
+      product,
+      bare,
+      `the working directory, the first directory the upward search ` +
+        `examines, refused by both routes alike, stops the search with a ` +
+        `read failure concerning it in its anchoring form, \`.\` — never ` +
+        `taken for absence, the search walking on upward through R and ` +
+        `its ancestors, which hold no configuration, to report T7-1's ` +
+        `missing configuration (\`configuration-error\` at \`.\`) (SPEC ` +
+        `14.25, 7, 14.14, 11.6, 12.0)`,
+      bareContext,
+      visitor,
+    );
+  } finally {
+    await bare.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (l) The kind halves of (b)–(d) — usage errors under mode-000 directories
+// (SPEC 14.25, 6.3, 7, 10.7, 11.2, 11.6, 13.3)
+// ---------------------------------------------------------------------------
+
+/** The CONF-CORE-shaped source (`CORE_DECL`'s: `a` holding `a.k`, then `g`). */
+const CORE_SOURCE_PATH = "specs/A.mdx";
+
+/**
+ * (l)(i)'s fixture: the CONF-CORE-shaped workspace (`CORE_DECL`), made
+ * journal-bearing by the prior journaled rename `g` → `g2` in `specs/A.mdx`
+ * (SPEC 6.1, 6.4) and committed as `c1` — `prepareRefusalWorkspace`'s
+ * baseline commit, its tree holding the journal.
+ */
+const KIND_JOURNAL_FIXTURE: RefusalFixture = {
+  decl: CORE_DECL,
+  priorRename: ["rename", CORE_SOURCE_PATH, "g", "g2"],
+};
+
+/** The journal's entry name in the graph-data area (SPEC 6.1). */
+const JOURNAL_ENTRY = "journal";
+
+/** (l)(i)'s staging: `.xspec` mode 000, the journal's kind and read refused. */
+const AREA_BOTH_ROUTES_REFUSED: BothRoutesRefused = {
+  dir: GRAPH_DATA_AREA,
+  entry: JOURNAL_ENTRY,
+  read: true,
+  entered: false,
+  what:
+    `with ${GRAPH_DATA_AREA} stripped of its read and search permission ` +
+    `(mode 000)`,
+};
+
+/**
+ * (l)(ii)'s staging: `.xspec/reviews` mode 000, the session file's kind and
+ * read refused.
+ */
+const REVIEWS_BOTH_ROUTES_REFUSED: BothRoutesRefused = {
+  dir: REVIEWS_DIR,
+  entry: `${SESSION}.json`,
+  read: true,
+  entered: false,
+  what:
+    `with ${REVIEWS_DIR} stripped of its read and search permission ` +
+    `(mode 000)`,
+};
+
+/**
+ * (l)(iii)'s staging: the root `R`, entered and only then mode 000, as (k)
+ * stages its working directory — the configuration file's kind and read
+ * refused.
+ */
+const ROOT_BOTH_ROUTES_REFUSED: BothRoutesRefused = {
+  dir: "",
+  entry: CONFIG_PATH,
+  read: true,
+  entered: true,
+  what:
+    "from the root R, entered and only then stripped of its read and " +
+    "search permission (mode 000)",
+};
+
+/**
+ * (l)(i)'s failing twin: `specs/A.mdx` given a section with no `id` (SPEC
+ * 14.1: a non-root section with no `id` attribute), appended after `g2`'s —
+ * an edit of the bytes the prior rename wrote (`workspace.edit`), which
+ * keep `g`'s text and closing tag as staged.
+ */
+const MISSING_ID_FROM = "Gamma text.\n</S>\n";
+const MISSING_ID_TO = `${MISSING_ID_FROM}\n<S>\nNo id.\n</S>\n`;
+
+/**
+ * (l)(i) the journal's kind read (TEST-SPEC T14-10(l)(i)): on the freshly
+ * built, valid, journal-bearing workspace whose repository holds `c1`,
+ * `.xspec` staged mode 000 around each run: `build`, `ids`, `impact --base
+ * c1`, and the surfaces of 11.2 — bare `occurrences`, `view specs/A.mdx`,
+ * and `at specs/A.mdx 0` — each exit 2 with `read-failure` at
+ * `.xspec/journal`, the one concerned path open to them (a refused listing
+ * of the area's own occupant is condition 23's state, never a read
+ * failure), and `inventory` likewise at `.xspec/journal` or
+ * `.xspec/reviews`; then, on its failing twin — `specs/A.mdx` given an
+ * id-less section after the build and before the staging — `build`, `ids`,
+ * and the three surfaces exactly so, and `check` at `.xspec/journal` or
+ * `.xspec/reviews`, never exit 1 with the condition-1 finding. Each run
+ * modifies nothing. Every run is handed to `visitor`
+ * (`bothRoutesRefusedRun`: the surfaces and `inventory`, JSON-only, run as
+ * T14-10's alone); the failing twin's edit, a premise, is made either way.
+ */
+async function journalKindArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (l)(i) the journal's kind";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    KIND_JOURNAL_FIXTURE,
+    context,
+  );
+  const { workspace, baseline } = prepared;
+  const journalAlone =
+    (why: string) =>
+    (result: RunResult, label: string): void => {
+      expectReadFailure(result, JOURNAL_PATH, `${label} — ${why}`);
+    };
+  const gate =
+    `the gate judges the journal beside the sources, and the journal's ` +
+    `kind read, refused by both routes alike, is a read failure that stops ` +
+    `the command: exit 2, \`read-failure\` at ${JOURNAL_PATH} — never ` +
+    `\`journal-error\` ((b): the refused content read's condition), nor a ` +
+    `\`write-failure\` from reading the journal as absent and then meeting ` +
+    `the area's refused write (SPEC 14.25, 13.3, 6.1)`;
+  const surfaces =
+    `the surfaces' judgement makes every read the gate makes, the ` +
+    `journal's included, a read failure there stopping them before any ` +
+    `answer: exit 2, \`read-failure\` at ${JOURNAL_PATH} — never an answer, ` +
+    `nor a \`write-failure\` from a refresh meeting the area's refused ` +
+    `write (SPEC 11.2, 14.25, 13.3)`;
+  const surfaceCommands: readonly (readonly string[])[] = [
+    ["occurrences"],
+    ["view", CORE_SOURCE_PATH],
+    ["at", CORE_SOURCE_PATH, "0"],
+  ];
+  try {
+    for (const argv of [
+      ["build", "--json"],
+      ["ids", "--json"],
+    ]) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        AREA_BOTH_ROUTES_REFUSED,
+        argv,
+        journalAlone(gate),
+        context,
+        visitor,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      AREA_BOTH_ROUTES_REFUSED,
+      ["impact", "--base", baseline, "--json"],
+      journalAlone(
+        `a given baseline's resolution reads the current journal before ` +
+          `any other cause can fail it, and its kind read, refused by both ` +
+          `routes alike, is a read failure: exit 2, \`read-failure\` at ` +
+          `${JOURNAL_PATH} — never \`journal-error\` ((b)) nor the ` +
+          `code-less unreadable baseline (SPEC 6.3, 14.25)`,
+      ),
+      context,
+      visitor,
+    );
+    for (const argv of surfaceCommands) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        AREA_BOTH_ROUTES_REFUSED,
+        argv,
+        journalAlone(surfaces),
+        context,
+        visitor,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      AREA_BOTH_ROUTES_REFUSED,
+      ["inventory"],
+      (result, label) => {
+        expectReadFailure(
+          result,
+          [JOURNAL_PATH, REVIEWS_DIR],
+          `${label} — the inventory examines the journal path's kind and ` +
+            `the session directory, each refused by both routes alike: exit ` +
+            `2, \`read-failure\` at ${JOURNAL_PATH} or ${REVIEWS_DIR} as ` +
+            `its read order decides — never the condition-23 answer alone ` +
+            `(SPEC 11.6, 14.25, 14.23)`,
+        );
+      },
+      context,
+      visitor,
+    );
+
+    // The failing twin: the same workspace, every run above having modified
+    // nothing, with `specs/A.mdx` given an id-less section (14.1) — a
+    // premise first, so a rename that rewrote more than the id fails
+    // diagnosed rather than at the edit.
+    const renamed = Buffer.from(
+      await workspace.readBytes(CORE_SOURCE_PATH),
+    ).toString("utf8");
+    if (!renamed.includes(MISSING_ID_FROM)) {
+      fail(
+        `${context}: the prior rename \`g\` → \`g2\` rewrites by minimal ` +
+          `in-place edits (SPEC 6.4), so ${CORE_SOURCE_PATH} keeps g's text ` +
+          `and closing tag as staged, ${JSON.stringify(MISSING_ID_FROM)}; ` +
+          `found ${JSON.stringify(renamed)}`,
+      );
+    }
+    await workspace.edit(CORE_SOURCE_PATH, MISSING_ID_FROM, MISSING_ID_TO);
+    const twinContext = `${context} on the failing twin (${CORE_SOURCE_PATH} given a section with no \`id\`, 14.1)`;
+    const failing =
+      `on a workspace whose sources also fail validation the journal is ` +
+      `still judged beside them — the judgement's reads are made whatever ` +
+      `findings the sources carry: exit 2, \`read-failure\` at ` +
+      `${JOURNAL_PATH} — never exit 1 with the condition-1 finding, which ` +
+      `a product reading the journal only once the sources pass reports ` +
+      `(SPEC 13.3, 14, 11.2, 14.25)`;
+    for (const argv of [
+      ["build", "--json"],
+      ["ids", "--json"],
+      ...surfaceCommands,
+    ]) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        AREA_BOTH_ROUTES_REFUSED,
+        argv,
+        journalAlone(failing),
+        twinContext,
+        visitor,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      AREA_BOTH_ROUTES_REFUSED,
+      ["check", "--json"],
+      (result, label) => {
+        expectReadFailure(
+          result,
+          [JOURNAL_PATH, REVIEWS_DIR],
+          `${label} — \`check\` judges the journal beside the sources and ` +
+            `reads the sessions (14.21), whatever findings the sources ` +
+            `carry: exit 2, \`read-failure\` at ${JOURNAL_PATH} or ` +
+            `${REVIEWS_DIR} as its read order decides — never exit 1 with ` +
+            `the condition-1 finding (SPEC 14, 13.3, 14.21, 14.25)`,
+        );
+      },
+      twinContext,
+      visitor,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (l)(ii) a session file's kind read (TEST-SPEC T14-10(l)(ii)): on a freshly
+ * built, valid workspace holding the valid audit session `s`,
+ * `.xspec/reviews` staged mode 000: `review status s` exits 2 with
+ * `read-failure` at `.xspec/reviews` or `.xspec/reviews/s.json` as its
+ * route decides, modifying nothing — never `corrupt-session` ((c): the
+ * refused content read's condition) and never the unknown-session error.
+ * The run is handed to `visitor` (`bothRoutesRefusedRun`).
+ */
+async function sessionKindArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (l)(ii) a session file's kind";
+  const { workspace } = await prepareBuiltWorkspace(
+    product,
+    CORE_DECL,
+    context,
+  );
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    const sessionKind = await workspace.kind(SESSION_FILE);
+    if (sessionKind !== "file") {
+      fail(
+        `${context}: the session \`review create\` created is stored as ` +
+          `the plain file ${SESSION_FILE} (SPEC 10.1); found ${sessionKind}`,
+      );
+    }
+    await bothRoutesRefusedRun(
+      product,
+      workspace,
+      REVIEWS_BOTH_ROUTES_REFUSED,
+      ["review", "status", SESSION, "--json"],
+      (result, label) => {
+        expectReadFailure(
+          result,
+          [REVIEWS_DIR, SESSION_FILE],
+          `${label} — a session file's kind read, refused by both routes ` +
+            `alike, is a read failure: exit 2, \`read-failure\` at ` +
+            `${REVIEWS_DIR} or ${SESSION_FILE} as its route decides — never ` +
+            `\`corrupt-session\` ((c): the refused content read's ` +
+            `condition) and never the unknown-session error (SPEC 14.25, ` +
+            `10.7, 10.1, 14.21)`,
+        );
+      },
+      context,
+      visitor,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (l)(iii) the configuration path's kind read (TEST-SPEC T14-10(l)(iii)):
+ * `--config xspec.config.ts` naming a freshly built, valid workspace's
+ * configuration from its root `R`, `R` entered and only then staged mode
+ * 000 as (k) stages its working directory, so the path's anchoring form
+ * and its workspace-relative path coincide: `build`, `ids`, and `inventory`
+ * each exit 2 with `read-failure` at `xspec.config.ts` — or `.`, the
+ * root's own, for a product learning the kind from the root's listing —
+ * modifying nothing, never `configuration-error`, whether (d)'s refused
+ * content read or T7-1's missing configuration. Each run is handed to
+ * `visitor` (`bothRoutesRefusedRun`: `inventory`, JSON-only, run as
+ * T14-10's alone).
+ */
+async function configurationKindArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  const context = "T14-10 (l)(iii) the configuration path's kind";
+  const { workspace } = await prepareBuiltWorkspace(
+    product,
+    CORE_DECL,
+    context,
+  );
+  try {
+    for (const argv of [
+      ["build", "--config", CONFIG_PATH, "--json"],
+      ["ids", "--config", CONFIG_PATH, "--json"],
+      ["inventory", "--config", CONFIG_PATH],
+    ]) {
+      await bothRoutesRefusedRun(
+        product,
+        workspace,
+        ROOT_BOTH_ROUTES_REFUSED,
+        argv,
+        (result, label) => {
+          expectReadFailure(
+            result,
+            [CONFIG_PATH, WORKING_DIRECTORY_ANCHOR],
+            `${label} — the configuration path's kind read, refused by ` +
+              `both routes alike, is a read failure: exit 2, ` +
+              `\`read-failure\` at ${CONFIG_PATH}, its anchoring form and ` +
+              `workspace-relative path coinciding from the root, or at ` +
+              `\`.\`, the root's own, for a product learning the kind from ` +
+              `the root's listing — never \`configuration-error\`, whether ` +
+              `(d)'s refused content read or T7-1's missing configuration ` +
+              `(SPEC 14.25, 7, 14.14, 11.6)`,
+          );
+        },
+        context,
+        visitor,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T14-10's arm (l), in turn: the journal's, a session file's, and the
+ * configuration path's kind reads, each under a directory staged where both
+ * routes are refused alike, each exit-2 run handed to `visitor`
+ * (`bothRoutesRefusedRun`); Linux leg only, as T14-10's other arms (E-1).
+ */
+async function kindHalvesArm(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  await journalKindArm(product, visitor);
+  await sessionKindArm(product, visitor);
+  await configurationKindArm(product, visitor);
+}
+
+// ---------------------------------------------------------------------------
+// T14-10's exit-2 stagings, for T12.0-15's exit-2 family
+// ---------------------------------------------------------------------------
+
+/**
+ * T14-10's exit-2 stagings (TEST-SPEC T12.0-15's exit-2 family: "T14-10's
+ * exit-2 read failures"), in T14-10's order: (b)'s given baselines, the
+ * journal error each resolution reports; (d)'s configuration errors; (g)'s
+ * read failures at the discovery's refused listing with their precedence
+ * arms — the unknown profile, the syntax class, the failing source, and the
+ * invalid configuration preceding the read; (h)'s session-directory
+ * listings; (i)'s acquisition and second-discovery read failures; (k)'s
+ * entered-directory sweeps, the syntax class among them; and (l)'s kind
+ * halves — each exit-2 invocation with a human form handed to `visitor`
+ * (`visitExitTwo`), every other run and assertion made where
+ * `visitor.home` holds. T14-10's body runs each arm with
+ * `ERROR_INVOCATION_HOME` among its other arms; T12.0-15 runs this with
+ * its human twin (section-12.0-iv.ts). (j)'s refused git data, a plain
+ * usage error and no read failure (14.25: no condition), stays T14-10's
+ * alone, as T6.3-6(e)'s does. Linux leg only (E-1): elsewhere nothing is
+ * staged or handed over.
+ */
+export async function runT1410ReadFailureStagings(
+  product: ProductBinding,
+  visitor: ErrorInvocationVisitor,
+): Promise<void> {
+  if (!READ_REFUSALS_STAGED) return;
+  await journalContentArm(product, visitor);
+  await configurationContentArm(product, visitor);
+  await discoveryListingArm(product, visitor);
+  await sessionDirectoryArm(product, visitor);
+  await runT1410ArmI(product, visitor);
+  await upwardSearchArm(product, visitor);
+  await kindHalvesArm(product, visitor);
+}
+
+// ---------------------------------------------------------------------------
+// T14-10 — read failures (14.25)
+// ---------------------------------------------------------------------------
+
+const T14_10 = defineProductTest({
+  id: "T14-10",
+  title:
+    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, a given baseline's resolution — `impact --base` and `review create --base` — reporting it as its usage error (exit 2, `code` journal-error, `path` .xspec/journal), while `occurrences`, `view`, and `at` answer finding-free, exit 0, and `inventory` reports `journal` exactly {path .xspec/journal, occupied true}, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (nothing modified), and `review list` (the session reported corrupt), each reporting one `corrupt-session` finding concerning the session file with no location, `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) graph data unreadable — every file under .xspec/ but the journal, the session directory, and the lock path at mode 0o200 and every directory among them at 0o300 (`-wx`, its write and search kept) — is the state of condition 23: `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and `build` exits 0, no later read of the record it wrote asserted — and, on a freshly built workspace, .xspec itself staged `-wx` (every path under it readable), `inventory` and a `move --preview` each answer as on the unstaged twin (exit 0) or with their datum unavailable beside the condition-23 finding concerning .xspec (exit 1), every other member the twin's, never `read-failure`; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0, and on a workspace failing `build`'s validations `review list` reports exactly the gate's findings, exit 1, the listing never reached; (i) at acquisition, the lock path's occupant and everything under it refused, each staged before the invocation on a freshly built workspace holding an `audit` session `s`, with `rename`, `move`, `review create`, `resolve`, and `split` in turn — an empty lock directory unlistable (`-wx`) and a subdirectory under it unlistable (`-wx`), each `read-failure`; `.xspec` unsearchable (`rw-`; holding no `lock` and, separately, an empty lock directory) and the lock directory unsearchable (`rw-`, holding a directory that holds a file), each `read-failure` or `write-failure` — each exit 2 with the error document, `path` .xspec/lock, never a nested path, `locations` [], nothing modified; and specs/sub, a directory the second discovery of 13.5 lists, made unlistable (`--x`) during the hold of `rename specs/A.mdx a a2`: exit 2, `code` read-failure, `path` specs/sub, nothing modified; (j) git data refused — the object store mode 000 (`impact --base`, `review create --base`, and `review status` of a baseline session) and, separately, a nested repository's inner `.git` mode 000 (`--base v1` from the outer root) — is the baseline's plain usage error, exit 2, `code` and `path` null, never `read-failure`, nothing modified; (k) the directories the upward search examines: R/tools, below a valid root R, entered and only then stripped of its read and search permission (mode 000) — `build`, `ids`, `inventory`, and `coverage <unknown-profile>` each exit 2 with `read-failure` at `.`, R's configuration never loaded and answered from, never `configuration-error`, and, separately, with no configuration in R or in any ancestor (H-1) likewise, never T7-1's missing configuration; `ids extra` the syntax class (`code` null), `version` exit 0, each nothing modified; (l) the kind halves of (b)–(d), each under a directory stripped of its read and search permission (mode 000) — (i) .xspec on a built, journal-bearing workspace whose repository holds c1: `build`, `ids`, `impact --base c1`, `occurrences`, `view`, and `at` each exit 2 with `read-failure` at .xspec/journal and `inventory` at .xspec/journal or .xspec/reviews, and on a twin also failing validation (a section with no `id`) `build`, `ids`, and the three surfaces likewise and `check` at .xspec/journal or .xspec/reviews, never exit 1 with the condition-1 finding; (ii) .xspec/reviews beside a valid session `s`: `review status s` exits 2 with `read-failure` at .xspec/reviews or .xspec/reviews/s.json, never `corrupt-session` nor the unknown-session error; (iii) the root R, entered and then so staged: `build`, `ids`, and `inventory` with `--config xspec.config.ts` each exit 2 with `read-failure` at xspec.config.ts or `.`, never `configuration-error` — each nothing modified; two clauses — a refused read of a path occupant's kind (the area's own occupant's at acquisition included, the lock path's there excepted, which (i) stages), save where both routes are refused alike, which (k) and (l) stage, and of a directory above the workspace root or any the anchoring resolution makes, the working directory itself (k)'s — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 6.3, 7, 11.2, 11.5, 11.6, 12.6, 13.3, 13.5, 10.7, 12.0, 12.7)",
+  run: async (product) => {
+    // E-1: permission stagings belong to the Linux leg; elsewhere the arms
+    // are not staged (the NU3_STAGED pattern of section-11.5) and no other
+    // leg selects T14-10 (E-6).
+    if (!READ_REFUSALS_STAGED) return;
+    await sourceContentArm(product);
+    await journalContentArm(product, ERROR_INVOCATION_HOME);
+    await sessionContentArm(product);
+    await configurationContentArm(product, ERROR_INVOCATION_HOME);
+    await derivedContentArm(product);
+    await graphDataArm(product);
+    await areaOccupantArm(product);
+    await discoveryListingArm(product, ERROR_INVOCATION_HOME);
+    await sessionDirectoryArm(product, ERROR_INVOCATION_HOME);
+    await runT1410ArmI(product, ERROR_INVOCATION_HOME);
+    await gitDataArm(product);
+    await upwardSearchArm(product, ERROR_INVOCATION_HOME);
+    await kindHalvesArm(product, ERROR_INVOCATION_HOME);
+  },
+});
+
+/** TEST-SPEC §14 II — T14-9 and T14-10, in canonical ID order (SUITE-49). */
+export const section14iiTests: readonly ProductTestEntry[] = [T14_9, T14_10];

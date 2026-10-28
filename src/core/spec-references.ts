@@ -12,32 +12,52 @@
 // 6.5), and its byte range for findings. Import-cycle detection over the
 // recorded import targets is the graph's (SPEC 2.1, 5.3 → 14.9).
 //
-// Masking (SPEC 14): a reference whose chain is rooted at a binding
-// introduced by an *invalid* import (or by colliding imports) is masked —
-// the import's own 14.15 already accounts for it, and its target is
-// undetectable — while a chain rooted at an identifier no import binds is
-// a dynamic reference (14.8): it is not "rooted at an imported spec
-// module" (SPEC 2.4). References through a valid import of an
-// unparseable file are recorded normally and report as unresolved during
-// resolution (SPEC 14.20, 14.5–14.7).
+// Rooting on invalid imports (SPEC 2.1, 11.2, 14): the default binding of
+// an import whose specifier designates a discovered spec source roots
+// chains exactly as a valid import's does, whatever other 14.15 defect the
+// declaration carries (a named or namespace clause beside it) — an
+// import's target is undefined only where specifier form or discovery
+// defines none (11.2), and the declaration's 14.15 makes nothing about a
+// chain through that binding undetectable (14). Masked are only the
+// chains rooted at a binding no chain may root at: a named or namespace
+// binding — the invalid one (2.1) — and a binding of a compiler-provided
+// name (`S`, `Spec`, `text`, never shadowed, 2.1); the import's 14.15
+// accounts for them. A chain rooted at an identifier no import binds is a
+// dynamic reference (14.8): it is not "rooted at an imported spec module"
+// (SPEC 2.4). References through an import of an unparseable file are
+// recorded normally and report as unresolved during resolution (SPEC
+// 14.20, 14.5–14.7); references through an import of a member whose own
+// path is invalid (SPEC 14.19) never resolve — every identity of such a
+// file is undefined (SPEC 11.2) — a condition decidable per file, so
+// their 14.5/14.6 is reported here directly. So is that of a chain rooted
+// at the default binding of an import designating nothing (SPEC 2.1,
+// 11.2), and of one rooted at an identifier an import binds that another
+// import, or a declaration an export statement holds, also binds (SPEC
+// 2.4): it names no target, beside the 14.15.
 
-import ts from "typescript";
+import ts from "./ts-module.js";
+import type * as tst from "typescript";
 import type { ByteRange } from "./bytes.js";
 import { Utf8Offsets } from "./bytes.js";
 import type { Finding } from "./findings.js";
+import { compareFindings, locatedFinding } from "./findings.js";
+import type { PathText } from "./path-text.js";
+import { pathTextKey, pathTextOf, renderPathText } from "./path-text.js";
 import type {
   SpecDocument,
   SpecEmbedding,
+  SpecExportedBinding,
   SpecImportStatement,
   SpecSection,
 } from "./mdx.js";
+import { deriveContentExpression } from "./mdx-acorn.js";
 import type {
   ClassifiedChain,
   ClassifiedReference,
   ClassifiedString,
   TextSpan,
 } from "./references.js";
-import { classifyReference, parseExpressionText } from "./references.js";
+import { classifyReferenceText, stringLiteralValue } from "./references.js";
 
 // ---------------------------------------------------------------------------
 // The import model (SPEC 2.1)
@@ -49,7 +69,10 @@ export interface SpecImport {
   readonly statement: SpecImportStatement;
   /** The single default binding, when the form permits one (SPEC 2.1). */
   readonly bindingName: string | null;
-  /** The module specifier's cooked value. */
+  /**
+   * The module specifier's value: the characters between its delimiters
+   * exactly as spelled, no escape sequence interpreted (SPEC 2.4, 2.1).
+   */
   readonly specifier: string;
   /** The quote character of the specifier literal (SPEC 6.5 rewrites). */
   readonly specifierQuote: '"' | "'";
@@ -58,28 +81,100 @@ export interface SpecImport {
   /**
    * The designated source file's workspace-relative path (SPEC 2.1:
    * `DIR/NAME.xspec` designates `DIR/NAME.mdx`) when the import is valid
-   * — the target of the file-level import edge (cycles, SPEC 5.3). Null
-   * for an invalid import.
+   * and the designated member's identities are defined (a valid source
+   * path, SPEC 11.2). Null for an invalid import — and for a valid import
+   * designating a member whose path is invalid (SPEC 14.19): such a
+   * member's identities are all undefined, so nothing identity-shaped
+   * points at it; `designatedFile` still carries its path.
    */
   readonly targetPath: string | null;
+  /**
+   * The declaration's resolved target file where specifier form and
+   * discovery define one (SPEC 11.4) — binding validity notwithstanding:
+   * the file an in-form (`./`/`../`, `.xspec`) specifier designates when
+   * that member is discovered, a 14.19 member's exact path (marked byte
+   * form capable, SPEC 12.0) included, whatever other defects the
+   * declaration carries. Null where form or discovery defines none — the
+   * view reports the datum explicitly unavailable (SPEC 11.2). The
+   * file-level import relation (spec import cycles, SPEC 2.1, 14) and the
+   * surfaces of 11.4 read it; equal to `targetPath` for a valid import
+   * designating a member whose identities are defined.
+   */
+  readonly designatedFile: PathText | null;
   /** Whether the import itself is valid (duplicate bindings are pairwise). */
   readonly valid: boolean;
 }
 
-/** What one import-bound identifier means as a reference root (SPEC 2.2). */
+/**
+ * What one import-bound identifier means as a reference root (SPEC 2.2).
+ * A declaration's default binding means what its specifier designates
+ * (`module`, `undefined-module`, `designates-nothing`), whether the
+ * declaration is valid or carries another 14.15 defect: an import's
+ * target is undefined only where specifier form or discovery defines none
+ * (SPEC 11.2), and the 14.15 makes nothing about a chain through the
+ * binding undetectable (SPEC 14).
+ */
 export type SpecImportBinding =
   | {
-      /** A valid spec-module binding: chains rooted here are external. */
+      /**
+       * The default binding of an import designating a discovered member
+       * whose identities are defined (SPEC 2.1, 11.2): chains rooted here
+       * are external — resolving, edge and occurrence (5.7), or reporting
+       * 14.5/14.6 — the declaration's own validity notwithstanding.
+       */
       readonly kind: "module";
       readonly targetPath: string;
     }
   | {
       /**
-       * A binding of an invalid import, or an identifier bound by more
-       * than one import: the 14.15 accounts for it, and references rooted
-       * here are masked (SPEC 14).
+       * The default binding of an import designating a member whose own
+       * path is invalid (SPEC 14.19) — the import valid or not: every
+       * identity of the designated file is undefined (SPEC 11.2), so a
+       * reference rooted here never resolves — condition 14.5/14.6,
+       * decidable per file.
+       */
+      readonly kind: "undefined-module";
+      readonly modulePath: PathText;
+    }
+  | {
+      /**
+       * SPEC 2.1, 11.2, 14: the default binding of an import whose
+       * specifier designates nothing — no discovered source of a
+       * configured spec group: a specifier not of the relative `.xspec`
+       * form, one whose ascent passes above the workspace root, or one
+       * designating a missing file or a file outside every spec group.
+       * The import's 14.15 locates the declaration; a chain rooted here
+       * names no target, so it records no edge and no occurrence (5.7)
+       * and reports as unresolved (14.5/14.6) beside the 14.15 — no other
+       * error makes its non-resolution undetectable (SPEC 14).
+       */
+      readonly kind: "designates-nothing";
+      /** The import's specifier as spelled (messages). */
+      readonly specifier: string;
+    }
+  | {
+      /**
+       * A binding no chain may root at (one not colliding): a named or
+       * namespace binding — the invalid one of its declaration (SPEC 2.1)
+       * — or a binding of a compiler-provided name (`S`, `Spec`, `text`,
+       * never shadowed, 2.1). The declaration's 14.15 accounts for it, and
+       * references rooted here are masked (SPEC 14): no edge, no
+       * occurrence, no other finding.
        */
       readonly kind: "poisoned";
+    }
+  | {
+      /**
+       * SPEC 2.1, 2.4: an identifier an import binds that another import,
+       * or a declaration an export statement holds, also binds — the
+       * language names no single binding, so a chain rooted here names no
+       * target: it reports as unresolved (14.5/14.6) beside the
+       * collision's 14.15, whatever the imports' own validity, recording
+       * no edge and no occurrence (5.7).
+       */
+      readonly kind: "colliding";
+      /** The colliding binders, as messages name them ("2 imports", …). */
+      readonly binders: string;
     };
 
 /** The analyzed imports of one xspec source file (SPEC 2.1). */
@@ -120,6 +215,190 @@ export function resolveImportSpecifier(
   return segments.join("/");
 }
 
+/**
+ * SPEC 2.1: `resolveImportSpecifier` over exact path bytes, for an
+ * importing file whose own path has no plain string form (SPEC 14.19):
+ * the importer's directory bytes joined with the specifier's segments —
+ * the specifier itself is decoded source text, so its segments enter as
+ * their UTF-8 bytes. Returns null when the specifier climbs out of the
+ * workspace root. For a valid-UTF-8 importer this computes exactly what
+ * the string form computes.
+ */
+export function resolveImportSpecifierBytes(
+  importerBytes: Uint8Array,
+  specifier: string,
+): Uint8Array | null {
+  const SLASH = 0x2f;
+  const segments: Uint8Array[] = [];
+  let start = 0;
+  for (let index = 0; index <= importerBytes.length; index += 1) {
+    if (index === importerBytes.length || importerBytes[index] === SLASH) {
+      segments.push(importerBytes.subarray(start, index));
+      start = index + 1;
+    }
+  }
+  segments.pop(); // the importing file's own name — resolve from its directory
+  const encoder = new TextEncoder();
+  for (const part of specifier.split("/")) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      if (segments.length === 0) {
+        return null; // resolves outside the workspace root
+      }
+      segments.pop();
+      continue;
+    }
+    segments.push(encoder.encode(part));
+  }
+  let length = 0;
+  for (const segment of segments) length += segment.length;
+  const joined = new Uint8Array(
+    length + (segments.length > 0 ? segments.length - 1 : 0),
+  );
+  let offset = 0;
+  for (let index = 0; index < segments.length; index += 1) {
+    if (index > 0) {
+      joined[offset] = SLASH;
+      offset += 1;
+    }
+    joined.set(segments[index], offset);
+    offset += segments[index].length;
+  }
+  return joined;
+}
+
+/**
+ * The outcome of designating the file an in-form import specifier names
+ * (SPEC 2.1: a relative `./`/`../` specifier ending `.xspec`, resolved
+ * against the importing file's directory; `DIR/NAME.xspec` designates
+ * `DIR/NAME.mdx`). Membership is over the entire discovered spec-source
+ * set — an import designating a discovered member whose path is invalid
+ * (SPEC 14.19) is valid (no 14.15), while the member's identities are all
+ * undefined (SPEC 11.2), so references through it never resolve.
+ */
+export type SpecifierDesignation =
+  | { readonly kind: "outside-root" }
+  | {
+      /** Not a discovered spec-group member; `designated` is its
+       * deterministic display spelling for the 14.15 message. */
+      readonly kind: "undiscovered";
+      readonly designated: string;
+    }
+  | {
+      /** A member with defined identities: a valid source path. */
+      readonly kind: "defined-member";
+      readonly path: string;
+    }
+  | {
+      /** A 14.19 member: import valid, every identity undefined (11.2). */
+      readonly kind: "undefined-member";
+      readonly file: PathText;
+    };
+
+/**
+ * Designate the member an in-form specifier names from one importing
+ * file. Callers check the specifier's form first (relative, `.xspec`);
+ * the designator owns resolution and membership.
+ */
+export type DesignateSpecifier = (specifier: string) => SpecifierDesignation;
+
+const XSPEC_SUFFIX_LENGTH = 6; // ".xspec"
+const MDX_SUFFIX_BYTES = [0x2e, 0x6d, 0x64, 0x78]; // ".mdx"
+
+/** One discovered spec source's designation record, either path form. */
+interface SpecMemberRecord {
+  readonly path: PathText;
+  readonly defined: boolean;
+}
+
+/**
+ * The discovered spec-source domain import designation consults (SPEC 2.1,
+ * 7.1): every discovered spec source, valid or invalid-path (14.19),
+ * indexed for the two resolution spaces — string space for importing
+ * files with a plain string path, byte space for importers whose own path
+ * has none (only reachable inside 14.19 analyses).
+ */
+export class SpecSourceDomain {
+  private readonly byString = new Map<string, SpecMemberRecord>();
+  private readonly byKey = new Map<string, SpecMemberRecord>();
+
+  constructor(
+    definedPaths: Iterable<string>,
+    invalidSpecPaths: Iterable<{
+      readonly path: PathText;
+      readonly bytes: Uint8Array;
+    }>,
+  ) {
+    for (const path of definedPaths) {
+      const record: SpecMemberRecord = { path, defined: true };
+      this.byString.set(path, record);
+      this.byKey.set(pathTextKey(path), record);
+    }
+    for (const source of invalidSpecPaths) {
+      const record: SpecMemberRecord = { path: source.path, defined: false };
+      if (typeof source.path === "string") {
+        this.byString.set(source.path, record);
+      }
+      this.byKey.set(pathTextKey(source.path), record);
+    }
+  }
+
+  private static memberDesignation(
+    record: SpecMemberRecord | undefined,
+    display: () => string,
+  ): SpecifierDesignation {
+    if (record === undefined) {
+      return { kind: "undiscovered", designated: display() };
+    }
+    return record.defined && typeof record.path === "string"
+      ? { kind: "defined-member", path: record.path }
+      : { kind: "undefined-member", file: record.path };
+  }
+
+  /** The designator for an importing file with a plain string path. */
+  designatorFor(importerPath: string): DesignateSpecifier {
+    return (specifier) => {
+      const resolved = resolveImportSpecifier(importerPath, specifier);
+      if (resolved === null) {
+        return { kind: "outside-root" };
+      }
+      // SPEC 2.1: `DIR/NAME.xspec` designates `DIR/NAME.mdx`.
+      const designated = resolved.slice(0, -XSPEC_SUFFIX_LENGTH) + ".mdx";
+      return SpecSourceDomain.memberDesignation(
+        this.byString.get(designated),
+        () => designated,
+      );
+    };
+  }
+
+  /**
+   * The designator for an importing file whose own path has no plain
+   * string form (SPEC 14.19): resolution and membership over exact bytes.
+   */
+  designatorForBytes(importerBytes: Uint8Array): DesignateSpecifier {
+    return (specifier) => {
+      const resolved = resolveImportSpecifierBytes(importerBytes, specifier);
+      if (resolved === null) {
+        return { kind: "outside-root" };
+      }
+      // SPEC 2.1: `DIR/NAME.xspec` designates `DIR/NAME.mdx`.
+      const designated = new Uint8Array(
+        resolved.length - XSPEC_SUFFIX_LENGTH + MDX_SUFFIX_BYTES.length,
+      );
+      designated.set(
+        resolved.subarray(0, resolved.length - XSPEC_SUFFIX_LENGTH),
+      );
+      designated.set(MDX_SUFFIX_BYTES, resolved.length - XSPEC_SUFFIX_LENGTH);
+      return SpecSourceDomain.memberDesignation(
+        this.byKey.get(pathTextKey(pathTextOf(designated))),
+        () => renderPathText(pathTextOf(designated)),
+      );
+    };
+  }
+}
+
 /** SPEC 2.1: the compiler-provided names an import may never bind. */
 const COMPILER_PROVIDED_NAMES: ReadonlySet<string> = new Set([
   "S",
@@ -129,15 +408,21 @@ const COMPILER_PROVIDED_NAMES: ReadonlySet<string> = new Set([
 
 const XSPEC_SUFFIX = ".xspec";
 
-/** Translates analyzer spans of one re-parsed slice into byte ranges. */
+/**
+ * Translates analyzer spans of one re-parsed slice into byte ranges: the
+ * slice begins at `sliceStartByte` in the document and at `parsedStart` in
+ * the text its spans index (0 for the slice itself; a text parsed by
+ * `classifyReferenceText` begins at its `textStart`).
+ */
 class SpanTranslator {
   private readonly baseIndex: number;
 
   constructor(
     private readonly offsets: Utf8Offsets,
     sliceStartByte: number,
+    parsedStart = 0,
   ) {
-    this.baseIndex = offsets.indexOfByteOffset(sliceStartByte);
+    this.baseIndex = offsets.indexOfByteOffset(sliceStartByte) - parsedStart;
   }
 
   range(span: TextSpan): ByteRange {
@@ -146,10 +431,22 @@ class SpanTranslator {
       end: this.offsets.byteOffset(this.baseIndex + span.end),
     };
   }
+
+  /**
+   * The translator of the part of this slice beginning at its offset
+   * `start`, re-parsed in a text where it begins at `parsedStart`.
+   */
+  part(start: number, parsedStart: number): SpanTranslator {
+    return new SpanTranslator(
+      this.offsets,
+      this.offsets.byteOffset(this.baseIndex + start),
+      parsedStart,
+    );
+  }
 }
 
 /** Every identifier an import clause binds, in written order. */
-function boundIdentifiers(clause: ts.ImportClause | undefined): string[] {
+function boundIdentifiers(clause: tst.ImportClause | undefined): string[] {
   if (clause === undefined) {
     return [];
   }
@@ -172,23 +469,27 @@ function boundIdentifiers(clause: ts.ImportClause | undefined): string[] {
 
 /**
  * Analyze and validate one file's spec-module imports (SPEC 2.1 →
- * 14.15). `specPaths` is the set of discovered spec-source paths (SPEC
- * 7.1): an import must designate one of them — whether the designated
- * file parses does not matter here (references through it report as
- * unresolved, SPEC 14.20, 14.5–14.7). Each invalid import yields exactly
- * one 14.15 finding listing its defects; identifiers bound by two
- * imports yield one 14.15 per re-binding import (SPEC 2.1: no two
- * imports in a file may bind the same identifier).
+ * 14.15). `designate` resolves an in-form specifier against the importing
+ * file and answers membership over the entire discovered spec-source set
+ * (SPEC 7.1, `SpecSourceDomain`): an import must designate a discovered
+ * member — whether the designated file parses does not matter here
+ * (references through it report as unresolved, SPEC 14.20, 14.5–14.7),
+ * and a member whose own path is invalid (SPEC 14.19) is designated
+ * validly, its identities all undefined (SPEC 11.2). Each invalid import
+ * yields exactly one 14.15 finding listing its defects; an identifier
+ * bound by more than one import (SPEC 2.1: no two imports in a file may
+ * bind the same identifier) yields ONE 14.15 finding locating every
+ * colliding declaration, the first included (SPEC 14 cardinality).
  */
 export function analyzeSpecImports(
   document: SpecDocument,
-  specPaths: ReadonlySet<string>,
+  designate: DesignateSpecifier,
 ): SpecImportModel {
   const imports: SpecImport[] = [];
   const bindings = new Map<string, SpecImportBinding>();
   const findings: Finding[] = [];
-  /** name → whether any import already bound it (duplicate rule). */
-  const seenNames = new Set<string>();
+  /** name → the distinct import declarations binding it (duplicate rule). */
+  const declarationsByName = new Map<string, SpecImportStatement[]>();
 
   for (const block of document.esmBlocks) {
     for (const statement of block.imports) {
@@ -236,7 +537,11 @@ export function analyzeSpecImports(
           "xspec internal error: import with a non-literal specifier",
         );
       }
-      const specifier = specifierLiteral.text;
+      // SPEC 2.4: the specifier is read as spelled, no escape sequence
+      // interpreted — one spelled with an escape designates the path its
+      // characters spell, the escape's included, never the path the
+      // interpreted value would name.
+      const specifier = stringLiteralValue(specifierLiteral, parsed.sourceFile);
       const relative =
         specifier.startsWith("./") || specifier.startsWith("../");
       if (!relative) {
@@ -252,24 +557,27 @@ export function analyzeSpecImports(
         );
       }
       let targetPath: string | null = null;
+      let designatedFile: PathText | null = null;
       if (relative && specifier.endsWith(XSPEC_SUFFIX)) {
-        const resolved = resolveImportSpecifier(document.path, specifier);
-        if (resolved === null) {
+        const designation = designate(specifier);
+        if (designation.kind === "outside-root") {
           defects.push(
             `the specifier ${JSON.stringify(specifier)} resolves outside ` +
               `the workspace root`,
           );
+        } else if (designation.kind === "undiscovered") {
+          defects.push(
+            `the designated file ${JSON.stringify(designation.designated)} ` +
+              `is not a discovered source file of a configured spec group`,
+          );
+        } else if (designation.kind === "defined-member") {
+          targetPath = designation.path;
+          designatedFile = designation.path;
         } else {
-          // SPEC 2.1: `DIR/NAME.xspec` designates `DIR/NAME.mdx`.
-          const designated = resolved.slice(0, -XSPEC_SUFFIX.length) + ".mdx";
-          if (specPaths.has(designated)) {
-            targetPath = designated;
-          } else {
-            defects.push(
-              `the designated file ${JSON.stringify(designated)} is not a ` +
-                `discovered source file of a configured spec group`,
-            );
-          }
+          // SPEC 14.19/11.2: a discovered member whose path is invalid is
+          // designated validly — no 14.15 — while its identities are all
+          // undefined, so references rooted at this binding never resolve.
+          designatedFile = designation.file;
         }
       }
 
@@ -285,45 +593,62 @@ export function analyzeSpecImports(
         }
       }
 
+      // SPEC 2.1, 11.2, 14: what the declaration's default binding roots
+      // is fixed by specifier form and discovery — the designated member,
+      // its identities defined or (14.19) all undefined, or nothing —
+      // whatever other 14.15 defect the declaration carries (a named or
+      // namespace clause beside the default binding): 11.2 leaves an
+      // import's target undefined only where form or discovery defines
+      // none, and the declaration's 14.15 makes nothing about a chain
+      // through the binding undetectable (SPEC 14). Fixed here, before the
+      // invalid-import reset of the record's targets below.
+      const defaultRoot: SpecImportBinding =
+        designatedFile === null
+          ? { kind: "designates-nothing", specifier }
+          : targetPath !== null
+            ? { kind: "module", targetPath }
+            : { kind: "undefined-module", modulePath: designatedFile };
+
       const valid = defects.length === 0;
       if (!valid) {
         // SPEC 14.15: one finding per invalid import, listing its defects.
-        findings.push({
-          condition: 15,
-          file: document.path,
-          range: statement.range,
-          message:
+        findings.push(
+          locatedFinding(
+            15,
             `invalid import: ${defects.join("; ")} — the only permitted ` +
-            `import is a single default binding of a relative "./"/"../" ` +
-            `specifier ending in ".xspec" that designates a discovered ` +
-            `spec-group file, e.g. import BASE from "./BASE.xspec" ` +
-            `(SPEC 2.1, 14.15)`,
-        });
+              `import is a single default binding of a relative "./"/"../" ` +
+              `specifier ending in ".xspec" that designates a discovered ` +
+              `spec-group file, e.g. import BASE from "./BASE.xspec" ` +
+              `(SPEC 2.1, 14.15)`,
+            [{ file: document.file, range: statement.range }],
+          ),
+        );
         targetPath = null;
       }
 
-      // SPEC 2.1: no two imports in a file may bind the same identifier.
+      // SPEC 2.1: no two imports in a file may bind the same identifier —
+      // declarations are recorded here and the collision judged once every
+      // declaration is seen (SPEC 14 cardinality: one finding locating
+      // every colliding declaration).
       for (const name of names) {
-        if (seenNames.has(name)) {
-          findings.push({
-            condition: 15,
-            file: document.path,
-            range: statement.range,
-            message:
-              `invalid import: the identifier ${JSON.stringify(name)} is ` +
-              `already bound by another import in this file — no two ` +
-              `imports in an xspec source file may bind the same ` +
-              `identifier; rename one binding (SPEC 2.1, 14.15)`,
-          });
-          bindings.set(name, { kind: "poisoned" });
-        } else {
-          seenNames.add(name);
+        const declared = declarationsByName.get(name);
+        if (declared === undefined) {
+          declarationsByName.set(name, [statement]);
+          const defaultBinding = name === clause?.name?.text;
           bindings.set(
             name,
-            valid && targetPath !== null && name === clause?.name?.text
-              ? { kind: "module", targetPath }
+            // SPEC 2.1, 11.2, 14: the default binding roots chains as the
+            // designation fixes them (`defaultRoot`), the import valid or
+            // not — resolving or unresolved beside its 14.15. A named or
+            // namespace binding, the invalid one (2.1), and a binding of a
+            // compiler-provided name, never shadowed (2.1), root no chain:
+            // masked by the import's 14.15.
+            defaultBinding && !COMPILER_PROVIDED_NAMES.has(name)
+              ? defaultRoot
               : { kind: "poisoned" },
           );
+        } else if (!declared.includes(statement)) {
+          declared.push(statement);
         }
       }
 
@@ -339,9 +664,94 @@ export function analyzeSpecImports(
           end: specifierLiteral.getEnd(),
         }),
         targetPath,
+        // SPEC 11.4, 2.1: the datum turns on specifier form and discovery
+        // alone — kept through the invalid-import reset above, so an
+        // invalid-form declaration still takes part in spec import cycles.
+        designatedFile,
         valid,
       });
     }
+  }
+
+  // SPEC 2.1, 2.4 → 14.15: an identifier bound by more than one import,
+  // or by an import and a declaration an export statement holds, is one
+  // condition the declarations jointly violate — ONE finding per collided
+  // identifier, locating every colliding declaration (SPEC 14: no
+  // representative is chosen), each export statement's by the construct
+  // binding the name. A collided identifier — bound by another import or
+  // by an export statement's declaration alike — roots no resolving chain
+  // (SPEC 2.4): its chains report as unresolved (14.5, 14.6) beside the
+  // collision, never masked by it.
+  const exportedByName = new Map<string, SpecExportedBinding[]>();
+  for (const block of document.esmBlocks) {
+    for (const held of block.exportedBindings) {
+      const entries = exportedByName.get(held.name);
+      if (entries === undefined) {
+        exportedByName.set(held.name, [held]);
+      } else if (
+        !entries.some(
+          (entry) =>
+            entry.range.start === held.range.start &&
+            entry.range.end === held.range.end,
+        )
+      ) {
+        entries.push(held);
+      }
+    }
+  }
+  for (const [name, declared] of declarationsByName) {
+    const exported = exportedByName.get(name) ?? [];
+    if (declared.length < 2 && exported.length === 0) continue;
+    findings.push(
+      locatedFinding(
+        15,
+        exported.length === 0
+          ? `invalid import: the identifier ${JSON.stringify(name)} is ` +
+              `bound by ${String(declared.length)} imports in this file — ` +
+              `no two imports in an xspec source file may bind the same ` +
+              `identifier, and the language names no single binding, so no ` +
+              `chain rooted at it resolves; rename all but one binding ` +
+              `(SPEC 2.1, 2.4, 14.15)`
+          : `invalid import: the identifier ${JSON.stringify(name)} is ` +
+              `bound by ` +
+              (declared.length === 1
+                ? `an import`
+                : `${String(declared.length)} imports`) +
+              ` and by ` +
+              (exported.length === 1
+                ? `a declaration an export statement holds`
+                : `${String(exported.length)} declarations export ` +
+                  `statements hold`) +
+              ` — the language names no single binding, so no chain rooted ` +
+              `at it resolves; remove the export statement or rename the ` +
+              `import binding (SPEC 2.1, 2.4, 14.15)`,
+        [
+          ...declared.map((decl) => ({
+            file: document.file,
+            range: decl.range,
+          })),
+          ...exported.map((held) => ({
+            file: document.file,
+            range: held.range,
+          })),
+        ],
+      ),
+    );
+    // SPEC 2.4: whatever the imports' own validity, the identifier roots
+    // no chain at any binding.
+    bindings.set(name, {
+      kind: "colliding",
+      binders:
+        (declared.length === 1
+          ? `an import`
+          : `${String(declared.length)} imports`) +
+        (exported.length === 0
+          ? ``
+          : exported.length === 1
+            ? ` and a declaration an export statement holds`
+            : ` and ${String(exported.length)} declarations export ` +
+              `statements hold`),
+    });
   }
 
   return {
@@ -353,10 +763,10 @@ export function analyzeSpecImports(
 
 /** The parsed shape of one recorded import statement's exact text. */
 interface ParsedImport {
-  readonly sourceFile: ts.SourceFile;
-  readonly importClause: ts.ImportClause | undefined;
-  readonly moduleSpecifier: ts.Expression;
-  readonly attributes: ts.ImportAttributes | undefined;
+  readonly sourceFile: tst.SourceFile;
+  readonly importClause: tst.ImportClause | undefined;
+  readonly moduleSpecifier: tst.Expression;
+  readonly attributes: tst.ImportAttributes | undefined;
 }
 
 /** Re-parse one import declaration's exact text (positions are local). */
@@ -419,7 +829,11 @@ export interface SegmentSpelling {
   readonly quote: '"' | "'" | null;
   /** The name token: the identifier, or the index literal with quotes. */
   readonly nameRange: ByteRange;
-  /** The whole access, from just past the base through its last byte. */
+  /**
+   * The access's own bytes: its one-byte access token (the `.` or the `[`)
+   * through its last byte (the name, or the `]`) — never the whitespace and
+   * comments before that token, which every rewrite keeps (SPEC 6.4, 6.5).
+   */
   readonly accessRange: ByteRange;
 }
 
@@ -459,8 +873,13 @@ export interface DependencyReference {
 
 /**
  * One `{text(...)}` embedding's analysis (SPEC 2.3). `reference` is null
- * when the embedding yields none: a 14.8 finding accounts for it, or its
- * chain root is a poisoned import binding (masked, SPEC 14).
+ * when the embedding yields none: a 14.8 finding accounts for it, its
+ * chain root is a binding no chain may root at — a named or namespace
+ * binding, or a compiler-provided name (masked by the import's 14.15,
+ * SPEC 2.1, 14) — or its chain names no target decidably per file, a 14.6
+ * reported here (SPEC 14.19, 11.2, 2.4, 2.1). A chain rooted at the
+ * default binding of an invalid import designating a discovered source is
+ * recorded as a valid import's is (SPEC 11.2, 14).
  */
 export interface EmbeddingReference {
   readonly embedding: SpecEmbedding;
@@ -481,13 +900,63 @@ export interface SpecReferenceModel {
 type ResolvedReference =
   | { readonly outcome: "reference"; readonly reference: SpecReference }
   | { readonly outcome: "finding"; readonly finding: Finding }
-  | { readonly outcome: "masked" };
+  | {
+      /**
+       * A static chain that never resolves, decidably per file — rooted
+       * at the default binding of an import, valid or not, of a member
+       * whose path is invalid (SPEC 14.19: every identity of that file is
+       * undefined, 11.2), at the default binding of an import designating
+       * nothing (SPEC 2.1, 11.2), or at an identifier another import or a
+       * declaration an export statement holds also binds (SPEC 2.4: the
+       * language names no single binding). The caller reports its
+       * 14.5/14.6 with the span rules of its construct kind.
+       */
+      readonly outcome: "unresolved";
+      /** What the reference names, for messages ("to …", "rooted at …"). */
+      readonly subject: string;
+      /** Why it names no node, for messages. */
+      readonly reason: string;
+      readonly span: TextSpan;
+    }
+  | {
+      /**
+       * A static chain rooted at a binding no chain may root at — a named
+       * or namespace binding, or a compiler-provided name (SPEC 2.1): the
+       * import's 14.15 accounts for it (SPEC 14), so it records no edge
+       * and no occurrence (5.7) and reports nothing else.
+       */
+      readonly outcome: "masked";
+    };
+
+/** A human description of an undefined-member target (messages only). */
+function describeUndefinedTarget(
+  modulePath: PathText,
+  segments: readonly string[],
+): string {
+  const display = renderPathText(modulePath);
+  if (segments.length === 0) {
+    // SPEC 2.2: the module itself targets that file's root node.
+    return `the root node of ${JSON.stringify(display)}`;
+  }
+  return JSON.stringify(`${display}#${segments.join(".")}`);
+}
+
+/** The SPEC 14.19/11.2 reason an undefined-member reference never resolves. */
+const UNDEFINED_TARGET_REASON =
+  `no identity of the designated file is defined because its own path is ` +
+  `invalid (SPEC 14.19, 11.2); rename that file to a valid source path or ` +
+  `retarget the reference`;
 
 /**
  * Extract the file's references (SPEC 2.2, 2.3) through the shared
  * static-reference analyzer (SPEC 2.4). Every `d` reference and
  * embedding argument is classified; dynamic ones report 14.8, chains
- * rooted at poisoned bindings are masked (SPEC 14), and the rest are
+ * rooted at a binding no chain may root at — a named or namespace
+ * binding, or a compiler-provided name — are masked by the import's 14.15
+ * (SPEC 2.1, 14), chains that name no target decidably per file — an
+ * import designating nothing among them (SPEC 2.1, 11.2) — report
+ * 14.5/14.6 here, and the rest — those rooted at an invalid import's
+ * default binding of a discovered source included (SPEC 11.2, 14) — are
  * recorded with target, spelling, and spans. Resolution against declared
  * IDs — and duplicate-target collapse (SPEC 2.2, 5.2) — happens in the
  * graph, which reports 14.5/14.6 for unknown targets.
@@ -499,12 +968,16 @@ export function analyzeSpecReferences(
   const analyzer = new ReferenceAnalyzer(document, importModel.bindings);
   const dependencies: DependencyReference[] = [];
   for (const section of document.sections) {
-    const dependency = section.dependency;
-    if (dependency === null) {
-      continue;
-    }
-    for (const reference of analyzer.analyzeDependencyValue(dependency)) {
-      dependencies.push({ section, reference });
+    // SPEC 11.2 "Resolution": every braced `d` spelling of the section, in
+    // tag order — each spelling of a repeated prop included (14.17) — is
+    // analyzed exactly as a single `d` is, so each of its entries records
+    // an occurrence, reports 14.5 through the graph, or reports 14.8 on its
+    // own; the graph's duplicate-target collapse (SPEC 2.2, 5.2) applies
+    // across spellings as within one array literal.
+    for (const dependency of section.dependencies) {
+      for (const reference of analyzer.analyzeDependencyValue(dependency)) {
+        dependencies.push({ section, reference });
+      }
     }
   }
   const embeddings: EmbeddingReference[] = [];
@@ -531,31 +1004,33 @@ class ReferenceAnalyzer {
   ) {}
 
   private addFinding(range: ByteRange, message: string): void {
-    this.findings.push({
-      condition: 8,
-      file: this.document.path,
-      range,
-      message,
-    });
+    this.findings.push(
+      locatedFinding(8, message, [{ file: this.document.file, range }]),
+    );
   }
 
   /**
    * SPEC 2.2: a `d` value is a single reference or an array literal of
    * references, external and local forms mixed freely; `d={[]}` declares
    * no dependencies. Any other value is a dynamic argument (SPEC 2.7 →
-   * 14.8), as is any dynamic element (SPEC 2.4).
+   * 14.8), as is any dynamic entry (SPEC 2.4). The value is the expression
+   * MDX 3 derives from the braces' content (SPEC 14.20) — an array literal
+   * exactly where that expression is one, unparenthesized — and each
+   * reference, the whole value or one entry, is classified by its own
+   * characters, first token through last, which its occurrence or finding
+   * spans (SPEC 14, 5.7).
    */
   analyzeDependencyValue(dependency: {
     readonly expressionText: string;
     readonly expressionRange: ByteRange;
     readonly attributeRange: ByteRange;
   }): SpecReference[] {
-    const { sourceFile, expression } = parseExpressionText(
-      dependency.expressionText,
-    );
-    if (expression === null) {
-      // Not a single expression at all (an object literal parses as a
-      // block, for instance): a dynamic argument (SPEC 2.7 → 14.8).
+    const text = dependency.expressionText;
+    const value = deriveContentExpression(text);
+    if (value === null) {
+      // A parsed document's braced `d` always derives one expression
+      // (SPEC 14.20); were it not to, the value would be no static
+      // reference: a dynamic argument (SPEC 2.7 → 14.8).
       this.addFinding(
         dependency.attributeRange,
         `invalid argument: the d value is not a static reference or an ` +
@@ -564,40 +1039,42 @@ class ReferenceAnalyzer {
       );
       return [];
     }
-    const translate = new SpanTranslator(
+    const valueTranslate = new SpanTranslator(
       this.document.offsets,
       dependency.expressionRange.start,
     );
+    const entries = value.type === "ArrayExpression" ? value.elements : [value];
+    if (entries.includes(null)) {
+      // SPEC 14: the elisions of one array literal — holes among its
+      // entries, spelling no expression — are one finding, however many,
+      // located by the whole array literal, brackets included (SPEC 2.2 →
+      // 14.8: a hole is no reference).
+      this.addFinding(
+        valueTranslate.range(value),
+        `invalid argument: the d array contains an elided element — ` +
+          `each element must be a static reference (SPEC 2.2, 2.4, 14.8)`,
+      );
+    }
     const references: SpecReference[] = [];
-    const elements = ts.isArrayLiteralExpression(expression)
-      ? expression.elements
-      : [expression];
-    for (const element of elements) {
-      if (ts.isOmittedExpression(element)) {
-        // An array hole is no reference (SPEC 2.2 → 14.8).
-        this.addFinding(
-          translate.range({
-            start: expression.getStart(sourceFile),
-            end: expression.getEnd(),
-          }),
-          `invalid argument: the d array contains an elided element — ` +
-            `each element must be a static reference (SPEC 2.2, 2.4, 14.8)`,
-        );
+    for (const entry of entries) {
+      if (entry === null) {
         continue;
       }
-      if (ts.isSpreadElement(element)) {
+      if (entry.type === "SpreadElement") {
+        // SPEC 14: a spread entry by its own characters, `...` included.
         this.addFinding(
-          translate.range({
-            start: element.getStart(sourceFile),
-            end: element.getEnd(),
-          }),
+          valueTranslate.range(entry),
           `invalid argument: a spread element is not a static reference ` +
             `(SPEC 2.2, 2.4, 14.8)`,
         );
         continue;
       }
+      const { classified, textStart } = classifyReferenceText(
+        text.slice(entry.start, entry.end),
+      );
+      const translate = valueTranslate.part(entry.start, textStart);
       const resolved = this.resolveClassified(
-        classifyReference(element, sourceFile),
+        classified,
         translate,
         `each d reference must be a static string literal naming a ` +
           `same-file ID or a static property chain rooted at an imported ` +
@@ -607,6 +1084,23 @@ class ReferenceAnalyzer {
         references.push(resolved.reference);
       } else if (resolved.outcome === "finding") {
         this.findings.push(resolved.finding);
+      } else if (resolved.outcome === "unresolved") {
+        // SPEC 14.5: a d reference that does not resolve, decidably per
+        // file (SPEC 14.19, 11.2, 2.4). The finding spans the reference's
+        // own expression (SPEC 14).
+        this.findings.push(
+          locatedFinding(
+            5,
+            `unknown dependency: the d reference ${resolved.subject} ` +
+              `does not resolve — ${resolved.reason} (SPEC 2.2, 14.5)`,
+            [
+              {
+                file: this.document.file,
+                range: translate.range(resolved.span),
+              },
+            ],
+          ),
+        );
       }
     }
     return references;
@@ -614,19 +1108,21 @@ class ReferenceAnalyzer {
 
   /**
    * SPEC 2.3, 2.4: an embedding is a `text(...)` call with exactly one
-   * argument, following the same external/local duality as `d`.
+   * argument, following the same external/local duality as `d`. The call
+   * is the expression MDX 3 derives from the container's content (SPEC
+   * 14.20), so its arguments are the ones ECMAScript reads (`text(<b/>,
+   * "a")` has two), and the one argument is classified by its own
+   * characters.
    */
   analyzeEmbedding(embedding: SpecEmbedding): SpecReference | null {
-    const { sourceFile, expression } = parseExpressionText(
-      embedding.expressionText,
-    );
+    const text = embedding.expressionText;
+    const expression = deriveContentExpression(text);
     const call =
       expression !== null &&
-      ts.isCallExpression(expression) &&
-      expression.questionDotToken === undefined &&
-      expression.typeArguments === undefined &&
-      ts.isIdentifier(expression.expression) &&
-      expression.expression.text === "text"
+      expression.type === "CallExpression" &&
+      !expression.optional &&
+      expression.callee.type === "Identifier" &&
+      expression.callee.name === "text"
         ? expression
         : null;
     if (call === null) {
@@ -651,52 +1147,82 @@ class ReferenceAnalyzer {
       return null;
     }
     const argument = call.arguments[0];
-    const translate = new SpanTranslator(
-      this.document.offsets,
-      embedding.expressionRange.start,
-    );
-    if (ts.isSpreadElement(argument)) {
+    if (argument.type === "SpreadElement") {
+      // SPEC 14: a no-occurrence spelling of the MDX embedding form is
+      // located by the full braced container (the span its occurrence
+      // would occupy, 5.7).
       this.addFinding(
-        translate.range({
-          start: argument.getStart(sourceFile),
-          end: argument.getEnd(),
-        }),
+        embedding.range,
         `invalid argument: a spread element is not a static reference ` +
           `(SPEC 2.3, 2.4, 14.8)`,
       );
       return null;
     }
+    const { classified, textStart } = classifyReferenceText(
+      text.slice(argument.start, argument.end),
+    );
+    const translate = new SpanTranslator(
+      this.document.offsets,
+      embedding.expressionRange.start,
+    ).part(argument.start, textStart);
     const resolved = this.resolveClassified(
-      classifyReference(argument, sourceFile),
+      classified,
       translate,
       `the text(...) argument must be a static string literal naming a ` +
         `same-file ID or a static property chain rooted at an imported ` +
         `spec module (SPEC 2.3, 2.4, 14.8)`,
+      // SPEC 14: an embedding-form finding's range is the full braced
+      // container — the span its occurrence would occupy (5.7).
+      embedding.range,
     );
     if (resolved.outcome === "reference") {
       return resolved.reference;
     }
     if (resolved.outcome === "finding") {
       this.findings.push(resolved.finding);
+    } else if (resolved.outcome === "unresolved") {
+      // SPEC 14.6: a text(...) reference that does not resolve, decidably
+      // per file (SPEC 14.19, 11.2, 2.4). An embedding-form finding's
+      // range is the full braced container — the span its occurrence
+      // would occupy (SPEC 14, 5.7).
+      this.findings.push(
+        locatedFinding(
+          6,
+          `unknown text target: the text(...) reference ${resolved.subject} ` +
+            `does not resolve — ${resolved.reason} (SPEC 2.3, 14.6)`,
+          [{ file: this.document.file, range: embedding.range }],
+        ),
+      );
     }
     return null;
   }
 
-  /** Turn one classification into a reference, a 14.8, or a mask. */
+  /**
+   * Turn one classification into a reference, a 14.8, or a mask.
+   * `containerRange` — set for a `text(...)` embedding argument — is the
+   * embedding's full braced container: an embedding-form finding's range
+   * is that container, the span its occurrence would occupy (SPEC 14,
+   * 5.7); a `d` reference's finding keeps its own expression's span.
+   */
   private resolveClassified(
     classified: ClassifiedReference,
     translate: SpanTranslator,
     expectation: string,
+    containerRange: ByteRange | null = null,
   ): ResolvedReference {
     if (classified.kind === "dynamic") {
       return {
         outcome: "finding",
-        finding: {
-          condition: 8,
-          file: this.document.path,
-          range: translate.range(classified.span),
-          message: `invalid argument: ${classified.reason} — ${expectation}`,
-        },
+        finding: locatedFinding(
+          8,
+          `invalid argument: ${classified.reason} — ${expectation}`,
+          [
+            {
+              file: this.document.file,
+              range: containerRange ?? translate.range(classified.span),
+            },
+          ],
+        ),
       };
     }
     if (classified.kind === "string") {
@@ -711,20 +1237,71 @@ class ReferenceAnalyzer {
       // module; a root no import binds makes the reference dynamic.
       return {
         outcome: "finding",
-        finding: {
-          condition: 8,
-          file: this.document.path,
-          range: translate.range(classified.span),
-          message:
-            `invalid argument: the property chain is rooted at ` +
+        finding: locatedFinding(
+          8,
+          `invalid argument: the property chain is rooted at ` +
             `${JSON.stringify(classified.rootName)}, which no spec-module ` +
             `import in this file binds — ${expectation}`,
-        },
+          [
+            {
+              file: this.document.file,
+              range: containerRange ?? translate.range(classified.span),
+            },
+          ],
+        ),
+      };
+    }
+    if (binding.kind === "undefined-module") {
+      // SPEC 14.19/11.2: the import, valid or not, designates a member
+      // every identity of which is undefined — the reference never
+      // resolves. The condition (14.5/14.6) is decidable per file; the
+      // caller reports it with its construct kind's span rules (SPEC 14,
+      // 5.7), beside any 14.15 of the declaration.
+      return {
+        outcome: "unresolved",
+        subject: `to ${describeUndefinedTarget(
+          binding.modulePath,
+          classified.segments.map((segment) => segment.name),
+        )}`,
+        reason: UNDEFINED_TARGET_REASON,
+        span: classified.span,
+      };
+    }
+    if (binding.kind === "colliding") {
+      // SPEC 2.4: the language names no single binding, so the chain
+      // names no target — no edge, no occurrence (5.7) — and reports as
+      // unresolved beside the collision's 14.15, decidably per file.
+      const root = JSON.stringify(classified.rootName);
+      return {
+        outcome: "unresolved",
+        subject: `rooted at ${root}`,
+        reason:
+          `${root} is bound by ${binding.binders} — the language names no ` +
+          `single binding, so the chain names no target (SPEC 2.4, 2.1); ` +
+          `resolve the collision`,
+        span: classified.span,
+      };
+    }
+    if (binding.kind === "designates-nothing") {
+      // SPEC 2.1, 11.2, 14: the import designates nothing, so the chain
+      // names no target — no edge, no occurrence (5.7) — and reports as
+      // unresolved beside the import's 14.15, decidably per file.
+      const root = JSON.stringify(classified.rootName);
+      return {
+        outcome: "unresolved",
+        subject: `rooted at ${root}`,
+        reason:
+          `the specifier ${JSON.stringify(binding.specifier)} of the ` +
+          `import binding ${root} designates no discovered source file of ` +
+          `a configured spec group, so the chain names no target (SPEC ` +
+          `2.1, 11.2, 14.15); correct the import's specifier`,
+        span: classified.span,
       };
     }
     if (binding.kind === "poisoned") {
-      // Masked (SPEC 14): the import's 14.15 makes the target
-      // undetectable; no separate condition, no edge.
+      // Masked (SPEC 2.1, 14): a named or namespace binding, or a
+      // compiler-provided name, roots no chain — the import's 14.15
+      // accounts for it; no separate condition, no edge, no occurrence.
       return { outcome: "masked" };
     }
     return {
@@ -777,12 +1354,7 @@ class ReferenceAnalyzer {
   }
 }
 
-/** Deterministic finding order (SPEC 12.0): by location, then condition. */
+/** Deterministic finding order (SPEC 12.0, 12.7). */
 function sortFindings(findings: readonly Finding[]): Finding[] {
-  return [...findings].sort(
-    (a, b) =>
-      (a.range?.start ?? 0) - (b.range?.start ?? 0) ||
-      (a.range?.end ?? 0) - (b.range?.end ?? 0) ||
-      a.condition - b.condition,
-  );
+  return [...findings].sort(compareFindings);
 }

@@ -1,0 +1,624 @@
+// Self-checks for the added-import insertion discipline helper
+// (`test/helpers/import-insertion.ts`; TEST-SPEC 17 preamble — harness
+// machinery certification does not exercise; SPEC 6.5's spelling and line
+// discipline, asserted value-blind in the fresh identifier and byte-exact in
+// every other character, as T6.5-8 reads it). The disciplined insertion —
+// `import <X> from "<canonical specifier>"` followed by U+000A at a
+// line-start offset — is accepted, including the ambiguous-offset case where
+// the run's own terminator repeats the byte beside it, so several offsets
+// describe one byte string; the canonical specifier is spelled by 6.5's
+// rule; and every failure spelling T6.5-8 names fails as a diagnosed
+// HarnessAssertionError: a declaration joined to a neighbour with `;`, the
+// mid-line form while a line-start offset exists (and a mid-line offset
+// without its preceding terminator), a spurious blank line, a CRLF
+// terminator, single quotes, a `;`, other spacing, a non-canonical
+// specifier (`./sub/../Target.xspec`, a `.` segment, an ascent into the
+// importer's own directory, no `./` prefix, a `.mdx` extension), a
+// declaration binding an identifier the rewritten references are not
+// rooted at, a specifier designating the wrong module, nothing inserted,
+// and edits beyond one inserted run. Line starts are judged by SPEC 3's
+// terminators (T6.5-8's terminator re-runs): the disciplined insertion after
+// a CRLF or a lone CR is accepted, one between a CRLF's two characters is
+// no line start, and the mid-line form a reader judging line starts by
+// U+000A alone writes after a lone CR fails diagnosed; a pinned offset (the
+// TS arm's start of line 2) admits that offset alone.
+
+import { Buffer } from "node:buffer";
+import { expect, test } from "vitest";
+import { HarnessAssertionError } from "../helpers/assertions.js";
+import {
+  assertAddedImportInsertion,
+  assertExactDeclarationInsertion,
+  atLineStart,
+  canonicalSpecifier,
+  isolateSingleInsertion,
+} from "../helpers/import-insertion.js";
+
+const bytes = (text: string): Uint8Array => Buffer.from(text, "utf8");
+
+const BASE = [
+  'import Org from "./Origin.xspec"',
+  "",
+  '<S id="th" d={T.tm}>',
+  "Third text.",
+  "</S>",
+  "",
+].join("\n");
+
+function check(actual: string, identifier = "T") {
+  return assertAddedImportInsertion(
+    {
+      rel: "specs/Third.mdx",
+      base: bytes(BASE),
+      actual: bytes(actual),
+      importerDir: "specs",
+      expectedModule: "specs/Target.xspec",
+      identifier,
+    },
+    "self",
+  );
+}
+
+function expectDiagnosed(run: () => unknown, ...patterns: string[]): void {
+  try {
+    run();
+  } catch (error) {
+    expect(error).toBeInstanceOf(HarnessAssertionError);
+    const message = (error as Error).message;
+    for (const pattern of patterns) expect(message).toContain(pattern);
+    return;
+  }
+  throw new Error(
+    "expected a diagnosed assertion failure, but the helper passed",
+  );
+}
+
+test("isolateSingleInsertion reports every admissible offset of one run", () => {
+  // `A\n` + `import X\n` + `B` equals `A` + `\nimport X` + `\nB`: offsets 1..2.
+  const found = isolateSingleInsertion(
+    bytes("A\nB"),
+    bytes("A\nimport X\nB"),
+    "self",
+  );
+  expect(found).toEqual({ length: 9, lowestOffset: 1, highestOffset: 2 });
+  expectDiagnosed(
+    () => isolateSingleInsertion(bytes("A\nB"), bytes("A\nB"), "self"),
+    "no bytes were inserted",
+  );
+  expectDiagnosed(
+    () =>
+      isolateSingleInsertion(bytes("A\nB"), bytes("A\nimport X\nC"), "self"),
+    "not its expected bytes with one run inserted",
+  );
+  expectDiagnosed(
+    () =>
+      isolateSingleInsertion(bytes("A\nB\nC"), bytes("A\nX\nB\nY\nC"), "self"),
+    "more than one edit",
+  );
+});
+
+test("canonicalSpecifier spells 6.5's canonical relative form", () => {
+  // No ascent: `./` prefixed.
+  expect(canonicalSpecifier("specs", "specs/Target.xspec")).toBe(
+    "./Target.xspec",
+  );
+  expect(canonicalSpecifier("specs", "specs/sub/t.xspec")).toBe(
+    "./sub/t.xspec",
+  );
+  expect(canonicalSpecifier("", "specs/t.xspec")).toBe("./specs/t.xspec");
+  expect(canonicalSpecifier(".", "specs/t.xspec")).toBe("./specs/t.xspec");
+  // Ascents, then the descending segments.
+  expect(canonicalSpecifier("src", "specs/target.xspec")).toBe(
+    "../specs/target.xspec",
+  );
+  expect(canonicalSpecifier("src/a/b", "specs/t.xspec")).toBe(
+    "../../../specs/t.xspec",
+  );
+  expect(canonicalSpecifier("specs/sub", "specs/t.xspec")).toBe("../t.xspec");
+  expect(canonicalSpecifier("specs/sub", "specs/other/t.xspec")).toBe(
+    "../other/t.xspec",
+  );
+  // The module's basename is a file, never a shared directory segment.
+  expect(canonicalSpecifier("specs", "specs.xspec")).toBe("../specs.xspec");
+  expect(canonicalSpecifier("a/b", "a/b.xspec")).toBe("../b.xspec");
+});
+
+test("the disciplined added import is accepted at a line-start offset", () => {
+  const atTop = check('import T from "./Target.xspec"\n' + BASE);
+  expect(atTop).toEqual({
+    offset: 0,
+    declaration: 'import T from "./Target.xspec"',
+    identifier: "T",
+    specifier: "./Target.xspec",
+  });
+  // After the first line — the ambiguous case: offset 32 (mid-line, before
+  // the terminator) reads as `\n` + declaration without a trailing
+  // terminator, offset 33 (line start) as declaration + `\n`; the bytes are
+  // one string, and the line-start reading is the accepted one.
+  const second = check(
+    'import Org from "./Origin.xspec"\nimport T from "./Target.xspec"\n\n<S id="th" d={T.tm}>\nThird text.\n</S>\n',
+  );
+  expect(second.offset).toBe(33);
+  // At the file's end after its final terminator — a line-start admissible
+  // offset (SPEC 6.5), the one every receiving file of the consumers holds.
+  expect(check(BASE + 'import T from "./Target.xspec"\n').offset).toBe(
+    BASE.length,
+  );
+  // The identifier's value is the product's: another root, read off the
+  // rewritten references, is accepted alike.
+  expect(
+    check('import Tgt from "./Target.xspec"\n' + BASE, "Tgt").identifier,
+  ).toBe("Tgt");
+  // The TS arm's ascent spelling from `src/` (T6.5-8).
+  const tsBase = [
+    'import ORG from "../specs/Origin.xspec";',
+    "",
+    "T.mv;",
+    "",
+  ].join("\n");
+  expect(
+    assertAddedImportInsertion(
+      {
+        rel: "src/app.ts",
+        base: bytes(tsBase),
+        actual: bytes('import T from "../specs/Target.xspec"\n' + tsBase),
+        importerDir: "src",
+        expectedModule: "specs/Target.xspec",
+        identifier: "T",
+      },
+      "self",
+    ).specifier,
+  ).toBe("../specs/Target.xspec");
+});
+
+test("every failure spelling T6.5-8 names fails diagnosed", () => {
+  const head = 'import Org from "./Origin.xspec"';
+  const tail = '\n\n<S id="th" d={T.tm}>\nThird text.\n</S>\n';
+  const notImport = "is not the added import";
+  // Joined to the neighbour with `;` — still parsing, still resolving.
+  // (The run's `.xspec"` repeats the neighbour's, so offsets 25..32 all
+  // describe it; same-reason offsets are reported as one range.)
+  expectDiagnosed(
+    () => check(head + '; import T from "./Target.xspec"' + tail),
+    notImport,
+    "at offsets 25–32: the offset is not at the start of a line",
+    "join the preceding line",
+  );
+  // The mid-line form while a line-start offset (33) exists: inserted after
+  // the first declaration's closing quote, before its terminator, as `\n` +
+  // declaration + `\n` — bytes no line-start insertion produces (a blank
+  // line more), so 6.5's preference fails it.
+  expectDiagnosed(
+    () => check(head + '\nimport T from "./Target.xspec"\n' + tail),
+    notImport,
+    "mid-line form",
+  );
+  // Mid-line offset without the preceding terminator.
+  expectDiagnosed(
+    () => check(head + 'import T from "./Target.xspec"\n' + tail),
+    notImport,
+    "join the preceding line",
+  );
+  // A spurious blank line after the declaration.
+  expectDiagnosed(
+    () => check('import T from "./Target.xspec"\n\n' + BASE),
+    notImport,
+    "spurious blank line",
+  );
+  // CRLF terminator.
+  expectDiagnosed(
+    () => check('import T from "./Target.xspec"\r\n' + BASE),
+    notImport,
+    "ends in U+000D",
+  );
+  // Single quotes.
+  expectDiagnosed(
+    () => check("import T from './Target.xspec'\n" + BASE),
+    notImport,
+    "single-quoted",
+  );
+  // A statement terminator.
+  expectDiagnosed(
+    () => check('import T from "./Target.xspec";\n' + BASE),
+    notImport,
+    "statement terminator",
+  );
+  // Other spacing: a doubled space, a tab.
+  expectDiagnosed(
+    () => check('import  T from "./Target.xspec"\n' + BASE),
+    notImport,
+    "single spaces",
+  );
+  expectDiagnosed(
+    () => check('import T\tfrom "./Target.xspec"\n' + BASE),
+    notImport,
+    "single spaces",
+  );
+  // Non-canonical specifiers designating the right module: a `..` ascent
+  // and re-descent, a `.` segment, an ascent into the importer's own
+  // directory.
+  for (const spelled of [
+    "./sub/../Target.xspec",
+    "././Target.xspec",
+    "../specs/Target.xspec",
+  ]) {
+    expectDiagnosed(
+      () => check(`import T from "${spelled}"\n` + BASE),
+      notImport,
+      "not the canonical relative spelling",
+    );
+  }
+  // No `./` prefix; a `.mdx` extension (2.1's form).
+  expectDiagnosed(
+    () => check('import T from "Target.xspec"\n' + BASE),
+    notImport,
+    "relative path",
+  );
+  expectDiagnosed(
+    () => check('import T from "./Target.mdx"\n' + BASE),
+    notImport,
+    "ending in `.xspec`",
+  );
+  // Binds an identifier the rewritten references are not rooted at.
+  expectDiagnosed(
+    () => check('import Tgt from "./Target.xspec"\n' + BASE),
+    notImport,
+    'binds "Tgt"',
+  );
+  // Designates the wrong module.
+  expectDiagnosed(
+    () => check('import T from "./Origin.xspec"\n' + BASE),
+    notImport,
+    "designates specs/Origin.xspec rather than specs/Target.xspec",
+  );
+  // Nothing added at all.
+  expectDiagnosed(() => check(BASE), "no bytes were inserted");
+});
+
+test("line starts are judged by SPEC 3's terminators", () => {
+  // After a U+000A, a CRLF, or a lone CR — the file's end after a final
+  // terminator of any kind included — and at offset 0.
+  expect(atLineStart(bytes("ab"), 0)).toBe(true);
+  expect(atLineStart(bytes("a\nb"), 2)).toBe(true);
+  expect(atLineStart(bytes("a\r\nb"), 3)).toBe(true);
+  expect(atLineStart(bytes("a\rb"), 2)).toBe(true);
+  expect(atLineStart(bytes("a\r"), 2)).toBe(true);
+  expect(atLineStart(bytes("a\r\n"), 3)).toBe(true);
+  // Mid-line, and between a CRLF's two characters (half of one terminator).
+  expect(atLineStart(bytes("ab"), 1)).toBe(false);
+  expect(atLineStart(bytes("a\r\nb"), 2)).toBe(false);
+});
+
+// T6.5-8's TS arm: `src/c.ts` is the origin import, a terminator, then a
+// function `f` holding the rewritten marker and the unmoved one; the start
+// of line 2 is its one line-start admissible offset, pinned.
+const C_LINE_1 = 'import O from "../specs/origin.xspec"';
+const C_DECL = 'import T from "../specs/target.xspec"';
+const cBase = (t: string): string =>
+  [C_LINE_1, "function f() {", "  T.y;", "  O.w;", "}", ""].join(t);
+
+function checkCode(actual: string, t: string, pinned = true) {
+  return assertAddedImportInsertion(
+    {
+      rel: "src/c.ts",
+      base: bytes(cBase(t)),
+      actual: bytes(actual),
+      importerDir: "src",
+      expectedModule: "specs/target.xspec",
+      identifier: "T",
+      ...(pinned
+        ? {
+            pinnedOffset: {
+              offset: C_LINE_1.length + t.length,
+              where: "the start of line 2",
+            },
+          }
+        : {}),
+    },
+    "self",
+  );
+}
+
+test("the disciplined insertion after a CRLF or a lone CR is at a line start", () => {
+  for (const t of ["\n", "\r\n", "\r"]) {
+    const base = cBase(t);
+    const at = C_LINE_1.length + t.length;
+    const actual = base.slice(0, at) + C_DECL + "\n" + base.slice(at);
+    // Pinned and unpinned alike: the run is the declaration followed by
+    // U+000A (never the file's own terminator style) at line 2's start.
+    expect(checkCode(actual, t).offset).toBe(at);
+    expect(checkCode(actual, t, false).offset).toBe(at);
+  }
+});
+
+test("a lone-CR or CRLF file's insertion off 3's line starts fails diagnosed", () => {
+  const notImport = "is not the added import";
+  // After a lone CR, the mid-line form (U+000A, the declaration, U+000A) —
+  // what a product judging line starts by U+000A alone writes there; that
+  // U+000A joins the lone CR into one CRLF.
+  {
+    const base = cBase("\r");
+    const at = C_LINE_1.length + 1;
+    expectDiagnosed(
+      () =>
+        checkCode(
+          base.slice(0, at) + "\n" + C_DECL + "\n" + base.slice(at),
+          "\r",
+        ),
+      notImport,
+      "follows a lone U+000D",
+      "by U+000A alone",
+    );
+    // The same product's mid-line form before the lone CR, at the
+    // statement's end: a line-start offset exists, so it is not conforming.
+    const end = C_LINE_1.length;
+    expectDiagnosed(
+      () =>
+        checkCode(
+          base.slice(0, end) + "\n" + C_DECL + "\n" + base.slice(end),
+          "\r",
+        ),
+      notImport,
+      "mid-line form",
+    );
+    // A terminator in the file's style after the declaration.
+    expectDiagnosed(
+      () => checkCode(base.slice(0, at) + C_DECL + "\r" + base.slice(at), "\r"),
+      notImport,
+    );
+  }
+  // Between a CRLF's two characters: no line start, so the declaration
+  // joins line 1.
+  {
+    const base = cBase("\r\n");
+    const at = C_LINE_1.length + 1;
+    expectDiagnosed(
+      () =>
+        checkCode(base.slice(0, at) + C_DECL + "\n" + base.slice(at), "\r\n"),
+      notImport,
+      "join the preceding line",
+    );
+    // The file's own CRLF after the declaration.
+    const start = C_LINE_1.length + 2;
+    expectDiagnosed(
+      () =>
+        checkCode(
+          base.slice(0, start) + C_DECL + "\r\n" + base.slice(start),
+          "\r\n",
+        ),
+      notImport,
+      "ends in U+000D",
+    );
+  }
+});
+
+test("a pinned offset admits that offset alone", () => {
+  for (const t of ["\n", "\r\n", "\r"]) {
+    const base = cBase(t);
+    // At the file's end after the final terminator, and at offset 0: line
+    // starts both, so the unpinned reader accepts them — the pin does not.
+    for (const actual of [base + C_DECL + "\n", C_DECL + "\n" + base]) {
+      expect(checkCode(actual, t, false).declaration).toBe(C_DECL);
+      expectDiagnosed(
+        () => checkCode(actual, t),
+        "not at the start of line 2",
+        "the one line-start admissible offset",
+      );
+    }
+  }
+  // A misspelled declaration at the pinned offset is diagnosed as one,
+  // the pin named.
+  const base = cBase("\n");
+  const at = C_LINE_1.length + 1;
+  expectDiagnosed(
+    () => checkCode(base.slice(0, at) + C_DECL + ";\n" + base.slice(at), "\n"),
+    "is not the added import",
+    "statement terminator",
+    "pins the insertion at the start of line 2",
+  );
+});
+
+// T6.5-9's code arm: the import declarations head the file, so the start of
+// the line directly after each one is a line-start admissible offset, and
+// the test confines the run to those (`pinnedOffsets`).
+const H_LINE_2 = 'import Target, { O2 } from "./util.js"';
+const H_BASE = [
+  C_LINE_1,
+  H_LINE_2,
+  "const target = Target + O2;",
+  "function f() {",
+  "  T.y;",
+  "  O.w;",
+  "}",
+  "",
+].join("\n");
+const H_AFTER_IMPORTS = [
+  C_LINE_1.length + 1,
+  C_LINE_1.length + 1 + H_LINE_2.length + 1,
+];
+
+function checkHeaded(actual: string, confined = true) {
+  return assertAddedImportInsertion(
+    {
+      rel: "src/c.ts",
+      base: bytes(H_BASE),
+      actual: bytes(actual),
+      importerDir: "src",
+      expectedModule: "specs/target.xspec",
+      identifier: "T",
+      ...(confined
+        ? {
+            pinnedOffsets: {
+              offsets: H_AFTER_IMPORTS,
+              where: "the start of the line directly after an import",
+            },
+          }
+        : {}),
+    },
+    "self",
+  );
+}
+
+const insertAt = (base: string, at: number, run: string): string =>
+  base.slice(0, at) + run + base.slice(at);
+
+test("a confining offset set admits each of its offsets and those alone", () => {
+  // Directly after either import: accepted, at that offset.
+  for (const at of H_AFTER_IMPORTS) {
+    expect(checkHeaded(insertAt(H_BASE, at, C_DECL + "\n")).offset).toBe(at);
+  }
+  // Offset 0, the start of the line after the `const`, and the file's end:
+  // line starts all, so the unconfined reader accepts them — the set does
+  // not, and names its offsets with their lines.
+  const afterConst = H_BASE.indexOf("function f");
+  for (const at of [0, afterConst, H_BASE.length]) {
+    const actual = insertAt(H_BASE, at, C_DECL + "\n");
+    expect(checkHeaded(actual, false).offset).toBe(at);
+    expectDiagnosed(
+      () => checkHeaded(actual),
+      "not at the start of the line directly after an import",
+      `offsets ${String(H_AFTER_IMPORTS[0])} (line 2), ` +
+        `${String(H_AFTER_IMPORTS[1])} (line 3)`,
+      "the line-start admissible offsets the receiving file holds",
+    );
+  }
+  // A misspelled declaration at a confined offset is diagnosed as one, the
+  // set named.
+  expectDiagnosed(
+    () =>
+      checkHeaded(insertAt(H_BASE, H_AFTER_IMPORTS[1] ?? 0, C_DECL + ";\n")),
+    "is not the added import",
+    "statement terminator",
+    "confines the insertion to the start of the line directly after an import",
+  );
+});
+
+test("pinnedOffset and pinnedOffsets together, or an empty set, are harness defects", () => {
+  const actual = insertAt(H_BASE, H_AFTER_IMPORTS[0] ?? 0, C_DECL + "\n");
+  const common = {
+    rel: "src/c.ts",
+    base: bytes(H_BASE),
+    actual: bytes(actual),
+    importerDir: "src",
+    expectedModule: "specs/target.xspec",
+    identifier: "T",
+  };
+  expect(() =>
+    assertAddedImportInsertion(
+      {
+        ...common,
+        pinnedOffset: { offset: H_AFTER_IMPORTS[0] ?? 0, where: "line 2" },
+        pinnedOffsets: { offsets: H_AFTER_IMPORTS, where: "after an import" },
+      },
+      "self",
+    ),
+  ).toThrow(/never both/);
+  expect(() =>
+    assertAddedImportInsertion(
+      { ...common, pinnedOffsets: { offsets: [], where: "nowhere" } },
+      "self",
+    ),
+  ).toThrow(/names no offset/);
+});
+
+// The exact-declaration reader (T6.5-11): the added declaration's characters
+// are pinned byte-exactly by the caller — 6.5's TypeScript spellings with the
+// fresh identifiers substituted — and the line discipline is read as the
+// default-import reader reads it.
+const TS_BASE = [
+  "",
+  "export function f(): string {",
+  "  return txt(Tgt.y);",
+  "}",
+  "",
+].join("\n");
+const TS_DECL = 'import Tgt, { text as txt } from "../specs/target.xspec"';
+
+function checkExact(actual: string, declaration = TS_DECL) {
+  return assertExactDeclarationInsertion(
+    {
+      rel: "src/c.ts",
+      base: bytes(TS_BASE),
+      actual: bytes(actual),
+      declaration,
+    },
+    "self",
+  );
+}
+
+test("an exactly spelled declaration is accepted at a line-start offset, every admissible reading returned", () => {
+  // At the file's start.
+  expect(checkExact(TS_DECL + "\n" + TS_BASE)).toEqual([
+    { offset: 0, atLineStart: true },
+  ]);
+  // After the blank line: the run's terminator repeats the LF beside it, so
+  // the isolated run admits offsets 0 and 1, of which only 1 reads as the
+  // declaration followed by U+000A.
+  expect(checkExact("\n" + TS_DECL + "\n" + TS_BASE.slice(1))).toEqual([
+    { offset: 1, atLineStart: true },
+  ]);
+  // The `{ text }` spelling is the caller's to pin.
+  const textDecl = 'import { text } from "../specs/target.xspec"';
+  expect(checkExact(textDecl + "\n" + TS_BASE, textDecl)).toEqual([
+    { offset: 0, atLineStart: true },
+  ]);
+});
+
+test("the mid-line form is read with its preceding terminator", () => {
+  const head = "\nexport";
+  expect(
+    checkExact(head + "\n" + TS_DECL + "\n" + TS_BASE.slice(head.length)),
+  ).toEqual([{ offset: head.length, atLineStart: false }]);
+});
+
+test("the exact reader judges line starts by 3's terminators", () => {
+  // The same file with every terminator a lone CR: the offset after the
+  // leading lone CR is a line start, so the run is the declaration followed
+  // by U+000A alone.
+  const base = TS_BASE.split("\n").join("\r");
+  expect(
+    assertExactDeclarationInsertion(
+      {
+        rel: "src/c.ts",
+        base: bytes(base),
+        actual: bytes("\r" + TS_DECL + "\n" + base.slice(1)),
+        declaration: TS_DECL,
+      },
+      "self",
+    ),
+  ).toEqual([{ offset: 1, atLineStart: true }]);
+});
+
+test("every deviation from the exact declaration fails diagnosed", () => {
+  const notDecl = "is not the added declaration";
+  // Joined to the file with a `;`.
+  expectDiagnosed(
+    () => checkExact(TS_DECL + ";\n" + TS_BASE),
+    notDecl,
+    "must hold exactly the declaration",
+  );
+  // Single-quoted specifier.
+  expectDiagnosed(
+    () => checkExact(TS_DECL.replace(/"/g, "'") + "\n" + TS_BASE),
+    notDecl,
+  );
+  // A spurious blank line after the declaration.
+  expectDiagnosed(() => checkExact(TS_DECL + "\n\n" + TS_BASE), notDecl);
+  // CRLF terminator.
+  expectDiagnosed(() => checkExact(TS_DECL + "\r\n" + TS_BASE), notDecl);
+  // A second declaration kept beside the added one (an import not removed).
+  expectDiagnosed(
+    () =>
+      checkExact(
+        TS_DECL + "\n" + 'import O from "../specs/origin.xspec";\n' + TS_BASE,
+      ),
+    notDecl,
+  );
+  // Nothing added at all.
+  expectDiagnosed(() => checkExact(TS_BASE), "no bytes were inserted");
+  // Edits beyond one inserted run.
+  expectDiagnosed(
+    () => checkExact(TS_DECL + "\n" + TS_BASE.replace("}\n", "};\n")),
+    "more than one edit",
+  );
+});

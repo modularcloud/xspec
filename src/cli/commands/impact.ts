@@ -3,17 +3,30 @@
 //
 // Flow (SPEC 9, 6.3, 12.0, 13.3):
 //
-// 1. Resolve the baseline — reconstruct and validate the workspace content
-//    at the ref and compute the journal replay (workspace/baseline.ts). A
-//    baseline that cannot be read or reconstructed is a usage error, exit 2,
-//    and baseline resolution precedes source validation (SPEC 12.0): the
-//    usage error is reported even when the current sources also fail build
-//    validation.
-// 2. Refresh-on-read of the current workspace (SPEC 13.3, cli/prepare.ts):
-//    validation findings report and exit 1, nothing answered.
-// 3. Derive the SPEC 5.6 change categories (core/changes.ts) and the report
-//    content (core/impact.ts), and render it — human or `--json`, the same
-//    information (SPEC 12.0).
+// 0. Analyze the current workspace (cli/prepare.ts `analyzeGraphForRead`):
+//    the configuration search and the discovery of 7 precede every error
+//    consulting them (SPEC 12.0) — a configuration error, a discovery-level
+//    one included, exits 2 before the baseline is read (14.14), and a
+//    discovery read the environment refuses stops the command (14.25). The
+//    analysis loads the current journal, read once.
+// 1. Resolve the given baseline whole (workspace/baseline.ts
+//    `resolveBaseline`): first the current journal as the analysis loaded
+//    it — a journal error there (14.13) fails the resolution before any
+//    other cause can, a usage error carrying its stable code and concerned
+//    path (SPEC 6.3, 12.7) — then resolve the ref, list the tree at it,
+//    compute the journal prefix/replay, and parse and validate the
+//    baseline content as a workspace. Each failure — an unresolvable ref,
+//    a prefix/replay failure, and baseline content that cannot be parsed
+//    and validated among them — is a usage error, exit 2, preceding source
+//    validation (SPEC 6.3, 12.0): reported even when the current sources
+//    also fail build validation, nothing modified.
+// 2. The SPEC 13.3 gate over the current workspace (cli/prepare.ts,
+//    workspace/refresh.ts): validation findings report and exit 1, nothing
+//    answered, nothing modified.
+// 3. Commit the refresh write (a no-op when the store already matches),
+//    then derive the SPEC 5.6 change categories (core/changes.ts) and the
+//    report content (core/impact.ts), and render it — human or `--json`,
+//    the same information (SPEC 12.0).
 //
 // `impact` is informational: it exits 0 whether or not differences exist
 // (SPEC 9.3, 12.0). All output is byte-deterministic for identical input
@@ -30,11 +43,13 @@ import type {
 } from "../../core/impact.js";
 import { deriveImpactReport } from "../../core/impact.js";
 import { resolveBaseline } from "../../workspace/baseline.js";
+import { assessWorkspaceRead } from "../../workspace/refresh.js";
 import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
-import { prepareGraphForRead } from "../prepare.js";
-import { emitDocument, usageError } from "./common.js";
+import { analyzeGraphForRead } from "../prepare.js";
+import { emitFindingsReport } from "../report.js";
+import { emitDocument, reportBaselineFailure } from "./common.js";
 
 /** One impacted-code entry as JSON data (SPEC 9.3: location, the minimized
  * witness edge — sourced at the location — and the witness path). */
@@ -129,21 +144,47 @@ export async function impactCommand(
     throw new Error("xspec internal error: impact without --base");
   }
 
-  // SPEC 6.3/12.0: baseline resolution precedes source validation — an
-  // unresolvable baseline is a usage error (exit 2, stderr) even when the
-  // current sources also fail build validation.
-  const resolution = await resolveBaseline(context.workspace, ref);
+  // SPEC 12.0, 14.14, 14.25: analyze the current workspace first — the
+  // configuration search and the discovery of 7 precede every error
+  // consulting them, and a configuration error (a discovery-level one
+  // included) precedes every other error of exit class 2, a baseline's
+  // included: a configuration error exits 2, and a discovery read the
+  // environment refuses stops the command at that read (exit 2).
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return analyzed.exit;
+  }
+
+  // SPEC 6.3/12.0: the given baseline's resolution — the current journal
+  // first, then ref resolution, the journal prefix/replay, and the
+  // baseline content's parse and validation as a workspace — precedes
+  // source validation: a journal error in the current journal (the coded
+  // usage error of 6.3 and 12.7), an unresolvable ref, a replay failure,
+  // or baseline content that cannot be parsed and validated is a usage
+  // error (exit 2, stderr), nothing modified, even when the current
+  // sources also fail build validation.
+  const { analysis } = analyzed;
+  const resolution = await resolveBaseline(
+    context.workspace,
+    ref,
+    analysis.journal,
+  );
   if (!resolution.ok) {
-    return usageError(context.stderr, invocation.command, resolution.message);
+    return reportBaselineFailure(invocation, context, resolution);
   }
   const { baseline } = resolution;
 
-  // SPEC 13.3: refresh-on-read, then answer.
-  const prepared = await prepareGraphForRead(invocation, context);
-  if (!prepared.ok) {
-    return prepared.exit;
+  // SPEC 13.3: the gate — on a workspace failing `build`'s validations,
+  // the findings report alone, exit 1, nothing answered, nothing modified.
+  const assessed = await assessWorkspaceRead(context.workspace, analysis);
+  if (assessed.kind === "findings") {
+    emitFindingsReport(invocation.json, context.stdout, assessed.findings);
+    return 1;
   }
-  const { analysis } = prepared;
+
+  // SPEC 13.3: the one refresh write (a no-op when the store already
+  // matches), every check passed; then answer.
+  await assessed.commit();
 
   // SPEC 9: compare the current workspace graph against the baseline graph,
   // identities mapped through the journal (SPEC 6.3, 5.4) — each side's

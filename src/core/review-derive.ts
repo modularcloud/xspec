@@ -10,25 +10,41 @@
 // - replays the session's recorded `split` decompositions over the
 //   generated items (SPEC 10.5: a generated item whose kind and scope node
 //   are recorded as decomposed is never added back — its decomposition
-//   applies instead, recursively), rewriting every blocker reference to a
-//   decomposed item into all items of its decomposition;
+//   applies instead, recursively, over the children the strategy's node
+//   relation gives the scope node: in a baseline session SPEC 10.5's
+//   links, deleted children included), rewriting every blocker reference
+//   to a decomposed item into all items of its decomposition;
 // - merges the expanded generation into a session's existing items under
 //   the re-derivation rules of SPEC 10.5 (`deriveSessionItems`) — the same
-//   computation serves `create` (merge into an empty session) and the
-//   re-derivation an `updated` resolve triggers;
+//   computation serves `create` (merge into an empty session), the
+//   re-derivation an `updated` resolve triggers, and the one every `split`
+//   ends with (`rederiveSession`: replay, then merge);
 // - computes each item's recorded `baseline` and `current` states
-//   (SPEC 10.2, 10.4) and its text snapshots (SPEC 10.7): `current` via
-//   review-state.ts's `computeRecordedState` — byte-identical to what
-//   read-time invalidation recomputes, so a freshly derived item is never
-//   born invalidated — and `baseline` against the recorded-baseline graph,
+//   (SPEC 10.2, 10.4), its recorded context set (written with `current`,
+//   SPEC 10.4), and its text snapshots (SPEC 10.7): `current` via
+//   review-state.ts's `computeRecordedState` against the graph the
+//   derivation runs over — so read-time invalidation, judging each
+//   recorded node against that graph, never finds a freshly derived item
+//   invalidated — and `baseline` against the recorded-baseline graph,
 //   resolving nodes through their per-side identities so an identity
 //   reintroduced by a distinct node (SPEC 5.4) never leaks the wrong
 //   side's values;
 // - realizes the `split` decomposition (SPEC 10.7,
-//   `splitItemDecomposition`) and `resolve`'s status/state update with its
-//   `updated`-triggered re-derivation (SPEC 10.5, `resolveSessionItem`);
+//   `splitItemDecomposition`), recorded and then governing the
+//   re-derivation with which `split` ends (SPEC 10.5, 10.7), and
+//   `resolve`'s status, context, and state
+//   update — the item assigned its current context set and its state
+//   recorded over it (SPEC 10.4), its nodes' texts snapshotted in the
+//   graph it records against (SPEC 10.7: the states under which mutating
+//   subcommands derived or resolved the item; every snapshot holds, per
+//   node, only the text kinds the node's roles present, `textRoles`) —
+//   with its `updated`-triggered re-derivation (SPEC 10.5,
+//   `resolveSessionItem`), which an `updated` resolve runs first,
+//   assigning and recording once it is done, against the item as
+//   re-derived (SPEC 10.4);
 // - derives the generator-assigned current context sets reads feed to
-//   read-time invalidation (SPEC 10.4, `currentContextSets`);
+//   read-time invalidation and present as each item's `context`
+//   (SPEC 10.4, `currentContextSets`);
 // - orders items per the total order of SPEC 10.5 (`sortItemsPathBlocks`)
 //   and per the file-path-then-document order of SPEC 10.6 audit sessions
 //   and SPEC 10.7 coverage sessions (`sortItemsByFileThenDocument`), with
@@ -60,12 +76,13 @@
 // and generator content.
 
 import { compareBytes } from "./bytes.js";
-import type { RequirementNode, WorkspaceGraph } from "./graph.js";
+import type { WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
 import type { Journal } from "./journal.js";
 import { canonicalAt, encodeCanonicalIdentity } from "./journal.js";
 import type {
   ItemKind,
+  RecordedDecomposition,
   RecordedHashName,
   RecordedNodeState,
   RecordedState,
@@ -74,13 +91,20 @@ import type {
   ResolveStatus,
   ReviewItem,
   ReviewSession,
+  TextKind,
 } from "./review.js";
-import { allocateItemId, kindScopesCodeLocation } from "./review.js";
+import {
+  ItemIdAllocator,
+  contextTextKind,
+  kindScopesCodeLocation,
+  scopeTextKind,
+} from "./review.js";
 import type { ReferenceResolution, ReviewStateInputs } from "./review-state.js";
 import {
   canonicalKeyOfCurrent,
   computeRecordedState,
   resolveReference,
+  resolveReferenceAt,
   spellingOfReference,
 } from "./review-state.js";
 import type { WorkspaceTextModel } from "./text-model.js";
@@ -126,15 +150,16 @@ export interface GeneratedBlockerRef {
   /**
    * The reference's scope node as the emitting generator knows it — set by
    * generator-space emitters that build the reference from a change record
-   * (path-blocks' `parent-consistency` blockers), so the reference
-   * canonicalizes exactly as its target item's scope does: from the
-   * record's sidedness (`GeneratedNode.deleted`), never from graph
-   * occupancy of the `scope` spelling. A reference naming a current-graph
-   * node (audit's child blockers, the decomposition content sources' child
-   * references) may omit it and canonicalizes as a current spelling.
-   * Canonicalized output references never carry it —
-   * `canonicalizeGeneration` emits `{kind, scope}` only, `scope` a
-   * canonical reference.
+   * (path-blocks' `parent-consistency` blockers, and its decomposition
+   * content source's child references, a deleted child among them), so
+   * the reference canonicalizes exactly as its target item's scope does:
+   * from the record's sidedness (`GeneratedNode.deleted`), never from
+   * graph occupancy of the `scope` spelling. A reference naming a
+   * current-graph node (audit's child blockers, the audit and coverage
+   * decomposition content sources' child references) may omit it and
+   * canonicalizes as a current spelling. Canonicalized output references
+   * never carry it — `canonicalizeGeneration` emits `{kind, scope}` only,
+   * `scope` a canonical reference.
    */
   readonly scopeNode?: GeneratedNode;
 }
@@ -169,6 +194,60 @@ export function currentAncestorChain(
   return chain.reverse();
 }
 
+/**
+ * The node's children in the current graph, in document order — the
+ * children of a scope root in the strategies without a baseline (SPEC
+ * 10.7: in a baseline session deleted ones are included, 10.5 — that
+ * strategy's content source enumerates its own links), each with no
+ * baseline identity, as `currentAncestorChain`'s nodes. Empty for an
+ * absent node and for a leaf.
+ */
+export function currentChildren(
+  graph: WorkspaceGraph,
+  identity: string,
+): GeneratedNode[] {
+  const node = graph.requirementNode(identity);
+  if (node === undefined) return [];
+  return graph.childrenOf(node).map((child) => ({
+    identity: child.identity,
+    baselineIdentity: null,
+    deleted: false,
+  }));
+}
+
+/**
+ * The node's descendants in the current graph, in document order (a
+ * pre-order walk over the children, the node itself excluded) — the scope
+ * nodes beneath a `subtree-coherence` scope root in the strategies without
+ * a baseline (SPEC 10.6: "as scope the node and all its current
+ * descendants"; SPEC 10.7's per-child items, "as in 10.5 and 10.6"), each
+ * with no baseline identity, as `currentAncestorChain`'s nodes. Empty for
+ * an absent node and for a leaf.
+ */
+export function currentDescendants(
+  graph: WorkspaceGraph,
+  identity: string,
+): GeneratedNode[] {
+  const node = graph.requirementNode(identity);
+  if (node === undefined) return [];
+  const descendants: GeneratedNode[] = [];
+  const stack = [...graph.childrenOf(node)].reverse();
+  while (stack.length > 0) {
+    const next = stack.pop();
+    if (next === undefined) break;
+    descendants.push({
+      identity: next.identity,
+      baselineIdentity: null,
+      deleted: false,
+    });
+    const children = graph.childrenOf(next);
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      stack.push(children[index]);
+    }
+  }
+  return descendants;
+}
+
 /** One strategy-generated review item: the SPEC 10.2 content plus the
  * node-identity plumbing of `GeneratedNode`. */
 export interface GeneratedItem {
@@ -176,26 +255,40 @@ export interface GeneratedItem {
   /** The scope node — the subtree root for `subtree-coherence` (SPEC 10.5),
    * the scoped code location for `code-impact`. */
   readonly scope: GeneratedNode;
+  /**
+   * A `subtree-coherence` item's scope nodes beneath its scope root
+   * (SPEC 10.5: "scope: N and all descendants"; 10.6: "the node and all its
+   * current descendants"), as the strategy's node relation gives them — in
+   * a baseline session over the links of 10.5 (src/core/path-blocks.ts:
+   * present nodes under their current parents, deleted nodes under their
+   * baseline parents mapped through the journal), so a deleted descendant
+   * is among them and a node a journaled move took out of the subtree is
+   * not; in a session without a baseline the root's current descendants in
+   * document order (`currentDescendants`), none for a root that does not
+   * canonically resolve (SPEC 10.4). Every `subtree-coherence` item a
+   * generator or decomposition content source produces carries it, empty
+   * for a leaf: an item takes it as its stored scope wherever it is
+   * assigned the generated scope (`newItemFromGenerated`,
+   * `reassignedExistingItem`; SPEC 10.4: reads present `scope` as last
+   * assigned); the item's `current` state covers the scope root and the
+   * nodes so stored, at creation and at each resolve (review-state.ts
+   * `computeRecordedState`), and in a baseline session the
+   * recorded-baseline state's relevant hashes cover the scope root and
+   * these nodes (`computeBaselineRecordedState`). Omitted on every other
+   * kind, whose scope is its scope node alone.
+   */
+  readonly scopeDescendants?: readonly GeneratedNode[];
   readonly context: readonly GeneratedNode[];
   readonly origin: readonly GeneratedNode[];
   readonly reason: string;
-  /** The strategy-assigned blockers (SPEC 10.5, 10.6), as references. */
-  readonly blockedBy: readonly GeneratedBlockerRef[];
   /**
-   * SPEC 10.7: blockers a decomposition-produced item inherits from the
-   * decomposed original ("newly created decomposition items additionally
-   * inherit the original's `blockedBy`") — applied by the merge only when
-   * the item is newly created, so a reused existing item is untouched.
-   * Inheritance is the `split` subcommand's split-time rule — the caller's
-   * to inject from the stored original's `blockedBy` — never derived by the
-   * decomposition replay from the generated original's recomputed blockers:
-   * at re-derivation `blockedBy` is recomputed per the strategy's rules and
-   * 10.7 (SPEC 10.5 rule 5), and an audit original's recomputed blockers
-   * are its children's items — the decomposition's own items — so
-   * replay-time inheritance would make a newly authored child of a
-   * decomposed node block itself, contradicting SPEC 10.1's acyclicity.
+   * The strategy-assigned blockers (SPEC 10.5, 10.6), as references — for
+   * a decomposition item, the decomposition's (SPEC 10.7: a per-child
+   * item's are the ones its session's strategy gives a `subtree-coherence`
+   * item, the scope root's `parent-consistency` item's the child items),
+   * never the decomposed original's.
    */
-  readonly inheritedBlockedBy?: readonly GeneratedBlockerRef[];
+  readonly blockedBy: readonly GeneratedBlockerRef[];
   /**
    * `code-impact` only (SPEC 10.4, 9.2): every node targeted by the scoped
    * location's impact edges — the union over both sides, qualifying for
@@ -212,40 +305,82 @@ export interface GeneratedItem {
  * `subtree-coherence` items and the scope root's `parent-consistency`
  * item — is the strategy's to define (context, origin, reason), because it
  * mirrors what the strategy generates (SPEC 10.7: "its context the child's
- * ancestor chain, as in 10.5 and 10.6"; origin "the originating nodes
- * (5.6) within its scope and context — empty in an `audit` session").
+ * ancestor chain, as in 10.5 and 10.6"; "Each decomposition item's
+ * `origin` is, as in 10.5, the `changed` nodes in its scope — for a
+ * `parent-consistency` item, in its scope node's subtree — and is empty in
+ * an `audit` session"). The replay at re-derivation and `split` draw on the
+ * same source, so both assign the same content — over the same children:
+ * which nodes a scope root's children are is the strategy's node relation
+ * too (SPEC 10.7: "whose scope root has children (in a baseline session,
+ * deleted ones included, 10.5)"), so the source enumerates them
+ * (`scopeChildren`), and `split`'s childless refusal, its decomposition,
+ * and the re-derivation's replay all take them from it.
+ *
+ * Every scope argument names a stored node. In canonical space (the
+ * wrapper `canonicalizeGeneration` builds, which the replay and `split`
+ * consume) it is a stored canonical reference and the optional resolution
+ * arguments are omitted; the wrapper resolves the reference and hands the
+ * strategy's spelling-space source its derived current spelling plus:
+ * `scopeResolves`, whether the reference canonically resolves through the
+ * full journal (SPEC 10.4) — false exactly when the spelling was
+ * recaptured for a distinct chain — and, in a baseline session,
+ * `scopeBaselineIdentity`, the identity the referenced node bore at the
+ * recorded baseline when the reference resolves as of the baseline
+ * journal prefix (review-state.ts `resolveReferenceAt`; SPEC 6.3), null
+ * when it does not (a node that entered the workspace since). A
+ * stored-spelling record lookup thus consults exactly the side the
+ * reference names — a present node by its current spelling only while the
+ * reference resolves, a deleted node by its baseline identity — never
+ * current-first across both by spelling alone (a dangling stored scope
+ * must never alias the node that recaptured its spelling, and a deleted
+ * node's resolving reference names no present node). A strategy without
+ * per-side records (audit, coverage) may ignore `scopeBaselineIdentity`.
  */
 export interface DecompositionContentSource {
   /**
+   * The scope root's children under the strategy's node relation
+   * (SPEC 10.7), in a deterministic order: a node per child, carrying its
+   * sidedness (`GeneratedNode.deleted`) and baseline identity, so each
+   * canonicalizes as the generator knows it. In a baseline session they
+   * follow SPEC 10.5's links — the root's present children and the
+   * deleted nodes whose baseline parent it is, so a deleted root's
+   * children are the deleted nodes linked beneath it; in a session
+   * without a baseline, the root's current children. Empty for a root
+   * without any — `split`'s childless refusal (SPEC 10.7). Spelling-space
+   * nodes from the strategy's source, canonical references from the
+   * wrapper.
+   */
+  scopeChildren(
+    scopeIdentity: string,
+    scopeResolves?: boolean,
+    scopeBaselineIdentity?: string | null,
+  ): readonly GeneratedNode[];
+  /**
    * The `subtree-coherence` item for a child subtree rooted at
-   * `scopeIdentity` (a stored identity). `scopeResolves` is the
-   * resolution sidedness `canonicalizeGeneration`'s wrapper passes the
-   * strategy's spelling-space source: whether the requested scope
-   * reference canonically resolves through the journal (SPEC 10.4) —
-   * false exactly when the spelling was recaptured for a distinct chain —
-   * so a stored-spelling record lookup consults the side the reference
-   * actually names, never current-first across both (a dangling stored
-   * scope must never alias the recapturing node). Canonical-space
-   * consumers (the decomposition replay, `split`) omit it; a strategy
-   * without per-side records (audit, coverage) may ignore it.
+   * `scopeIdentity` (SPEC 10.7: its context the child's ancestor chain,
+   * as in 10.5 and 10.6). The resolution arguments as in the interface
+   * doc.
    */
   subtreeCoherenceItem(
     scopeIdentity: string,
     scopeResolves?: boolean,
+    scopeBaselineIdentity?: string | null,
   ): GeneratedItem;
   /**
    * The decomposed scope root's `parent-consistency` item (SPEC 10.7):
-   * scope `scopeIdentity`, context the child subtrees (`childIdentities`,
-   * the scope root's current child nodes in document order — enumerated
-   * from the current graph, so they carry no resolution flag). `blockedBy`
-   * MUST reference the child items — the replay rewrites references into
-   * decomposed children recursively. `scopeResolves` as on
-   * `subtreeCoherenceItem`.
+   * scope `scopeIdentity`, context the child subtrees — `children`,
+   * exactly the nodes `scopeChildren` gave for the same scope (the wrapper
+   * hands the strategy's source each one's spelling, sidedness, and
+   * baseline identity). `blockedBy` MUST reference the child items, each
+   * reference canonicalizing as its child's item's scope does — the
+   * replay rewrites references into decomposed children recursively. The
+   * resolution arguments as in the interface doc.
    */
   splitParentConsistencyItem(
     scopeIdentity: string,
-    childIdentities: readonly string[],
+    children: readonly GeneratedNode[],
     scopeResolves?: boolean,
+    scopeBaselineIdentity?: string | null,
   ): GeneratedItem;
 }
 
@@ -332,13 +467,15 @@ export function canonicalizeGeneration(
   // A blocker reference canonicalizes exactly as its target item's scope
   // does — from the emitting record's sidedness, carried on
   // `GeneratedBlockerRef.scopeNode` by the generator-space emitters that
-  // build references from change records — never by resolving the scope
-  // spelling through graph occupancy: a spelling vacated by a manual
-  // deletion and recaptured by a journaled entry is ambiguous, sidedness
-  // is not (module header). A reference without `scopeNode` names a
-  // current-graph node (audit's child blockers, the decomposition content
-  // sources' child references — decomposition is per *current* child
-  // subtree, SPEC 10.5, 10.7) and canonicalizes as a current spelling.
+  // build references from change records (path-blocks' `parent-consistency`
+  // blockers and its decomposition child references, a deleted child's
+  // included) — never by resolving the scope spelling through graph
+  // occupancy: a spelling vacated by a manual deletion and recaptured by a
+  // journaled entry is ambiguous, sidedness is not (module header). A
+  // reference without `scopeNode` names a current-graph node (audit's
+  // child blockers, the audit and coverage decomposition content sources'
+  // child references — their children are current ones, SPEC 10.6, 10.7)
+  // and canonicalizes as a current spelling.
   // Because every reference is built from the same record — or the same
   // current-graph node — as its target item's scope, reference and scope
   // canonicalize identically by construction, so every blocker reference
@@ -357,13 +494,10 @@ export function canonicalizeGeneration(
   const canonicalizeItem = (item: GeneratedItem): GeneratedItem => ({
     ...item,
     scope: canonicalNode(item.scope),
+    scopeDescendants: item.scopeDescendants?.map(canonicalNode),
     context: item.context.map(canonicalNode),
     origin: item.origin.map(canonicalNode),
     blockedBy: item.blockedBy.map((ref) => ({
-      kind: ref.kind,
-      scope: refKey(ref),
-    })),
-    inheritedBlockedBy: item.inheritedBlockedBy?.map((ref) => ({
       kind: ref.kind,
       scope: refKey(ref),
     })),
@@ -372,22 +506,52 @@ export function canonicalizeGeneration(
 
   const items = run.items.map(canonicalizeItem);
 
-  // The decomposition content source in reference space. An input scope
-  // reference is resolved (`resolveReference`), and the strategy's
-  // spelling-space builder receives both the derived spelling and whether
-  // the reference canonically resolves (SPEC 10.4), so its stored-spelling
-  // record lookups are resolution-sided — a dangling reference, whose
-  // spelling may be borne by the distinct node that recaptured it, never
-  // aliases that node (module header). Child identities are enumerated
-  // from the current graph (`expandDecompositions`) and decode to
-  // spellings alone. The wrapper is authoritative for the produced item's
-  // canonical scope: it carries exactly the requested reference — never a
-  // decode-then-recanonicalize round trip, which could land on a
-  // recapturing chain — because `expandDecompositions` memoizes and
-  // matches by that reference, which the wrapper already knows.
+  // The decomposition content source in reference space
+  // (DecompositionContentSource doc). An input scope reference is resolved
+  // on each side — through the full journal (`resolveReference`) and, in a
+  // baseline session, as of the baseline journal prefix
+  // (`resolveReferenceAt`) — and the strategy's spelling-space builder
+  // receives the derived spelling, whether the reference canonically
+  // resolves (SPEC 10.4), and the identity the referenced node bore at the
+  // recorded baseline, so its stored-spelling record lookups are
+  // resolution-sided: a dangling reference, whose spelling may be borne by
+  // the distinct node that recaptured it, never aliases that node, and a
+  // deleted node's reference reaches its baseline-side record (module
+  // header). The children the builder enumerates (`scopeChildren`)
+  // canonicalize from their sidedness, as every generated node does, and
+  // decode back to spellings — sidedness and baseline identity kept — for
+  // the `parent-consistency` item they frame. The wrapper is authoritative
+  // for the produced item's canonical scope: it carries exactly the
+  // requested reference — never a decode-then-recanonicalize round trip,
+  // which could land on a recapturing chain — because
+  // `expandDecompositions` memoizes and matches by that reference, which
+  // the wrapper already knows.
   const inner = run.contentSource;
-  const decode = (reference: string): string =>
-    spellingOfReference(journal, reference);
+  const { baselineJournalLength } = inputs;
+  const resolveScope = (
+    reference: string,
+  ): {
+    readonly spelling: string;
+    readonly resolves: boolean;
+    readonly baselineIdentity: string | null;
+  } => {
+    const resolution = resolveReference(journal, reference);
+    let baselineIdentity: string | null = null;
+    if (baselineJournalLength !== undefined) {
+      const atBaseline = resolveReferenceAt(
+        journal,
+        baselineJournalLength,
+        reference,
+      );
+      if (atBaseline.resolves) baselineIdentity = atBaseline.spelling;
+    }
+    return { ...resolution, baselineIdentity };
+  };
+  const decodeNode = (node: GeneratedNode): GeneratedNode => ({
+    identity: spellingOfReference(journal, node.identity),
+    baselineIdentity: node.baselineIdentity,
+    deleted: node.deleted,
+  });
   const withScopeReference = (
     item: GeneratedItem,
     reference: string,
@@ -396,26 +560,34 @@ export function canonicalizeGeneration(
     scope: { ...item.scope, identity: reference },
   });
   const contentSource: DecompositionContentSource = {
+    scopeChildren: (scopeReference): readonly GeneratedNode[] => {
+      const scope = resolveScope(scopeReference);
+      return inner
+        .scopeChildren(scope.spelling, scope.resolves, scope.baselineIdentity)
+        .map(canonicalNode);
+    },
     subtreeCoherenceItem: (scopeReference): GeneratedItem => {
-      const resolution = resolveReference(journal, scopeReference);
+      const scope = resolveScope(scopeReference);
       return withScopeReference(
         canonicalizeItem(
-          inner.subtreeCoherenceItem(resolution.spelling, resolution.resolves),
+          inner.subtreeCoherenceItem(
+            scope.spelling,
+            scope.resolves,
+            scope.baselineIdentity,
+          ),
         ),
         scopeReference,
       );
     },
-    splitParentConsistencyItem: (
-      scopeReference,
-      childReferences,
-    ): GeneratedItem => {
-      const resolution = resolveReference(journal, scopeReference);
+    splitParentConsistencyItem: (scopeReference, children): GeneratedItem => {
+      const scope = resolveScope(scopeReference);
       return withScopeReference(
         canonicalizeItem(
           inner.splitParentConsistencyItem(
-            resolution.spelling,
-            childReferences.map(decode),
-            resolution.resolves,
+            scope.spelling,
+            children.map(decodeNode),
+            scope.resolves,
+            scope.baselineIdentity,
           ),
         ),
         scopeReference,
@@ -471,27 +643,29 @@ function kindScopeKey(kind: ItemKind, scope: string): string {
  * Replay the session's recorded decompositions over a generation
  * (SPEC 10.5): a generated item whose kind and scope node are recorded as
  * decomposed by `split` (SPEC 10.7) is never added back — it is replaced
- * by one `subtree-coherence` item per current child subtree of the scope
- * node plus the scope node's `parent-consistency` item, recursively (a
- * replacement child item that is itself decomposed is replaced in turn).
- * Every blocker reference to a decomposed item is replaced by references
- * to all items of its decomposition (rule 5), and a kind and scope node
- * produced more than once yields a single item (rule 1's dedup, applied
- * here so the expansion output is the one-item-per-kind-and-scope set the
- * merge consumes; SPEC 10.1).
+ * by one `subtree-coherence` item per child subtree the scope node has at
+ * the re-derivation plus the scope node's `parent-consistency` item,
+ * recursively (a replacement child item that is itself decomposed is
+ * replaced in turn). The children are the strategy's
+ * (`DecompositionContentSource.scopeChildren`): in a baseline session
+ * over SPEC 10.5's links, deleted children included ("ancestors,
+ * descendants, children, and subtrees — in decompositions (10.7) too —
+ * follow these links"), else the current ones. Every blocker reference to
+ * a decomposed item is replaced by references to all items of its
+ * decomposition (rule 5), and a kind and scope node produced more than
+ * once yields a single item (rule 1's dedup, applied here so the
+ * expansion output is the one-item-per-kind-and-scope set the merge
+ * consumes; SPEC 10.1).
  *
  * `decomposedScopes` holds the recorded decompositions' scope references
  * (all recorded decompositions are `subtree-coherence`, SPEC 10.7), as
  * stored canonical references; `generated` and `source` are
- * canonical-space (`canonicalizeGeneration`). A decomposed scope resolves
- * to a current graph node for child enumeration through its derived
- * spelling (`journal`).
+ * canonical-space (`canonicalizeGeneration`), so the source resolves each
+ * scope reference on both sides itself.
  */
 export function expandDecompositions(
   generated: readonly GeneratedItem[],
   decomposedScopes: readonly string[],
-  graph: WorkspaceGraph,
-  journal: Journal,
   source: DecompositionContentSource,
 ): GeneratedItem[] {
   const decomposed = new Set(decomposedScopes);
@@ -502,8 +676,8 @@ export function expandDecompositions(
   // memoized so nested decompositions expand once (SPEC 10.5: "recursively").
   // The replacement items carry the content and blockers the strategy's
   // rules and 10.7 assign them; nothing is inherited from the replaced
-  // generated item — split-time inheritance is the `split` subcommand's own
-  // (`GeneratedItem.inheritedBlockedBy`).
+  // item (SPEC 10.7: a per-child item's `blockedBy` is the one its
+  // session's strategy gives a `subtree-coherence` item).
   const expansionMemo = new Map<string, readonly GeneratedItem[]>();
   const expanding = new Set<string>();
 
@@ -518,26 +692,19 @@ export function expandDecompositions(
     }
     expanding.add(scopeIdentity);
     try {
-      // SPEC 10.5: one subtree-coherence item per *current* child subtree
-      // of the scope node — an absent scope node (10.4: deleted, or its
-      // identity ceased to resolve through the journal) has no current
-      // children, so a dangling stored scope never enumerates the distinct
-      // node that recaptured its spelling. A canonically resolving scope
-      // reaches its graph node through its derived spelling; the children,
-      // current-graph nodes, canonicalize against the full journal (module
-      // header).
-      const resolution = resolveReference(journal, scopeIdentity);
-      const scopeNode = resolution.resolves
-        ? graph.requirementNode(resolution.spelling)
-        : undefined;
-      const children: RequirementNode[] =
-        scopeNode === undefined ? [] : graph.childrenOf(scopeNode);
-      const childReferences = children.map((child) =>
-        canonicalKeyOfCurrent(journal, child.identity),
-      );
+      // SPEC 10.5: one subtree-coherence item per child subtree the scope
+      // node has at the re-derivation — the strategy's children
+      // (`scopeChildren`): in a baseline session over the links of 10.5,
+      // a deleted child under its baseline parent, each child's reference
+      // canonicalized from its sidedness (module header); otherwise the
+      // current children, of which an absent scope node (10.4: deleted, or
+      // its identity ceased to resolve through the journal) has none, so a
+      // dangling stored scope never enumerates the distinct node that
+      // recaptured its spelling.
+      const children = source.scopeChildren(scopeIdentity);
       const items: GeneratedItem[] = [];
-      for (const childReference of childReferences) {
-        const childItem = source.subtreeCoherenceItem(childReference);
+      for (const child of children) {
+        const childItem = source.subtreeCoherenceItem(child.identity);
         if (isDecomposed(childItem.kind, childItem.scope.identity)) {
           // SPEC 10.5: the decomposition applies recursively.
           items.push(...expandScope(childItem.scope.identity));
@@ -545,9 +712,7 @@ export function expandDecompositions(
           items.push(childItem);
         }
       }
-      items.push(
-        source.splitParentConsistencyItem(scopeIdentity, childReferences),
-      );
+      items.push(source.splitParentConsistencyItem(scopeIdentity, children));
       expansionMemo.set(scopeIdentity, items);
       return items;
     } finally {
@@ -574,10 +739,6 @@ export function expandDecompositions(
     expanded[existingIndex] = {
       ...existing,
       blockedBy: mergeRefs(existing.blockedBy, item.blockedBy),
-      inheritedBlockedBy: mergeRefs(
-        existing.inheritedBlockedBy ?? [],
-        item.inheritedBlockedBy ?? [],
-      ),
     };
   };
   for (const item of generated) {
@@ -618,10 +779,6 @@ export function expandDecompositions(
   return expanded.map((item) => ({
     ...item,
     blockedBy: rewriteRefs(item.blockedBy),
-    inheritedBlockedBy:
-      item.inheritedBlockedBy === undefined
-        ? undefined
-        : rewriteRefs(item.inheritedBlockedBy),
   }));
 }
 
@@ -680,20 +837,30 @@ export interface BaselineDerivationSide {
   readonly journalLength: number;
 }
 
-/** `ReviewStateInputs` (review-state.ts) over a current side. */
+/** Per current side, its `ReviewStateInputs`. */
+const STATE_INPUTS = new WeakMap<CurrentDerivationSide, ReviewStateInputs>();
+
+/** `ReviewStateInputs` (review-state.ts) over a current side — one object
+ * per side, so the state computation's per-graph-state memo spans every
+ * item a derivation records against it. */
 export function reviewStateInputs(
   current: CurrentDerivationSide,
 ): ReviewStateInputs {
-  const impactTargets = current.impactTargets;
-  return {
-    graph: current.graph,
-    hashes: current.hashes,
-    journal: current.journal,
-    impactTargets:
-      impactTargets === undefined
-        ? undefined
-        : (location): readonly string[] => impactTargets.get(location) ?? [],
-  };
+  let inputs = STATE_INPUTS.get(current);
+  if (inputs === undefined) {
+    const impactTargets = current.impactTargets;
+    inputs = {
+      graph: current.graph,
+      hashes: current.hashes,
+      journal: current.journal,
+      impactTargets:
+        impactTargets === undefined
+          ? undefined
+          : (location): readonly string[] => impactTargets.get(location) ?? [],
+    };
+    STATE_INPUTS.set(current, inputs);
+  }
+  return inputs;
 }
 
 // ---------------------------------------------------------------------------
@@ -708,10 +875,12 @@ export function reviewStateInputs(
  * `GeneratedNode.baselineIdentity` (module header), never by looking a
  * stored reference up in the baseline graph, so a reintroduced identity
  * (SPEC 5.4) cannot alias a distinct baseline node. Keys are stored
- * canonical references: a baseline-side subtree member's key is its
- * canonical identity as of the baseline journal prefix (SPEC 5.4 — never
- * its forward-mapped spelling canonicalized against the full journal,
- * module header).
+ * canonical references, the generated nodes' own
+ * (`canonicalizeGeneration`): a deleted node's key is its canonical
+ * identity as of the baseline journal prefix (SPEC 5.4 — never its
+ * forward-mapped spelling canonicalized against the full journal, module
+ * header). A `subtree-coherence` item's scope nodes are the generator's
+ * (`GeneratedItem.scopeDescendants`, over SPEC 10.5's links).
  */
 export function computeBaselineRecordedState(
   item: GeneratedItem,
@@ -753,37 +922,25 @@ export function computeBaselineRecordedState(
   switch (item.kind) {
     case "subtree-coherence": {
       // SPEC 10.4: subtreeHash and metadataHash of each scope node — the
-      // root and all its descendants in the baseline graph (SPEC 10.5); an
-      // absent root contributes itself alone.
-      const rootIdentity = item.scope.baselineIdentity;
-      const root =
-        rootIdentity === null
-          ? undefined
-          : baseline.graph.requirementNode(rootIdentity);
-      if (root === undefined) {
-        recordNode(item.scope, "subtreeHash", "metadataHash");
-        break;
-      }
-      const stack: RequirementNode[] = [root];
-      while (stack.length > 0) {
-        const node = stack.pop();
-        if (node === undefined) break;
-        record(
-          encodeCanonicalIdentity(
-            canonicalAt(
-              baseline.journal,
-              baseline.journalLength,
-              node.identity,
-            ),
-          ),
-          node.identity,
-          "subtreeHash",
-          "metadataHash",
+      // root and all its descendants over the links of SPEC 10.5, which
+      // the generator supplies (`GeneratedItem.scopeDescendants`): a node
+      // set alone, so each node's values are its own in the baseline graph
+      // (SPEC 10.5: hashes keep their definitions) — a node moved into the
+      // subtree since the baseline holds its baseline values, one added
+      // since is absent there (the explicit absent marker), and one moved
+      // out of the subtree is no scope node.
+      const descendants = item.scopeDescendants;
+      if (descendants === undefined) {
+        throw new Error(
+          `xspec internal error: the recorded-baseline state of a ` +
+            `subtree-coherence item (scope ${item.scope.identity}) needs ` +
+            `its scope nodes beneath the root (SPEC 10.4, 10.5), but the ` +
+            `generator supplied none`,
         );
-        const children = baseline.graph.childrenOf(node);
-        for (let index = children.length - 1; index >= 0; index -= 1) {
-          stack.push(children[index]);
-        }
+      }
+      recordNode(item.scope, "subtreeHash", "metadataHash");
+      for (const node of descendants) {
+        recordNode(node, "subtreeHash", "metadataHash");
       }
       break;
     }
@@ -869,60 +1026,130 @@ function baselineNodeState(
 // Text snapshots (SPEC 10.2, 10.7)
 // ---------------------------------------------------------------------------
 
-/** The distinct requirement nodes of an item's scope, context, and origin
- * — the nodes whose texts the payload rule presents (SPEC 10.7); a
- * `code-impact` scope is a code location with no text value. */
-function textBearingNodes(item: GeneratedItem): GeneratedNode[] {
-  const nodes: GeneratedNode[] = [];
-  const seen = new Set<string>();
-  const push = (node: GeneratedNode): void => {
-    if (!seen.has(node.identity)) {
-      seen.add(node.identity);
-      nodes.push(node);
-    }
-  };
-  if (!kindScopesCodeLocation(item.kind)) push(item.scope);
-  for (const node of item.context) push(node);
-  for (const node of item.origin) push(node);
-  return nodes;
+/** One node's text role in an item: the node and the text kinds its roles
+ * there present (SPEC 10.7). */
+interface TextRole<N> {
+  readonly node: N;
+  readonly kinds: ReadonlySet<TextKind>;
 }
 
-/** A node's own and subtree text (SPEC 1.6, fully expanded) from a graph
- * and its text model — null when the identity resolves to no node there. */
+/**
+ * SPEC 10.7: the requirement nodes whose texts an item's payload presents,
+ * each with the text kinds its roles present, keyed by stored reference
+ * (`referenceOf`) in first-role order — the scope root its kind's scope
+ * text (`scopeTextKind`: subtree text for `subtree-coherence` and
+ * `uncovered-requirement`, own text for the consistency kinds, none for a
+ * `code-impact` scope, a code location with no text value), each context
+ * node its kind's context text (`contextTextKind`: own text along an
+ * ancestor chain, subtree text otherwise), and each node of `origin` its
+ * own text, an origin's before side (its after side is the current
+ * graph's, so derivation-time snapshots pass no origin). A node holding
+ * several roles takes each role's kind; for every kind the scope root and
+ * the context nodes are disjoint, so within one item a node's kind as
+ * scope root or context node is fixed by its role. The scope nodes beneath
+ * a root present no text, and no ancestor's subtree text is presented, so
+ * a snapshot never holds both kinds of every node.
+ */
+function textRoles<N>(
+  kind: ItemKind,
+  scope: N,
+  context: readonly N[],
+  origin: readonly N[],
+  referenceOf: (node: N) => string,
+): ReadonlyMap<string, TextRole<N>> {
+  const roles = new Map<string, { node: N; kinds: Set<TextKind> }>();
+  const add = (node: N, textKind: TextKind): void => {
+    const reference = referenceOf(node);
+    let role = roles.get(reference);
+    if (role === undefined) {
+      roles.set(reference, (role = { node, kinds: new Set() }));
+    }
+    role.kinds.add(textKind);
+  };
+  const scopeKind = scopeTextKind(kind);
+  if (scopeKind !== null) add(scope, scopeKind);
+  const contextKind = contextTextKind(kind);
+  for (const node of context) add(node, contextKind);
+  for (const node of origin) add(node, "ownText");
+  return roles;
+}
+
+/** Per text model, `nodeTexts`' values by identity and kinds. */
+const NODE_TEXTS = new WeakMap<
+  WorkspaceTextModel,
+  Map<string, Map<string, RecordedTexts | null>>
+>();
+
+/** A node's texts of the given kinds (SPEC 1.6, fully expanded) from a
+ * graph and its text model — null when the identity resolves to no node
+ * there. Computed once per graph state, identity, and kinds — the text
+ * model is one graph state's, immutable — so every item snapshotting a
+ * node in one state shares one value: an n-deep chain's audit items
+ * snapshot O(n²) ancestor texts of n + 1 nodes. */
 function nodeTexts(
   graph: WorkspaceGraph,
   textModel: WorkspaceTextModel,
   identity: string,
+  kinds: ReadonlySet<TextKind>,
 ): RecordedTexts | null {
+  let byIdentity = NODE_TEXTS.get(textModel);
+  if (byIdentity === undefined) {
+    byIdentity = new Map();
+    NODE_TEXTS.set(textModel, byIdentity);
+  }
+  let byKinds = byIdentity.get(identity);
+  if (byKinds === undefined) {
+    byKinds = new Map();
+    byIdentity.set(identity, byKinds);
+  }
+  const key =
+    (kinds.has("ownText") ? "own" : "") +
+    (kinds.has("subtreeText") ? " subtree" : "");
+  const known = byKinds.get(key);
+  if (known !== undefined) return known;
   const node = graph.requirementNode(identity);
-  if (node === undefined) return null;
-  return {
-    ownText: textModel.ownText(node.document, node.section),
-    subtreeText: textModel.subtreeText(node.document, node.section),
-  };
+  let texts: { ownText?: string; subtreeText?: string } | null = null;
+  if (node !== undefined) {
+    texts = {};
+    if (kinds.has("ownText")) {
+      texts.ownText = textModel.ownText(node.document, node.section);
+    }
+    if (kinds.has("subtreeText")) {
+      texts.subtreeText = textModel.subtreeText(node.document, node.section);
+    }
+  }
+  byKinds.set(key, texts);
+  return texts;
 }
 
-/** A stored reference's texts in the current graph — null unless the
- * reference canonically resolves to a present node (SPEC 10.4): text
- * snapshots record only nodes present per 10.4, so a dangling reference
- * never captures the text of the distinct node that recaptured its
- * spelling. */
+/** A stored reference's texts of the given kinds in the current graph —
+ * null unless the reference canonically resolves to a present node (SPEC
+ * 10.4): text snapshots record only nodes present per 10.4, so a dangling
+ * reference never captures the text of the distinct node that recaptured
+ * its spelling. */
 function currentNodeTexts(
   current: CurrentDerivationSide,
   reference: string,
+  kinds: ReadonlySet<TextKind>,
 ): RecordedTexts | null {
   const resolution = resolveReference(current.journal, reference);
   return resolution.resolves
-    ? nodeTexts(current.graph, current.textModel, resolution.spelling)
+    ? nodeTexts(current.graph, current.textModel, resolution.spelling, kinds)
     : null;
 }
 
 /**
- * SPEC 10.7: the item's baseline text snapshots — the origin before-texts
- * and absent-node fallbacks come from the item's `baseline` state, so each
- * node present in the baseline graph records its texts there, keyed by
- * stored identity. Sessions without a baseline record the entry-moment
- * current texts (their `baseline` state is the current graph's, SPEC 10.2).
+ * SPEC 10.7: the item's baseline text snapshots — absent-node fallbacks,
+ * and a session without a baseline's origin before-texts, come from the
+ * item's baseline state, so each of the item's nodes present in the
+ * baseline graph records there the kinds its roles present (`textRoles`,
+ * origins included: the scope root's scope text, each context node's
+ * context text, each origin node's own text), keyed by stored identity.
+ * Sessions without a baseline record the entry-moment current texts (their
+ * `baseline` state is the current graph's, SPEC 10.2); a baseline
+ * session's reads take origin before-texts from the reconstructed
+ * recorded-baseline graph (src/cli/commands/review-session.ts
+ * `originBeforeSide`).
  */
 function baselineTextTable(
   item: GeneratedItem,
@@ -930,56 +1157,150 @@ function baselineTextTable(
   current: CurrentDerivationSide,
 ): RecordedTextTable {
   const table: Record<string, RecordedTexts> = {};
-  for (const node of textBearingNodes(item)) {
+  const roles = textRoles(
+    item.kind,
+    item.scope,
+    item.context,
+    item.origin,
+    (node) => node.identity,
+  );
+  for (const [reference, { node, kinds }] of roles) {
     const texts =
       baseline === undefined
-        ? currentNodeTexts(current, node.identity)
+        ? currentNodeTexts(current, reference, kinds)
         : node.baselineIdentity === null
           ? null
           : nodeTexts(
               baseline.graph,
               baseline.textModel,
               node.baselineIdentity,
+              kinds,
             );
     if (texts !== null) {
-      table[node.identity] = texts;
+      table[reference] = texts;
     }
   }
   return table;
 }
 
-/** SPEC 10.7: the derivation-time text snapshots — every item node present
- * per 10.4 (canonically resolving, in the current graph) records its
- * texts, rewritten per node at each derivation that finds it present and
- * never removed (`previous` entries for nodes absent now are kept). */
+/**
+ * SPEC 10.7: the mutating-state text snapshots (`ReviewItem.derivedTexts`)
+ * — an absent node's text is its value in the most recent graph state that
+ * contained it, among the item's baseline state and "the states under which
+ * mutating subcommands (13.5) derived or resolved the item with that node
+ * among its nodes". Each such state records, for every node of `roles`
+ * present per 10.4 (canonically resolving, in the current graph), the
+ * kinds its role presents there: an entry is rewritten per node at each
+ * derivation or resolve that finds the node present among the item's
+ * nodes and otherwise kept (`previous` entries for nodes absent now, or no
+ * longer the item's, stay), so the table always holds each node's most
+ * recent such state — save where the item's `baselineTexts` entry for the
+ * node holds that state's values: the state then records no entry and an
+ * earlier one is removed, the read taking the same values there
+ * (src/cli/commands/review-session.ts `absentNodeText`), so the session
+ * stores each unchanged text once.
+ */
+function snapshotCurrentTexts(
+  roles: ReadonlyMap<string, TextRole<unknown>>,
+  current: CurrentDerivationSide,
+  previous: RecordedTextTable,
+  baselineTexts: RecordedTextTable,
+): RecordedTextTable {
+  const table: Record<string, RecordedTexts> = { ...previous };
+  for (const [reference, { kinds }] of roles) {
+    const texts = currentNodeTexts(current, reference, kinds);
+    if (texts === null) {
+      continue;
+    }
+    if (holdsTexts(baselineTexts[reference], texts)) {
+      delete table[reference];
+    } else {
+      table[reference] = texts;
+    }
+  }
+  return table;
+}
+
+/** Whether `recorded` holds every text `texts` holds, with the same
+ * value. */
+function holdsTexts(
+  recorded: RecordedTexts | undefined,
+  texts: RecordedTexts,
+): boolean {
+  return (
+    recorded !== undefined &&
+    (texts.ownText === undefined || recorded.ownText === texts.ownText) &&
+    (texts.subtreeText === undefined ||
+      recorded.subtreeText === texts.subtreeText)
+  );
+}
+
+/** SPEC 10.7: the derivation-time text snapshots — a derivation's state
+ * (`create`, a re-derivation, a `split`) over the generated item's scope
+ * root and context nodes, by role (`textRoles`, `snapshotCurrentTexts`
+ * beside the item's `baselineTexts`). */
 function derivedTextTable(
   item: GeneratedItem,
   current: CurrentDerivationSide,
   previous: RecordedTextTable,
+  baselineTexts: RecordedTextTable,
 ): RecordedTextTable {
-  const table: Record<string, RecordedTexts> = { ...previous };
-  for (const node of textBearingNodes(item)) {
-    const texts = currentNodeTexts(current, node.identity);
-    if (texts !== null) {
-      table[node.identity] = texts;
-    }
-  }
-  return table;
+  return snapshotCurrentTexts(
+    textRoles(item.kind, item.scope, item.context, [], (node) => node.identity),
+    current,
+    previous,
+    baselineTexts,
+  );
+}
+
+/**
+ * SPEC 10.7: the resolve-time text snapshots — a resolve's state is among
+ * "the states under which mutating subcommands (13.5) … resolved the item
+ * with that node among its nodes", so the item as the resolve assigns and
+ * records it (SPEC 10.4: its scope as last assigned, its context the
+ * current context set the resolve assigns) snapshots, by role
+ * (`textRoles`), the texts of its scope root (none for a code location,
+ * which has no text value) and context nodes present in the graph the
+ * resolve records against (`snapshotCurrentTexts`), exactly as a
+ * derivation does.
+ */
+function resolvedTextTable(
+  item: ReviewItem,
+  current: CurrentDerivationSide,
+): RecordedTextTable {
+  return snapshotCurrentTexts(
+    textRoles(
+      item.kind,
+      item.scope,
+      item.context,
+      [],
+      (reference) => reference,
+    ),
+    current,
+    item.derivedTexts,
+    item.baselineTexts,
+  );
 }
 
 // ---------------------------------------------------------------------------
-// New-item construction (shared by the merge and `split`)
+// Item construction and reassignment (shared by the merge and `split`)
 // ---------------------------------------------------------------------------
 
 /**
  * One new session item from a generated item (SPEC 10.2): status
- * `unresolved`, `current` computed against the current graph exactly as
- * read-time invalidation recomputes it (so a freshly created item is never
- * born invalidated), `baseline` against the recorded-baseline side — or the
- * current graph's values at this moment for a session without one — and the
- * SPEC 10.7 text snapshots. `blockedBy` is the caller's: resolved blocker
- * references plus, for a `split`'s newly created decomposition items, the
- * inherited set (SPEC 10.7).
+ * `unresolved`, `current` computed against the current graph over the
+ * generated scope (the root and the scope nodes beneath it), context, and
+ * origin, with the generated context as its recorded context set
+ * (SPEC 10.4), so read-time invalidation finds every recorded node and the
+ * context set holding (a freshly created item is never born invalidated),
+ * `baseline` against the recorded-baseline side — or the current graph's
+ * values at this moment for a session without one — and the SPEC 10.7
+ * text snapshots by role: `baselineTexts` in its baseline state
+ * (`baselineTextTable`), `derivedTexts` in this derivation's state where
+ * that differs (`derivedTextTable`; in a session without a baseline the
+ * two states are one, so it starts empty).
+ * `blockedBy` is the caller's: the generated item's blocker references,
+ * resolved to item ids.
  */
 function newItemFromGenerated(
   generated: GeneratedItem,
@@ -988,22 +1309,34 @@ function newItemFromGenerated(
   current: CurrentDerivationSide,
   baseline: BaselineDerivationSide | undefined,
 ): ReviewItem {
+  // SPEC 10.4, 10.2: the scope as assigned at entry — the generated scope
+  // nodes beneath the root (`generatedScopeDescendants`) — which `current`
+  // is recorded over, as every resolve records it over the scope as last
+  // assigned.
+  const scopeDescendants = generatedScopeDescendants(generated);
+  // One array each — the item's model is readonly, so `context` and the
+  // recorded context set it starts as share theirs.
+  const context = generated.context.map((node) => node.identity);
+  const origin = generated.origin.map((node) => node.identity);
   const currentState = computeRecordedState(
     {
       kind: generated.kind,
       scope: generated.scope.identity,
-      context: generated.context.map((node) => node.identity),
-      origin: generated.origin.map((node) => node.identity),
+      scopeDescendants,
+      context,
+      origin,
     },
     reviewStateInputs(current),
   );
+  const baselineTexts = baselineTextTable(generated, baseline, current);
   return {
     id,
     kind: generated.kind,
     scope: generated.scope.identity,
-    context: generated.context.map((node) => node.identity),
+    scopeDescendants,
+    context,
     reason: generated.reason,
-    origin: generated.origin.map((node) => node.identity),
+    origin,
     // SPEC 10.2: `baseline` is fixed at entry — recorded-baseline values in
     // a baseline session, current values without one.
     baseline:
@@ -1011,10 +1344,62 @@ function newItemFromGenerated(
         ? currentState
         : computeBaselineRecordedState(generated, baseline),
     current: currentState,
+    // SPEC 10.4: the context nodes so recorded form the recorded context
+    // set, written with `current`.
+    recordedContext: context,
     status: "unresolved",
     blockedBy,
-    baselineTexts: baselineTextTable(generated, baseline, current),
-    derivedTexts: derivedTextTable(generated, current, {}),
+    baselineTexts,
+    derivedTexts: derivedTextTable(generated, current, {}, baselineTexts),
+  };
+}
+
+/**
+ * The scope nodes beneath a generated item's scope root, as the stored
+ * references an item takes with its scope (`ReviewItem.scopeDescendants`;
+ * SPEC 10.4: `scope` as last assigned) — the generated
+ * `subtree-coherence` item's `scopeDescendants`, in generated order; none
+ * for every other kind, whose scope is its scope node alone (SPEC 10.5).
+ */
+function generatedScopeDescendants(generated: GeneratedItem): string[] {
+  return (generated.scopeDescendants ?? []).map((node) => node.identity);
+}
+
+/**
+ * An existing session item standing for a generated item of the same kind
+ * and scope node — a re-derivation's matched item (SPEC 10.5) or a
+ * `split`'s reused decomposition item (SPEC 10.7): it keeps its `id`,
+ * status, note, and recorded state — `baseline`, `current`, and the
+ * recorded context set, which only creation and a resolve write
+ * (SPEC 10.2, 10.4) — and takes the generated scope (the scope root and
+ * the nodes beneath it, `generatedScopeDescendants`), context, origin,
+ * reason, and `blockedBy` (the caller's, resolved to item ids). The
+ * derivation-time text snapshots are rewritten, by role, per scope root and
+ * context node of the item as assigned that the current graph contains,
+ * never removed save where the item's baseline snapshot holds the same
+ * values (SPEC 10.7: the states under which mutating subcommands derived or
+ * resolved the item count; `snapshotCurrentTexts`).
+ */
+function reassignedExistingItem(
+  existing: ReviewItem,
+  generated: GeneratedItem,
+  blockedBy: readonly string[],
+  current: CurrentDerivationSide,
+): ReviewItem {
+  return {
+    ...existing,
+    scope: generated.scope.identity,
+    scopeDescendants: generatedScopeDescendants(generated),
+    context: generated.context.map((node) => node.identity),
+    origin: generated.origin.map((node) => node.identity),
+    reason: generated.reason,
+    blockedBy,
+    derivedTexts: derivedTextTable(
+      generated,
+      current,
+      existing.derivedTexts,
+      existing.baselineTexts,
+    ),
   };
 }
 
@@ -1029,8 +1414,13 @@ export interface DeriveSessionItemsArgs {
    * (src/core/review.ts identity policy); empty at `create`.
    */
   readonly existing: readonly ReviewItem[];
-  /** The session's item-id counter (src/core/review.ts). */
-  readonly nextItemId: number;
+  /**
+   * The session's recorded decompositions (SPEC 10.7) — empty at
+   * `create` — whose kinds and scope nodes keep their ids retired: a new
+   * item's derived id never equals one of them (`ItemIdAllocator`,
+   * src/core/review.ts "Item ids").
+   */
+  readonly decompositions: readonly RecordedDecomposition[];
   /** The expanded canonical-space generation (`canonicalizeGeneration` →
    * `expandDecompositions`) — one item per kind and scope node. */
   readonly generated: readonly GeneratedItem[];
@@ -1040,10 +1430,9 @@ export interface DeriveSessionItemsArgs {
   readonly baseline?: BaselineDerivationSide;
 }
 
-/** The merge result: the session's new item list and id counter. */
+/** The merge result: the session's new item list. */
 export interface DerivedSessionItems {
   readonly items: readonly ReviewItem[];
-  readonly nextItemId: number;
 }
 
 /**
@@ -1052,23 +1441,30 @@ export interface DerivedSessionItems {
  *
  * - a generated item whose kind and scope node match an existing item is
  *   that item — it keeps its `id`, `status`, `note`, and recorded state
- *   (`baseline`, `current`); its `context`, `origin`, and `reason` are
- *   updated from the generation (a changed context set surfaces as
- *   read-time invalidation once the item is resolved, SPEC 10.4);
+ *   (`baseline`, `current`, and the recorded context set); its scope (the
+ *   nodes beneath the root included), `context`, `origin`, and `reason`
+ *   are updated from the generation, and 10.4
+ *   alone, against that recorded state, decides whether it then reads
+ *   `invalidated` (a node joining its scope, context, or origin has no
+ *   recorded presence, so a changed origin by itself invalidates nothing,
+ *   while a context set differing from the recorded one does, SPEC 10.4,
+ *   10.5);
  * - items that no longer generate remain in the session untouched,
- *   keeping their `blockedBy` (and recorded context set, SPEC 10.4);
+ *   keeping their `blockedBy` (and recorded state, SPEC 10.4);
  * - new items are added with current state — status `unresolved`
- *   (SPEC 10.2), `current` computed against the current graph exactly as
- *   read-time invalidation recomputes it, `baseline` against the
+ *   (SPEC 10.2), `current` computed against the current graph, the
+ *   generated context its recorded context set, `baseline` against the
  *   recorded-baseline side (or the current graph when none, SPEC 10.2) —
- *   and fresh ids in generation order (ids are never reused, SPEC 10.7);
+ *   and ids derived from their kinds and scope nodes, in generation order
+ *   (src/core/review.ts "Item ids": unique, never reused, SPEC 10.2, 10.7);
  * - `blockedBy` is recomputed for every generated item from its blocker
  *   references (decomposed references were already replaced by
- *   `expandDecompositions`); newly created decomposition items add their
- *   inherited blockers (SPEC 10.7);
- * - text snapshots follow SPEC 10.7: a new item records baseline texts
- *   and current texts; a matched item's derivation-time texts are
- *   rewritten per node found present, never removed.
+ *   `expandDecompositions`), matched and new items alike (SPEC 10.5,
+ *   10.7);
+ * - text snapshots follow SPEC 10.7, by role (`textRoles`): a new item
+ *   records baseline texts and current texts; a matched item's
+ *   derivation-time texts are rewritten per node found present, never
+ *   removed save where its baseline texts hold the same values.
  *
  * The result keeps existing items in their stored order (matched ones
  * updated in place) and appends new items in generation order —
@@ -1084,31 +1480,27 @@ export function deriveSessionItems(
     existingByKey.set(kindScopeKey(item.kind, item.scope), item);
   }
 
-  // First pass: fix ids — matched items keep theirs, new items allocate in
-  // generation order (SPEC 10.5: new items take their place with fresh
-  // ids; SPEC 10.7: an id is never reused).
-  let nextItemId = args.nextItemId;
+  // First pass: fix ids — matched items keep theirs (SPEC 10.5), new items
+  // take ids derived from their kinds and scope nodes, in generation order
+  // (src/core/review.ts "Item ids": unique within the session, SPEC 10.2;
+  // never a removed original's, 10.7; alike on every branch adding the
+  // item, 13.4).
+  const ids = new ItemIdAllocator(existing, args.decompositions);
   const idByKey = new Map<string, string>();
-  const isNew = new Set<string>();
   for (const item of generated) {
     const key = kindScopeKey(item.kind, item.scope.identity);
     const existingItem = existingByKey.get(key);
-    if (existingItem !== undefined) {
-      idByKey.set(key, existingItem.id);
-    } else {
-      const allocation = allocateItemId(nextItemId);
-      nextItemId = allocation.nextItemId;
-      idByKey.set(key, allocation.id);
-      isNew.add(key);
-    }
+    idByKey.set(
+      key,
+      existingItem !== undefined
+        ? existingItem.id
+        : ids.allocate(item.kind, item.scope.identity),
+    );
   }
 
-  const resolveRefs = (item: GeneratedItem, key: string): readonly string[] => {
-    const refs = isNew.has(key)
-      ? mergeRefs(item.blockedBy, item.inheritedBlockedBy ?? [])
-      : item.blockedBy;
+  const resolveRefs = (item: GeneratedItem): readonly string[] => {
     const ids: string[] = [];
-    for (const ref of refs) {
+    for (const ref of item.blockedBy) {
       const id = idByKey.get(kindScopeKey(ref.kind, ref.scope));
       if (id === undefined) {
         // Every blocker reference names a generated item (SPEC 10.5, 10.6:
@@ -1128,24 +1520,17 @@ export function deriveSessionItems(
   const mergedByKey = new Map<string, ReviewItem>();
   for (const item of generated) {
     const key = kindScopeKey(item.kind, item.scope.identity);
-    const blockedBy = resolveRefs(item, key);
+    const blockedBy = resolveRefs(item);
     const existingItem = existingByKey.get(key);
     if (existingItem !== undefined) {
-      // SPEC 10.5: the matched item keeps id, status, and recorded state;
-      // context (and the strategy content around it) is updated.
-      mergedByKey.set(key, {
-        ...existingItem,
-        scope: item.scope.identity,
-        context: item.context.map((node) => node.identity),
-        origin: item.origin.map((node) => node.identity),
-        reason: item.reason,
-        blockedBy,
-        derivedTexts: derivedTextTable(
-          item,
-          current,
-          existingItem.derivedTexts,
-        ),
-      });
+      // SPEC 10.5: the matched item keeps id, status, note, and recorded
+      // state — `baseline`, `current`, and the recorded context set — and
+      // takes the generated scope, context, origin, reason, and
+      // `blockedBy`.
+      mergedByKey.set(
+        key,
+        reassignedExistingItem(existingItem, item, blockedBy, current),
+      );
     } else {
       mergedByKey.set(
         key,
@@ -1177,7 +1562,60 @@ export function deriveSessionItems(
     const merged = mergedByKey.get(key);
     if (merged !== undefined) items.push(merged);
   }
-  return { items, nextItemId };
+  return { items };
+}
+
+/** The inputs of `rederiveSession`. */
+export interface RederiveSessionArgs {
+  /**
+   * The session to re-derive — canonical references (src/core/review.ts
+   * identity policy); its recorded decompositions govern the replay.
+   */
+  readonly session: ReviewSession;
+  /**
+   * The session strategy's generator run with the recorded creation
+   * parameters against the current workspace, canonicalized
+   * (`canonicalizeGeneration`), before decomposition replay.
+   */
+  readonly generated: readonly GeneratedItem[];
+  /** That run's decomposition content, in canonical-reference space. */
+  readonly contentSource: DecompositionContentSource;
+  readonly current: CurrentDerivationSide;
+  /** The recorded-baseline side; omitted for `audit`/`coverage` sessions
+   * (SPEC 10.2: their `baseline` is the entry-moment current state). */
+  readonly baseline?: BaselineDerivationSide;
+}
+
+/**
+ * SPEC 10.5: re-derive a session — the generators' run with the recorded
+ * creation parameters against the current workspace (`generated`), its
+ * recorded decompositions replayed over it (`expandDecompositions`), merged
+ * into the session's items under the re-derivation rules
+ * (`deriveSessionItems`): matched items keep their `id`, status, note, and
+ * recorded state and take the generated scope, context, origin, reason, and
+ * `blockedBy`; items that no longer generate remain, keeping their
+ * `blockedBy`; new items enter `unresolved` with current state and ids
+ * derived from their kinds and scope nodes. The re-derivation every `split`
+ * ends with (SPEC 10.7: the
+ * decomposition, once recorded, "governs re-derivation (10.5), with which
+ * `split` ends, so blocking is recomputed against the current graph"),
+ * replaying the decompositions `session` records — the new one included.
+ */
+export function rederiveSession(args: RederiveSessionArgs): ReviewSession {
+  const { session, generated, contentSource, current, baseline } = args;
+  const expanded = expandDecompositions(
+    generated,
+    session.decompositions.map((decomposition) => decomposition.scope),
+    contentSource,
+  );
+  const derived = deriveSessionItems({
+    existing: session.items,
+    decompositions: session.decompositions,
+    generated: expanded,
+    current,
+    baseline,
+  });
+  return { ...session, items: derived.items };
 }
 
 // ---------------------------------------------------------------------------
@@ -1194,8 +1632,15 @@ export interface SplitDecompositionArgs {
   /** The item to decompose — an item of `session.items` (caller-resolved;
    * an unknown item id is the caller's usage error, SPEC 10.7, 12.0). */
   readonly original: ReviewItem;
+  /**
+   * The session strategy's generator run with the recorded creation
+   * parameters against the current workspace, canonicalized
+   * (`canonicalizeGeneration`), before decomposition replay — the run the
+   * re-derivation ending the split merges (SPEC 10.5, 10.7).
+   */
+  readonly generated: readonly GeneratedItem[];
   /** The session strategy's decomposition content (SPEC 10.7), in
-   * canonical-reference space (`canonicalizeGeneration`). */
+   * canonical-reference space (`canonicalizeGeneration`) — the same run's. */
   readonly contentSource: DecompositionContentSource;
   readonly current: CurrentDerivationSide;
   /** The recorded-baseline side; omitted for `audit`/`coverage` sessions
@@ -1207,9 +1652,12 @@ export interface SplitDecompositionArgs {
 export type SplitDecompositionResult =
   | {
       readonly ok: true;
+      /** The session the split leaves: decomposed, the decomposition
+       * recorded, then re-derived (SPEC 10.5, 10.7). */
       readonly session: ReviewSession;
       /** The decomposition's item ids — reused and newly created alike —
-       * in expansion order (SPEC 10.7: "all items of the decomposition"). */
+       * in expansion order (SPEC 10.7: "all items of the decomposition");
+       * the re-derivation keeps each (a matched item keeps its `id`). */
       readonly itemIds: readonly string[];
     }
   | {
@@ -1222,26 +1670,44 @@ export type SplitDecompositionResult =
 
 /**
  * SPEC 10.7 `split`: decompose a `subtree-coherence` item whose scope root
- * has children into one `subtree-coherence` item per current child subtree
- * plus one `parent-consistency` item for the scope root's own text — the
- * strategy's decomposition content fixes each item's context, origin, and
- * reason ("its context the child's ancestor chain, as in 10.5 and 10.6"),
- * and a child whose kind and scope node are themselves recorded as
- * decomposed is spliced recursively (SPEC 10.5). An item of the
- * decomposition whose kind and scope node already exist in the session is
- * not created: the existing item takes its place, keeping its `id`,
- * status, and recorded state — untouched entirely. Newly created
- * decomposition items enter `unresolved` with current state and
- * additionally inherit the original's `blockedBy`; every item that was
- * blocked by the original becomes blocked by all items of the
- * decomposition; the original is removed and its id never reused (the id
- * counter only advances); the decomposition is recorded durably and
- * governs re-derivation (SPEC 10.5, 10.7).
+ * has children — the strategy's (`DecompositionContentSource.scopeChildren`:
+ * in a baseline session, deleted ones included, SPEC 10.5) — into one
+ * `subtree-coherence` item per child subtree plus one `parent-consistency`
+ * item for the scope root's own text — the strategy's decomposition
+ * content fixes each item's scope, context,
+ * origin, reason, and `blockedBy` ("its context the child's ancestor
+ * chain, as in 10.5 and 10.6"; a per-child item's `blockedBy` "the one its
+ * session's strategy gives a `subtree-coherence` item", the
+ * `parent-consistency` item's "those child items") — and a child whose
+ * kind and scope node are themselves recorded as decomposed is spliced
+ * recursively, its decomposition's items standing in for its per-child
+ * item, in the `parent-consistency` item's `blockedBy` too (SPEC 10.5,
+ * 10.7). An item of the decomposition whose kind and scope node already
+ * exist in the session is not created: the existing item takes its place,
+ * keeping its `id`, status, note, and recorded state (`baseline`,
+ * `current`, and its recorded context set, SPEC 10.4) and taking the
+ * decomposition's scope, context, origin, reason, and `blockedBy`
+ * (`reassignedExistingItem`). Newly created decomposition items enter
+ * `unresolved` with current state and the decomposition's `blockedBy`
+ * alone, never the original's; every item outside the decomposition that
+ * was blocked by the original becomes blocked by all items of the
+ * decomposition; the original is removed and its id never reused (its kind
+ * and scope node, recorded as decomposed, stay retired from id derivation,
+ * src/core/review.ts "Item ids"); the decomposition is recorded durably and
+ * governs re-derivation (SPEC 10.5, 10.7) — with which `split` ends
+ * (`rederiveSession` over `generated`, the decomposition just recorded
+ * among those it replays), so every generated or decomposition-produced
+ * item takes the strategy's content and `blockedBy` recomputed against the
+ * current graph, items that no longer generate keep theirs — a
+ * decomposition item, where its scope root's item no longer generates,
+ * keeping this split's assignment — and a change since the last derivation
+ * that generates a new item adds it, `unresolved` (SPEC 10.2, 10.5, 10.7).
  */
 export function splitItemDecomposition(
   args: SplitDecompositionArgs,
 ): SplitDecompositionResult {
-  const { session, original, contentSource, current, baseline } = args;
+  const { session, original, generated, contentSource, current, baseline } =
+    args;
 
   // SPEC 10.7: `split` on an item of any other kind is refused.
   if (original.kind !== "subtree-coherence") {
@@ -1253,28 +1719,31 @@ export function splitItemDecomposition(
         `children (SPEC 10.7)`,
     };
   }
-  // SPEC 10.7: a childless scope root is refused. The decomposition is per
-  // *current* child subtree (SPEC 10.5), so an absent scope root — deleted,
-  // or its identity ceased to resolve through the journal (SPEC 10.4) —
-  // has no current children and is childless here: a dangling scope never
-  // splits over the children of the distinct node that recaptured its
-  // spelling. A canonically resolving scope reaches its graph node through
-  // its derived spelling, which is also how the refusal names it
-  // (SPEC 10.4: nodes surface under current identities).
-  const scopeResolution = resolveReference(current.journal, original.scope);
-  const scopeSpelling = scopeResolution.spelling;
-  const scopeNode = scopeResolution.resolves
-    ? current.graph.requirementNode(scopeSpelling)
-    : undefined;
-  const children =
-    scopeNode === undefined ? [] : current.graph.childrenOf(scopeNode);
-  if (children.length === 0) {
+  // SPEC 10.7: a scope root without children is refused. Its children are
+  // the strategy's — the ones the decomposition below and the replay at
+  // every re-derivation take (`scopeChildren`) — judged, as every outcome
+  // turning on the graph is, "against the current workspace and, in a
+  // baseline session, the recorded baseline" (SPEC 10.7): in a baseline
+  // session over the links of 10.5, so a root whose only children were
+  // deleted since the baseline — or a deleted root with deleted children
+  // of its own — has children; in an `audit` session the current ones
+  // alone, of which an absent root (SPEC 10.4: deleted, or its identity
+  // ceased to resolve through the journal) has none, so a dangling scope
+  // never splits over the children of the distinct node that recaptured
+  // its spelling. The refusal names the root under its derived current
+  // spelling (SPEC 10.4: nodes surface under current identities).
+  if (contentSource.scopeChildren(original.scope).length === 0) {
+    const scopeSpelling = resolveReference(
+      current.journal,
+      original.scope,
+    ).spelling;
     return {
       ok: false,
       refusal:
         `the scope root ${scopeSpelling} of item '${original.id}' has no ` +
-        `children in the current graph — \`split\` on a subtree-coherence ` +
-        `item whose scope root has no children is refused (SPEC 10.7)`,
+        `children (in a baseline session, deleted ones included, SPEC ` +
+        `10.5) — \`split\` on a subtree-coherence item whose scope root has ` +
+        `no children is refused (SPEC 10.7)`,
     };
   }
 
@@ -1289,70 +1758,75 @@ export function splitItemDecomposition(
   const expansion = expandDecompositions(
     [contentSource.subtreeCoherenceItem(original.scope)],
     decomposedScopes,
-    current.graph,
-    current.journal,
     contentSource,
   );
 
   // SPEC 10.7: an item of the decomposition whose kind and scope node
   // already exist in the session is not created — the existing item takes
-  // its place. New items allocate fresh ids in expansion order; the
-  // removed original's id is never reused (the counter only advances).
+  // its place. New items take ids derived from their kinds and scope nodes,
+  // in expansion order (src/core/review.ts "Item ids"), never the removed
+  // original's: its id is taken while it is derived from here, and its
+  // kind and scope node, recorded as decomposed, stay retired afterwards.
   const existingByKey = new Map<string, ReviewItem>();
   for (const item of session.items) {
     if (item.id === original.id) continue;
     existingByKey.set(kindScopeKey(item.kind, item.scope), item);
   }
-  let nextItemId = session.nextItemId;
+  const decompositions: readonly RecordedDecomposition[] = [
+    ...session.decompositions,
+    { kind: "subtree-coherence", scope: original.scope },
+  ];
+  const ids = new ItemIdAllocator(session.items, decompositions);
   const idByKey = new Map<string, string>();
-  const newByKey = new Map<string, GeneratedItem>();
   for (const generated of expansion) {
     const key = kindScopeKey(generated.kind, generated.scope.identity);
     const existing = existingByKey.get(key);
-    if (existing !== undefined) {
-      idByKey.set(key, existing.id);
-    } else {
-      const allocation = allocateItemId(nextItemId);
-      nextItemId = allocation.nextItemId;
-      idByKey.set(key, allocation.id);
-      newByKey.set(key, generated);
-    }
+    idByKey.set(
+      key,
+      existing !== undefined
+        ? existing.id
+        : ids.allocate(generated.kind, generated.scope.identity),
+    );
   }
 
   // A blocker reference resolves against the decomposition's items and the
   // session's items. SPEC 10.1 lets `blockedBy` name only item ids present
-  // in the session, so a reference to an item that never entered it (a new
-  // child's own children, itemless until a re-derivation) is dropped —
-  // re-derivation recomputes every blocker per the strategy's rules
-  // (SPEC 10.5).
+  // in the session, so a reference to an item that never entered it (in an
+  // `audit` session, a new child's own children, itemless until the
+  // re-derivation ending the split adds them and recomputes every blocker
+  // per the strategy's rules, SPEC 10.5) is dropped.
   const idOfRef = (ref: GeneratedBlockerRef): string | undefined => {
     const key = kindScopeKey(ref.kind, ref.scope);
     return idByKey.get(key) ?? existingByKey.get(key)?.id;
   };
 
-  // SPEC 10.7: newly created decomposition items — per-child items and the
-  // scope root's parent-consistency item alike — additionally inherit the
-  // original's `blockedBy`.
-  const newItems: ReviewItem[] = [];
+  // SPEC 10.7: every item of the decomposition, newly created or reused,
+  // as the decomposition assigns it — its `blockedBy` the decomposition's
+  // own (a per-child item's the strategy's: none in a baseline session, its
+  // child sections' items in an `audit` session; the scope root's
+  // `parent-consistency` item's the child items), never the original's. A
+  // reused item keeps its `id`, status, note, and recorded state and takes
+  // the decomposition's scope, context, origin, reason, and `blockedBy`.
+  const assignedByKey = new Map<string, ReviewItem>();
   for (const generated of expansion) {
     const key = kindScopeKey(generated.kind, generated.scope.identity);
-    if (!newByKey.has(key)) continue;
     const blockedBy: string[] = [];
     for (const ref of generated.blockedBy) {
       const id = idOfRef(ref);
       if (id !== undefined && !blockedBy.includes(id)) blockedBy.push(id);
     }
-    for (const inherited of original.blockedBy) {
-      if (!blockedBy.includes(inherited)) blockedBy.push(inherited);
-    }
-    newItems.push(
-      newItemFromGenerated(
-        generated,
-        idByKey.get(key) as string,
-        blockedBy,
-        current,
-        baseline,
-      ),
+    const existing = existingByKey.get(key);
+    assignedByKey.set(
+      key,
+      existing !== undefined
+        ? reassignedExistingItem(existing, generated, blockedBy, current)
+        : newItemFromGenerated(
+            generated,
+            idByKey.get(key) as string,
+            blockedBy,
+            current,
+            baseline,
+          ),
     );
   }
 
@@ -1363,13 +1837,32 @@ export function splitItemDecomposition(
       ) as string,
   );
 
-  // SPEC 10.7: the original is removed; every item that was blocked by it
-  // becomes blocked by all items of the decomposition. Reused items are
-  // otherwise untouched — id, status, recorded state, and everything else
-  // kept.
+  // SPEC 10.7: the original is removed; every item outside the
+  // decomposition that was blocked by it becomes blocked by all items of
+  // the decomposition. Reused decomposition items keep their places, as
+  // assigned above. In the stored layout (src/core/review.ts, "Stored
+  // layout"; SPEC 13.4: concurrent additions merge textually), the scope
+  // root's `parent-consistency` item, where this split creates it, takes
+  // the original's place, so that the split rewrites the original's line
+  // rather than removing it — a removal conflicts with another branch's
+  // change to the line after it — and the other newly created items follow
+  // the last stored item in expansion order; only where that item already
+  // exists is the original's line removed.
+  const rootKey = kindScopeKey("parent-consistency", original.scope);
+  const rootItem = existingByKey.has(rootKey)
+    ? undefined
+    : assignedByKey.get(rootKey);
   const items: ReviewItem[] = [];
   for (const item of session.items) {
-    if (item.id === original.id) continue;
+    if (item.id === original.id) {
+      if (rootItem !== undefined) items.push(rootItem);
+      continue;
+    }
+    const assigned = assignedByKey.get(kindScopeKey(item.kind, item.scope));
+    if (assigned !== undefined) {
+      items.push(assigned);
+      continue;
+    }
     if (!item.blockedBy.includes(original.id)) {
       items.push(item);
       continue;
@@ -1388,21 +1881,34 @@ export function splitItemDecomposition(
     }
     items.push({ ...item, blockedBy });
   }
-  items.push(...newItems);
+  for (const generated of expansion) {
+    const key = kindScopeKey(generated.kind, generated.scope.identity);
+    if (
+      !existingByKey.has(key) &&
+      !(rootItem !== undefined && key === rootKey)
+    ) {
+      items.push(assignedByKey.get(key) as ReviewItem);
+    }
+  }
 
   // SPEC 10.7: the decomposition — the original's kind and scope node — is
-  // recorded durably in the session and governs re-derivation (10.5).
+  // recorded durably in the session and governs re-derivation (10.5), with
+  // which `split` ends: the generators' run replayed under every recorded
+  // decomposition, this one included, and merged under 10.5's rules — so
+  // blocking is recomputed against the current graph and stays acyclic
+  // (10.1). Every decomposition item is in the session the re-derivation
+  // merges into, so each keeps its id — matched where generated again,
+  // remaining as it stands where not (10.5).
+  const decomposed: ReviewSession = { ...session, decompositions, items };
   return {
     ok: true,
-    session: {
-      ...session,
-      decompositions: [
-        ...session.decompositions,
-        { kind: "subtree-coherence", scope: original.scope },
-      ],
-      nextItemId,
-      items,
-    },
+    session: rederiveSession({
+      session: decomposed,
+      generated,
+      contentSource,
+      current,
+      baseline,
+    }),
     itemIds,
   };
 }
@@ -1433,39 +1939,97 @@ export interface ResolveItemArgs {
 }
 
 /**
- * SPEC 10.7 `resolve`: set the item's status and record the current
- * relevant state (10.4) — `current` is rewritten at this resolve (10.2) —
- * on any unblocked item regardless of current status, so an `invalidated`
- * or previously resolved item is re-resolved the same way. When the status
- * is `updated`, the session is re-derived at resolve time (SPEC 10.5, for
- * every strategy): the expanded generation is merged under the
- * re-derivation rules — the just-resolved item, matched by kind and scope
- * node, keeps its new status and recorded state through the merge.
- * Resolving with `no-change` or `skipped` never re-derives.
+ * SPEC 10.7 `resolve`: set the item's status and note, assign the item its
+ * current context set as `context`, and record the current relevant state
+ * (10.4) — `current` is rewritten at this resolve (10.2) — on any unblocked
+ * item regardless of current status, so an `invalidated` or previously
+ * resolved item is re-resolved the same way. The current context set is
+ * the one reads compute and present (`currentContextSets` over the same
+ * expanded generation, else the item's `context` as last assigned), and
+ * `current` is recorded over the item's scope as last assigned (the root
+ * and the scope nodes beneath it, `scopeDescendants` — never the current
+ * graph's subtree, which may hold nodes authored since), that context, and
+ * its origin, that context becoming its recorded context set, so a read of
+ * the same workspace finds the recorded context set equal to the current
+ * one (SPEC 10.4). Resolving with `no-change` or `skipped` never re-derives:
+ * the item is assigned and recorded as it stands. When the status is `updated`, the session is re-derived at
+ * resolve time (SPEC 10.5, for every strategy) — the expanded generation
+ * merged under the re-derivation rules, with the item in the session
+ * holding its new status and note, which the merge keeps (a matched item
+ * keeps its status, note, and recorded state and takes the generated
+ * scope, context, origin, reason, and `blockedBy`) — and only once that
+ * re-derivation is done is the item, as re-derived, assigned its current
+ * context set and its state recorded, over its re-derived scope, context,
+ * and origin in the graph the re-derivation used (SPEC 10.4: "an `updated`
+ * resolve assigns and records once the re-derivation it triggers (10.5) is
+ * done, against the item as re-derived"). A node the re-derivation joined
+ * to the item is thus recorded in `current` and gains no entry in
+ * `baseline`, which the merge keeps as fixed at entry (SPEC 10.2). With
+ * the recording, the item as assigned snapshots, by role, the texts of its
+ * scope root and context nodes present in that same graph
+ * (`resolvedTextTable`; an origin's after side is the current graph's, so
+ * origins need none): a resolve's state counts among those an absent
+ * node's text comes from (SPEC 10.7), whatever the status, so a
+ * `no-change` or `skipped` resolve — which re-derives nothing — records
+ * a state no derivation saw.
  */
 export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
   const { session, itemId, status, note, expanded, current, baseline } = args;
   const stateInputs = reviewStateInputs(current);
-  const items = session.items.map((item): ReviewItem => {
-    if (item.id !== itemId) return item;
+  // SPEC 10.4: "Resolving an item assigns it its current context set as
+  // `context` and records, in its `current` field (10.2), its relevant
+  // hashes per the list above and, for every scope, context, and origin
+  // node, whether the node is present — the context nodes so recorded
+  // forming its recorded context set, which is thus the context a read of
+  // the same workspace presents". Scope, origin, reason, and blockedBy
+  // stay as last assigned: the resolve itself assigns the context alone,
+  // and records the relevant hashes over the scope as last assigned (the
+  // root and its `scopeDescendants`), so a node authored beneath the scope
+  // root since that assignment gets no entry.
+  // SPEC 10.7: the state this resolve records the item under is among the
+  // states an absent node's text comes from ("derived or resolved the item
+  // with that node among its nodes"), so the item as assigned snapshots its
+  // nodes' texts in that graph — after the re-derivation, for `updated`.
+  const assignAndRecord = (item: ReviewItem): ReviewItem => {
+    const context =
+      currentContextSets([item], expanded).get(item.id) ?? item.context;
+    const assigned: ReviewItem = { ...item, context };
     return {
-      ...item,
-      status,
-      note,
-      current: computeRecordedState(item, stateInputs),
+      ...assigned,
+      current: computeRecordedState(assigned, stateInputs),
+      recordedContext: context,
+      derivedTexts: resolvedTextTable(assigned, current),
     };
-  });
+  };
+  const withStatus = session.items.map((item): ReviewItem =>
+    item.id === itemId ? { ...item, status, note } : item,
+  );
   if (status !== "updated") {
-    return { ...session, items };
+    return {
+      ...session,
+      items: withStatus.map((item) =>
+        item.id === itemId ? assignAndRecord(item) : item,
+      ),
+    };
   }
+  // SPEC 10.5: the re-derivation an `updated` resolve triggers runs first,
+  // with the item in the session under its new status and note; SPEC 10.4:
+  // the assignment and the recording follow it, against the item as
+  // re-derived. Items that no longer generate remain in the session
+  // (10.5), so the resolved item is among the derived items.
   const derived = deriveSessionItems({
-    existing: items,
-    nextItemId: session.nextItemId,
+    existing: withStatus,
+    decompositions: session.decompositions,
     generated: expanded,
     current,
     baseline,
   });
-  return { ...session, nextItemId: derived.nextItemId, items: derived.items };
+  return {
+    ...session,
+    items: derived.items.map((item) =>
+      item.id === itemId ? assignAndRecord(item) : item,
+    ),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1478,8 +2042,10 @@ export function resolveSessionItem(args: ResolveItemArgs): ReviewSession {
  * and decompositions against the current workspace (`generated` is that
  * run's expanded output), matched to the session's items by kind and scope
  * node. An item the generators no longer produce is absent from the map
- * (it retains its recorded context set). Feeds `ItemValidityInputs.
- * currentContexts` (review-state.ts); nothing is persisted.
+ * (its current context set is its `context` as last assigned). Feeds
+ * `ItemValidityInputs.currentContexts` (review-state.ts), and reads
+ * present it as each item's `context` (SPEC 10.4, 10.7); nothing is
+ * persisted.
  */
 export function currentContextSets(
   items: readonly ReviewItem[],

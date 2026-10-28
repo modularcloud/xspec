@@ -12,7 +12,10 @@
 //   stdout/stderr separation of SPEC.md 12.0 — `assertExitCode`,
 //   `assertStdoutEmpty`/`assertStderrEmpty`, `parseJsonStdout` (stdout is
 //   exactly one JSON document), and `assertJsonOutputConvention` (one JSON
-//   document on exit 0/1; empty stdout on exit 2; anything else diagnosed).
+//   document on every exit: a report/answer document on exit 0/1, the 12.7
+//   error document `{"error": …}` on exit 2; anything else diagnosed).
+//   Exit-2 stdout is byte-empty only when JSON output is NOT in effect
+//   (SPEC.md 12.0) — asserted per call site via `assertStdoutEmpty`.
 // - H-8: a `HarnessAssertionError` is the harness's *diagnosed assertion
 //   failure* — the failure shape every product-facing test must produce
 //   against a missing or stub product. Anything else thrown is a harness
@@ -21,6 +24,10 @@
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
+// An import cycle (forms.ts imports `fail` from here), safe under ESM because
+// neither module calls into the other while it is being evaluated.
+import { assertUnavailabilityMarkerForms } from "./adapters/forms.js";
+import { guardSyncStep } from "./step-guards.js";
 import type { RunResult } from "./subprocess.js";
 import { summarizeResult } from "./subprocess.js";
 
@@ -30,15 +37,40 @@ import { summarizeResult } from "./subprocess.js";
  * below); any other exception escaping a test body is a harness error.
  */
 export class HarnessAssertionError extends Error {
-  constructor(message: string) {
+  /**
+   * Whether a property this failure falsifies is shrunk further before it is
+   * reported (helpers/property.ts `checkProperty`); default true. A failure
+   * declines shrinking for one of two reasons. Shrinking is bounded in
+   * property executions, and that bound stops bounding wall clock when every
+   * re-observation of the failure costs a full hang guard — an invocation
+   * the subprocess driver killed (P-8's and P-11's termination clauses,
+   * TEST-SPEC §16). And a failure no draw can change — the built product
+   * missing, which the subprocess driver reports before anything is spawned
+   * (helpers/subprocess.ts, `missingFilesFailDiagnosed`; H-8) — would only
+   * shrink to an arbitrary counterexample. On a drawn trial, the drawn
+   * counterexample is reported as is; on a shrink candidate (met while
+   * shrinking another failure), that candidate ends the shrink as the
+   * reported counterexample. Either way the report names the seed (H-10),
+   * and a shrink re-observes such a failure at most once.
+   */
+  readonly shrinkable: boolean;
+
+  constructor(message: string, options: FailOptions = {}) {
     super(message);
     this.name = "HarnessAssertionError";
+    this.shrinkable = options.shrinkable ?? true;
   }
 }
 
+/** Options of {@link fail}. */
+export interface FailOptions {
+  /** See {@link HarnessAssertionError.shrinkable}; default true. */
+  readonly shrinkable?: boolean;
+}
+
 /** Throw a diagnosed assertion failure (H-8). */
-export function fail(message: string): never {
-  throw new HarnessAssertionError(message);
+export function fail(message: string, options?: FailOptions): never {
+  throw new HarnessAssertionError(message, options);
 }
 
 /** View assertion input as bytes: strings are UTF-8, byte inputs are as-is. */
@@ -139,14 +171,37 @@ export function assertStderrEmpty(result: RunResult, context?: string): void {
  * Assert stdout is exactly one JSON document — the entire standard output
  * parses as a single document (surrounding insignificant whitespace included;
  * a trailing newline after the document is still one document) — and return
- * it parsed. Empty stdout, invalid UTF-8, concatenated documents, and any
- * non-JSON contamination fail diagnosed (H-5; SPEC.md 12.0).
+ * it parsed. Empty stdout, invalid UTF-8, a leading UTF-8 byte-order mark,
+ * concatenated documents, and any non-JSON contamination fail diagnosed
+ * (H-5; SPEC.md 12.0: the single JSON document is the entire standard
+ * output). The byte-order mark — U+FEFF, the bytes EF BB BF — is no part of
+ * a JSON text, whose whitespace is U+0009, U+000A, U+000D, and U+0020
+ * alone, so the decode keeps it rather than dropping it as a decoder's
+ * signature (H-4: these helpers normalize nothing), and a stdout it leads
+ * is not exactly one JSON document; a U+FEFF anywhere else fails the parse
+ * as such. Every parsed document then passes the 12.7 unavailability-marker
+ * walk (`assertUnavailabilityMarkerForms`, adapters/forms.ts; T12.7-1): an
+ * object of any form other than `{"unavailable": true}` carrying a member
+ * named `unavailable` fails diagnosed, the message naming its JSON path, the
+ * caller's context, and the command line. The decode and walk are a harness
+ * step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts):
+ * synchronous, bounded by the capture limit, measured.
  */
 export function parseJsonStdout(result: RunResult, context?: string): unknown {
+  return guardSyncStep(
+    `decoding the stdout of ${result.commandLine} (parseJsonStdout)`,
+    () => decodeJsonStdout(result, context),
+  );
+}
+
+/** {@link parseJsonStdout}'s decode and walk, under its guard. */
+function decodeJsonStdout(result: RunResult, context?: string): unknown {
   const prefix = context === undefined ? "" : `${context}: `;
   let text: string;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(result.stdoutBytes);
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      result.stdoutBytes,
+    );
   } catch {
     return fail(
       `${prefix}stdout of ${result.commandLine} is not valid UTF-8, so it is not one JSON document (H-5): ${renderStream(result.stdoutBytes)}`,
@@ -157,20 +212,49 @@ export function parseJsonStdout(result: RunResult, context?: string): unknown {
       `${prefix}expected exactly one JSON document as the entire stdout of ${result.commandLine}, but stdout is empty — ${summarizeResult(result)}`,
     );
   }
+  if (startsWithUtf8ByteOrderMark(result.stdoutBytes)) {
+    return fail(
+      `${prefix}stdout of ${result.commandLine} begins with a UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF), which is no part of a JSON text (JSON's whitespace is U+0009, U+000A, U+000D, and U+0020 alone), so it is not exactly one JSON document (H-5; SPEC.md 12.0: the single JSON document is the entire standard output): ${renderStream(result.stdoutBytes)}`,
+    );
+  }
+  let doc: unknown;
   try {
-    return JSON.parse(text) as unknown;
+    doc = JSON.parse(text) as unknown;
   } catch (error) {
     return fail(
       `${prefix}stdout of ${result.commandLine} is not exactly one JSON document (H-5; SPEC.md 12.0): ${(error as Error).message}; stdout: ${renderStream(result.stdoutBytes)}`,
     );
   }
+  // T12.7-1 (SPEC 12.7): no object of any form other than the unavailability
+  // marker carries a member named `unavailable` — an exclusivity universal
+  // like the value forms (H-3) — so the structural walk runs here, over every
+  // JSON document the suite parses from a stdout, whether or not an adapter
+  // decodes it afterwards (S-5 guards this integration). The subprocess
+  // driver has already walked the captured stdout of every run with JSON
+  // output in effect (helpers/capture-walk.ts; S-3), the documents no test
+  // parses included; this walk also covers a document parsed from any other
+  // run or from a synthetic result. The document decoders keep their own
+  // entry walks: they also take documents that never pass through here or
+  // the driver (S-5's and S-8's synthetic ones).
+  assertUnavailabilityMarkerForms(
+    doc,
+    `${context === undefined ? "" : `${context} — `}stdout of ${result.commandLine}`,
+  );
+  return doc;
 }
 
 /**
- * Assert the full `--json` stream convention of SPEC.md 12.0 / H-5 for a run:
- * exit 0 or 1 → stdout is exactly one JSON document (returned parsed);
- * exit 2 → stdout is byte-empty (returns undefined). Any other exit code —
- * a stub's unexpected code included — or a signal death fails diagnosed.
+ * Assert the stream convention of SPEC.md 12.0 / H-5 for a run with JSON
+ * output in effect (`--json` among the arguments, or a JSON-only surface):
+ * whatever the exit code, stdout is exactly one JSON document (returned
+ * parsed) — on exit 0/1 the report or answer document, on exit 2 the 12.7
+ * error document, `{"error": …}` exactly (asserted here at the protocol
+ * grain: a top-level object whose only member is `error`, holding an object;
+ * the literal finding-form decode is `decodeErrorDocument`,
+ * adapters/forms.ts). Any other exit code — a stub's unexpected code
+ * included — or a signal death fails diagnosed. Exit-2 stdout is byte-empty
+ * only when JSON output is NOT in effect — assert that per call site via
+ * `assertStdoutEmpty`, never through this helper.
  */
 export function assertJsonOutputConvention(
   result: RunResult,
@@ -183,13 +267,29 @@ export function assertJsonOutputConvention(
     );
   }
   switch (result.exitCode) {
-    case 2:
-      if (result.stdoutBytes.length > 0) {
+    case 2: {
+      const doc = parseJsonStdout(
+        result,
+        context === undefined
+          ? "exit-2 error document (SPEC.md 12.0: with JSON output in effect, a usage or configuration error emits the 12.7 error document as the entire stdout)"
+          : `${context} — exit-2 error document (SPEC.md 12.0: with JSON output in effect, a usage or configuration error emits the 12.7 error document as the entire stdout)`,
+      );
+      if (
+        typeof doc !== "object" ||
+        doc === null ||
+        Array.isArray(doc) ||
+        Object.keys(doc).length !== 1 ||
+        !Object.hasOwn(doc, "error") ||
+        typeof (doc as Record<string, unknown>)["error"] !== "object" ||
+        (doc as Record<string, unknown>)["error"] === null ||
+        Array.isArray((doc as Record<string, unknown>)["error"])
+      ) {
         fail(
-          `${prefix}under --json, stdout must be empty on exit 2 (H-5; usage/configuration diagnostics belong on stderr), but ${result.commandLine} wrote ${String(result.stdoutBytes.length)} bytes to stdout: ${renderStream(result.stdoutBytes)}`,
+          `${prefix}on exit 2 with JSON output in effect, stdout must be the 12.7 error document — {"error": …} exactly, one member holding one finding form (SPEC.md 12.0, 12.7; H-5) — but ${result.commandLine} wrote: ${renderStream(result.stdoutBytes)}`,
         );
       }
-      return undefined;
+      return doc;
+    }
     case 0:
     case 1:
       return parseJsonStdout(result, context);
@@ -271,6 +371,16 @@ function renderWindow(bytes: Uint8Array, offset: number): string {
     Buffer.from(bytes.subarray(start, end)).toString("utf8"),
   );
   return `${parts.join(" ")} ${printable}`;
+}
+
+/** Whether `bytes` begin with EF BB BF, the UTF-8 encoding of U+FEFF. */
+function startsWithUtf8ByteOrderMark(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  );
 }
 
 const STREAM_EXCERPT_LIMIT = 512;

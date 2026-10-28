@@ -44,13 +44,11 @@
 import type { ByteRange } from "./bytes.js";
 import { compareBytes, sortByBytes } from "./bytes.js";
 import { compactJson } from "./canonical-json.js";
+import { containsReplacementCharacter } from "./discovery.js";
 import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 import { firstInvalidUtf8 } from "./source-text.js";
-import {
-  containsControl,
-  containsWhitespace,
-  FORBIDDEN_SEGMENT_NAMES,
-} from "./text.js";
+import { describeSegmentViolation, idSegmentViolations } from "./text.js";
 
 /** SPEC 6.1: the journal's workspace-relative path. */
 export const JOURNAL_PATH = ".xspec/journal";
@@ -90,12 +88,26 @@ export interface PositionedJournalEntry extends JournalEntry {
   readonly range: ByteRange;
 }
 
+/**
+ * A journal parse finding positioned at its offending line. A plain Finding
+ * everywhere findings flow (the extra member never renders — the JSON form
+ * extracts the 12.7 members explicitly); the line carries the prefix/suffix
+ * partition of baseline replay (SPEC 6.3): a malformed line within the
+ * baseline prefix is the workspace content's own 14.13 — reported by the
+ * SPEC 13.3 gate on the current side, or by baseline-content validation —
+ * while one in the replay suffix makes the mapping unresolvable.
+ */
+export interface PositionedJournalFinding extends Finding {
+  /** 1-based journal line number of the offending line. */
+  readonly line: number;
+}
+
 /** The result of parsing a journal file's bytes. */
 export interface ParsedJournal {
   /** The entries of the lines that parsed and validated, in file order. */
   readonly entries: readonly PositionedJournalEntry[];
   /** One 14.13 finding per malformed, conflicting, or non-canonical line. */
-  readonly findings: readonly Finding[];
+  readonly findings: readonly PositionedJournalFinding[];
 }
 
 /**
@@ -171,10 +183,13 @@ export function serializeJournalEntry(entry: JournalEntry): string {
 
 const LF = 0x0a;
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 
 /**
  * Parse a journal file's bytes (SPEC 6.1): one entry per line, the final
- * line's terminator optional (the product always writes it). Every line that
+ * line's terminator optional (the product always writes it, and an append
+ * terminates an unterminated last line first, `appendedJournalBytes`,
+ * so the new entry never joins it). Every line that
  * is not the canonical byte form of a valid entry yields one condition-13
  * finding naming the line (SPEC 14.13); the remaining lines' entries are
  * still returned, in file order, so diagnostics can describe the rest of the
@@ -183,7 +198,7 @@ const decoder = new TextDecoder();
  */
 export function parseJournal(bytes: Uint8Array): ParsedJournal {
   const entries: PositionedJournalEntry[] = [];
-  const findings: Finding[] = [];
+  const findings: PositionedJournalFinding[] = [];
   let offset = 0;
   let line = 0;
   while (offset < bytes.length) {
@@ -195,30 +210,68 @@ export function parseJournal(bytes: Uint8Array): ParsedJournal {
     if (result.ok) {
       entries.push({ ...result.entry, line, range });
     } else {
-      findings.push(journalFinding(line, range, result.problem));
+      findings.push(journalFinding(line, result.problem));
     }
     offset = end + 1;
   }
   return { entries, findings };
 }
 
+/**
+ * The journal as it stands once `entry` is appended to `prior` (SPEC 6.1:
+ * append-only, one entry per line; 13.4: line-oriented, so concurrent
+ * additions merge textually), on the line model `parseJournal` reads.
+ * `prior` is the journal as loaded and validated — null for an absent
+ * journal (SPEC 6.1). The result is `prior`'s bytes unchanged, then a line
+ * feed where they are nonempty and do not end with one — a last line left
+ * unterminated by hand or by a merge tool, which `parseJournal` reads as
+ * an entry, so a valid journal — then the entry's canonical line and its
+ * terminator: the new entry always stands on a line of its own, never
+ * joined to the prior last line, and the prior bytes stay a byte prefix.
+ * An absent or empty journal, and one ending in its terminator, gain the
+ * entry's line alone.
+ *
+ * This is the one composition of the post-append journal: the rewritten-
+ * workspace analyses of `rename` and `move` validate against it and derive
+ * the graph data's recorded inputs from it (SPEC 6.4, 6.5, 5.4, 13.3), and
+ * the append writes it (workspace/journal.ts `appendJournalEntry`), so the
+ * file written is byte-identical with the journal so validated.
+ */
+export function appendedJournalBytes(
+  prior: Uint8Array | null,
+  entry: JournalEntry,
+): Uint8Array {
+  const line = encoder.encode(serializeJournalEntry(entry) + "\n");
+  const before = prior ?? new Uint8Array(0);
+  const separator =
+    before.length > 0 && before[before.length - 1] !== LF ? 1 : 0;
+  const out = new Uint8Array(before.length + separator + line.length);
+  out.set(before, 0);
+  if (separator === 1) {
+    out[before.length] = LF;
+  }
+  out.set(line, before.length + separator);
+  return out;
+}
+
 /** One 14.13 finding for a bad journal line, naming the line (SPEC 14.13). */
 function journalFinding(
   line: number,
-  range: ByteRange,
   problem: string,
-): Finding {
+): PositionedJournalFinding {
+  // SPEC 14: a journal condition carries the path it concerns, not an
+  // in-source location; the offending line is named in the message.
   return {
-    condition: 13,
-    file: JOURNAL_PATH,
-    line,
-    range,
-    message:
+    ...pathFinding(
+      13,
       `journal error: the entry on line ${String(line)} of ${JOURNAL_PATH} ` +
-      `${problem} — the journal is a durable, append-only record written ` +
-      `only by \`xspec rename\` and \`xspec move\` (SPEC 6.1, 13.4); ` +
-      `restore it from version control or delete the offending line ` +
-      `(SPEC 14.13)`,
+        `${problem} — the journal is a durable, append-only record written ` +
+        `only by \`xspec rename\` and \`xspec move\` (SPEC 6.1, 13.4); ` +
+        `restore it from version control or delete the offending line ` +
+        `(SPEC 14.13)`,
+      JOURNAL_PATH,
+    ),
+    line,
   };
 }
 
@@ -485,9 +538,10 @@ function splitIdentity(
 /**
  * Why `path` is not a workspace-relative spec source path, or null when it
  * is. SPEC 1.5: identity paths are workspace-relative and `/`-separated on
- * every platform; SPEC 14.19/7.1: a discovered spec source contains no `#`
- * and carries the `.mdx` extension — journaled operations act on discovered
- * spec sources only (SPEC 6.4, 6.5).
+ * every platform; SPEC 14.19/7.1: a valid discovered spec source's path
+ * contains no `#` and no U+FFFD and carries the `.mdx` extension —
+ * journaled operations act on valid discovered spec sources only (SPEC
+ * 6.4, 6.5).
  */
 function pathProblem(path: string): string | null {
   if (path.length === 0) {
@@ -495,6 +549,11 @@ function pathProblem(path: string): string | null {
   }
   if (path.includes("#")) {
     return `contains "#" (SPEC 14.19)`;
+  }
+  if (containsReplacementCharacter(path)) {
+    // SPEC 7 → 14.19: no valid source path contains U+FFFD, the same rule
+    // discovery applies (core/discovery.ts).
+    return `contains U+FFFD (SPEC 7, 14.19)`;
   }
   if (path.startsWith("/")) {
     return "is not workspace-relative (SPEC 1.5)";
@@ -516,29 +575,22 @@ function pathProblem(path: string): string | null {
   return null;
 }
 
-/** Why `id` is not a valid requirement ID (SPEC 1.3, 1.4), or null. */
+/**
+ * Why `id` is not a valid requirement ID (SPEC 1.3, 1.4), or null — judged
+ * by the shared SPEC 1.4 validator (text.ts), segment by segment.
+ */
 function idProblem(id: string): string | null {
-  for (const segment of id.split(".")) {
-    if (segment.length === 0) {
-      return "has an ID with an empty segment (SPEC 1.4)";
-    }
-    if (FORBIDDEN_SEGMENT_NAMES.has(segment)) {
-      return (
-        `has an ID with the forbidden segment ${JSON.stringify(segment)} ` +
-        `(SPEC 1.4)`
-      );
-    }
-    if (segment.includes("#")) {
-      return `has an ID segment containing "#" (SPEC 1.4)`;
-    }
-    if (containsWhitespace(segment)) {
-      return "has an ID segment containing whitespace (SPEC 1.4)";
-    }
-    if (containsControl(segment)) {
-      return "has an ID segment containing a control character (SPEC 1.4)";
-    }
+  const first = idSegmentViolations(id)[0];
+  if (first === undefined) {
+    return null;
   }
-  return null;
+  if (first.violation.rule === "empty") {
+    return "has an ID with an empty segment (SPEC 1.4)";
+  }
+  return (
+    `has an ID whose segment ${JSON.stringify(first.segment)} ` +
+    `${describeSegmentViolation(first.violation)} (SPEC 1.4)`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -622,11 +674,21 @@ export class Journal {
    * remaining journal, SPEC 10.4/6.3), byte-for-byte what a Journal over
    * that slice computes, without materializing one. Defaults to the whole
    * journal; values beyond it clamp to the empty suffix, as `slice` does.
+   * The optional `to` stops before entry `to` — the mapping of
+   * `entries.slice(from, to)`, so `to` = a baseline journal's length maps
+   * an identity as of that prefix (SPEC 6.3: the baseline journal is a
+   * prefix of the current one). Defaults to the journal's end; values
+   * beyond it clamp, as `slice` does.
    */
-  mapForward(identity: string, from = 0): string {
+  mapForward(
+    identity: string,
+    from = 0,
+    to: number = this.sourceIndex.length,
+  ): string {
     let current = identity;
     const start = journalBound(from, this.sourceIndex.length);
-    for (let index = start; index < this.sourceIndex.length; index += 1) {
+    const end = journalBound(to, this.sourceIndex.length);
+    for (let index = start; index < end; index += 1) {
       const target = this.sourceIndex[index].get(current);
       if (target !== undefined) {
         current = target;
@@ -828,10 +890,16 @@ export type JournalReplayResult =
  * append-only, SPEC 6.1) — and the entries beyond that prefix are the
  * replay, applied in file order with chained mappings composing.
  *
- * Callers validate the baseline journal first (a baseline whose journal has
- * malformed lines fails workspace validation, 14.13, before replay is ever
- * computed); with the prefix holding, any malformed current line therefore
- * lies in the replay suffix and makes the mapping unresolvable.
+ * Replay judges only the lines it applies: a malformed line in the replay
+ * suffix makes the mapping unresolvable (the failure names it), while a
+ * malformed line within the shared prefix — present identically on both
+ * sides, so nothing of it is replayed — is not a replay failure. Such a
+ * line is the workspace content's own journal error (14.13), on both sides
+ * at once: callers sequence replay before baseline-content validation
+ * (workspace/baseline.ts), and the SPEC 13.3 gate reports the current
+ * side's finding first (SPEC 12.0 — replay failures precede the gate, the
+ * gate precedes baseline-content validation), so the prefix's 14.13 is the
+ * gate's exit-1 report, never an exit-2 resolution error.
  */
 export function computeJournalReplay(
   baselineBytes: Uint8Array,
@@ -872,17 +940,22 @@ export function computeJournalReplay(
       };
     }
   }
-  // SPEC 6.3: replay is unresolvable when the entries to apply cannot be
-  // parsed and validated — the findings name the offending lines (14.13's
-  // message form, reused here as the naming duty's carrier).
+  // SPEC 6.3: replay is unresolvable when the entries to apply — the lines
+  // beyond the baseline prefix — cannot be parsed and validated; the
+  // findings name the offending lines (14.13's message form, reused here as
+  // the naming duty's carrier). Malformed lines within the prefix are not
+  // replayed and not judged here (module comment above).
   const parsed = parseJournal(currentBytes);
-  if (parsed.findings.length > 0) {
+  const suffixFindings = parsed.findings.filter(
+    (finding) => finding.line > baselineLines.length,
+  );
+  if (suffixFindings.length > 0) {
     return {
       ok: false,
       problem:
         `replaying the journal entries absent at the baseline ref ` +
         `produced no resolvable mapping — ` +
-        parsed.findings.map((finding) => finding.message).join("; "),
+        suffixFindings.map((finding) => finding.message).join("; "),
     };
   }
   return {

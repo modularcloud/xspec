@@ -1,4 +1,4 @@
-// TEST-SPEC §8 (coverage) — SUITE-30: T8-1…T8-5, T8.2-1.
+// TEST-SPEC §8 (coverage) — SUITE-30: T8-1…T8-5, T8.1-1, T8.2-1.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -36,19 +36,59 @@
 //   four SPEC 8.2 reason identities, failing loudly on an unclassifiable or
 //   ambiguous one (H-3). The tests then assert reason identity and the fixed
 //   order as values.
-// - T8-1…T8-5 assert covered rows (exact paths) and uncovered membership;
-//   counts and ignored composition are T8.2-1's subject (the discipline
-//   T7.4-2 fixed). Required-set composition is observed through
-//   covered ∪ uncovered (SPEC 8.1/8.2: required = covered ∪ uncovered).
+// - T8-1…T8-5 and T8.1-1 assert covered rows (exact paths) and uncovered
+//   membership; counts and ignored composition are T8.2-1's subject (the
+//   discipline T7.4-2 fixed). Required-set composition (T8.1-1) is
+//   observed through covered ∪ uncovered (SPEC 8.1/8.2: required =
+//   covered ∪ uncovered).
 // - T8.2-1's "same information" arms: the JSON document is decoded and
 //   asserted in full; `coverage <name>` and `coverage --check` outputs are
 //   adapter-decoded and compared for information equality against the
-//   default run (a product-to-itself comparison, order-normalized); the
-//   human report is checked to mention the same distinctive information —
-//   profile names, every covered/uncovered/ignored identity, the covering
-//   path's boundary member, and the count digits (identities and profile
-//   names in the fixture are digit-free, so digits in the report render
-//   counts) — robust matching, never wording (H-3).
+//   default run (a product-to-itself comparison, order-normalized).
+//   The human form (T12.0-1's information parity; SPEC 12.0): directly
+//   after each decoded `coverage … --json` run and its assertions — the
+//   default run, `coverage prof-aux`, `coverage --check`, and the covered
+//   fixture's `coverage --check` — the same argv without `--json`, at the
+//   same state, exits with the same code, and its report mentions what the
+//   decoded report carries (a product-to-itself comparison, H-4;
+//   `assertHumanCoverageReport`, through helpers/adapters/human.ts), in two
+//   calls: every profile's name (session-name boundaries, so a name never
+//   counts inside a longer one) and every covered identity, every node of
+//   its covering path, every uncovered identity, and every ignored identity
+//   (identity boundaries, so the root `tgt/T.mdx` never counts inside
+//   `tgt/T.mdx#win`, nor `tgt/T.mdx#combo` inside `tgt/T.mdx#combo.kid`);
+//   then each nonzero count (whole numbers), with the report's digit-holding
+//   data — names, identities, path nodes, and the ignored reasons' strings —
+//   blanked out, save a datum that is itself a whole number
+//   (`digitHoldingData` from section-10.7-i.ts). Limits: no mention is
+//   associated with another, so which identity belongs to which profile and
+//   row kind, which node lies on which covering path and where, and which
+//   count labels which number stay with the JSON assertions; an identity
+//   counts wherever the report prints it (a covered target on its own path
+//   line, an identity in another profile's rows), and a count in any whole
+//   number the report prints outside the blanked data; a zero count is not
+//   asked (a report may state an empty row set in words); and the ignored
+//   reasons and their order are not asked of the human report — they are
+//   prose SPEC 8.2 fixes no spelling for, naming no SPEC-named token, so
+//   they stay with the JSON assertions (`classifyIgnoredReasons`), blanked
+//   only so their digits never stand in for a count. The fixture's names
+//   and identities hold no digit and no character a report may need to
+//   quote or escape, so every one is asked. (T12.0-15 holds each of these
+//   human reports to its `--json` twin through the human coverage decoder,
+//   which classifies the reasons as `classifyIgnoredReasons` classifies the
+//   twin's — their order included, 8.2's fixed order being the report's
+//   own.)
+// - T12.0-15's staging (section-12.0-iv.ts; TEST-SPEC T12.0-15's `coverage`
+//   fixtures, T8.2-1): T8.2-1's body is `runT821Reads(product, visit)`,
+//   each of its four `coverage` reads — the report workspace's default run,
+//   `coverage prof-aux`, and `coverage --check`, then the covered fixture's
+//   `coverage --check` — handed to `visit` with its argv, the exit the home
+//   test pins, and the home test's own `--json` read, assertions, and human
+//   parity check as `home`. T8.2-1 passes `home` through; T12.0-15 hands its
+//   human twin in its place, the staging between the reads — the two
+//   workspaces and their builds — the home test's own. Every initial file
+//   of both workspaces is a staged-source record (S-9), T12.0-15 staging
+//   them after its own first invocation.
 // - T8-5's impact arm follows the SUITE-20 (§5.6) conventions: entries are
 //   merged per node identity (SPEC 9.3 fixes the grouping by category, not
 //   the adapter-level entry granularity); an uncategorized, undeleted node
@@ -79,12 +119,19 @@ import {
   decodeEdgesReport,
   decodeFindingsReport,
   decodeImpactReport,
+  identityMention,
+  nameMention,
+  numberMention,
 } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import { digitHoldingData } from "./section-10.7-i.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -100,7 +147,7 @@ import {
 
 /** Stage a fresh workspace from files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -763,17 +810,24 @@ Depends on the derived file as a whole.
   "specs/B.mdx": derivedSource("Derived leaf one."),
 };
 
+/**
+ * Render one policy finding from its contractual identities — in order, the
+ * violated rule's name and the offending edge's source identity, kind token,
+ * and target identity (SPEC 14.12, 12.7) — as `rule :: kind: from -> to`.
+ * A finding without the four identities renders verbatim, failing the
+ * comparison with the offense visible.
+ */
+function renderPolicyIdentities(finding: Finding): string {
+  if (finding.identities.length !== 4) {
+    return `<malformed 14.12 identities> ${JSON.stringify(finding.identities)}`;
+  }
+  const [rule, from, kind, to] = finding.identities;
+  return `${rule} :: ${kind}: ${from} -> ${to}`;
+}
+
 /** Render policy findings for order-insensitive exact comparison (7.5). */
 function renderPolicyFindings(findings: readonly Finding[]): string[] {
-  return findings
-    .map(
-      (finding) =>
-        `${finding.rule ?? "<no rule>"} :: ` +
-        (finding.edge === undefined
-          ? "<no edge>"
-          : `${finding.edge.kind}: ${finding.edge.from} -> ${finding.edge.to}`),
-    )
-    .sort();
+  return findings.map(renderPolicyIdentities).sort();
 }
 
 /**
@@ -885,70 +939,13 @@ function assertRootExclusionImpact(
   }
 }
 
-// The second T8-5 workspace: required-set composition (SPEC 8.1) — one
-// workspace asserting group restriction, `targetTags` restriction, "leaves"
-// vs "all", `coverage="none"` exclusion, and root exclusion. The boundary
-// group has no outgoing dependency edges, so nothing is covered and each
-// profile's uncovered set IS its required set (required = covered ∪
-// uncovered).
-const REQUIRED_SET_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    tgt: ["tgt/**/*.mdx"],
-    bnd: ["bnd/**/*.mdx"],
-    oth: ["oth/**/*.mdx"]
-  },
-  coverage: [
-    {
-      name: "req-leaves",
-      target: "tgt",
-      boundary: "bnd",
-      mode: "direct"
-    },
-    {
-      name: "req-all",
-      target: "tgt",
-      boundary: "bnd",
-      targets: "all",
-      mode: "direct"
-    },
-    {
-      name: "req-tagged",
-      target: "tgt",
-      boundary: "bnd",
-      targetTags: ["hot"],
-      mode: "direct"
-    }
-  ]
-})
-`,
-  "tgt/T.mdx": `<S id="t">
-Internal parent behavior.
-
-<S id="t.leaf" tags="hot">
-Tagged leaf behavior.
-</S>
-
-<S id="t.none" coverage="none">
-Coverage-excluded leaf behavior.
-</S>
-
-<S id="t.plain">
-Untagged leaf behavior.
-</S>
-</S>
-`,
-  "bnd/B.mdx": `<S id="b">
-Boundary node with no outgoing dependency edges.
-</S>
-`,
-  "oth/O.mdx": `<S id="o">
-A node of a group that is neither target nor boundary.
-</S>
-`,
-};
+// The b1 edit is staged after the root-exclusion arm's `build` and queries,
+// so it is a ledger record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) — the same template call, moved to module level.
+const T8_5_B_EDITED = stagedMdx(
+  "T8-5 specs/B.mdx with b1's text edited",
+  derivedSource("Derived leaf one, edited."),
+);
 
 const T8_5 = defineProductTest({
   id: "T8-5",
@@ -957,13 +954,11 @@ const T8_5 = defineProductTest({
     "non-root nodes, and root-sourced/root-targeted dependency edges never " +
     "extend a covering path — a root is never boundary node, intermediate, " +
     "or target — while the same edges remain ordinary for policy, impact " +
-    "(upstream-changed through the root pairs), and query edges; plus one " +
-    "workspace asserting the 8.1 required set: group restriction, " +
-    'targetTags, leaves vs all, coverage="none", and root exclusion ' +
-    "(SPEC 8, 8.1, 7.5, 5.5, 5.6, 11, 2.2, 2.3)",
+    "(upstream-changed through the root pairs), and query edges " +
+    "(SPEC 8, 7.5, 5.5, 5.6, 11, 2.2, 2.3)",
   run: async (product) => {
-    // (a) The root-exclusion workspace, with its coverage-scoped-exclusion
-    // arms (policy, impact, query) over the same edges.
+    // The root-exclusion workspace, with its coverage-scoped-exclusion arms
+    // (policy, impact, query) over the same edges.
     await withWorkspace(ROOT_EXCLUSION_FILES, async (workspace) => {
       await workspace.gitInit();
       const base = await workspace.gitCommitAll("baseline");
@@ -1071,10 +1066,7 @@ const T8_5 = defineProductTest({
       // containment cannot explain it — and B-root's through containment,
       // hence a1's through the root-targeted pair: A-root and a1 are both
       // upstream-changed (SPEC 5.5, 5.6).
-      await workspace.file(
-        "specs/B.mdx",
-        derivedSource("Derived leaf one, edited."),
-      );
+      await workspace.file("specs/B.mdx", T8_5_B_EDITED);
       await buildOk(
         product,
         workspace,
@@ -1097,15 +1089,98 @@ const T8_5 = defineProductTest({
         impactLabel,
       );
     });
+  },
+});
 
-    // (b) One workspace asserting the 8.1 required-set composition through
-    // covered ∪ uncovered: group restriction (no node of bnd or oth ever
-    // appears), targetTags restriction, "leaves" vs "all", coverage="none"
-    // exclusion, and root exclusion (the root is excluded even under
-    // targets: "all").
+// ---------------------------------------------------------------------------
+// T8.1-1 — required set
+// ---------------------------------------------------------------------------
+
+// One workspace asserting the SPEC 8.1 required set through covered ∪
+// uncovered (module header): group restriction, `targetTags` restriction,
+// "leaves" vs "all", `coverage="none"` exclusion, and root exclusion. Spec
+// groups `tgt` (the target), `bnd` (the boundary), and `oth` (neither);
+// tgt/T.mdx holds the internal node `t` over three leaves — `t.leaf`
+// tagged `hot`, `t.none` marked `coverage="none"`, and the untagged
+// `t.plain` — and three direct profiles over tgt with boundary bnd differ
+// in one field each: req-leaves (the default `targets: "leaves"`), req-all
+// (`targets: "all"`), and req-tagged (`targetTags: ["hot"]`). The boundary
+// group has no outgoing dependency edges, so nothing is covered and each
+// profile's uncovered set IS its required set (required = covered ∪
+// uncovered). The body's one workspace is created before any product
+// invocation, so its initial files are plain strings the workspace builder
+// judges (S-9; S-7's sweep reaches them).
+const REQUIRED_SET_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"],
+    bnd: ["bnd/**/*.mdx"],
+    oth: ["oth/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "req-leaves",
+      target: "tgt",
+      boundary: "bnd",
+      mode: "direct"
+    },
+    {
+      name: "req-all",
+      target: "tgt",
+      boundary: "bnd",
+      targets: "all",
+      mode: "direct"
+    },
+    {
+      name: "req-tagged",
+      target: "tgt",
+      boundary: "bnd",
+      targetTags: ["hot"],
+      mode: "direct"
+    }
+  ]
+})
+`,
+  "tgt/T.mdx": `<S id="t">
+Internal parent behavior.
+
+<S id="t.leaf" tags="hot">
+Tagged leaf behavior.
+</S>
+
+<S id="t.none" coverage="none">
+Coverage-excluded leaf behavior.
+</S>
+
+<S id="t.plain">
+Untagged leaf behavior.
+</S>
+</S>
+`,
+  "bnd/B.mdx": `<S id="b">
+Boundary node with no outgoing dependency edges.
+</S>
+`,
+  "oth/O.mdx": `<S id="o">
+A node of a group that is neither target nor boundary.
+</S>
+`,
+};
+
+const T8_1_1 = defineProductTest({
+  id: "T8.1-1",
+  title:
+    "required set: one workspace asserting the 8.1 required set through " +
+    "covered ∪ uncovered — group restriction (no node outside the target " +
+    'group), targetTags restriction, leaves vs all, coverage="none" ' +
+    "exclusion, and root exclusion (the root excluded even under targets: " +
+    '"all") (SPEC 8.1, 7.4)',
+  run: async (product) => {
     await withWorkspace(REQUIRED_SET_FILES, async (workspace) => {
-      await buildOk(product, workspace, "T8-5 `build` (required-set fixture)");
-      const label = "T8-5 `coverage --json` (required-set fixture)";
+      await buildOk(product, workspace, "T8.1-1 `build`");
+      const label = "T8.1-1 `coverage --json`";
       const report = await coverageJson(
         product,
         workspace,
@@ -1160,12 +1235,24 @@ const T8_5 = defineProductTest({
 // targetTags — reasons root node, non-leaf, lacking-tags, pinning the root
 // reason's first position (roots carry no tags and no coverage attribute,
 // SPEC 5.5). prof-aux (no targetTags) re-pins the order with the tag reason
-// inapplicable. bnd/B.mdx stages the 12.0 tie-break: `first` and `second`
-// each hold a depends edge to `win` (two equal-length covering paths; the
-// byte-least sequence runs through #first) and `chain` → `first` adds a
-// longer route prof-main's shortest-path selection must reject.
-const REPORT_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// inapplicable. bnd/B.mdx stages the 12.0 tie-break: `second` and `first`
+// each hold a depends edge to `win` (two equal-length covering paths, in
+// both profiles; the byte-least sequence runs through #first) and `chain` →
+// `first` adds a longer route prof-main's shortest-path selection must
+// reject. The file spells `chain`, then `second`, then `first`, so the
+// byte-least route through #first is second in document order and in
+// `win`'s incoming-edge order: a product reporting the first-found candidate
+// — a search from the boundary nodes in document order, or one backward from
+// `win` over its incoming edges — reports the route through #second, and
+// only the 12.0 tie-break yields the asserted path. T12.0-15 runs this
+// staging after its own first product invocation (`runT821Reads`, below),
+// so each file is a staged-source record (helpers/staged-ts.ts,
+// helpers/staged-mdx.ts; S-9's TypeScript and timing clauses), the same
+// bytes T8.2-1 stages first.
+const REPORT_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T8.2-1/T12.0-15 report fixture xspec.config.ts (prof-main transitive over targetTags hot, prof-aux direct)",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1190,7 +1277,10 @@ export default defineConfig({
   ]
 })
 `,
-  "tgt/T.mdx": `<S id="win" tags="hot">
+  ),
+  "tgt/T.mdx": stagedMdx(
+    "T8.2-1/T12.0-15 report fixture tgt/T.mdx (win and lone tagged hot; combo coverage=none holding combo.kid; plain untagged)",
+    `<S id="win" tags="hot">
 Covered winner leaf.
 </S>
 
@@ -1210,28 +1300,35 @@ Tagged child leaf.
 Untagged leaf.
 </S>
 `,
-  "bnd/B.mdx": `import T from "../tgt/T.xspec"
+  ),
+  "bnd/B.mdx": stagedMdx(
+    "T8.2-1/T12.0-15 report fixture bnd/B.mdx (chain, then second, then first — the last two each a depends edge to win)",
+    `import T from "../tgt/T.xspec"
 
 <S id="chain" d={"first"}>
 A longer route to the winner, through first.
 </S>
 
-<S id="first" d={T.win}>
-First equal-length covering edge.
-</S>
-
 <S id="second" d={T.win}>
 Second equal-length covering edge.
 </S>
+
+<S id="first" d={T.win}>
+First equal-length covering edge.
+</S>
 `,
+  ),
 };
 
 const WIN_ROW: ExpectedCoveredRow = {
   identity: "tgt/T.mdx#win",
-  // Three candidate covering paths exist in prof-main: [#first, win] and
-  // [#second, win] of equal length, and the longer [#chain, #first, win].
-  // One shortest path is reported, ties by element-wise byte comparison of
-  // the node-identity sequences (SPEC 8.2, 12.0): #first < #second.
+  // Three candidate covering paths exist in prof-main: [#second, win] and
+  // [#first, win] of equal length, and the longer [#chain, #first, win];
+  // prof-aux (direct) admits the two single edges alone. One shortest path
+  // is reported, ties by element-wise byte comparison of the node-identity
+  // sequences (SPEC 8.2, 12.0): #first < #second. The route through #first
+  // is second in bnd/B.mdx's document order and in `win`'s incoming-edge
+  // order, so a first-found product reports [#second, win] instead.
   path: ["bnd/B.mdx#first", "tgt/T.mdx#win"],
 };
 
@@ -1259,23 +1356,95 @@ const PROF_AUX_EXPECTED: ExpectedProfileContent = {
   ],
 };
 
-// The distinctive information the human report must mention (module header:
-// identities, profile names, the covering path's boundary member, and the
-// count digits — the fixture's identities and names are digit-free).
-const REPORT_HUMAN_MENTIONS: readonly (string | RegExp)[] = [
-  "prof-main",
-  "prof-aux",
-  "tgt/T.mdx#win",
-  "bnd/B.mdx#first",
-  "tgt/T.mdx#lone",
-  "tgt/T.mdx#combo.kid",
-  "tgt/T.mdx#combo",
-  "tgt/T.mdx#plain",
-  /\b1\b/,
-  /\b2\b/,
-  /\b3\b/,
-  /\b4\b/,
-];
+/**
+ * The human `coverage` at the state of a decoded `coverage … --json` report,
+ * directly after that run's own JSON assertions — T12.0-1's information
+ * parity (SPEC 12.0: the JSON form carries the same information as the
+ * human report; the module header): `argv`, the `--json` run's argv without
+ * `--json`, exits with `exitCode`, the `--json` run's own (with `--check`, 1
+ * iff a required node is uncovered, else 0; without it, 0 — SPEC 8.2,
+ * 12.0), and its report mentions what the decoded report carries for every
+ * profile, in two calls. First, its literal data: every profile's name (a
+ * session-name boundary, so a name never counts inside a longer one), and
+ * every covered identity and every node of its covering path, every
+ * uncovered identity, and every ignored identity (identity boundaries, so
+ * the root `tgt/T.mdx` never counts inside `tgt/T.mdx#win`, nor
+ * `tgt/T.mdx#combo` inside `tgt/T.mdx#combo.kid`). Second, each nonzero
+ * count of required, covered, uncovered, and ignored nodes (whole numbers,
+ * SPEC 8.2), matched with the report's digit-holding data — the names,
+ * identities, and path nodes, and the ignored reasons' strings (free text,
+ * never compared: blanked only so their digits never stand in for a count)
+ * — blanked out, save a datum that is itself a whole number
+ * (`digitHoldingData` from section-10.7-i.ts). A call with nothing to ask is
+ * skipped. Robust matching (H-3): presence, never wording, and no mention
+ * associated with another.
+ */
+async function assertHumanCoverageReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  report: CoverageReport,
+  exitCode: number,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`${argv.join(" ")}\` (human report)`;
+  const human = await expectExit(
+    product,
+    workspace,
+    argv,
+    exitCode,
+    `${label} — the same exit code as the \`--json\` run at this state: ` +
+      `with --check, 1 iff a required node is uncovered, else 0; without ` +
+      `it, 0, an informational report even with uncovered required nodes ` +
+      `(SPEC 8.2, 12.0)`,
+  );
+  const names = new Set<string>();
+  const identities = new Set<string>();
+  const reasons = new Set<string>();
+  const counts = new Set<number>();
+  for (const profile of report.profiles) {
+    names.add(profile.name);
+    for (const row of profile.covered) {
+      identities.add(row.identity);
+      for (const node of row.path) identities.add(node);
+    }
+    for (const identity of profile.uncovered) identities.add(identity);
+    for (const row of profile.ignored) {
+      identities.add(row.identity);
+      for (const reason of row.reasons) reasons.add(reason);
+    }
+    const { required, covered, uncovered, ignored } = profile.counts;
+    for (const count of [required, covered, uncovered, ignored]) {
+      if (count > 0) counts.add(count);
+    }
+  }
+  const literal = [
+    ...[...names].map(nameMention),
+    ...[...identities].map(identityMention),
+  ];
+  if (literal.length > 0) {
+    assertReportMentions(
+      human,
+      literal,
+      `${label}: every profile's name, every covered identity and every ` +
+        `node of its covering path, every uncovered identity, and every ` +
+        `ignored identity — the information of the JSON report (SPEC 8.2, ` +
+        `12.0)`,
+    );
+  }
+  if (counts.size > 0) {
+    assertReportMentions(
+      human,
+      [...counts].map(numberMention),
+      `${label}: each nonzero count of required, covered, uncovered, and ` +
+        `ignored nodes, whole numbers, matched with the report's ` +
+        `digit-holding names, identities, path nodes, and ignored reasons ` +
+        `blanked out, save a datum that is itself a whole number (SPEC 8.2, ` +
+        `12.0)`,
+      { blank: digitHoldingData([...names, ...identities, ...reasons]) },
+    );
+  }
+}
 
 /** Order-normalize a decoded profile for product-to-itself comparison. */
 function normalizedProfile(profile: CoverageProfileReport): unknown {
@@ -1299,9 +1468,15 @@ function normalizedReport(report: CoverageReport): unknown {
 }
 
 // The fully covered workspace for `--check`'s "0 otherwise" arm: one
-// profile, one required leaf, covered.
-const CHECK_GREEN_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// profile, one required leaf, covered. It follows the report workspace's
+// invocations (and T12.0-15's), so its `.mdx` sources are staged-source
+// records (helpers/staged-mdx.ts; S-9's before-any-product clause), wrapped
+// in place, and so is its configuration — a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed.
+const CHECK_GREEN_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T8.2-1/T12.0-15 covered fixture xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1318,17 +1493,264 @@ export default defineConfig({
   ]
 })
 `,
-  "tgt/T.mdx": `<S id="only">
+  ),
+  "tgt/T.mdx": stagedMdx(
+    "T8.2-1/T12.0-15 covered fixture tgt/T.mdx",
+    `<S id="only">
 The only required leaf.
 </S>
 `,
-  "bnd/B.mdx": `import T from "../tgt/T.xspec"
+  ),
+  "bnd/B.mdx": stagedMdx(
+    "T8.2-1/T12.0-15 covered fixture bnd/B.mdx",
+    `import T from "../tgt/T.xspec"
 
 <S id="covers" d={T.only}>
 Covers the only leaf.
 </S>
 `,
+  ),
 };
+
+/**
+ * One `coverage` read T8.2-1's staging reaches, handed to the staging's
+ * visitor at the state it reads: its label, its argv without `--json`, the
+ * exit the home test pins there (SPEC 8.2: with `--check`, 1 iff a required
+ * node is uncovered, else 0; without it, 0), and the home test's own
+ * `coverage … --json` read with its assertions and the human form's parity
+ * check (`home`). Exported for T12.0-15 (section-12.0-iv.ts), which hands
+ * its human twin of the read in their place.
+ */
+export interface T821Read {
+  readonly label: string;
+  readonly argv: readonly string[];
+  readonly expectedExit: 0 | 1;
+  readonly home: () => Promise<void>;
+}
+
+/** A visitor of T8.2-1's reads, each at the state it reads. */
+export type T821ReadVisitor = (
+  workspace: TestWorkspace,
+  read: T821Read,
+) => Promise<void>;
+
+/**
+ * T8.2-1's staging, its four `coverage` reads handed to `visit` (exported
+ * for T12.0-15): the report workspace (`REPORT_FILES`), built, and its
+ * default run, `coverage prof-aux`, and `coverage --check`; then the covered
+ * fixture (`CHECK_GREEN_FILES`), built, and its `coverage --check`. The
+ * named and `--check` reads' home assertions compare with the default
+ * run's decoded report, which its own home reads — T8.2-1 runs every home
+ * in order. `prefix` leads every staging step's diagnosis.
+ */
+export async function runT821Reads(
+  product: ProductBinding,
+  visit: T821ReadVisitor,
+  prefix = "T8.2-1",
+): Promise<void> {
+  await withWorkspace(REPORT_FILES, async (workspace) => {
+    await buildOk(product, workspace, `${prefix} \`build\``);
+
+    // The default run's decoded report, read by its own home and compared
+    // with by the later reads' homes.
+    let full: CoverageReport | undefined = undefined;
+    const fullLabel = `${prefix} \`coverage --json\``;
+    const defaultRun = (reader: string): CoverageReport => {
+      if (full === undefined) {
+        throw new Error(
+          `harness error: ${reader}: the default run's home (${fullLabel}) ` +
+            `must run first — T8.2-1 runs its reads' homes in order`,
+        );
+      }
+      return full;
+    };
+
+    await visit(workspace, {
+      label: `${prefix} the default run`,
+      argv: ["coverage"],
+      expectedExit: 0,
+      home: async () => {
+        // All profiles run by default; full per-profile content: counts,
+        // covered rows with the tie-broken shortest path, uncovered and
+        // ignored identities, and each ignored node's reasons in the fixed
+        // order.
+        const report = await coverageJson(
+          product,
+          workspace,
+          ["coverage", "--json"],
+          fullLabel,
+        );
+        full = report;
+        assertSameJson(
+          report.profiles.map((profile) => profile.name).sort(),
+          ["prof-aux", "prof-main"],
+          `${fullLabel}: all configured profiles run by default (SPEC 8.2)`,
+        );
+        assertProfileContent(
+          profileNamed(report, "prof-main", fullLabel),
+          PROF_MAIN_EXPECTED,
+          `${fullLabel} profile prof-main — the equal-length paths through ` +
+            `#second and #first (in that document and incoming-edge order) ` +
+            `tie-break to the byte-least sequence, through #first, never the ` +
+            `first-found route through #second; the longer #chain route ` +
+            `loses to the shortest, the root reports ` +
+            `reasons [root node, non-leaf, lacking every tag] pinning the ` +
+            `root reason's first position, and combo reports ` +
+            `[coverage="none", non-leaf, lacking every tag] (SPEC 8.2, 12.0)`,
+        );
+        assertProfileContent(
+          profileNamed(report, "prof-aux", fullLabel),
+          PROF_AUX_EXPECTED,
+          `${fullLabel} profile prof-aux — without targetTags the tag reason ` +
+            `applies to no ignored node, the untagged leaf joins the ` +
+            `required set, and the two single-edge paths through #second and ` +
+            `#first tie-break alike to the byte-least, through #first ` +
+            `(SPEC 8.1, 8.2, 12.0)`,
+        );
+        // Human form, at the same state: the default run's information —
+        // both profiles' names, rows, paths, and counts (module header; H-3).
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage"],
+          report,
+          0,
+          prefix,
+        );
+      },
+    });
+
+    // `coverage <name>` runs exactly the named profile, carrying the same
+    // information as the default run's profile (adapter-asserted equality,
+    // product-to-itself).
+    await visit(workspace, {
+      label: `${prefix} the named run`,
+      argv: ["coverage", "prof-aux"],
+      expectedExit: 0,
+      home: async () => {
+        const oneLabel = `${prefix} \`coverage prof-aux --json\``;
+        const one = await coverageJson(
+          product,
+          workspace,
+          ["coverage", "prof-aux", "--json"],
+          oneLabel,
+        );
+        assertSameJson(
+          one.profiles.map((profile) => profile.name),
+          ["prof-aux"],
+          `${oneLabel}: \`coverage <name>\` runs exactly the named profile (SPEC 8.2)`,
+        );
+        assertSameJson(
+          normalizedProfile(profileNamed(one, "prof-aux", oneLabel)),
+          normalizedProfile(
+            profileNamed(defaultRun(oneLabel), "prof-aux", fullLabel),
+          ),
+          `${oneLabel}: the named run reports the same information for the ` +
+            `profile as the all-profiles run (SPEC 8.2)`,
+        );
+        // Human form, at the same state: the named run's information.
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage", "prof-aux"],
+          one,
+          0,
+          prefix,
+        );
+      },
+    });
+
+    // --check exits 1 iff any required node is uncovered — here some are,
+    // with and without --json; the JSON document still carries the same
+    // information as the checkless run (SPEC 12.0: exit 1 is a findings
+    // outcome, the report is the stdout).
+    await visit(workspace, {
+      label: `${prefix} the --check run`,
+      argv: ["coverage", "--check"],
+      expectedExit: 1,
+      home: async () => {
+        const checkJsonLabel = `${prefix} \`coverage --check --json\``;
+        const checkResult = await expectExit(
+          product,
+          workspace,
+          ["coverage", "--check", "--json"],
+          1,
+          `${checkJsonLabel} — required nodes are uncovered, so --check ` +
+            `exits 1 (SPEC 8.2, 12.0)`,
+        );
+        const check = decodeCoverageReport(
+          parseJsonStdout(checkResult, checkJsonLabel),
+          checkJsonLabel,
+        );
+        assertSameJson(
+          normalizedReport(check),
+          normalizedReport(defaultRun(checkJsonLabel)),
+          `${checkJsonLabel}: --check changes the exit code, not the ` +
+            `information — the JSON document carries the same report (SPEC 8.2)`,
+        );
+        // Human form, at the same state: exit 1 alike, with the --check
+        // run's information (module header; H-3).
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage", "--check"],
+          check,
+          1,
+          prefix,
+        );
+      },
+    });
+  });
+
+  // The "0 otherwise" arm: a workspace whose every required node is
+  // covered — --check exits 0, and the report is non-vacuous (a required
+  // node exists and is covered).
+  await withWorkspace(CHECK_GREEN_FILES, async (workspace) => {
+    await buildOk(product, workspace, `${prefix} \`build\` (covered fixture)`);
+    await visit(workspace, {
+      label: `${prefix} the covered fixture's --check run`,
+      argv: ["coverage", "--check"],
+      expectedExit: 0,
+      home: async () => {
+        const greenLabel = `${prefix} \`coverage --check --json\` (covered fixture)`;
+        const green = decodeCoverageReport(
+          await runJson(
+            product,
+            workspace,
+            ["coverage", "--check", "--json"],
+            greenLabel,
+          ),
+          greenLabel,
+        );
+        assertProfileContent(
+          profileNamed(green, "p-green", greenLabel),
+          {
+            covered: [
+              {
+                identity: "tgt/T.mdx#only",
+                path: ["bnd/B.mdx#covers", "tgt/T.mdx#only"],
+              },
+            ],
+            uncovered: [],
+          },
+          `${greenLabel}: the one required node is covered, so the exit-0 ` +
+            `outcome is not vacuous (SPEC 8.2)`,
+        );
+        // Human form, at the same state: exit 0 alike — no required node is
+        // uncovered — with the covered fixture's information (module header;
+        // H-3).
+        await assertHumanCoverageReport(
+          product,
+          workspace,
+          ["coverage", "--check"],
+          green,
+          0,
+          `${prefix} (covered fixture)`,
+        );
+      },
+    });
+  });
+}
 
 const T8_2_1 = defineProductTest({
   id: "T8.2-1",
@@ -1339,168 +1761,26 @@ const T8_2_1 = defineProductTest({
     "path per covered node with the 12.0 byte-least tie-break; ignored " +
     "nodes report all applicable reasons in the fixed order (root node " +
     "first); --check exits 1 iff any required node is uncovered; --json " +
-    "carries the same information (SPEC 8.1, 8.2, 12.0)",
+    "carries the same information; and directly after each `--json` run " +
+    "the human form at the same state exits alike and mentions every " +
+    "profile's name, every covered, uncovered, and ignored identity, every " +
+    "node of each covering path, and each nonzero count (robust matching, " +
+    "H-3) (SPEC 8.1, 8.2, 12.0)",
   run: async (product) => {
-    await withWorkspace(REPORT_FILES, async (workspace) => {
-      await buildOk(product, workspace, "T8.2-1 `build`");
-
-      // All profiles run by default; full per-profile content: counts,
-      // covered rows with the tie-broken shortest path, uncovered and
-      // ignored identities, and each ignored node's reasons in the fixed
-      // order.
-      const fullLabel = "T8.2-1 `coverage --json`";
-      const full = await coverageJson(
-        product,
-        workspace,
-        ["coverage", "--json"],
-        fullLabel,
-      );
-      assertSameJson(
-        full.profiles.map((profile) => profile.name).sort(),
-        ["prof-aux", "prof-main"],
-        `${fullLabel}: all configured profiles run by default (SPEC 8.2)`,
-      );
-      assertProfileContent(
-        profileNamed(full, "prof-main", fullLabel),
-        PROF_MAIN_EXPECTED,
-        `${fullLabel} profile prof-main — the equal-length paths through ` +
-          `#first and #second tie-break to the byte-least sequence, the ` +
-          `longer #chain route loses to the shortest, the root reports ` +
-          `reasons [root node, non-leaf, lacking every tag] pinning the ` +
-          `root reason's first position, and combo reports ` +
-          `[coverage="none", non-leaf, lacking every tag] (SPEC 8.2, 12.0)`,
-      );
-      assertProfileContent(
-        profileNamed(full, "prof-aux", fullLabel),
-        PROF_AUX_EXPECTED,
-        `${fullLabel} profile prof-aux — without targetTags the tag reason ` +
-          `applies to no ignored node, and the untagged leaf joins the ` +
-          `required set (SPEC 8.1, 8.2)`,
-      );
-
-      // `coverage <name>` runs exactly the named profile, carrying the same
-      // information as the default run's profile (adapter-asserted
-      // equality, product-to-itself).
-      const oneLabel = "T8.2-1 `coverage prof-aux --json`";
-      const one = await coverageJson(
-        product,
-        workspace,
-        ["coverage", "prof-aux", "--json"],
-        oneLabel,
-      );
-      assertSameJson(
-        one.profiles.map((profile) => profile.name),
-        ["prof-aux"],
-        `${oneLabel}: \`coverage <name>\` runs exactly the named profile (SPEC 8.2)`,
-      );
-      assertSameJson(
-        normalizedProfile(profileNamed(one, "prof-aux", oneLabel)),
-        normalizedProfile(profileNamed(full, "prof-aux", fullLabel)),
-        `${oneLabel}: the named run reports the same information for the ` +
-          `profile as the all-profiles run (SPEC 8.2)`,
-      );
-
-      // --check exits 1 iff any required node is uncovered — here some are,
-      // with and without --json; the JSON document still carries the same
-      // information as the checkless run (SPEC 12.0: exit 1 is a findings
-      // outcome, the report is the stdout).
-      const checkJsonLabel = "T8.2-1 `coverage --check --json`";
-      const checkResult = await expectExit(
-        product,
-        workspace,
-        ["coverage", "--check", "--json"],
-        1,
-        `${checkJsonLabel} — required nodes are uncovered, so --check exits ` +
-          `1 (SPEC 8.2, 12.0)`,
-      );
-      assertSameJson(
-        normalizedReport(
-          decodeCoverageReport(
-            parseJsonStdout(checkResult, checkJsonLabel),
-            checkJsonLabel,
-          ),
-        ),
-        normalizedReport(full),
-        `${checkJsonLabel}: --check changes the exit code, not the ` +
-          `information — the JSON document carries the same report (SPEC 8.2)`,
-      );
-      await expectExit(
-        product,
-        workspace,
-        ["coverage", "--check"],
-        1,
-        "T8.2-1 `coverage --check` (human) — exits 1 with uncovered " +
-          "required nodes (SPEC 8.2)",
-      );
-
-      // The human report carries the same information as the JSON document
-      // (module header: robust matching of the distinctive information,
-      // never wording — H-3).
-      const humanLabel = "T8.2-1 `coverage` (human report)";
-      const human = await expectExit(
-        product,
-        workspace,
-        ["coverage"],
-        0,
-        `${humanLabel} — without --check, coverage is informational even ` +
-          `with uncovered required nodes (SPEC 12.0)`,
-      );
-      assertReportMentions(
-        human,
-        REPORT_HUMAN_MENTIONS,
-        `${humanLabel}: profile names, covered/uncovered/ignored ` +
-          `identities, the covering path's boundary member, and the count ` +
-          `digits — the same information as the JSON form (SPEC 8.2, 12.0)`,
-      );
-    });
-
-    // The "0 otherwise" arm: a workspace whose every required node is
-    // covered — --check exits 0, and the report is non-vacuous (a required
-    // node exists and is covered).
-    await withWorkspace(CHECK_GREEN_FILES, async (workspace) => {
-      await buildOk(product, workspace, "T8.2-1 `build` (covered fixture)");
-      const greenLabel = "T8.2-1 `coverage --check --json` (covered fixture)";
-      const green = decodeCoverageReport(
-        await runJson(
-          product,
-          workspace,
-          ["coverage", "--check", "--json"],
-          greenLabel,
-        ),
-        greenLabel,
-      );
-      assertProfileContent(
-        profileNamed(green, "p-green", greenLabel),
-        {
-          covered: [
-            {
-              identity: "tgt/T.mdx#only",
-              path: ["bnd/B.mdx#covers", "tgt/T.mdx#only"],
-            },
-          ],
-          uncovered: [],
-        },
-        `${greenLabel}: the one required node is covered, so the exit-0 ` +
-          `outcome is not vacuous (SPEC 8.2)`,
-      );
-      await expectExit(
-        product,
-        workspace,
-        ["coverage", "--check"],
-        0,
-        "T8.2-1 `coverage --check` (human, covered fixture) — exits 0 when " +
-          "no required node is uncovered (SPEC 8.2)",
-      );
-    });
+    await runT821Reads(product, (_workspace, read) => read.home());
   },
 });
 
-/** TEST-SPEC §8 T8-1…T8-5, T8.2-1, in canonical ID order (SUITE-30). */
+/**
+ * TEST-SPEC §8 T8-1…T8-5, T8.1-1, and T8.2-1, in canonical ID order
+ * (SUITE-30).
+ */
 export const section8Tests: readonly ProductTestEntry[] = [
   T8_1,
   T8_2,
   T8_3,
   T8_4,
   T8_5,
+  T8_1_1,
   T8_2_1,
 ];

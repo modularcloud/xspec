@@ -5,8 +5,69 @@
 // byte-verbatim stdout/stderr separation (H-5), enforced per-test working
 // directories, controlled environment, argv fidelity without shell
 // interpretation, timeout-as-failure for hangs (reported as failures, never
-// skips — H-8), diagnosed failures for missing executables, and the 13.5
-// machinery: background start, hold-file choreography, kill, concurrency.
+// skips — H-8), missing executables — the built product's missing artifact
+// a diagnosed failure declining shrinking (H-8's no-product run), a missing
+// command or any other binding's missing file a harness error (C-1: an
+// unbuilt fixture is a harness defect) — and the 13.5 machinery: background
+// start, hold-file choreography, kill, concurrency.
+// The capture limit (H-11) is pinned here too: an overflow is a loud
+// `ProductRunOutputOverflowError`, never a truncation, which the hold-file
+// wait surfaces as itself and `rethrowHarnessError` — the first call of
+// every helper converting a run's rejection — lets through unchanged. So is
+// the classification of the driver's in-run evaluation (H-11): T6.5-22(a)'s
+// check of a performed move (helpers/added-import-identifiers.ts), made to
+// fail on purpose through a scoped `vi.doMock` of that module — the driver
+// loads it on demand, so the mock reaches the driver's own import — is a
+// harness error, `HarnessEvaluationError` carrying the original as its
+// `cause`, whether it fails before the spawn or judging the exited run,
+// while its breach (`HarnessAssertionError`) passes through unchanged. A
+// crash inside the check's own MDX parse — injected into `readMdxTree`
+// reading a spec source the move rewrote, on either side of the move — is
+// that harness error too, never taken for the diagnosed "not well-formed"
+// breach a rewrite that genuinely does not derive stays; and
+// `judgeAddedImportsOfFile`, which T6.5-22(b) and T6.5-23 call directly,
+// throws such a crash instead of returning it as a problem. The driver's
+// second in-run evaluation, T12.7-1's marker walk over the captured stdout
+// of every invocation with JSON output in effect (helpers/capture-walk.ts),
+// is pinned against an emitting stand-in: a near-marker rejects the run,
+// diagnosed, by flag and by JSON-only surface, on every exit code, a run
+// killed by request included; a run without JSON output in effect, or
+// whose stdout is no one JSON document, passes untouched; and a crash of
+// the walk, armed through a pass-through mock of its module, is the
+// harness error `HarnessEvaluationError` (stage `walk`). The hold rule for
+// hang guards (TEST-SPEC S-3) is pinned against a stand-in holding at its
+// `--test-hold` path: its own guard stands suspended from the moment the
+// harness finds its hold — through `waitForFile` or `holdFileStands` —
+// until `releaseHoldFile` lifts it, so a hold kept past the guard passes
+// and a run hanging once lifted is killed for what is left of its guard;
+// a hold path occupied as the run started, and a file found at another
+// path, suspend nothing. A run from a working directory entered before its
+// staging (`runProductInEnteredDirectory`; TEST-SPEC T14-10(k), (l)(iii))
+// is pinned against the stand-in too: run from a directory staged mode 000
+// once the harness's wrapper stands there, the stand-in has it as its cwd
+// and finds its own listing of it and a lookup there refused, by either
+// route, while its exit code, streams, argv, environment, and parent — the
+// harness, the wrapper replaced — are any run's and it holds file
+// descriptors 0–2 alone; a staging failing ends the run with that very
+// error, the product never started; the run's own guard covers its product
+// alone; its stdout is walked; and the wrapper's own failures, a failed
+// exec included, are harness errors, never the product's outcome — the
+// staging undone after every run. A wait beside a run carries no bound of
+// its own:
+// `waitForFile` against a live run that never creates its file ends with
+// the run, killed at its own guard, the kill the rejection's cause, and a
+// wait for another path while the run stands held rejects at once. The
+// harness-step guards (helpers/step-guards.ts) are pinned on stand-in
+// steps: an asynchronous step still pending past its guard, or settling
+// past it after a synchronous stretch, and a synchronous step returning
+// past it, each end in `HarnessStepTimeoutError`, a harness error never a
+// diagnosed failure, while a step within its guard settles as itself; a
+// harness subprocess killed at `execFile`'s timeout reads as such a trip,
+// and nothing else does. S-3's pre-product checks over spans — the delayed
+// span and the never-terminating invocation run as registered bodies, the
+// registry's declarations, the scan holding every limit the harness sets to
+// an own guard, properties, trial loops, spans counted only once staged, a
+// held run's span — are test/self/s3-hang-guards.test.ts's.
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven
@@ -20,19 +81,59 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { expect, onTestFinished, test } from "vitest";
+import { setTimeout as sleep } from "node:timers/promises";
+import { expect, onTestFinished, test, vi } from "vitest";
+import type * as AddedImportCheckModule from "../helpers/added-import-identifiers.js";
+import { judgeAddedImportsOfFile } from "../helpers/added-import-identifiers.js";
+import {
+  HarnessAssertionError,
+  parseJsonStdout,
+} from "../helpers/assertions.js";
+import type * as CaptureWalkModule from "../helpers/capture-walk.js";
+import { isHangGuardKill } from "../helpers/hang-guards.js";
+import { holdPathArgument } from "../helpers/invocation-grammar.js";
+import {
+  DEFAULT_STEP_GUARD_MS,
+  execFileGuardTrip,
+  guardStep,
+  guardSyncStep,
+  HarnessStepTimeoutError,
+} from "../helpers/step-guards.js";
+import {
+  ProcessGroupLingerError,
+  VoidedTrialsExhaustedError,
+} from "../helpers/kill-discipline.js";
+import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
+import {
+  HarnessStagingError,
+  stageDirectoryMode,
+} from "../helpers/permissions.js";
 import {
   builtProductBinding,
+  builtProductBindingAt,
   createHoldFile,
+  HarnessEvaluationError,
   pathExists,
+  productEnvironment,
+  ProductRunOutputOverflowError,
+  ProductRunTimeoutError,
   releaseHoldFile,
+  rethrowHarnessError,
   runProduct,
+  runProductInEnteredDirectory,
   startProduct,
 } from "../helpers/subprocess.js";
-import type { ProductBinding } from "../helpers/subprocess.js";
+import type {
+  ArgvValue,
+  EnteredDirectoryStaging,
+  ProductBinding,
+  RunLauncher,
+  RunResult,
+} from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 
 const onPosix = process.platform !== "win32";
+const onLinux = process.platform === "linux";
 
 const hex = (data: Uint8Array): string => Buffer.from(data).toString("hex");
 
@@ -57,6 +158,15 @@ switch (mode) {
   case "bytes": {
     process.stdout.write(Buffer.from([0x6f, 0x75, 0x74, 0x00, 0xff, 0xfe, 0x0d, 0x0a, 0x0d]));
     process.stderr.write(Buffer.from([0x65, 0x72, 0x72, 0x80, 0xc3, 0x28, 0x0a]));
+    process.exit(0);
+    break;
+  }
+  case "move": {
+    fs.writeFileSync("moved", "");
+    const writes = JSON.parse(process.env.XSPEC_S3_MOVE_WRITES ?? "{}");
+    for (const [rel, content] of Object.entries(writes)) {
+      fs.writeFileSync(rel, content);
+    }
     process.exit(0);
     break;
   }
@@ -93,10 +203,63 @@ switch (mode) {
     }, 10);
     break;
   }
+  case "held": {
+    // held <after> --test-hold <path>: the hold file created at <path>, the
+    // run waits until it is deleted, then exits 0 (after "exit") or never
+    // terminates (after "hang").
+    const hold = args[args.indexOf("--test-hold") + 1];
+    fs.writeFileSync(hold, "");
+    const poll = setInterval(() => {
+      if (!fs.existsSync(hold)) {
+        clearInterval(poll);
+        if (args[0] === "exit") {
+          process.stdout.write("released");
+          process.exit(0);
+        }
+        setInterval(() => {}, 60000);
+      }
+    }, 10);
+    break;
+  }
   case "spam": {
     const chunk = "x".repeat(1024);
     for (let i = 0; i < 1024; i += 1) process.stdout.write(chunk);
     setInterval(() => {}, 60000);
+    break;
+  }
+  case "mark": {
+    fs.writeFileSync(args[0], "marked");
+    process.exit(0);
+    break;
+  }
+  case "entered": {
+    // entered <code> <args...>: the run's own view of its working directory
+    // and of itself, its argv after <code>, its parent, and its environment;
+    // then a fixed stderr and <code>.
+    const attempt = (operation) => {
+      try {
+        operation();
+        return "allowed";
+      } catch (error) {
+        return error.code ?? "unknown";
+      }
+    };
+    const cwd = process.cwd();
+    process.stdout.write(
+      JSON.stringify({
+        cwd,
+        list: attempt(() => fs.readdirSync(".")),
+        lookup: attempt(() => fs.lstatSync("xspec.config.ts")),
+        dot: attempt(() => fs.statSync(".")),
+        absoluteList: attempt(() => fs.readdirSync(cwd)),
+        absoluteLookup: attempt(() => fs.lstatSync(cwd + "/xspec.config.ts")),
+        argv: args.slice(1),
+        ppid: process.ppid,
+        env: process.env,
+      }),
+    );
+    process.stderr.write(Buffer.from([0x65, 0x6e, 0x74, 0xff, 0x0d, 0x0a]));
+    process.exit(Number(args[0]));
     break;
   }
   default: {
@@ -111,9 +274,12 @@ interface Standin {
   readonly binding: ProductBinding;
 }
 
-async function standin(): Promise<Standin> {
+/** A fresh workspace holding the stand-in, beside `files` when given. */
+async function standin(
+  files: Readonly<Record<string, string>> = {},
+): Promise<Standin> {
   const workspace = await TestWorkspace.create({
-    files: { "standin.mjs": STANDIN_SOURCE },
+    files: { "standin.mjs": STANDIN_SOURCE, ...files },
   });
   onTestFinished(() => workspace.dispose());
   return {
@@ -316,7 +482,7 @@ test("argv reaches the child verbatim — no shell interpretation, empty and met
 });
 
 test.runIf(onPosix)(
-  "raw-byte (Uint8Array) argv elements reach the child byte-verbatim via the POSIX trampoline — non-UTF-8 argument staging (T6.5-4, T12.0-5)",
+  "raw-byte (Uint8Array) argv elements reach the child byte-verbatim via the POSIX trampoline — non-UTF-8 argument staging (T6.5-5, T12.0-5)",
   async () => {
     const { workspace } = await standin();
     // `/bin/sh` itself is the known-behavior stand-in: `printf %s "$1"`
@@ -384,24 +550,14 @@ test("converts a hanging child into a diagnosed timeout failure and kills it (H-
   ).rejects.toThrow(/timed out/);
 });
 
-test("a missing executable or required build artifact fails diagnosed, not as a harness crash (H-8)", async () => {
-  const { workspace } = await standin();
-  const missingCommand = path.join(workspace.tempRoot, "no-such-binary");
-  const spawnError = await runProduct(
-    { label: "missing executable", command: missingCommand },
-    { cwd: workspace.root },
-  ).then(
-    () => null,
-    (error: unknown) => error as Error,
-  );
-  expect(spawnError).not.toBeNull();
-  expect(spawnError!.message).toContain("failed to start");
-  expect(spawnError!.message).toContain(missingCommand);
-
+test("a missing `command` and an unflagged binding's missing required file reject as harness errors — a plain `Error`, never a `HarnessAssertionError` — each naming its path, the latter its binding's label too, the run going on (H-8; C-1: an unbuilt fixture is a harness defect, never a certified failure)", async () => {
+  const { workspace, binding } = await standin();
+  // The certification fixtures' binding shape, its executable unbuilt: the
+  // binding leaves `missingFilesFailDiagnosed` unset.
   const missingArtifact = path.join(workspace.tempRoot, "not-built.js");
   const artifactError = await runProduct(
     {
-      label: "unbuilt product",
+      label: "unbuilt fixture",
       command: process.execPath,
       prefixArgs: [missingArtifact],
       requiredFiles: [missingArtifact],
@@ -411,14 +567,90 @@ test("a missing executable or required build artifact fails diagnosed, not as a 
     () => null,
     (error: unknown) => error as Error,
   );
-  expect(artifactError).not.toBeNull();
-  expect(artifactError!.message).toContain("required file missing");
-  expect(artifactError!.message).toContain(missingArtifact);
-  expect(artifactError!.message).toContain("npm run build");
+  expect(artifactError).toBeInstanceOf(Error);
+  expect(artifactError).not.toBeInstanceOf(HarnessAssertionError);
+  expect(artifactError!.name).toBe("Error");
+  expect(artifactError!.message).toContain(
+    `unbuilt fixture: required file missing: ${missingArtifact}`,
+  );
+  expect(artifactError!.message).toContain("harness error");
+  // A pre-flight refusal: nothing noted (the undeclared-staging guard's
+  // mark, helpers/product-invocations.ts), nothing spawned.
+  expect(workspace.productInvoked).toBe(false);
+
+  const missingCommand = path.join(workspace.tempRoot, "no-such-binary");
+  const spawnError = await runProduct(
+    { label: "missing executable", command: missingCommand },
+    { cwd: workspace.root },
+  ).then(
+    () => null,
+    (error: unknown) => error as Error,
+  );
+  expect(spawnError).toBeInstanceOf(Error);
+  expect(spawnError).not.toBeInstanceOf(HarnessAssertionError);
+  expect(spawnError!.name).toBe("Error");
+  expect(spawnError!.message).toContain("failed to start");
+  expect(spawnError!.message).toContain(missingCommand);
+  expect(spawnError!.message).toContain("harness error");
+
+  // Neither stopped the driver: the next run in the same workspace runs.
+  const next = await runProduct(binding, {
+    cwd: workspace.root,
+    argv: ["exit", "3"],
+  });
+  expect(next.exitCode).toBe(3);
 });
 
-test("builtProductBinding names the built executable absolutely, independent of the process cwd (C-2 default binding)", () => {
+test("the built product's missing artifact fails every run diagnosed — a `HarnessAssertionError` declining shrinking, naming the artifact and `npm run build` — before anything is spawned (H-8: no product installed)", async () => {
+  const absentRoot = await fsp.mkdtemp(
+    path.join(os.tmpdir(), "xspec-s3-no-product-"),
+  );
+  onTestFinished(() => fsp.rm(absentRoot, { recursive: true, force: true }));
+  const missingArtifact = path.join(absentRoot, "dist", "cli", "bin.js");
+  const binding = builtProductBindingAt(missingArtifact);
+  const workspace = await TestWorkspace.create();
+  onTestFinished(() => workspace.dispose());
+
+  const attempts: readonly (readonly [string, () => Promise<unknown>])[] = [
+    [
+      "runProduct",
+      () =>
+        runProduct(binding, { cwd: workspace.root, argv: ["build", "--json"] }),
+    ],
+    [
+      "startProduct",
+      () =>
+        startProduct(binding, {
+          cwd: workspace.root,
+          argv: ["build", "--json"],
+        }),
+    ],
+  ];
+  for (const [what, attempt] of attempts) {
+    const rejection = await attempt().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(rejection, what).toBeInstanceOf(HarnessAssertionError);
+    const failure = rejection as HarnessAssertionError;
+    expect(failure.name, what).toBe("HarnessAssertionError");
+    expect(failure.shrinkable, what).toBe(false);
+    expect(failure.message, what).toContain(
+      `built xspec product: required file missing: ${missingArtifact}`,
+    );
+    expect(failure.message, what).toContain("npm run build");
+  }
+  // Nothing was noted (the undeclared-staging guard's mark,
+  // helpers/product-invocations.ts) or spawned: the run's working directory
+  // holds nothing, and nothing appeared beside the absent artifact.
+  expect(workspace.productInvoked).toBe(false);
+  expect(await fsp.readdir(workspace.root)).toEqual([]);
+  expect(await fsp.readdir(absentRoot)).toEqual([]);
+});
+
+test("builtProductBinding names the built executable absolutely, independent of the process cwd, its missing artifact marked the missing product; builtProductBindingAt is that shape at another path (C-2 default binding; H-8)", () => {
   const binding = builtProductBinding();
+  expect(binding.label).toBe("built xspec product");
   expect(binding.command).toBe(process.execPath);
   expect(binding.prefixArgs).toHaveLength(1);
   const binJs = binding.prefixArgs![0]!;
@@ -427,6 +659,21 @@ test("builtProductBinding names the built executable absolutely, independent of 
   // The pre-flight check targets exactly the executable artifact, so an
   // unbuilt product fails diagnosed (H-8) rather than as a confusing spawn.
   expect(binding.requiredFiles).toEqual([binJs]);
+  expect(binding.missingFilesFailDiagnosed).toBe(true);
+
+  const elsewhere = path.join(
+    os.tmpdir(),
+    "xspec-s3-elsewhere",
+    "dist",
+    "cli",
+    "bin.js",
+  );
+  expect(builtProductBindingAt(elsewhere)).toStrictEqual({
+    ...binding,
+    prefixArgs: [elsewhere],
+    requiredFiles: [elsewhere],
+  });
+  expect(builtProductBindingAt(binJs)).toStrictEqual(binding);
 });
 
 test("background start with hold-file choreography: await creation, hold, release, completion (13.5 seam support)", async () => {
@@ -499,19 +746,177 @@ test("waitForFile fails diagnosed when the child exits without creating the file
   expect((await running.waitForExit()).exitCode).toBe(86);
 });
 
-test("waitForFile times out diagnosed against a live child that never creates the file", async () => {
+test("waitForFile against a live child that never creates the file carries no bound of its own: the child's own hang guard kills it, and the wait ends with it, rejecting with the premature-exit error naming the kill, the kill its cause (TEST-SPEC S-3: a wait beside a run ends at the latest once the run has exited)", async () => {
   const { workspace, binding } = await standin();
+  const guardMs = 400;
   const running = await startProduct(binding, {
     cwd: workspace.root,
     argv: ["hang"],
+    timeoutMs: guardMs,
   });
-  await expect(
-    running.waitForFile(path.join(workspace.tempRoot, "never"), {
-      timeoutMs: 200,
-    }),
-  ).rejects.toThrow(/timed out after 200 ms waiting for/);
-  running.kill();
-  await running.waitForExit();
+  const never = path.join(workspace.tempRoot, "never");
+  const started = performance.now();
+  const error = await rejectionOf(running.waitForFile(never));
+  const waitedMs = performance.now() - started;
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(HarnessAssertionError);
+  const message = (error as Error).message;
+  expect(message).toContain(`exited before creating ${never}`);
+  expect(message).toContain(`timed out after ${String(guardMs)} ms`);
+  const cause = (error as Error).cause;
+  expect(cause).toBeInstanceOf(ProductRunTimeoutError);
+  expect(isHangGuardKill(error)).toBe(true);
+  // The wait ended with the run, at its guard — never before it.
+  expect(waitedMs).toBeGreaterThanOrEqual(guardMs - 50);
+  expect(running.hasExited()).toBe(true);
+});
+
+test("waitForFile for another path than a held run's own hold, its guard suspended for that hold, rejects at once with a plain Error — a wait bounded by nothing is a harness-usage error — the hold and the run unchanged (TEST-SPEC S-3)", async () => {
+  const { workspace, binding } = await standin();
+  const hold = path.join(workspace.tempRoot, "own-hold");
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "exit", "--test-hold", hold],
+    timeoutMs: 1_000,
+  });
+  await running.waitForFile(hold);
+  const elsewhere = path.join(workspace.tempRoot, "elsewhere");
+  const error = await rejectionOf(running.waitForFile(elsewhere));
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(HarnessAssertionError);
+  expect((error as Error).message).toContain(
+    `stands held at its own hold ${hold}`,
+  );
+  expect((error as Error).message).toContain(`a wait for ${elsewhere}`);
+  expect(running.hasExited()).toBe(false);
+  // Its own hold, waited for again, is found at once.
+  await running.waitForFile(hold);
+  await releaseHoldFile(hold);
+  const result = await running.waitForExit();
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toBe("released");
+});
+
+test("holdPathArgument reads a `--test-hold <path>` flag as SPEC 12.0's grammar reads it: anywhere among the flags, its first occurrence, never after `--`, never another flag's value, never without its value", () => {
+  expect(holdPathArgument(["rename", "a", "b", "--test-hold", "/h"])).toBe(
+    "/h",
+  );
+  expect(holdPathArgument(["--test-hold", "/h", "rename", "a", "b"])).toBe(
+    "/h",
+  );
+  expect(
+    holdPathArgument(["--test-hold", "/a", "rename", "--test-hold", "/b"]),
+  ).toBe("/a");
+  expect(holdPathArgument(["rename", "--", "--test-hold", "/h"])).toBe(
+    undefined,
+  );
+  expect(
+    holdPathArgument(["review", "resolve", "--note", "--test-hold", "x"]),
+  ).toBe(undefined);
+  expect(holdPathArgument(["rename", "a", "b", "--test-hold"])).toBe(undefined);
+  expect(holdPathArgument(["rename", "a", "b"])).toBe(undefined);
+});
+
+test("a held run's own hang guard stands suspended while the harness keeps its hold standing, and resumes for what is left of it once the hold is lifted (TEST-SPEC S-3): held past its guard, found through waitForFile or holdFileStands, the run completes once lifted; hanging once lifted, it is killed at its own guard", async () => {
+  const { workspace, binding } = await standin();
+  const guardMs = 1_000;
+  const heldMs = 2_500;
+
+  // Found through waitForFile, held 2.5 s past a 1 s guard.
+  const hold1 = path.join(workspace.tempRoot, "hold-waited");
+  const waited = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "exit", "--test-hold", hold1],
+    timeoutMs: guardMs,
+  });
+  await waited.waitForFile(hold1);
+  await sleep(heldMs);
+  expect(waited.hasExited()).toBe(false);
+  await releaseHoldFile(hold1);
+  const completed = await waited.waitForExit();
+  expect(completed.exitCode).toBe(0);
+  expect(completed.stdout).toBe("released");
+
+  // Found through holdFileStands, polled as a harness polls beside other
+  // conditions (T13.5-13, P-10).
+  const hold2 = path.join(workspace.tempRoot, "hold-polled");
+  const polled = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "exit", "--test-hold", hold2],
+    timeoutMs: guardMs,
+  });
+  while (!(await polled.holdFileStands(hold2))) {
+    expect(polled.hasExited()).toBe(false);
+    await sleep(10);
+  }
+  await sleep(heldMs);
+  expect(polled.hasExited()).toBe(false);
+  await releaseHoldFile(hold2);
+  expect((await polled.waitForExit()).exitCode).toBe(0);
+
+  // Hanging once lifted: the guard, armed again for what is left of it,
+  // kills the run, its diagnosis naming the suspension.
+  const hold3 = path.join(workspace.tempRoot, "hold-hangs");
+  const hangs = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["held", "hang", "--test-hold", hold3],
+    timeoutMs: guardMs,
+  });
+  await hangs.waitForFile(hold3);
+  await sleep(heldMs);
+  expect(hangs.hasExited()).toBe(false);
+  await releaseHoldFile(hold3);
+  const killed = await hangs.waitForExit().then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+  expect(killed).toBeInstanceOf(ProductRunTimeoutError);
+  expect((killed as Error).message).toContain(
+    `timed out after ${String(guardMs)} ms of its own hang guard, suspended while the harness kept its hold standing (TEST-SPEC S-3), and was killed`,
+  );
+});
+
+test("a hold path occupied as the run started, and a file found at another path than the run's own hold, suspend nothing: the run's own guard kills it there (TEST-SPEC S-3)", async () => {
+  const { workspace, binding } = await standin();
+
+  // Occupied as the run started: the occupant is no hold of the run's.
+  const occupied = path.join(workspace.tempRoot, "occupied-hold");
+  await createHoldFile(occupied);
+  const atOccupied = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["hang", "--test-hold", occupied],
+    timeoutMs: 300,
+  });
+  await atOccupied.waitForFile(occupied);
+  expect(await atOccupied.holdFileStands(occupied)).toBe(true);
+  const occupiedKill = await atOccupied.waitForExit().then(
+    () => undefined,
+    (thrown: unknown) => thrown as Error,
+  );
+  expect(occupiedKill).toBeInstanceOf(ProductRunTimeoutError);
+  expect(occupiedKill!.message).toContain(
+    "timed out after 300 ms and was killed (H-8",
+  );
+
+  // A file found at another path than the run's own hold path.
+  const other = path.join(workspace.tempRoot, "other-file");
+  const own = path.join(workspace.tempRoot, "own-hold");
+  const elsewhere = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["hold", other, "--test-hold", own],
+    timeoutMs: 300,
+  });
+  await elsewhere.waitForFile(other);
+  const elsewhereKill = await elsewhere.waitForExit().then(
+    () => undefined,
+    (thrown: unknown) => thrown as Error,
+  );
+  await releaseHoldFile(other);
+  expect(elsewhereKill).toBeInstanceOf(ProductRunTimeoutError);
+  expect(elsewhereKill!.message).toContain(
+    "timed out after 300 ms and was killed (H-8",
+  );
+  expect(await pathExists(own)).toBe(false);
 });
 
 test("concurrent invocations stay isolated: each returns its own argv, output, and exit code (13.5 support)", async () => {
@@ -541,7 +946,7 @@ test("concurrent invocations stay isolated: each returns its own argv, output, a
   expect(exitResults.map((result) => result.exitCode)).toEqual([11, 12, 13]);
 });
 
-test("a child exceeding the output cap is killed with a diagnosed failure (H-8: runaway output never hangs the harness)", async () => {
+test("a child exceeding the output cap is killed with a loud overflow error, never a silent truncation (H-8: runaway output never hangs the harness; H-11)", async () => {
   const { workspace, binding } = await standin();
   await expect(
     runProduct(binding, {
@@ -551,3 +956,1249 @@ test("a child exceeding the output cap is killed with a diagnosed failure (H-8: 
     }),
   ).rejects.toThrow(/exceeded the output limit of 2048 bytes/);
 });
+
+test("waitForFile surfaces a capture-limit kill as the driver's ProductRunOutputOverflowError itself, never folded into the premature-exit error (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["spam"],
+    maxOutputBytes: 2048,
+  });
+  const neverCreated = path.join(workspace.tempRoot, "never-created");
+  const error = await running.waitForFile(neverCreated).then(
+    () => null,
+    (thrown: unknown) => thrown,
+  );
+  expect(error).toBeInstanceOf(ProductRunOutputOverflowError);
+  expect((error as Error).message).toMatch(
+    /exceeded the output limit of 2048 bytes/,
+  );
+  expect((error as Error).message).not.toContain("exited before creating");
+  // The very rejection the run settled with, not a copy.
+  const settled = await running.waitForExit().then(
+    () => null,
+    (thrown: unknown) => thrown,
+  );
+  expect(settled).toBe(error);
+});
+
+test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, an exhausted voidable trial, and a harness step's tripped guard — unchanged, and returns for every other rejection a helper converts (H-11; TEST-SPEC S-3)", () => {
+  for (const harnessError of [
+    new ProductRunOutputOverflowError("capture limit"),
+    new ProcessGroupLingerError("stand-in", 4242, "listed", 30_000, [], [4243]),
+    new VoidedTrialsExhaustedError("stand-in trial", ["reused identifier"]),
+    new HarnessStepTimeoutError("a stand-in step", 100, "took 150 ms, past"),
+    new HarnessEvaluationError(
+      "stand-in move",
+      "verify",
+      new Error("evaluation crashed"),
+    ),
+    new HarnessEvaluationError(
+      "stand-in move",
+      "prepare",
+      new RangeError("parser limit"),
+    ),
+  ]) {
+    let rethrown: unknown = null;
+    try {
+      rethrowHarnessError(harnessError);
+    } catch (thrown) {
+      rethrown = thrown;
+    }
+    expect(rethrown, harnessError.message).toBe(harnessError);
+  }
+  for (const other of [
+    new ProductRunTimeoutError("hang guard"),
+    new HarnessAssertionError("diagnosed"),
+    new Error("failed to start"),
+    "not an error",
+    undefined,
+  ]) {
+    expect(() => {
+      rethrowHarnessError(other);
+    }).not.toThrow();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Harness-step guards (TEST-SPEC S-3, helpers/step-guards.ts): each step of
+// the harness's own work carries a guard of its own, its tripping the
+// harness error HarnessStepTimeoutError — never a diagnosed product failure.
+
+/** Busy-wait `ms` on the main thread: a synchronous stretch no timer interrupts. */
+function spin(ms: number): void {
+  const until = performance.now() + ms;
+  while (performance.now() < until) {
+    // a synchronous stretch
+  }
+}
+
+test("guardStep settles as its step does within its guard — a value, a diagnosed failure, or a plain error passing through unchanged — and the default guard is the one AGENTS.md sizes (TEST-SPEC S-3)", async () => {
+  expect(DEFAULT_STEP_GUARD_MS).toBe(120_000);
+  expect(await guardStep("a stand-in step", async () => 42)).toBe(42);
+  const diagnosed = new HarnessAssertionError("diagnosed");
+  expect(
+    await rejectionOf(
+      guardStep("a stand-in step", async () => {
+        await sleep(10);
+        throw diagnosed;
+      }),
+    ),
+  ).toBe(diagnosed);
+  const plain = new Error("plain");
+  expect(
+    await rejectionOf(
+      guardStep(
+        "a stand-in step",
+        async () => {
+          throw plain;
+        },
+        1_000,
+      ),
+    ),
+  ).toBe(plain);
+});
+
+test("guardStep rejects a step still pending past its guard with HarnessStepTimeoutError — never a HarnessAssertionError — naming the step and its guard, at its guard, the step's own later outcome observed and dropped (TEST-SPEC S-3; H-11)", async () => {
+  const guardMs = 200;
+  let rejectLater: (error: Error) => void = () => undefined;
+  const started = performance.now();
+  const error = await rejectionOf(
+    guardStep(
+      "a stand-in step that never settles",
+      () =>
+        new Promise<never>((_resolve, reject) => {
+          rejectLater = reject;
+        }),
+      guardMs,
+    ),
+  );
+  const waitedMs = performance.now() - started;
+  expect(error).toBeInstanceOf(HarnessStepTimeoutError);
+  expect(error).not.toBeInstanceOf(HarnessAssertionError);
+  expect((error as HarnessStepTimeoutError).step).toBe(
+    "a stand-in step that never settles",
+  );
+  expect((error as HarnessStepTimeoutError).guardMs).toBe(guardMs);
+  expect((error as Error).message).toMatch(
+    /^harness error \(H-11\): a stand-in step that never settles was still pending after \d+ ms, past its own guard of 200 ms \(TEST-SPEC S-3/,
+  );
+  expect(waitedMs).toBeGreaterThanOrEqual(guardMs - 20);
+  expect(waitedMs).toBeLessThan(guardMs + 2_000);
+  // The step's own rejection, once the guard has tripped, is observed: no
+  // unhandled rejection reaches the run.
+  rejectLater(new Error("the stuck step's late failure"));
+  await sleep(20);
+});
+
+test("guardStep measures its step as it settles: a synchronous stretch outlasting the guard, which no timer interrupts, trips it too, the step's own rejection the error's cause (TEST-SPEC S-3)", async () => {
+  const resolved = await rejectionOf(
+    guardStep(
+      "a stand-in step spinning past its guard",
+      async () => {
+        spin(150);
+        return "done";
+      },
+      50,
+    ),
+  );
+  expect(resolved).toBeInstanceOf(HarnessStepTimeoutError);
+  expect((resolved as Error).message).toMatch(
+    /a stand-in step spinning past its guard took \d+ ms, past its own guard of 50 ms/,
+  );
+  const own = new Error("its own failure");
+  const rejected = await rejectionOf(
+    guardStep(
+      "a stand-in step spinning, then failing",
+      async () => {
+        spin(150);
+        throw own;
+      },
+      50,
+    ),
+  );
+  expect(rejected).toBeInstanceOf(HarnessStepTimeoutError);
+  expect((rejected as Error).cause).toBe(own);
+});
+
+test("guardSyncStep runs a synchronous step to completion and checks it: within its guard it returns or throws as the step does, past its guard it throws HarnessStepTimeoutError, what the step threw its cause (TEST-SPEC S-3: bounded construction, measured)", () => {
+  expect(guardSyncStep("a stand-in sync step", () => 7)).toBe(7);
+  const diagnosed = new HarnessAssertionError("diagnosed");
+  expect(() =>
+    guardSyncStep("a stand-in sync step", () => {
+      throw diagnosed;
+    }),
+  ).toThrow(diagnosed);
+  let late: unknown;
+  try {
+    guardSyncStep(
+      "a stand-in sync step spinning past its guard",
+      () => {
+        spin(120);
+        return 1;
+      },
+      40,
+    );
+  } catch (thrown) {
+    late = thrown;
+  }
+  expect(late).toBeInstanceOf(HarnessStepTimeoutError);
+  expect(late).not.toBeInstanceOf(HarnessAssertionError);
+  expect((late as Error).message).toMatch(
+    /a stand-in sync step spinning past its guard took \d+ ms, past its own guard of 40 ms/,
+  );
+  let lateFailure: unknown;
+  try {
+    guardSyncStep(
+      "a stand-in sync step spinning, then failing",
+      () => {
+        spin(120);
+        throw diagnosed;
+      },
+      40,
+    );
+  } catch (thrown) {
+    lateFailure = thrown;
+  }
+  expect(lateFailure).toBeInstanceOf(HarnessStepTimeoutError);
+  expect((lateFailure as Error).cause).toBe(diagnosed);
+});
+
+test("execFileGuardTrip reads a harness subprocess killed at execFile's timeout as its step's tripped guard, and nothing else — an exit, a spawn failure, or an exhausted maxBuffer — as one (TEST-SPEC S-3)", async () => {
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execFileAsync = promisify(execFile);
+  const killed = await rejectionOf(
+    execFileAsync(process.execPath, ["-e", "setInterval(() => {}, 60000)"], {
+      timeout: 200,
+    }),
+  );
+  const tripped = execFileGuardTrip("a stand-in subprocess", 200, killed);
+  expect(tripped).toBeInstanceOf(HarnessStepTimeoutError);
+  expect(tripped?.cause).toBe(killed);
+  expect(tripped?.message).toContain(
+    "a stand-in subprocess was killed at its own guard of 200 ms",
+  );
+  const exited = await rejectionOf(
+    execFileAsync(process.execPath, ["-e", "process.exit(3)"], {
+      timeout: 60_000,
+    }),
+  );
+  expect(execFileGuardTrip("a stand-in subprocess", 60_000, exited)).toBe(
+    undefined,
+  );
+  const overflowed = await rejectionOf(
+    execFileAsync(
+      process.execPath,
+      ["-e", "process.stdout.write('x'.repeat(4096))"],
+      { timeout: 60_000, maxBuffer: 16 },
+    ),
+  );
+  expect(execFileGuardTrip("a stand-in subprocess", 60_000, overflowed)).toBe(
+    undefined,
+  );
+  const missing = await rejectionOf(
+    execFileAsync(path.join(os.tmpdir(), "xspec-s3-no-such-command"), [], {
+      timeout: 60_000,
+    }),
+  );
+  expect(execFileGuardTrip("a stand-in subprocess", 60_000, missing)).toBe(
+    undefined,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// The driver's in-run evaluation (H-11): T6.5-22(a)'s check of a performed
+// move (helpers/added-import-identifiers.ts) is the harness evaluating the
+// run's answer, so its own failure is a harness error, never a diagnosed
+// product failure — and its breach stays the diagnosed failure it is.
+
+/** The module the driver loads on demand for T6.5-22(a)'s check. */
+const CHECK_MODULE = "../helpers/added-import-identifiers.js";
+
+/** A performed move's argv, as the driver reads it (the stand-in's `move`). */
+const MOVE_ARGV = ["move", "specs/A.mdx", "specs/B.mdx"];
+
+/**
+ * Replace T6.5-22(a)'s check for the running test alone: a scoped
+ * `vi.doMock` of the module the driver imports on demand, the real module's
+ * other exports kept; undone when the test finishes.
+ */
+function injectAddedImportCheck(
+  prepare: typeof AddedImportCheckModule.prepareAddedImportCheck,
+): void {
+  vi.doMock(CHECK_MODULE, async (importOriginal) => ({
+    ...(await importOriginal<typeof AddedImportCheckModule>()),
+    prepareAddedImportCheck: prepare,
+  }));
+  onTestFinished(() => {
+    vi.doUnmock(CHECK_MODULE);
+  });
+}
+
+/** What a promise rejects with; null when it resolves. */
+async function rejectionOf(pending: Promise<unknown>): Promise<unknown> {
+  return await pending.then(
+    () => null,
+    (thrown: unknown) => thrown,
+  );
+}
+
+test("a failure of T6.5-22(a)'s check judging an exited move rejects waitForExit and runProduct with the harness error HarnessEvaluationError, its cause the original — never a diagnosed HarnessAssertionError (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const original = new Error("S-3: the check's judgement crashed");
+  const judged: (number | null)[] = [];
+  injectAddedImportCheck(async () => ({
+    verify: async (result) => {
+      judged.push(result.exitCode);
+      throw original;
+    },
+  }));
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: MOVE_ARGV,
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expect(settled).toBeInstanceOf(HarnessEvaluationError);
+  expect(settled).not.toBeInstanceOf(HarnessAssertionError);
+  const error = settled as HarnessEvaluationError;
+  expect(error.cause).toBe(original);
+  expect(error.stage).toBe("verify");
+  expect(error.commandLine).toBe(running.commandLine);
+  expect(error.message).toContain("T6.5-22(a)");
+  expect(error.message).toContain(running.commandLine);
+  expect(error.message).toContain(original.message);
+  // The judgement ran on the exited run; every await sees the same error.
+  expect(judged).toEqual([0]);
+  expect(await rejectionOf(running.waitForExit())).toBe(error);
+  // The foreground path rejects alike.
+  const foreground = await rejectionOf(
+    runProduct(binding, { cwd: workspace.root, argv: MOVE_ARGV }),
+  );
+  expect(foreground).toBeInstanceOf(HarnessEvaluationError);
+  expect((foreground as HarnessEvaluationError).cause).toBe(original);
+});
+
+test("a failure of T6.5-22(a)'s check reading the pre-operation sources rejects startProduct with HarnessEvaluationError, nothing spawned (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const original = new RangeError("S-3: the pre-operation reading crashed");
+  injectAddedImportCheck(async () => {
+    throw original;
+  });
+  const rejected = await rejectionOf(
+    startProduct(binding, { cwd: workspace.root, argv: MOVE_ARGV }),
+  );
+  expect(rejected).toBeInstanceOf(HarnessEvaluationError);
+  expect(rejected).not.toBeInstanceOf(HarnessAssertionError);
+  const error = rejected as HarnessEvaluationError;
+  expect(error.cause).toBe(original);
+  expect(error.stage).toBe("prepare");
+  expect(error.message).toContain("T6.5-22(a)");
+  expect(error.message).toContain(MOVE_ARGV.join(" "));
+  // The reading precedes the spawn: the stand-in's `move` never ran.
+  expect(await pathExists(workspace.path("moved"))).toBe(false);
+});
+
+test("a T6.5-22(a) breach (HarnessAssertionError) passes through the driver unchanged — the very error, from waitForExit and from startProduct — a diagnosed product failure", async () => {
+  const { workspace, binding } = await standin();
+  const breach = new HarnessAssertionError("T6.5-22(a): stand-in breach");
+  injectAddedImportCheck(async () => ({
+    verify: async () => {
+      throw breach;
+    },
+  }));
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: MOVE_ARGV,
+  });
+  expect(await rejectionOf(running.waitForExit())).toBe(breach);
+  const early = new HarnessAssertionError("T6.5-22(a): stand-in early");
+  injectAddedImportCheck(async () => {
+    throw early;
+  });
+  expect(
+    await rejectionOf(
+      startProduct(binding, { cwd: workspace.root, argv: MOVE_ARGV }),
+    ),
+  ).toBe(early);
+});
+
+test("waitForFile on a run whose T6.5-22(a) check fails rejects with that HarnessEvaluationError itself, never folded into the premature-exit error (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const original = new Error("S-3: the check's judgement crashed");
+  injectAddedImportCheck(async () => ({
+    verify: async () => {
+      throw original;
+    },
+  }));
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: MOVE_ARGV,
+  });
+  const neverCreated = path.join(workspace.tempRoot, "never-created");
+  const error = await rejectionOf(running.waitForFile(neverCreated));
+  expect(error).toBeInstanceOf(HarnessEvaluationError);
+  expect((error as Error).cause).toBe(original);
+  expect((error as Error).message).not.toContain("exited before creating");
+  // The very rejection the run settled with, not a copy.
+  expect(await rejectionOf(running.waitForExit())).toBe(error);
+});
+
+// ---------------------------------------------------------------------------
+// A crash of the harness's own MDX parse inside T6.5-22(a)'s check (H-11):
+// reading a spec source a performed move rewrote, the check takes the
+// parse's grammar verdict alone (`MdxNonDerivationError`) for "not
+// well-formed", the diagnosed breach, and lets anything else the read
+// throws — an exhausted stack, say — propagate as the harness's own
+// failure. The fault is injected into `readMdxTree`
+// (helpers/mdx-derivability.ts), which the check module binds when it is
+// first loaded: a `vi.doMock` made after any test of this file loaded that
+// module would not reach it, so the module is mocked for the whole file
+// (Vitest hoists `vi.mock` above the imports) by a pass-through that throws
+// only while the running test arms it, disarmed when that test finishes.
+
+/** The armed fault: what `readMdxTree` throws reading a text, if anything. */
+const mdxReadFault = vi.hoisted(() => ({
+  throwFor: undefined as ((text: string) => Error | undefined) | undefined,
+}));
+
+vi.mock("../helpers/mdx-derivability.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof MdxDerivabilityModule>();
+  const readMdxTree: typeof actual.readMdxTree = (text) => {
+    const fault = mdxReadFault.throwFor?.(text);
+    if (fault !== undefined) throw fault;
+    return actual.readMdxTree(text);
+  };
+  return { ...actual, readMdxTree };
+});
+
+/** Arms the fault for the running test alone: `readMdxTree` throws `error`
+ * reading exactly `text`, and reads every other text as it does. */
+function injectMdxReadFault(text: string, error: Error): void {
+  mdxReadFault.throwFor = (read) => (read === text ? error : undefined);
+  onTestFinished(() => {
+    mdxReadFault.throwFor = undefined;
+  });
+}
+
+/** The stand-in's `move` writes these files (relative path to content). */
+const MOVE_WRITES_ENV = "XSPEC_S3_MOVE_WRITES";
+
+/** A performed section-form move, as the driver reads it (SPEC 6.5, 12.0). */
+const SECTION_MOVE_ARGV = ["move", "specs/A.mdx#a", "specs/B.mdx#b.a"];
+
+const SECTION_B = '<S id="b">\n\nBeta.\n</S>\n';
+
+/** `specs/B.mdx` once `a` moved into it: well-formed, no import added. */
+const REWRITTEN_B = '<S id="b">\n\nBeta.\n\n<S id="a">\n\nAlpha.\n</S>\n</S>\n';
+
+/** A rewrite that genuinely does not derive under 14.20 (`<S>` unclosed). */
+const UNCLOSED_B = '<S id="b">\n\nBeta.\n';
+
+/** The workspace's one spec group discovers both sources (SPEC 7). */
+const SPEC_WORKSPACE = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  "specs/A.mdx": '<S id="a">\n\nAlpha.\n</S>\n',
+  "specs/B.mdx": SECTION_B,
+};
+
+/** The stand-in's environment for a move rewriting `specs/B.mdx` so. */
+const rewritingB = (content: string): Readonly<Record<string, string>> => ({
+  [MOVE_WRITES_ENV]: JSON.stringify({ "specs/B.mdx": content }),
+});
+
+/** What a call throws; null when it returns. */
+function thrownBy(call: () => unknown): unknown {
+  try {
+    call();
+  } catch (thrown) {
+    return thrown;
+  }
+  return null;
+}
+
+const NOT_WELL_FORMED_AFTER =
+  /specs\/B\.mdx, which the operation rewrote, is not well-formed under its grammar after it \(SPEC 14\.20: /;
+
+test("a crash of the harness's own MDX parse reading a spec source a performed move rewrote, on either side of the move, rejects runProduct and waitForExit with HarnessEvaluationError, its cause the original — never the diagnosed 'not well-formed' HarnessAssertionError (H-11)", async () => {
+  const { workspace, binding } = await standin(SPEC_WORKSPACE);
+  // The rewritten text, read once the run exited: the foreground path.
+  const afterCrash = new RangeError("Maximum call stack size exceeded");
+  injectMdxReadFault(REWRITTEN_B, afterCrash);
+  const foreground = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: SECTION_MOVE_ARGV,
+      env: rewritingB(REWRITTEN_B),
+    }),
+  );
+  expect(foreground).toBeInstanceOf(HarnessEvaluationError);
+  expect(foreground).not.toBeInstanceOf(HarnessAssertionError);
+  expect((foreground as HarnessEvaluationError).cause).toBe(afterCrash);
+  expect((foreground as HarnessEvaluationError).stage).toBe("verify");
+  // The run exited 0 having rewritten B: the judgement, not the run, failed.
+  expect(await fsp.readFile(workspace.path("specs/B.mdx"), "utf8")).toBe(
+    REWRITTEN_B,
+  );
+
+  // The pre-operation text, read once the run exited: the background path.
+  await fsp.writeFile(workspace.path("specs/B.mdx"), SECTION_B);
+  const beforeCrash = new RangeError("Maximum call stack size exceeded");
+  injectMdxReadFault(SECTION_B, beforeCrash);
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: SECTION_MOVE_ARGV,
+    env: rewritingB(REWRITTEN_B),
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expect(settled).toBeInstanceOf(HarnessEvaluationError);
+  expect(settled).not.toBeInstanceOf(HarnessAssertionError);
+  expect((settled as HarnessEvaluationError).cause).toBe(beforeCrash);
+  expect((settled as HarnessEvaluationError).stage).toBe("verify");
+});
+
+test("a spec source a performed move rewrote that genuinely does not derive under 14.20 (an unclosed `<S>`) stays the diagnosed breach, through the same pass-through parse (H-11's control)", async () => {
+  const { workspace, binding } = await standin(SPEC_WORKSPACE);
+  const error = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: SECTION_MOVE_ARGV,
+      env: rewritingB(UNCLOSED_B),
+    }),
+  );
+  expect(error).toBeInstanceOf(HarnessAssertionError);
+  expect(error).not.toBeInstanceOf(HarnessEvaluationError);
+  expect((error as Error).message).toMatch(/^T6\.5-22\(a\)/);
+  expect((error as Error).message).toMatch(NOT_WELL_FORMED_AFTER);
+});
+
+test("judgeAddedImportsOfFile, called directly (T6.5-22(b), T6.5-23), throws a crash of the harness's own MDX parse on either side instead of returning it as a problem, while a genuine non-derivation stays its one problem (H-11)", () => {
+  // Unfaulted, both texts read: nothing added, no problem.
+  expect(
+    judgeAddedImportsOfFile(
+      "specs/B.mdx",
+      "spec-source",
+      SECTION_B,
+      REWRITTEN_B,
+    ),
+  ).toEqual({ added: [], problems: [] });
+  const crash = new RangeError("Maximum call stack size exceeded");
+  injectMdxReadFault(REWRITTEN_B, crash);
+  expect(
+    thrownBy(() =>
+      judgeAddedImportsOfFile(
+        "specs/B.mdx",
+        "spec-source",
+        SECTION_B,
+        REWRITTEN_B,
+      ),
+    ),
+  ).toBe(crash);
+  expect(
+    thrownBy(() =>
+      judgeAddedImportsOfFile(
+        "specs/B.mdx",
+        "spec-source",
+        REWRITTEN_B,
+        SECTION_B,
+      ),
+    ),
+  ).toBe(crash);
+  const judgement = judgeAddedImportsOfFile(
+    "specs/B.mdx",
+    "spec-source",
+    SECTION_B,
+    UNCLOSED_B,
+  );
+  expect(judgement.added).toEqual([]);
+  expect(judgement.problems).toHaveLength(1);
+  expect(judgement.problems[0]).toMatch(NOT_WELL_FORMED_AFTER);
+});
+
+// ---------------------------------------------------------------------------
+// T12.7-1's walk over every captured JSON document (helpers/capture-walk.ts):
+// the driver walks the captured stdout of every invocation with JSON output
+// in effect — its argv read by SPEC 12.0's grammar (helpers/invocation-
+// grammar.ts) — once the run has exited, so a near-marker in a document a
+// test only byte-compares or never reads still fails, diagnosed; a run
+// without JSON output in effect, or whose stdout is not one JSON document,
+// passes untouched; and a failure of the walk itself is the harness error
+// `HarnessEvaluationError` (stage `walk`, H-11). The walk's crash is armed
+// through a pass-through mock of the walk's module, hoisted for the whole
+// file like `readMdxTree`'s above: the driver binds the module statically.
+
+/**
+ * The walk vectors' stand-in. Its argv is never read — the argv the driver
+ * reads is free to spell any invocation — and its behavior rides its
+ * environment: it writes `XSPEC_S3_STDOUT` (UTF-8 text), or the bytes
+ * `XSPEC_S3_STDOUT_HEX` spells in hexadecimal, to stdout and exits with
+ * `XSPEC_S3_EXIT` (default 0); with `XSPEC_S3_HOLD` set it then creates
+ * that file and never exits, for a kill by request.
+ */
+const EMIT_STANDIN_SOURCE = `import fs from "node:fs";
+
+const hex = process.env.XSPEC_S3_STDOUT_HEX;
+const bytes =
+  hex === undefined
+    ? Buffer.from(process.env.XSPEC_S3_STDOUT ?? "", "utf8")
+    : Buffer.from(hex, "hex");
+const hold = process.env.XSPEC_S3_HOLD;
+process.stdout.write(bytes, () => {
+  if (hold === undefined) {
+    process.exitCode = Number(process.env.XSPEC_S3_EXIT ?? "0");
+    return;
+  }
+  fs.writeFileSync(hold, "");
+  setInterval(() => {}, 60000);
+});
+`;
+
+/** A fresh workspace holding the walk vectors' stand-in. */
+async function emitStandin(): Promise<Standin> {
+  const workspace = await TestWorkspace.create({
+    files: { "emit.mjs": EMIT_STANDIN_SOURCE },
+  });
+  onTestFinished(() => workspace.dispose());
+  return {
+    workspace,
+    binding: {
+      label: "S-3 emitting stand-in",
+      command: process.execPath,
+      prefixArgs: [workspace.path("emit.mjs")],
+    },
+  };
+}
+
+/** The stand-in's environment: emit `stdout`, then exit with `exit`. */
+const emitting = (
+  stdout: string,
+  exit = 0,
+): Readonly<Record<string, string>> => ({
+  XSPEC_S3_STDOUT: stdout,
+  XSPEC_S3_EXIT: String(exit),
+});
+
+/** A document carrying a near-marker at `$.nodes[0].tags` (SPEC 12.7). */
+const NEAR_MARKER_DOCUMENT = `${JSON.stringify(
+  {
+    findings: [],
+    nodes: [{ identity: "specs/A.mdx", tags: { unavailable: false } }],
+  },
+  null,
+  2,
+)}\n`;
+
+/** The same document with the exact marker in that place. */
+const EXACT_MARKER_DOCUMENT = `${JSON.stringify(
+  {
+    findings: [],
+    nodes: [{ identity: "specs/A.mdx", tags: { unavailable: true } }],
+  },
+  null,
+  2,
+)}\n`;
+
+/** The walk's diagnosis of the near-marker at `path` in a run's stdout. */
+function expectWalkDiagnosis(
+  error: unknown,
+  path: string,
+  argvShown: string,
+): void {
+  expect(error, argvShown).toBeInstanceOf(HarnessAssertionError);
+  expect(error, argvShown).not.toBeInstanceOf(HarnessEvaluationError);
+  const message = (error as Error).message;
+  expect(message, argvShown).toContain(
+    "T12.7-1, the driver's walk over every captured JSON document — stdout of",
+  );
+  expect(message, argvShown).toContain(argvShown);
+  expect(message, argvShown).toContain(
+    `at ${path}: expected no object of any form other than the unavailability marker`,
+  );
+}
+
+test("the driver walks the captured stdout of every invocation with JSON output in effect — by flag or by JSON-only surface, every exit code, a run killed by request included — and rejects runProduct and waitForExit with the walk's diagnosed failure on a near-marker, naming its JSON path and the command line (T12.7-1)", async () => {
+  const { workspace, binding } = await emitStandin();
+  // By flag and by surface (SPEC 12.0's grammar: flags stand anywhere, a
+  // value-taking flag takes the next token), on exits 0, 1, and 2.
+  const cases: readonly {
+    readonly argv: readonly string[];
+    readonly exit: number;
+  }[] = [
+    { argv: ["check", "--json"], exit: 1 },
+    { argv: ["--json", "build"], exit: 0 },
+    { argv: ["check", "--json", "--json"], exit: 2 },
+    { argv: ["query", "nodes"], exit: 0 },
+    { argv: ["--config", "xspec.config.ts", "view", "specs/A.mdx"], exit: 0 },
+    { argv: ["occurrences", "--to", "specs/A.mdx#a"], exit: 1 },
+    { argv: ["at", "specs/A.mdx", "0"], exit: 0 },
+    { argv: ["inventory"], exit: 0 },
+    { argv: ["version"], exit: 0 },
+    { argv: ["review", "export", "r1"], exit: 0 },
+  ];
+  for (const { argv, exit } of cases) {
+    const error = await rejectionOf(
+      runProduct(binding, {
+        cwd: workspace.root,
+        argv,
+        env: emitting(NEAR_MARKER_DOCUMENT, exit),
+      }),
+    );
+    expectWalkDiagnosis(error, "$.nodes[0].tags", argv.join(" "));
+  }
+  // An exit-2 error document and a marker with a sibling member.
+  const errorDocument = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: ["nosuch", "--json"],
+      env: emitting(
+        `${JSON.stringify({
+          error: {
+            code: null,
+            message: "unknown command",
+            locations: [],
+            path: { unavailable: true, bytes: "ff" },
+            identities: [],
+          },
+        })}\n`,
+        2,
+      ),
+    }),
+  );
+  expectWalkDiagnosis(errorDocument, "$.error.path", "nosuch --json");
+  // The background path: every waitForExit settles with the one rejection.
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["query", "nodes", "--tag", "x"],
+    env: emitting(NEAR_MARKER_DOCUMENT),
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expectWalkDiagnosis(settled, "$.nodes[0].tags", "query nodes --tag x");
+  expect(await rejectionOf(running.waitForExit())).toBe(settled);
+  // A run killed by request after writing a whole document: what it
+  // captured is still a JSON document, walked like any other.
+  const hold = workspace.path("held");
+  const killed = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["review", "export", "r1"],
+    env: { ...emitting(NEAR_MARKER_DOCUMENT), XSPEC_S3_HOLD: hold },
+  });
+  await killed.waitForFile(hold);
+  killed.kill();
+  expectWalkDiagnosis(
+    await rejectionOf(killed.waitForExit()),
+    "$.nodes[0].tags",
+    "review export r1",
+  );
+  // A byte argv element (POSIX staging) reads as the string its bytes
+  // spell when they are valid UTF-8, as the product reads it.
+  if (onPosix) {
+    const byteFlag = await rejectionOf(
+      runProduct(binding, {
+        cwd: workspace.root,
+        argv: ["check", new Uint8Array(Buffer.from("--json", "utf8"))],
+        env: emitting(NEAR_MARKER_DOCUMENT, 1),
+      }),
+    );
+    expect(byteFlag).toBeInstanceOf(HarnessAssertionError);
+    expect((byteFlag as Error).message).toContain(
+      "at $.nodes[0].tags: expected no object of any form other than the unavailability marker",
+    );
+  }
+});
+
+test("the driver leaves untouched a run without JSON output in effect, and a captured stdout that is no one JSON document or carries only exact markers (T12.7-1)", async () => {
+  const { workspace, binding } = await emitStandin();
+  const resolves = async (
+    argv: readonly ArgvValue[],
+    env: Readonly<Record<string, string>>,
+  ): Promise<RunResult> => {
+    const result = await runProduct(binding, {
+      cwd: workspace.root,
+      argv,
+      env,
+    });
+    expect(result.signal).toBeNull();
+    return result;
+  };
+  // JSON output not in effect (SPEC 12.0): no `--json` read as a flag — a
+  // value-taking flag's value, a token after `--` — and no JSON-only
+  // surface: the near-marker document is never walked, its bytes intact.
+  for (const argv of [
+    ["check"],
+    ["check", "--note", "--json"],
+    ["check", "--", "--json"],
+    ["review", "list"],
+    ["rename", "specs/A.mdx", "a", "b", "--preview"],
+    [],
+  ]) {
+    const result = await resolves(argv, emitting(NEAR_MARKER_DOCUMENT, 1));
+    expect(result.exitCode, argv.join(" ")).toBe(1);
+    expect(result.stdout, argv.join(" ")).toBe(NEAR_MARKER_DOCUMENT);
+  }
+  if (onPosix) {
+    // A byte argv element that is not valid UTF-8 names no command.
+    const result = await resolves(
+      [new Uint8Array([0xff]), "nodes"],
+      emitting(NEAR_MARKER_DOCUMENT),
+    );
+    expect(result.stdout).toBe(NEAR_MARKER_DOCUMENT);
+  }
+  // JSON output in effect, every object with an `unavailable` member the
+  // exact marker: the run resolves, its document as emitted.
+  for (const argv of [
+    ["query", "nodes"],
+    ["build", "--json"],
+  ]) {
+    const result = await resolves(argv, emitting(EXACT_MARKER_DOCUMENT));
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(EXACT_MARKER_DOCUMENT);
+  }
+  // JSON output in effect, but no one JSON document to walk — empty,
+  // not JSON, two documents, invalid UTF-8, a document led by a UTF-8
+  // byte-order mark: the run resolves, its form left to the run's own
+  // assertions (H-5).
+  for (const stdout of [
+    "",
+    "not json\n",
+    '{"unavailable": false}{"unavailable": false}\n',
+  ]) {
+    const result = await resolves(["check", "--json"], emitting(stdout, 1));
+    expect(result.stdout).toBe(stdout);
+  }
+  const invalidBytes = Buffer.concat([
+    Buffer.from('{"unavailable": 0}', "utf8"),
+    Buffer.from([0xff]),
+  ]);
+  const invalid = await resolves(["view"], {
+    XSPEC_S3_STDOUT_HEX: invalidBytes.toString("hex"),
+  });
+  expect(hex(invalid.stdoutBytes)).toBe(hex(invalidBytes));
+  // The byte-order mark — U+FEFF, the bytes EF BB BF — is no part of a JSON
+  // text (SPEC 12.0: the single JSON document is the entire standard
+  // output), so the near-marker document it leads is never walked, though
+  // the document after it would draw the walk's diagnosis; and
+  // `parseJsonStdout` reads the same stdout as no one JSON document, a
+  // diagnosed failure naming the mark, so the driver's reading and the
+  // parse's stay one.
+  const bomLedBytes = Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from(NEAR_MARKER_DOCUMENT, "utf8"),
+  ]);
+  const bomLed = await resolves(["ids", "--json"], {
+    XSPEC_S3_STDOUT_HEX: bomLedBytes.toString("hex"),
+  });
+  expect(bomLed.exitCode).toBe(0);
+  expect(hex(bomLed.stdoutBytes)).toBe(hex(bomLedBytes));
+  expect(() => parseJsonStdout(bomLed)).toThrow(HarnessAssertionError);
+  expect(() => parseJsonStdout(bomLed)).toThrow(
+    "begins with a UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF)",
+  );
+});
+
+/** The armed fault: what the walk throws for a run, if anything. */
+const walkFault = vi.hoisted(() => ({
+  throwFor: undefined as ((result: RunResult) => Error | undefined) | undefined,
+}));
+
+vi.mock("../helpers/capture-walk.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof CaptureWalkModule>();
+  const walkCapturedJsonDocument: typeof actual.walkCapturedJsonDocument = (
+    result,
+  ) => {
+    const fault = walkFault.throwFor?.(result);
+    if (fault !== undefined) throw fault;
+    actual.walkCapturedJsonDocument(result);
+  };
+  return { ...actual, walkCapturedJsonDocument };
+});
+
+test("a failure of the driver's walk itself rejects runProduct and waitForExit with the harness error HarnessEvaluationError (stage walk), its cause the original — never a diagnosed failure, never a pass (H-11)", async () => {
+  const { workspace, binding } = await emitStandin();
+  const crash = new RangeError("S-3: the walk crashed");
+  const walked: string[] = [];
+  walkFault.throwFor = (result) => {
+    walked.push(result.commandLine);
+    return crash;
+  };
+  onTestFinished(() => {
+    walkFault.throwFor = undefined;
+  });
+  const foreground = await rejectionOf(
+    runProduct(binding, {
+      cwd: workspace.root,
+      argv: ["query", "nodes"],
+      env: emitting(EXACT_MARKER_DOCUMENT),
+    }),
+  );
+  expect(foreground).toBeInstanceOf(HarnessEvaluationError);
+  expect(foreground).not.toBeInstanceOf(HarnessAssertionError);
+  const error = foreground as HarnessEvaluationError;
+  expect(error.cause).toBe(crash);
+  expect(error.stage).toBe("walk");
+  expect(error.commandLine).toContain("query nodes");
+  expect(error.message).toMatch(
+    /^harness error \(H-11\): T12\.7-1's marker walk/,
+  );
+  expect(thrownBy(() => rethrowHarnessError(error))).toBe(error);
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["check", "--json"],
+    env: emitting(EXACT_MARKER_DOCUMENT, 1),
+  });
+  const settled = await rejectionOf(running.waitForExit());
+  expect(settled).toBeInstanceOf(HarnessEvaluationError);
+  expect((settled as HarnessEvaluationError).cause).toBe(crash);
+  // A run without JSON output in effect never reaches the walk.
+  const plain = await runProduct(binding, {
+    cwd: workspace.root,
+    argv: ["check"],
+    env: emitting(EXACT_MARKER_DOCUMENT, 1),
+  });
+  expect(plain.exitCode).toBe(1);
+  expect(walked).toHaveLength(2);
+});
+
+// Runs from a working directory entered before its staging (TEST-SPEC
+// T14-10(k), (l)(iii); H-2; helpers/subprocess.ts
+// `runProductInEnteredDirectory`, its wrapper
+// helpers/entered-directory-wrapper.mjs): the harness's wrapper enters the
+// directory, the caller's staging is made once it stands there, and the
+// wrapper replaces itself with the product, which is then the very process
+// the driver spawned. The mode-000 vector needs an unprivileged runner, as
+// every permission staging does (helpers/permissions.ts, E-1: as root its
+// staging fails as HarnessStagingError by design); the vectors whose
+// staging is a stand-in staging run on any POSIX runner.
+
+/** A path's mode bits. */
+async function modeOf(target: string): Promise<number> {
+  return (await fsp.stat(target)).mode & 0o7777;
+}
+
+/** A stand-in staging that stages nothing and counts its undoings. */
+function countedStaging(): EnteredDirectoryStaging & {
+  readonly restored: () => number;
+} {
+  let restored = 0;
+  return {
+    restore: async () => {
+      restored += 1;
+    },
+    restored: () => restored,
+  };
+}
+
+/** What the stand-in's `entered` mode reports. */
+interface EnteredView {
+  readonly cwd: string;
+  readonly list: string;
+  readonly lookup: string;
+  readonly dot: string;
+  readonly absoluteList: string;
+  readonly absoluteLookup: string;
+  readonly argv: readonly string[];
+  readonly ppid: number;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+test.runIf(onLinux)(
+  "an entered-directory run (TEST-SPEC T14-10(k), (l)(iii); H-2): a stand-in run from a working directory it entered before the harness staged it mode 000 has that directory as its cwd and finds its own listing of it, a lookup of xspec.config.ts there, and an examination of `.` refused, spelled relative to it and walked absolutely alike — the staging made once the wrapper stands there, verified on the harness, and undone once the run has ended — while its exit code, byte-exact streams, argv, environment, and parent are any run's",
+  async () => {
+    const { workspace, binding } = await standin();
+    await workspace.dir("tools");
+    const tools = workspace.path("tools");
+    await fsp.chmod(tools, 0o755);
+    const entered = await fsp.realpath(tools);
+    const argv = ["entered", "7", "a b", "", "$HOME", "*.mdx", '"quoted"'];
+    // A name no shell keeps among its variables, and the ambient PWD,
+    // which no shell rewrote: the environment is exactly the driver's.
+    const env = { XSPEC_S3_ENTERED: "yes", "XSPEC_S3-ENTERED.NAME": "kept" };
+    const modesAtStaging: number[] = [];
+    const result = await runProductInEnteredDirectory(
+      binding,
+      { cwd: tools, argv, env },
+      async () => {
+        modesAtStaging.push(await modeOf(tools));
+        return await stageDirectoryMode(tools, 0o000, [
+          { attempt: "list", refused: true },
+          { attempt: "examine", name: "xspec.config.ts", refused: true },
+        ]);
+      },
+    );
+    // Staged once, the directory as the test left it until then.
+    expect(modesAtStaging).toEqual([0o755]);
+    expect(result.exitCode).toBe(7);
+    expect(result.signal).toBeNull();
+    const seen = JSON.parse(result.stdout) as EnteredView;
+    expect(seen.cwd).toBe(entered);
+    expect([
+      seen.list,
+      seen.lookup,
+      seen.dot,
+      seen.absoluteList,
+      seen.absoluteLookup,
+    ]).toEqual(["EACCES", "EACCES", "EACCES", "EACCES", "EACCES"]);
+    expect(seen.argv).toEqual(argv.slice(2));
+    // The product is the very process the driver spawned: the harness's
+    // child, the wrapper replaced.
+    expect(seen.ppid).toBe(process.pid);
+    expect(seen.env).toEqual(productEnvironment(binding, env));
+    expect(hex(result.stdoutBytes)).toBe(
+      hex(Buffer.from(result.stdout, "utf8")),
+    );
+    expect(hex(result.stderrBytes)).toBe("656e74ff0d0a");
+    expect(result.commandLine).toContain(
+      "from its working directory, entered before the harness staged it",
+    );
+    // Undone once the run has ended.
+    expect(await modeOf(tools)).toBe(0o755);
+    expect(await fsp.readdir(tools)).toEqual([]);
+  },
+);
+
+test.runIf(onLinux)(
+  "an entered-directory run's product holds file descriptors 0–2 alone, as a run spawned directly does — its wrapper's control channel never inherited — and its staging is undone once, after the run",
+  async () => {
+    const { workspace } = await standin();
+    const lister: ProductBinding = {
+      label: "S-3 file-descriptor lister",
+      command: "/bin/ls",
+      prefixArgs: ["-l", "/proc/self/fd"],
+    };
+    // Each open descriptor and what it is, socket and pipe numbers and the
+    // lister's own process identifier left out.
+    const descriptors = (result: RunResult): string[] =>
+      result.stdout
+        .split("\n")
+        .flatMap((line) => {
+          const found = / (\d+) -> (.+)$/.exec(line);
+          return found === null ? [] : [`${found[1]} ${found[2]}`];
+        })
+        .map((entry) =>
+          entry
+            .replace(/^(\d+ [a-z]+):\[\d+\]$/, "$1")
+            .replace(/\/proc\/\d+\//, "/proc/<pid>/"),
+        );
+    const direct = await runProduct(lister, { cwd: workspace.root });
+    expect(direct.exitCode).toBe(0);
+    // The premise: a run spawned directly holds 0–2 (stdin closed onto
+    // /dev/null) and the lister's own listing handle.
+    const listed = descriptors(direct);
+    expect(listed.map((entry) => entry.split(" ")[0])).toEqual([
+      "0",
+      "1",
+      "2",
+      "3",
+    ]);
+    expect(listed[0]).toBe("0 /dev/null");
+    expect(listed[3]).toBe("3 /proc/<pid>/fd");
+    const staging = countedStaging();
+    const entered = await runProductInEnteredDirectory(
+      lister,
+      { cwd: workspace.root },
+      async () => staging,
+    );
+    expect(entered.exitCode).toBe(0);
+    expect(descriptors(entered)).toEqual(descriptors(direct));
+    expect(entered.stderr).toBe("");
+    expect(staging.restored()).toBe(1);
+  },
+);
+
+test.runIf(onPosix)(
+  "an entered-directory run whose staging fails ends before its product starts, rejecting with that very error — a HarnessStagingError as itself — the wrapper killed; pre-flight refusals — a launcher, a relative command, a command no executable regular file — are plain Errors, nothing staged or spawned",
+  async () => {
+    const { workspace, binding } = await standin();
+    const marker = path.join(workspace.tempRoot, "marked");
+    const run = (
+      stage: () => Promise<EnteredDirectoryStaging>,
+      over: Partial<ProductBinding> = {},
+      launcher?: RunLauncher,
+    ): Promise<RunResult> =>
+      runProductInEnteredDirectory(
+        { ...binding, ...over },
+        { cwd: workspace.root, argv: ["mark", marker], launcher },
+        stage,
+      );
+    const ineffective = new HarnessStagingError(
+      "directory-mode",
+      workspace.root,
+      "S-3: an ineffective staging",
+    );
+    expect(
+      await rejectionOf(
+        run(async () => {
+          throw ineffective;
+        }),
+      ),
+    ).toBe(ineffective);
+    const failed = new Error("S-3: the staging failed");
+    expect(
+      await rejectionOf(
+        run(async () => {
+          throw failed;
+        }),
+      ),
+    ).toBe(failed);
+    expect(await pathExists(marker)).toBe(false);
+
+    let staged = 0;
+    const counting = async (): Promise<EnteredDirectoryStaging> => {
+      staged += 1;
+      return { restore: async () => undefined };
+    };
+    const launcher: RunLauncher = {
+      label: "(S-3 launcher)",
+      wrap: (invocation, env) => ({
+        command: invocation.command,
+        args: [...invocation.args],
+        env: { ...env },
+      }),
+      killGroup: async () => undefined,
+    };
+    // Each refused run starts only once the one before it has been judged,
+    // so its rejection is observed as it is created: started together, a
+    // later run could reject — after the I/O each makes before its
+    // pre-flight — while an earlier one is still awaited, an unhandled
+    // rejection Vitest reports as an error of the whole run.
+    const refusals: readonly (readonly [() => Promise<RunResult>, RegExp])[] = [
+      [() => run(counting, {}, launcher), /takes no launcher/],
+      [() => run(counting, { command: "node" }), /takes an absolute command/],
+      [
+        () => run(counting, { command: workspace.path("standin.mjs") }),
+        /takes an executable regular file/,
+      ],
+    ];
+    for (const [start, pattern] of refusals) {
+      const error = await rejectionOf(start());
+      expect(error).toBeInstanceOf(Error);
+      expect(error).not.toBeInstanceOf(HarnessAssertionError);
+      expect((error as Error).message).toMatch(pattern);
+      expect((error as Error).message).toContain("nothing was spawned");
+    }
+    expect(staged).toBe(0);
+    expect(await pathExists(marker)).toBe(false);
+    // With nothing amiss the same run starts its product.
+    const marked = await run(counting);
+    expect(marked.exitCode).toBe(0);
+    expect(staged).toBe(1);
+    expect(await fsp.readFile(marker, "utf8")).toBe("marked");
+  },
+);
+
+test.runIf(onPosix)(
+  "an entered-directory run's own hang guard covers its product alone (TEST-SPEC S-3): a staging outlasting that guard passes, the guard armed once the product starts, and a product that never ends is killed at its own guard — a ProductRunTimeoutError, the hang guard's kill — its staging undone once the run has ended",
+  async () => {
+    const { workspace, binding } = await standin();
+    const guardMs = 2000;
+    const slow = countedStaging();
+    const passed = await runProductInEnteredDirectory(
+      binding,
+      { cwd: workspace.root, argv: ["exit", "0"], timeoutMs: guardMs },
+      async () => {
+        await sleep(guardMs + 500);
+        return slow;
+      },
+    );
+    expect(passed.exitCode).toBe(0);
+    expect(slow.restored()).toBe(1);
+    const hanging = countedStaging();
+    const hangGuardMs = 400;
+    const started = performance.now();
+    const error = await rejectionOf(
+      runProductInEnteredDirectory(
+        binding,
+        { cwd: workspace.root, argv: ["hang"], timeoutMs: hangGuardMs },
+        async () => hanging,
+      ),
+    );
+    expect(error).toBeInstanceOf(ProductRunTimeoutError);
+    expect(isHangGuardKill(error)).toBe(true);
+    expect((error as Error).message).toContain(
+      `timed out after ${String(hangGuardMs)} ms`,
+    );
+    expect(performance.now() - started).toBeGreaterThanOrEqual(
+      hangGuardMs - 50,
+    );
+    expect(hanging.restored()).toBe(1);
+  },
+);
+
+test.runIf(onPosix)(
+  "the entered-directory wrapper's own failures are harness errors, never the product's outcome: a command no longer executable once staged, which the wrapper reports, and an exec the kernel refuses, which aborts it — each a plain Error, the staging undone",
+  async () => {
+    const { workspace } = await standin();
+    await workspace.file("tool.sh", "#!/bin/sh\nexit 0\n");
+    const tool = workspace.path("tool.sh");
+    await fsp.chmod(tool, 0o755);
+    const unexecutable = countedStaging();
+    const reported = await rejectionOf(
+      runProductInEnteredDirectory(
+        { label: "S-3 tool", command: tool },
+        { cwd: workspace.root },
+        async () => {
+          await fsp.chmod(tool, 0o644);
+          return unexecutable;
+        },
+      ),
+    );
+    expect(reported).toBeInstanceOf(Error);
+    expect(reported).not.toBeInstanceOf(HarnessAssertionError);
+    expect(reported).not.toBeInstanceOf(ProductRunTimeoutError);
+    expect((reported as Error).message).toMatch(
+      /^harness error \(H-11\): .*the harness's entered-directory wrapper ended before starting the product/,
+    );
+    expect((reported as Error).message).toContain(
+      `the command ${tool} is not executable`,
+    );
+    expect(unexecutable.restored()).toBe(1);
+
+    // No shebang and no binary format: the kernel refuses the exec
+    // (ENOEXEC), past every check the wrapper and the driver make.
+    await workspace.file("garbage", "S-3: no executable format\n");
+    const garbage = workspace.path("garbage");
+    await fsp.chmod(garbage, 0o755);
+    const refusedExec = countedStaging();
+    const aborted = await rejectionOf(
+      runProductInEnteredDirectory(
+        { label: "S-3 garbage", command: garbage },
+        { cwd: workspace.root },
+        async () => refusedExec,
+      ),
+    );
+    expect(aborted).toBeInstanceOf(Error);
+    expect(aborted).not.toBeInstanceOf(HarnessAssertionError);
+    expect((aborted as Error).message).toContain(
+      "failed to replace itself with the product",
+    );
+    expect((aborted as Error).message).toContain("ENOEXEC");
+    expect(refusedExec.restored()).toBe(1);
+  },
+);
+
+test.runIf(onPosix)(
+  "an entered-directory run's captured stdout is walked as any run's (T12.7-1): a near-marker under --json rejects it with the walk's diagnosed failure, its staging undone before the rejection surfaces",
+  async () => {
+    const { workspace, binding } = await emitStandin();
+    const staging = countedStaging();
+    const error = await rejectionOf(
+      runProductInEnteredDirectory(
+        binding,
+        {
+          cwd: workspace.root,
+          argv: ["ids", "--json"],
+          env: emitting(NEAR_MARKER_DOCUMENT),
+        },
+        async () => staging,
+      ),
+    );
+    expectWalkDiagnosis(error, "$.nodes[0].tags", "ids --json");
+    expect(staging.restored()).toBe(1);
+  },
+);

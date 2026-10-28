@@ -21,25 +21,78 @@
 // optional `kinds`; `files` selectors support capture wildcards `$1`…`$9`
 // (each at most once in `from`; a `to` capture must exist in `from`; a
 // capture takes one or more bytes within a single segment, shortest-match
-// left to right). Violations are findings of `check` — and only `check`
-// (14.12): `build` does not evaluate policy (12.1).
+// left to right) and follow 7's glob rules — a `files` glob, capture-bearing
+// or not, lies outside the workspace root by its spelling alone, as a
+// group's does (14.14), and an inside-root spelling's `.`, `..`, and empty
+// segments match nothing. Violations are findings of `check` — one per rule
+// and offending edge, an edge spelled twice being one edge (5.2) — and only
+// `check` (14.12): `build` does not evaluate policy (12.1).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
-//   2 exactly, byte-empty stdout under --json, stderr matching /config/i.
+//   2 exactly, the single 12.7 error document (stable code
+//   `configuration-error`, concerned path) as the entire stdout under
+//   --json, stderr matching /config/i.
 //   Every invalid fixture stages valid sources for every configured group, so
 //   the staged deviation is the workspace's only defect: a product that
 //   wrongly accepts the configuration proceeds to a clean build (exit 0) and
 //   fails the exit-code assertion — never exits 2 for a side reason.
+//   Every `expectConfigRefused` arm (T7.4-1, T7.5-1) further pins the
+//   finding's concerned path to exactly `xspec.config.ts` — the file the
+//   upward search found, in 11.6's anchoring form relative to the invocation
+//   working directory, the workspace root (SPEC 14, 12.7) — its locations []
+//   (a configuration condition carries the file it concerns, no source
+//   range; 14), and, by a whole-root snapshot compare around the invocation,
+//   that nothing is written (12.1).
+// - T7.4-1 and T7.5-1 stray-member arms (`edgeKinds` / `kinds` not a subset
+//   of the three dependency kinds; a non-string `targetTags` / selector
+//   `tags` element): each `edgeKinds` or `kinds` stray member — "contains",
+//   "depend", `true` — is staged last beside the valid kind "depends", so a
+//   product that drops unknown members (or filters them and only then
+//   applies the empty-list rule) keeps a valid list and builds, exit 0,
+//   instead of refusing by the wrong rule (`build` never evaluates policy,
+//   12.1, so a tolerated rule can never fail the build by a side reason);
+//   `targetTags: [true]` and `tags: [true]` are staged as TEST-SPEC spells
+//   them. `true` is the boolean literal the declarative form of 7 admits, so
+//   those refusals are 14.14's invalid profile or rule shape, never a form
+//   error.
+// - Set reading (T7.4-1, T7.5-1; SPEC 7.4, 7.5, 12.7, 11.6): `targetTags`,
+//   `edgeKinds`, a rule's `kinds`, and a selector's `tags` are read as sets
+//   — a repeated element collapses — and reported in 12.7's value forms:
+//   tag sets in byte order with duplicates collapsed, kind sets in 5.2's
+//   order however configured. Each arm stages the spelled list beside its
+//   collapsed twin (the same workspace under the canonical spellings) and
+//   asserts `inventory`'s view form-exact (`decodeInventoryResolvedMap`
+//   rejects a verbatim echo) and literally, then the report the sets
+//   govern — the profile's `coverage --json`, the rule's `check --json` —
+//   equal to the twin's: the decoded reports compared member for member and
+//   the stdout bytes identical (a product-to-itself comparison, H-4; one
+//   resolved configuration, one deterministic answer, 12.0).
 // - Unknown profile name at `coverage <name>` (T7.4-1) is a 12.0 usage error,
-//   not a 14.14: asserted as exit 2 with byte-empty stdout under --json (the
-//   exit-2 error prevents emitting the single JSON document, H-5) and a
-//   non-empty stderr diagnostic — no /config/i duty applies.
+//   not a 14.14: asserted as exit 2 with the single 12.7 error document as
+//   the entire stdout under --json (12.0: with JSON output in effect, an
+//   exit-2 invocation emits the error document; H-5) and a non-empty stderr
+//   diagnostic — no /config/i duty applies.
 // - Policy findings are compared as sorted "rule :: kind: from -> to"
 //   renderings plus an exact 14.12 condition count: SPEC 7.5 fixes the
 //   information (rule name + offending edge) and one finding per (rule, edge)
 //   pair, not an order or a location (the edge is the subject, not a source
-//   span).
+//   span). T7.5-2's twice-spelled edge (`d={[BASE.a, BASE.a]}`, one edge,
+//   5.2) pins the pair rule: exactly one finding, where a product reporting
+//   one per spelling reports two.
+// - Selector globs (T7.5-1, T7.5-4; SPEC 7): T7.5-1's outside-root `files`
+//   globs — `../x/*.ts` and the capture pattern `a/../../$1.ts` in `from`,
+//   `/src/*.ts` in `to` — are matrix rows, each rule otherwise valid, so a
+//   product vetting group globs alone accepts the configuration and builds
+//   (exit 0) where 14.14 requires exit 2. T7.5-4's inside-root counterpart
+//   stages one code source's marker edge into the spec group `product`
+//   under `from: { files: "./src/*.ts" }` and, on a second workspace built
+//   under its own configuration (a configuration changed after a build may
+//   leave graph data stale, T13.4-11(a)), under the twin `src/*.ts`: the
+//   first loads (`build` exit 0), the edge's presence pinned through `query
+//   edges` so its clean `check --json` (exit 0, findings []) is not vacuous,
+//   and the twin reports the edge (exit 1) — a product normalizing a
+//   selector glob's spelling before matching flags it under both.
 // - Every `check` run is preceded by a successful `build` in the same
 //   workspace, so generated output is fresh and the policy findings are the
 //   run's only findings (no 14.10 staleness contamination) — the exact
@@ -57,12 +110,67 @@
 //   `*`, whole-path regex) so the exact finding set pins the captured tuple.
 //   Determinism of the shortest-match disambiguation runs the identical
 //   `check --json` twice and asserts byte-identical outputs (H-6).
+// - T7.5-5 literal-`$` forms: `build` succeeding on each arm IS the
+//   load-without-14.14 observation — configuration validity is enforced at
+//   load by every command (SPEC 7, 14.14), and a capture-reading product
+//   refuses the `to`-side arms as referencing an absent capture, exit 2.
+//   Matching-only-the-literal-bytes is the exact policy-finding set over
+//   staged bait: beside each literal-byte path, the fixtures stage the paths
+//   a capture reading, a dropped-`$` reading, a one-byte-wildcard reading,
+//   or a regex-anchor reading would match instead, each bearing an edge of
+//   the same shape. The trailing-`$`-in-`to` arm expects zero findings —
+//   plain `check` exit 0 (any finding causes exit 1, 12.0/14.12) — with the
+//   anchor-bait edge's presence pinned first via `query edges`, so the
+//   no-findings observation is not vacuous; no discovered target can spell a
+//   trailing-`$` path (a spec source always ends `.mdx`, 14.19), which is
+//   why that arm's match observation is pure absence.
 // - T7.5-6 "regenerates output" is asserted by tampering with a generated
 //   module after a first build and byte-comparing it back after a rebuild —
 //   a product-to-itself comparison (H-4 allows those; 12.0 makes the
 //   regenerated bytes deterministic). "Only check reports them" is asserted
 //   as build exiting 0 (a reported policy finding causes exit 1, 7.5) while
 //   the same workspace's check exits 1 with exactly the staged findings.
+// - Staged-source records (TEST-SPEC S-9's before-any-product clause;
+//   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
+//   created after its first product invocation — T7.4-1's and T7.5-1's
+//   later matrix arms, ambiguous-name arms, positive arms, and set-reading
+//   workspaces (`MATRIX_FILES`, `DUAL_FILES`, the set-reading fixtures),
+//   T7.5-2's kinds-restriction and twice-spelled-edge workspaces, T7.5-4's
+//   files-selector, inside-root spelling, and tags-selector workspaces,
+//   T7.5-5's arms (b)–(j) — is a ledger record, judged by
+//   test/self/s9-staged-sources.test.ts before any product exists.
+//   Byte-identical sources across tests and paths are ONE record, named
+//   with every staging test in ID order and every path: `mdxSection("a")`
+//   is section-7-basics.ts's exported `SECTION_A_SOURCE`, `mdxSection("c")`
+//   section-7-discovery.ts's `SECTION_C_SOURCE`, and this module's minimal
+//   sections x, d, t, g, w, p, q, and r are one record each. Each body's
+//   first workspace (T7.4-2's, T7.5-3's, and T7.5-6's only one; T7.5-2's,
+//   T7.5-4's, and T7.5-5's first arm) precedes any invocation — S-7's sweep
+//   reaches it — and stays plain, as does T7.5-6's tampered generated
+//   module (no `.mdx` path).
+// - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
+//   timing clauses; helpers/staged-ts.ts): every configuration file and
+//   code source a body stages in a workspace created after its first
+//   product invocation — `expectConfigRefused`'s one staging site (T7.4-1's
+//   and T7.5-1's matrix tables, every row a record made at module load, the
+//   first's too, the table being one), T7.4-1's ambiguous-name, inferred-
+//   kind, and unknown-profile-name configurations, both bodies' set-reading
+//   configurations, T7.5-2's kinds-restriction and twice-spelled-edge,
+//   T7.5-4's files-selector, two inside-root spelling, and tags-selector,
+//   and T7.5-5's arms (b)–(j) configurations, and the code sources of
+//   MATRIX_FILES, DUAL_FILES, T7.5-4's inside-root spelling workspaces, and
+//   T7.5-5's arms (d), (e), and (g) — is a ledger record carrying its S-9
+//   declaration, every one well-formed, judged by
+//   test/self/s9-staged-sources.test.ts before any product exists.
+//   Byte-identical code sources are ONE record, named with every staging
+//   test in ID order and every path: `src/impl.ts` and `dualcode/d.ts`
+//   (OK_CODE_SOURCE), and CODE_MARKER_TO_P at T7.5-4's `src/a.ts` and
+//   T7.5-5's five paths, `src/end$` and `src/end` among them (code sources
+//   the default does not reach, judged because the record makes the path
+//   judged). The same first workspaces stay plain; T7.5-6's tampered
+//   generated module, an edit of product-written bytes, is staged
+//   `unchecked` (the document declares nothing of its well-formedness, and
+//   no harness constant equals its bytes).
 
 import type {
   CoverageProfileReport,
@@ -72,26 +180,41 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
+  decodeEdgesReport,
   decodeFindingsReport,
+  decodeInventoryResolvedMap,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertFileBytes,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertRunTwiceDeterministic } from "../../helpers/determinism.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import {
+  assertSnapshotsEqual,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
+import { SECTION_A_SOURCE } from "./section-7-basics.js";
+import { SECTION_C_SOURCE } from "./section-7-discovery.js";
 import {
   assertConditionCounts,
+  assertEdgeSetEqual,
   assertSameJson,
   buildOk,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
   readGeneratedModule,
   runJson,
@@ -107,6 +230,63 @@ function mdxSection(id: string): string {
   return `<S id="${id}">\nText for ${id}.\n</S>\n`;
 }
 
+// The minimal sources this module stages in workspaces created after a
+// body's first product invocation (module header) — one staged-source
+// record per byte sequence, named with every staging test in ID order and
+// every path: `mdxSection("a")` is section-7-basics.ts's `SECTION_A_SOURCE`
+// (T7.4-1's and T7.5-1's `specs/A.mdx`, T7.5-2's `lo/BASE.mdx`, T7.5-5's
+// `tgt/a.mdx`) and `mdxSection("c")` section-7-discovery.ts's
+// `SECTION_C_SOURCE` (T7.5-4's `specs/C.mdx`, T7.5-5's `tgt/c.mdx`), both
+// imported above; the rest are this module's own, CODE_MARKER_TO_P (the
+// one code source T7.5-4 and T7.5-5 share) among them.
+const SECTION_X_SOURCE = stagedMdx(
+  "T7.4-1/T7.5-1/T7.5-5 the minimal section x (aux/X.mdx; T7.5-5's tgt/abc.mdx)",
+  mdxSection("x"),
+);
+const SECTION_D_SOURCE = stagedMdx(
+  "T7.4-1/T7.5-1/T7.5-4 the minimal section d (dualspec/D.mdx; T7.5-4's specs/D.mdx)",
+  mdxSection("d"),
+);
+const SECTION_T_SOURCE = stagedMdx(
+  "T7.5-1/T7.5-4/T7.5-5 tgt/T.mdx (the minimal section t)",
+  mdxSection("t"),
+);
+const SECTION_G_SOURCE = stagedMdx(
+  "T7.5-5 m/good.mdx (the minimal section g)",
+  mdxSection("g"),
+);
+const SECTION_W_SOURCE = stagedMdx(
+  "T7.5-5 m/wrong.mdx (the minimal section w)",
+  mdxSection("w"),
+);
+const SECTION_P_SOURCE = stagedMdx(
+  "T7.5-4/T7.5-5 the minimal section p (tgt/P.mdx; T7.5-5's tgt/t$0.mdx; " +
+    "tgt/t$z.mdx)",
+  mdxSection("p"),
+);
+const SECTION_Q_SOURCE = stagedMdx(
+  "T7.5-5 the minimal section q (tgt/tb.mdx; tgt/tz.mdx)",
+  mdxSection("q"),
+);
+const SECTION_R_SOURCE = stagedMdx(
+  "T7.5-5 the minimal section r (tgt/t0.mdx; tgt/tQz.mdx)",
+  mdxSection("r"),
+);
+
+/**
+ * A code file bearing one top-level marker into `tgt/P.mdx#p`: one
+ * TypeScript staged-source record for every path T7.5-4's inside-root
+ * spelling workspaces and T7.5-5's (e) and (g) workspaces stage it at
+ * (module header), well-formed — at `src/end$` and `src/end`, names the
+ * default does not reach, too (the record makes the path judged).
+ */
+const CODE_MARKER_TO_P = stagedTs(
+  "T7.5-4/T7.5-5 the code source bearing one marker into tgt/P.mdx#p " +
+    "(T7.5-4's src/a.ts; T7.5-5's src/a$0.ts; src/ab.ts; src/a0.ts; " +
+    "src/end$; src/end)",
+  'import P from "../tgt/P.xspec"\n\nP.p\n',
+);
+
 /** Stage a fresh workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   decl: WorkspaceDecl,
@@ -121,20 +301,64 @@ async function withWorkspace<T>(
 }
 
 /**
- * Stage a workspace with the given configuration and source files and assert
- * `build --json` refuses it per 14.14 (module header: the deviation is the
- * only defect, so wrong acceptance surfaces as a failed exit-code assertion).
+ * Stage a workspace with the given configuration — a staged-source record,
+ * well-formed (module header), since T7.4-1 and T7.5-1 stage every arm past
+ * their first after the body's first product invocation (S-9's timing
+ * clause) — and source files, and assert `build --json` refuses it per
+ * 14.14 (module header: the deviation is the only defect, so wrong
+ * acceptance surfaces as a failed exit-code assertion).
+ * Beyond the shared 14.14 contract (`expectConfigurationError`), the finding
+ * is pinned to the configuration file: its concerned path is exactly
+ * `xspec.config.ts` — the file the upward search found, in the anchoring
+ * form of 11.6 relative to the invocation working directory, here the
+ * workspace root, so the bare name (SPEC 14, 12.7) — and its locations are
+ * [] (a configuration condition carries the file it concerns, no source
+ * range; SPEC 14); a whole-root snapshot compare around the invocation pins
+ * that a build failing at configuration load writes nothing (SPEC 12.1).
  */
 async function expectConfigRefused(
   product: ProductBinding,
-  config: string,
-  files: Readonly<Record<string, string>>,
+  config: StagedTs,
+  files: Readonly<Record<string, InitialFileContents>>,
   context: string,
 ): Promise<void> {
   await withWorkspace(
     { files: { "xspec.config.ts": config, ...files } },
     async (workspace) => {
-      await expectConfigurationError(product, workspace, ["build"], context);
+      const before = await snapshotDirectory(workspace.root);
+      const result = await expectConfigurationError(
+        product,
+        workspace,
+        ["build"],
+        context,
+      );
+      const finding = expectErrorDocument(result, context);
+      assertSameJson(
+        {
+          code: finding.code,
+          path: finding.path,
+          locations: finding.locations.map((location) => location.file),
+        },
+        {
+          code: "configuration-error",
+          path: "xspec.config.ts",
+          locations: [],
+        },
+        `${context}: the error document's one finding carries the stable ` +
+          `code "configuration-error", locations [] (a configuration ` +
+          `condition carries the file it concerns, never a source range), ` +
+          `and as its concerned path the configuration file the upward ` +
+          `search found, in the anchoring form of 11.6 relative to the ` +
+          `invocation working directory — the workspace root, so exactly ` +
+          `"xspec.config.ts" (SPEC 14, 12.7, 11.6)`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(workspace.root),
+        `${context}: a build failing at configuration load modifies ` +
+          `nothing (SPEC 12.1, 12.0) — no derived file or graph data ` +
+          `appears anywhere under the root`,
+      );
     },
   );
 }
@@ -157,10 +381,21 @@ function entriesBlock(
   return `  ${key}: [\n${rendered}\n  ]`;
 }
 
+// The one code source the validation-matrix and ambiguous-name layouts
+// stage — `src/impl.ts` of MATRIX_FILES, `dualcode/d.ts` of DUAL_FILES, the
+// same bytes — is one TypeScript staged-source record (module header): T7.4-1
+// and T7.5-1 stage both maps in workspaces created after their first product
+// invocation.
+const OK_CODE_SOURCE = stagedTs(
+  "T7.4-1/T7.5-1 the code source exporting ok (src/impl.ts; dualcode/d.ts)",
+  "export const ok = 1;\n",
+);
+
 // The validation-matrix group layout (T7.4-1, T7.5-1): two spec groups (so
 // group-typed references have a valid unambiguous referent and a second
 // distinct group), one code group (for the wrong-kind arms). Every group
-// holds one valid staged source (MATRIX_FILES).
+// holds one valid staged source (MATRIX_FILES; every one a record, the map
+// serving every arm after a body's first — module header).
 const MATRIX_GROUPS = `  specs: {
     main: ["specs/**/*.mdx"],
     aux: ["aux/**/*.mdx"]
@@ -179,10 +414,10 @@ ${block}
 `;
 }
 
-const MATRIX_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
-  "aux/X.mdx": mdxSection("x"),
-  "src/impl.ts": "export const ok = 1;\n",
+const MATRIX_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/A.mdx": SECTION_A_SOURCE,
+  "aux/X.mdx": SECTION_X_SOURCE,
+  "src/impl.ts": OK_CODE_SOURCE,
 };
 
 // The ambiguous-name layout: `dual` exists as both a spec group and a code
@@ -206,10 +441,10 @@ ${block}
 `;
 }
 
-const DUAL_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
-  "dualspec/D.mdx": mdxSection("d"),
-  "dualcode/d.ts": "export const ok = 1;\n",
+const DUAL_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/A.mdx": SECTION_A_SOURCE,
+  "dualspec/D.mdx": SECTION_D_SOURCE,
+  "dualcode/d.ts": OK_CODE_SOURCE,
 };
 
 /**
@@ -259,19 +494,32 @@ function assertPolicyFindings(
     expected.length === 0 ? {} : { "14.12": expected.length },
     context,
   );
+  // SPEC 14.12/12.7: the offending entity is a graph edge, not a spelling —
+  // `locations` empty, `path` null, the identities in order the violated
+  // rule's name and the edge's source identity, kind token, and target.
+  for (const finding of findings) {
+    if (finding.locations.length !== 0 || finding.path !== null) {
+      fail(
+        `${context}: a policy finding carries no in-source locations and ` +
+          `concerns no path — \`locations\` [], \`path\` null (SPEC 14.12, ` +
+          `12.7); got locations ${JSON.stringify(finding.locations)}, path ` +
+          `${JSON.stringify(finding.path)}`,
+      );
+    }
+  }
   assertSameJson(
     findings
-      .map(
-        (finding) =>
-          `${finding.rule ?? "<no rule>"} :: ` +
-          (finding.edge === undefined
-            ? "<no edge>"
-            : `${finding.edge.kind}: ${finding.edge.from} -> ${finding.edge.to}`),
-      )
+      .map((finding) => {
+        if (finding.identities.length !== 4) {
+          return `<malformed 14.12 identities> ${JSON.stringify(finding.identities)}`;
+        }
+        const [rule, from, kind, to] = finding.identities;
+        return `${rule} :: ${kind}: ${from} -> ${to}`;
+      })
       .sort(),
     expected.map((entry) => renderPolicyPair(entry.rule, entry.edge)).sort(),
-    `${context}: policy findings as (rule name, offending edge) pairs ` +
-      `(SPEC 7.5, 14.12)`,
+    `${context}: policy findings' identities as (rule name, offending edge) ` +
+      `pairs (SPEC 7.5, 14.12, 12.7)`,
   );
 }
 
@@ -283,7 +531,7 @@ function assertPolicyFindings(
  */
 async function expectPolicyFindings(
   product: ProductBinding,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   expected: readonly PolicyExpectation[],
   contextBase: string,
 ): Promise<void> {
@@ -319,6 +567,328 @@ function profileNamed(
     );
   }
   return profile;
+}
+
+// ---------------------------------------------------------------------------
+// Set reading (T7.4-1, T7.5-1) — configured lists read as sets
+// ---------------------------------------------------------------------------
+
+// The set-reading coverage fixture's sources: the same bytes in the spelled
+// workspace and its collapsed twin (the profile's two lists alone differ),
+// so one staged-source record each, staged in both (module header).
+const SET_READING_PROFILE_TARGET = stagedMdx(
+  "T7.4-1 set reading tgt/T.mdx (the spelled profile and its collapsed twin)",
+  `<S id="a" tags="a">
+Leaf a.
+</S>
+
+<S id="z" tags="z">
+Leaf z.
+</S>
+
+<S id="n">
+Leaf n.
+</S>
+`,
+);
+const SET_READING_PROFILE_BOUNDARY = stagedMdx(
+  "T7.4-1 set reading bnd/B.mdx (the spelled profile and its collapsed twin)",
+  `import T from "../tgt/T.xspec"
+
+<S id="dep" d={T.a}>
+Depends on a.
+</S>
+
+<S id="emb">
+Embeds z:
+
+{text(T.z)}
+</S>
+`,
+);
+
+/**
+ * The set-reading coverage fixture, parametrized by the two spellings (the
+ * spelled profile and its collapsed twin). Three leaves under the root of
+ * `tgt/T.mdx`: `a` (tagged a) covered over a depends edge, `z` (tagged z)
+ * reachable over an embeds edge alone — a kind outside the configured
+ * edgeKinds — and the untagged `n`, lacking every targetTags tag (8.1/8.2),
+ * so both configured sets shape the report the twins must agree on.
+ * Called at module load only: each workspace's configuration is a
+ * TypeScript staged-source record named for its `spelling` (module header —
+ * T7.4-1 stages both workspaces after its first product invocation).
+ */
+function setReadingProfileFiles(
+  spelling: string,
+  targetTags: string,
+  edgeKinds: string,
+): Readonly<Record<string, InitialFileContents>> {
+  return {
+    "xspec.config.ts": stagedTs(
+      `T7.4-1 set reading xspec.config.ts (${spelling})`,
+      `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"],
+    bnd: ["bnd/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p",
+      target: "tgt",
+      targetTags: ${targetTags},
+      boundary: "bnd",
+      mode: "direct",
+      edgeKinds: ${edgeKinds}
+    }
+  ]
+})
+`,
+    ),
+    "tgt/T.mdx": SET_READING_PROFILE_TARGET,
+    "bnd/B.mdx": SET_READING_PROFILE_BOUNDARY,
+  };
+}
+
+const SET_READING_PROFILE_FILES = setReadingProfileFiles(
+  "the spelled profile",
+  '["z", "a", "a"]',
+  '["references", "depends", "depends"]',
+);
+const SET_READING_PROFILE_TWIN_FILES = setReadingProfileFiles(
+  "the profile's collapsed twin",
+  '["a", "z"]',
+  '["depends", "references"]',
+);
+
+/**
+ * Run one set-reading coverage workspace: `build` accepts the configuration
+ * (the spelled lists are valid — a repeated element collapses, SPEC 7.4),
+ * `inventory` reports the profile with its sets in their 12.7 value forms
+ * (form-exact through `decodeInventoryResolvedMap`, then compared
+ * literally), and `coverage --json` answers the report the sets govern —
+ * `a` covered over its depends edge, `z` uncovered (its embeds edge lies
+ * outside the configured kinds), the untagged `n` required by neither
+ * (8.1) — returned decoded with its stdout bytes for the twin compare.
+ */
+async function runSetReadingProfile(
+  product: ProductBinding,
+  files: Readonly<Record<string, InitialFileContents>>,
+  context: string,
+): Promise<{ report: CoverageReport; stdoutBytes: Uint8Array }> {
+  return await withWorkspace({ files }, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` — the spelled lists are valid: a repeated ` +
+        `element collapses (SPEC 7.4)`,
+    );
+    const inventoryLabel = `${context} \`inventory\``;
+    const view = decodeInventoryResolvedMap(
+      await runJson(product, workspace, ["inventory"], inventoryLabel),
+      inventoryLabel,
+    );
+    assertSameJson(
+      view.configuration.coverage,
+      [
+        {
+          name: "p",
+          target: "tgt",
+          targetTags: ["a", "z"],
+          targets: "leaves",
+          boundary: "bnd",
+          boundaryKind: "spec",
+          mode: "direct",
+          edgeKinds: ["depends", "references"],
+        },
+      ],
+      `${inventoryLabel}: the profile's \`targetTags\` exactly ["a", "z"] ` +
+        `(byte order, the repeated element collapsed) and \`edgeKinds\` ` +
+        `exactly ["depends", "references"] (5.2's order, however ` +
+        `configured) — 12.7's value forms, compared literally (SPEC 7.4, ` +
+        `12.7, 11.6)`,
+    );
+    const label = `${context} \`coverage --json\``;
+    const result = await expectExit(
+      product,
+      workspace,
+      ["coverage", "--json"],
+      0,
+      label,
+    );
+    const report = decodeCoverageReport(parseJsonStdout(result, label), label);
+    const profile = profileNamed(report, "p", label);
+    assertSameJson(
+      coveredWithPaths(profile),
+      [{ identity: "tgt/T.mdx#a", path: ["bnd/B.mdx#dep", "tgt/T.mdx#a"] }],
+      `${label}: exactly the a-tagged leaf is covered, over its depends ` +
+        `edge — both listed tags select the required set and depends is ` +
+        `among the configured kinds (SPEC 7.4, 8, 8.1)`,
+    );
+    assertSameJson(
+      [...profile.uncovered].sort(),
+      ["tgt/T.mdx#z"],
+      `${label}: the z-tagged leaf is required (it carries a listed tag) ` +
+        `and uncovered — its only edge is embeds, outside the configured ` +
+        `kinds — while the untagged leaf is required by neither (SPEC 7.4, ` +
+        `8, 8.1)`,
+    );
+    return { report, stdoutBytes: result.stdoutBytes };
+  });
+}
+
+// The set-reading policy fixture's own source: the same bytes in the spelled
+// workspace and its collapsed twin (the rule's two lists alone differ), so
+// one staged-source record, staged in both; `tgt/T.mdx` is the shared `t`.
+const SET_READING_RULE_POLICY = stagedMdx(
+  "T7.5-1 set reading pol/P.mdx (the spelled rule and its collapsed twin)",
+  `import T from "../tgt/T.xspec"
+
+<S id="pa" tags="a" d={T.t}>
+Tagged a, depends.
+</S>
+
+<S id="pb" tags="b">
+Tagged b, embeds:
+
+{text(T.t)}
+</S>
+
+<S id="pu" d={T.t}>
+Untagged.
+</S>
+
+<S id="pc" tags="c" d={T.t}>
+Tagged c.
+</S>
+`,
+);
+
+/**
+ * The set-reading policy fixture, parametrized by the two spellings. One
+ * edge per (tag, kind) pair the sets admit — `pa` (tagged a) depends on `t`,
+ * `pb` (tagged b) embeds it — beside the two the rule must leave unflagged:
+ * the untagged `pu` and `pc`, tagged c (matching means carrying at least
+ * one listed tag, SPEC 7.5). Called at module load only: each workspace's
+ * configuration is a TypeScript staged-source record named for its
+ * `spelling` (module header — T7.5-1 stages both workspaces after its first
+ * product invocation).
+ */
+function setReadingRuleFiles(
+  spelling: string,
+  kinds: string,
+  tags: string,
+): Readonly<Record<string, InitialFileContents>> {
+  return {
+    "xspec.config.ts": stagedTs(
+      `T7.5-1 set reading xspec.config.ts (${spelling})`,
+      `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pol: ["pol/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "r",
+      type: "forbidden",
+      from: { tags: ${tags} },
+      to: { group: "tgt" },
+      kinds: ${kinds}
+    }
+  ]
+})
+`,
+    ),
+    "pol/P.mdx": SET_READING_RULE_POLICY,
+    "tgt/T.mdx": SECTION_T_SOURCE,
+  };
+}
+
+const SET_READING_RULE_FILES = setReadingRuleFiles(
+  "the spelled rule",
+  '["embeds", "depends", "embeds"]',
+  '["b", "a", "b"]',
+);
+const SET_READING_RULE_TWIN_FILES = setReadingRuleFiles(
+  "the rule's collapsed twin",
+  '["depends", "embeds"]',
+  '["a", "b"]',
+);
+
+/** The rule's findings: one per (listed tag, configured kind) edge. */
+const SET_READING_RULE_EXPECTED: readonly PolicyExpectation[] = [
+  {
+    rule: "r",
+    edge: { from: "pol/P.mdx#pa", to: "tgt/T.mdx#t", kind: "depends" },
+  },
+  {
+    rule: "r",
+    edge: { from: "pol/P.mdx#pb", to: "tgt/T.mdx#t", kind: "embeds" },
+  },
+];
+
+/**
+ * Run one set-reading policy workspace: `build` accepts the configuration
+ * (valid — a repeated element collapses, SPEC 7.5 — and build never
+ * evaluates policy, 12.1), `inventory` reports the rule with `kinds` and
+ * the selector's `tags` in their 12.7 value forms (form-exact, then
+ * literal), and `check --json` reports exactly the rule's findings —
+ * returned decoded with the stdout bytes for the twin compare.
+ */
+async function runSetReadingRule(
+  product: ProductBinding,
+  files: Readonly<Record<string, InitialFileContents>>,
+  context: string,
+): Promise<{ findings: readonly Finding[]; stdoutBytes: Uint8Array }> {
+  return await withWorkspace({ files }, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` — the spelled lists are valid: a repeated ` +
+        `element collapses (SPEC 7.5), and build never evaluates policy ` +
+        `(SPEC 12.1)`,
+    );
+    const inventoryLabel = `${context} \`inventory\``;
+    const view = decodeInventoryResolvedMap(
+      await runJson(product, workspace, ["inventory"], inventoryLabel),
+      inventoryLabel,
+    );
+    assertSameJson(
+      view.configuration.policy,
+      [
+        {
+          name: "r",
+          type: "forbidden",
+          from: { tags: ["a", "b"] },
+          to: { group: "tgt", kind: "spec" },
+          kinds: ["depends", "embeds"],
+        },
+      ],
+      `${inventoryLabel}: the rule's \`kinds\` exactly ["depends", ` +
+        `"embeds"] (5.2's order, however configured) and the selector's ` +
+        `\`tags\` exactly ["a", "b"] (byte order, the repeated element ` +
+        `collapsed) — 12.7's value forms, compared literally (SPEC 7.5, ` +
+        `12.7, 11.6)`,
+    );
+    const label = `${context} \`check --json\``;
+    const result = await expectExit(
+      product,
+      workspace,
+      ["check", "--json"],
+      1,
+      `${label} — policy violations are findings of check and cause exit 1 ` +
+        `(SPEC 7.5, 14.12, 12.0)`,
+    );
+    const findings = decodeFindingsReport(
+      parseJsonStdout(result, label),
+      label,
+    ).findings;
+    assertPolicyFindings(findings, SET_READING_RULE_EXPECTED, label);
+    return { findings, stdoutBytes: result.stdoutBytes };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -460,50 +1030,161 @@ const PROFILE_MATRIX: readonly {
       ],
     ],
   },
+  // `edgeKinds` not a subset of ["depends", "embeds", "references"] (7.4) —
+  // an otherwise invalid profile shape (14.14), one arm per kind of stray
+  // member. Each stray member sits last beside the valid kind "depends", so
+  // the list is non-empty and non-subset at once: a product that drops or
+  // ignores members it does not know, or that filters them out and only then
+  // applies the empty-list rule, keeps a well-formed ["depends"] and builds
+  // (exit 0) — where a lone stray member would let such a product refuse by
+  // the wrong rule (an emptied list) and pass by accident.
+  {
+    label:
+      '`edgeKinds` holding the non-dependency kind "contains" beside ' +
+      '"depends" — not a subset of the three dependency kinds (7.4), ' +
+      "discriminating a product that lets `contains` grant coverage (8) or " +
+      "ignores the stray member",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        'boundary: "aux"',
+        'mode: "direct"',
+        'edgeKinds: ["depends", "contains"]',
+      ],
+    ],
+  },
+  {
+    label:
+      '`edgeKinds` holding the unknown token "depend" beside "depends" — ' +
+      "not a subset (7.4), discriminating a product that accepts and " +
+      "ignores a stray member",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        'boundary: "aux"',
+        'mode: "direct"',
+        'edgeKinds: ["depends", "depend"]',
+      ],
+    ],
+  },
+  {
+    label:
+      "`edgeKinds` holding the non-string element `true` beside " +
+      '"depends" — the boolean literal the declarative form of 7 admits, ' +
+      "so the refusal is 14.14's invalid profile shape, not a form error",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        'boundary: "aux"',
+        'mode: "direct"',
+        'edgeKinds: ["depends", true]',
+      ],
+    ],
+  },
+  {
+    label:
+      "`targetTags` holding the non-string element `true` (`[true]`, as " +
+      "TEST-SPEC T7.4-1 spells the fixture) — the boolean literal the " +
+      "declarative form of 7 admits, so the refusal is 14.14's invalid " +
+      "profile shape; a product tolerating it (dropping or stringifying the " +
+      "element) accepts the configuration and builds, so exit 0 " +
+      "discriminates it",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        "targetTags: [true]",
+        'boundary: "aux"',
+        'mode: "direct"',
+      ],
+    ],
+  },
 ];
 
+/** A refused-configuration arm (T7.4-1, T7.5-1): its label and its record. */
+interface RefusedConfigArm {
+  readonly label: string;
+  readonly config: StagedTs;
+}
+
+// The matrix's rows as refused-configuration arms, each configuration a
+// TypeScript staged-source record made at module load from its row — the
+// expression moved, never re-spelled — named `T7.4-1 xspec.config.ts
+// (<label>)`: T7.4-1 stages every arm past the first after its first product
+// invocation, and the table is one (module header).
+const PROFILE_MATRIX_ARMS: readonly RefusedConfigArm[] = PROFILE_MATRIX.map(
+  (arm) => ({
+    label: arm.label,
+    config: stagedTs(
+      `T7.4-1 xspec.config.ts (${arm.label})`,
+      matrixConfig(entriesBlock("coverage", arm.profiles)),
+    ),
+  }),
+);
+
 // `boundary: "dual"` where dual is both a spec and a code group, boundaryKind
-// absent → 14.14 (7.4: boundaryKind MUST be required when ambiguous).
-const AMBIGUOUS_BOUNDARY_ABSENT_CONFIG = dualConfig(
-  entriesBlock("coverage", [
-    ['name: "p"', 'target: "main"', 'boundary: "dual"', 'mode: "direct"'],
-  ]),
+// absent → 14.14 (7.4: boundaryKind MUST be required when ambiguous). This
+// configuration and the three below are TypeScript staged-source records
+// (module header): T7.4-1 stages each after its first product invocation.
+const AMBIGUOUS_BOUNDARY_ABSENT_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (the ambiguous boundary name dual, boundaryKind " +
+    "absent)",
+  dualConfig(
+    entriesBlock("coverage", [
+      ['name: "p"', 'target: "main"', 'boundary: "dual"', 'mode: "direct"'],
+    ]),
+  ),
 );
 
 // The same ambiguous name with boundaryKind given, both directions → valid.
-const AMBIGUOUS_BOUNDARY_GIVEN_CONFIG = dualConfig(
-  entriesBlock("coverage", [
-    [
-      'name: "p-spec"',
-      'target: "main"',
-      'boundary: "dual"',
-      'boundaryKind: "spec"',
-      'mode: "direct"',
-    ],
-    [
-      'name: "p-code"',
-      'target: "main"',
-      'boundary: "dual"',
-      'boundaryKind: "code"',
-      'mode: "direct"',
-    ],
-  ]),
+const AMBIGUOUS_BOUNDARY_GIVEN_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (the ambiguous boundary name dual, boundaryKind " +
+    "given in both directions)",
+  dualConfig(
+    entriesBlock("coverage", [
+      [
+        'name: "p-spec"',
+        'target: "main"',
+        'boundary: "dual"',
+        'boundaryKind: "spec"',
+        'mode: "direct"',
+      ],
+      [
+        'name: "p-code"',
+        'target: "main"',
+        'boundary: "dual"',
+        'boundaryKind: "code"',
+        'mode: "direct"',
+      ],
+    ]),
+  ),
 );
 
 // Unambiguous boundary names without boundaryKind — one spec-only (aux), one
 // code-only (app) → valid: the kind MUST be inferred (7.4).
-const INFERRED_KIND_CONFIG = matrixConfig(
-  entriesBlock("coverage", [
-    ['name: "p-spec"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
-    ['name: "p-code"', 'target: "main"', 'boundary: "app"', 'mode: "direct"'],
-  ]),
+const INFERRED_KIND_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (unambiguous spec-only and code-only boundary " +
+    "names, boundaryKind inferred)",
+  matrixConfig(
+    entriesBlock("coverage", [
+      ['name: "p-spec"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
+      ['name: "p-code"', 'target: "main"', 'boundary: "app"', 'mode: "direct"'],
+    ]),
+  ),
 );
 
 // One valid profile, for the unknown-profile-name usage-error arm.
-const VALID_COVERAGE_CONFIG = matrixConfig(
-  entriesBlock("coverage", [
-    ['name: "p"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
-  ]),
+const VALID_COVERAGE_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (one valid profile, the unknown-profile-name " +
+    "usage-error arm)",
+  matrixConfig(
+    entriesBlock("coverage", [
+      ['name: "p"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
+    ]),
+  ),
 );
 
 const T7_4_1 = defineProductTest({
@@ -511,17 +1192,25 @@ const T7_4_1 = defineProductTest({
   title:
     "profile validation: duplicate names, each missing required field, " +
     "invalid targets/mode/boundaryKind values, unknown and wrong-kind " +
-    "target/boundary references, empty targetTags/edgeKinds, and an " +
-    "ambiguous boundary without boundaryKind are configuration errors " +
-    "(14.14, exit 2); boundaryKind is inferred when unambiguous; an unknown " +
-    "profile name at `coverage <name>` is a usage error (SPEC 7.4, 14.14, " +
-    "12.0)",
+    "target/boundary references, empty targetTags/edgeKinds, edgeKinds " +
+    'holding "contains", an unknown token, or a non-string element, a ' +
+    "non-string targetTags element, and an ambiguous boundary without " +
+    "boundaryKind are configuration errors (14.14, exit 2, the finding " +
+    "naming xspec.config.ts, nothing written); boundaryKind is inferred " +
+    "when unambiguous; an unknown profile name at `coverage <name>` is a " +
+    'usage error (12.0); set reading: `targetTags: ["z", "a", "a"]` and ' +
+    '`edgeKinds: ["references", "depends", "depends"]` are valid — a ' +
+    "repeated element collapses — `inventory` reporting `targetTags` " +
+    'exactly ["a", "z"] (byte order, collapsed) and `edgeKinds` exactly ' +
+    '["depends", "references"] (5.2\'s order, however configured), and the ' +
+    "profile's coverage report equal to its collapsed twin's (SPEC 7.4, " +
+    "14.14, 12.0, 12.7, 11.6)",
   run: async (product) => {
     // (a) The 14.14 matrix over the standard group layout.
-    for (const arm of PROFILE_MATRIX) {
+    for (const arm of PROFILE_MATRIX_ARMS) {
       await expectConfigRefused(
         product,
-        matrixConfig(entriesBlock("coverage", arm.profiles)),
+        arm.config,
         MATRIX_FILES,
         `T7.4-1 (${arm.label})`,
       );
@@ -573,8 +1262,9 @@ const T7_4_1 = defineProductTest({
     );
 
     // (d) Unknown profile name at `coverage <name>` → usage error (12.0):
-    // exit 2, byte-empty stdout under --json, a stderr diagnostic. Not a
-    // 14.14 (the configuration is valid), so no /config/i duty applies.
+    // exit 2, the 12.7 error document as the entire stdout under --json, a
+    // stderr diagnostic. Not a 14.14 (the configuration is valid), so no
+    // /config/i duty applies.
     await withWorkspace(
       { files: { "xspec.config.ts": VALID_COVERAGE_CONFIG, ...MATRIX_FILES } },
       async (workspace) => {
@@ -587,11 +1277,10 @@ const T7_4_1 = defineProductTest({
           `${label} — an unknown profile named in arguments is a usage ` +
             `error (SPEC 12.0)`,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           result,
-          `${label} — under --json, stdout is byte-empty on exit 2: the ` +
-            `usage error prevents emitting the single JSON document ` +
-            `(SPEC 12.0, H-5)`,
+          `${label} — under --json, the exit-2 error document is the ` +
+            `entire stdout (SPEC 12.0, 12.7, H-5)`,
         );
         if (result.stderrBytes.length === 0) {
           fail(
@@ -600,6 +1289,39 @@ const T7_4_1 = defineProductTest({
           );
         }
       },
+    );
+
+    // (e) Set reading (7.4, 12.7): `targetTags: ["z", "a", "a"]` and
+    // `edgeKinds: ["references", "depends", "depends"]` are valid — a
+    // repeated element collapses — `inventory` reports the sets in their
+    // value forms, and the profile's coverage report equals its collapsed
+    // twin's (T11.6-2).
+    const spelled = await runSetReadingProfile(
+      product,
+      SET_READING_PROFILE_FILES,
+      'T7.4-1 (set reading: the profile spelled `targetTags: ["z", "a", ' +
+        '"a"]`, `edgeKinds: ["references", "depends", "depends"]`)',
+    );
+    const twin = await runSetReadingProfile(
+      product,
+      SET_READING_PROFILE_TWIN_FILES,
+      'T7.4-1 (set reading: the collapsed twin `targetTags: ["a", "z"]`, ' +
+        '`edgeKinds: ["depends", "references"]`)',
+    );
+    assertSameJson(
+      spelled.report,
+      twin.report,
+      "T7.4-1 (set reading): the profile's coverage report equals its " +
+        "collapsed twin's — the decoded reports, member for member: one " +
+        "resolved configuration, one report (SPEC 7.4, 12.7, 8.2)",
+    );
+    assertBytesEqual(
+      spelled.stdoutBytes,
+      twin.stdoutBytes,
+      "T7.4-1 (set reading): the two `coverage --json` answers are " +
+        "byte-identical — the same resolved configuration answers " +
+        "deterministically (SPEC 7.4, 12.0; a product-to-itself " +
+        "comparison, H-4)",
     );
   },
 });
@@ -915,6 +1637,61 @@ const RULE_MATRIX: readonly {
       ],
     ],
   },
+  // `kinds` not a subset of the dependency edge kinds (7.5) — an otherwise
+  // invalid rule shape (14.14), one arm per kind of stray member. As in
+  // T7.4-1, each stray member sits last beside the valid kind "depends", so
+  // the list is non-empty and non-subset at once: a product that drops or
+  // ignores members it does not know, or that filters them out and only then
+  // applies the empty-list rule, keeps a well-formed ["depends"] and builds
+  // (exit 0 — `build` never evaluates policy, 12.1) — where a lone stray
+  // member would let such a product refuse by the wrong rule (an emptied
+  // list) and pass by accident.
+  {
+    label:
+      '`kinds` holding the non-dependency kind "contains" beside ' +
+      '"depends" — not a subset of the dependency edge kinds (7.5), ' +
+      "discriminating a product that evaluates policy over `contains` " +
+      "edges or ignores the stray member",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { group: "aux" }',
+        'kinds: ["depends", "contains"]',
+      ],
+    ],
+  },
+  {
+    label:
+      '`kinds` holding the unknown token "depend" beside "depends" — not ' +
+      "a subset (7.5), discriminating a product that accepts and ignores a " +
+      "stray member",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { group: "aux" }',
+        'kinds: ["depends", "depend"]',
+      ],
+    ],
+  },
+  {
+    label:
+      "`kinds` holding the non-string element `true` beside " +
+      '"depends" — the boolean literal the declarative form of 7 admits, ' +
+      "so the refusal is 14.14's invalid rule shape, not a form error",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { group: "aux" }',
+        'kinds: ["depends", true]',
+      ],
+    ],
+  },
   {
     label: "empty selector `tags` list",
     rules: [
@@ -922,6 +1699,22 @@ const RULE_MATRIX: readonly {
         'name: "r"',
         'type: "forbidden"',
         "from: { tags: [] }",
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      "selector `tags` holding the non-string element `true` (`[true]`, as " +
+      "TEST-SPEC T7.5-1 spells the fixture) — the boolean literal the " +
+      "declarative form of 7 admits, so the refusal is 14.14's invalid rule " +
+      "shape; a product stringifying or silently tolerating the element " +
+      "accepts the configuration and builds, so exit 0 discriminates it",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        "from: { tags: [true] }",
         'to: { group: "aux" }',
       ],
     ],
@@ -1004,34 +1797,114 @@ const RULE_MATRIX: readonly {
       ],
     ],
   },
+  // Selector globs (7: whether a glob lies outside the workspace root is
+  // decided by its spelling alone, a `files` selector's — capture-bearing
+  // patterns included — as a group's, T7-4): one arm each, each rule
+  // otherwise valid, so a product vetting group globs alone accepts the
+  // configuration and builds (exit 0 — `build` never evaluates policy,
+  // 12.1). The inside-root counterpart is T7.5-4's `./src/*.ts` selector.
+  {
+    label:
+      'selector `files` glob "../x/*.ts" in `from` — its depth falling ' +
+      "below zero at the leading `..`, outside the workspace root by its " +
+      "spelling alone (7), discriminating a product that vets group globs " +
+      "alone",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { files: "../x/*.ts" }',
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      'the capture pattern "a/../../$1.ts" in `from` — its depth falling ' +
+      "below zero at the second `..`, outside the workspace root by its " +
+      "spelling alone, its capture notwithstanding (7)",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { files: "a/../../$1.ts" }',
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      'selector `files` glob "/src/*.ts" in `to` — a leading `/`, outside ' +
+      "the workspace root by its spelling alone (7)",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { files: "/src/*.ts" }',
+      ],
+    ],
+  },
 ];
+
+// The matrix's rows as refused-configuration arms, each configuration a
+// TypeScript staged-source record made at module load from its row — the
+// expression moved, never re-spelled — named `T7.5-1 xspec.config.ts
+// (<label>)`: T7.5-1 stages every arm past the first after its first product
+// invocation, and the table is one (module header).
+const RULE_MATRIX_ARMS: readonly RefusedConfigArm[] = RULE_MATRIX.map(
+  (arm) => ({
+    label: arm.label,
+    config: stagedTs(
+      `T7.5-1 xspec.config.ts (${arm.label})`,
+      matrixConfig(entriesBlock("policy", arm.rules)),
+    ),
+  }),
+);
 
 // An ambiguous group name in a selector without `kind` → 14.14 (7.5: the
 // kind MUST be given when the name exists as both a spec and a code group).
-const AMBIGUOUS_SELECTOR_CONFIG = dualConfig(
-  entriesBlock("policy", [
-    [
-      'name: "r"',
-      'type: "forbidden"',
-      'from: { group: "dual" }',
-      'to: { group: "main" }',
-    ],
-  ]),
+// A TypeScript staged-source record (module header): T7.5-1 stages it after
+// its first product invocation.
+const AMBIGUOUS_SELECTOR_CONFIG = stagedTs(
+  "T7.5-1 xspec.config.ts (a selector naming the ambiguous group dual " +
+    "without kind)",
+  dualConfig(
+    entriesBlock("policy", [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "dual" }',
+        'to: { group: "main" }',
+      ],
+    ]),
+  ),
 );
 
 const T7_5_1 = defineProductTest({
   id: "T7.5-1",
   title:
     "rule validation: duplicate names, each missing required field, an " +
-    "invalid type, empty kinds/tags lists, selectors with zero or two of " +
-    "group/files/tags, unknown, wrong-kind, and ambiguous group references, " +
-    "a capture used twice in `from`, and a `to` referencing an absent " +
-    "capture are configuration errors (SPEC 7.5, 14.14, exit 2)",
+    "invalid type, empty kinds/tags lists, `kinds` not a subset of the " +
+    "dependency edge kinds (a `contains` member, an unknown token, a " +
+    "non-string element), a non-string selector `tags` element, selectors " +
+    "with zero or two of group/files/tags, unknown, wrong-kind, and " +
+    "ambiguous group references, a capture used twice in `from`, a `to` " +
+    "referencing an absent capture, and a selector `files` glob outside " +
+    "the workspace root by its spelling alone — `../x/*.ts` and the " +
+    "capture pattern `a/../../$1.ts` in `from`, `/src/*.ts` in `to`, one " +
+    "arm each — are configuration errors (SPEC 7.5, 7, 14.14, exit 2); " +
+    'set reading: a rule\'s `kinds: ["embeds", ' +
+    '"depends", "embeds"]` and a selector\'s `tags: ["b", "a", "b"]` are ' +
+    'valid, `inventory` reporting `kinds` exactly ["depends", "embeds"] ' +
+    "(5.2's order, however configured) and the selector's `tags` exactly " +
+    '["a", "b"] (byte order, collapsed), and the rule\'s `check` findings ' +
+    "equal to its collapsed twin's (SPEC 7.5, 12.7, 11.6)",
   run: async (product) => {
-    for (const arm of RULE_MATRIX) {
+    for (const arm of RULE_MATRIX_ARMS) {
       await expectConfigRefused(
         product,
-        matrixConfig(entriesBlock("policy", arm.rules)),
+        arm.config,
         MATRIX_FILES,
         `T7.5-1 (${arm.label})`,
       );
@@ -1042,6 +1915,37 @@ const T7_5_1 = defineProductTest({
       DUAL_FILES,
       "T7.5-1 (selector naming the ambiguous group dual — both a spec and a " +
         "code group — without kind)",
+    );
+
+    // Set reading (7.5, 12.7): a rule's `kinds: ["embeds", "depends",
+    // "embeds"]` and a selector's `tags: ["b", "a", "b"]` are valid,
+    // `inventory` reports them in their value forms, and the rule's `check`
+    // findings equal its collapsed twin's.
+    const spelled = await runSetReadingRule(
+      product,
+      SET_READING_RULE_FILES,
+      'T7.5-1 (set reading: the rule spelled `kinds: ["embeds", "depends", ' +
+        '"embeds"]`, `from: { tags: ["b", "a", "b"] }`)',
+    );
+    const twin = await runSetReadingRule(
+      product,
+      SET_READING_RULE_TWIN_FILES,
+      'T7.5-1 (set reading: the collapsed twin `kinds: ["depends", ' +
+        '"embeds"]`, `from: { tags: ["a", "b"] }`)',
+    );
+    assertSameJson(
+      spelled.findings,
+      twin.findings,
+      "T7.5-1 (set reading): the rule's `check` findings equal its " +
+        "collapsed twin's — the decoded findings arrays, every member " +
+        "(SPEC 7.5, 12.7, 12.0)",
+    );
+    assertBytesEqual(
+      spelled.stdoutBytes,
+      twin.stdoutBytes,
+      "T7.5-1 (set reading): the two `check --json` answers are " +
+        "byte-identical — one resolved configuration, one deterministic " +
+        "report (SPEC 7.5, 12.0; a product-to-itself comparison, H-4)",
     );
   },
 });
@@ -1101,8 +2005,11 @@ Mid uses the low group.
 
 // `kinds` restriction: one source node with a depends edge AND an embeds edge
 // into the forbidden group; kinds ["embeds"] evaluates only the embeds edge.
-const FORBIDDEN_KINDS_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// The configuration is a TypeScript staged-source record (module header).
+const FORBIDDEN_KINDS_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-2 kinds restriction xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1120,7 +2027,10 @@ export default defineConfig({
   ]
 })
 `,
-  "hi/H.mdx": `import L from "../lo/L.xspec"
+  ),
+  "hi/H.mdx": stagedMdx(
+    "T7.5-2 kinds restriction hi/H.mdx",
+    `import L from "../lo/L.xspec"
 
 <S id="has" d={L.l}>
 Uses the low group, and embeds it:
@@ -1128,7 +2038,10 @@ Uses the low group, and embeds it:
 {text(L.l2)}
 </S>
 `,
-  "lo/L.mdx": `<S id="l">
+  ),
+  "lo/L.mdx": stagedMdx(
+    "T7.5-2 kinds restriction lo/L.mdx",
+    `<S id="l">
 Low one.
 </S>
 
@@ -1136,6 +2049,48 @@ Low one.
 Low two.
 </S>
 `,
+  ),
+};
+
+// An offending edge spelled twice: `hi/H.mdx#twice` declares `d={[BASE.a,
+// BASE.a]}` — one depends edge (5.2: edges of a kind form a set, duplicate
+// declarations collapsing to a single edge; the two spellings are two
+// reference occurrences, 5.7) — so the rule reports exactly one finding,
+// one per rule and offending edge (14.12), where a product reporting one
+// per spelling reports two. The configuration and `hi/H.mdx` are
+// staged-source records (module header); `lo/BASE.mdx` is the minimal
+// section a, `SECTION_A_SOURCE`.
+const FORBIDDEN_TWICE_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-2 twice-spelled edge xspec.config.ts",
+    `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    hi: ["hi/**/*.mdx"],
+    lo: ["lo/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "no-hi-to-lo",
+      type: "forbidden",
+      from: { group: "hi" },
+      to: { group: "lo" }
+    }
+  ]
+})
+`,
+  ),
+  "hi/H.mdx": stagedMdx(
+    "T7.5-2 twice-spelled edge hi/H.mdx",
+    `import BASE from "../lo/BASE.xspec"
+
+<S id="twice" d={[BASE.a, BASE.a]}>
+Depends on the low group's a, spelled twice.
+</S>
+`,
+  ),
+  "lo/BASE.mdx": SECTION_A_SOURCE,
 };
 
 const T7_5_2 = defineProductTest({
@@ -1144,7 +2099,9 @@ const T7_5_2 = defineProductTest({
     "forbidden rules: an edge whose source matches `from` and target " +
     "matches `to` is a check finding carrying the rule name and the " +
     "offending edge (exit 1); non-matching edges are not; `kinds` restricts " +
-    "which edges are evaluated (SPEC 7.5, 14.12)",
+    "which edges are evaluated; an offending edge spelled twice " +
+    "(`d={[BASE.a, BASE.a]}`, one edge) is exactly one finding, one per " +
+    "rule and offending edge, never one per spelling (SPEC 7.5, 5.2, 14.12)",
   run: async (product) => {
     await expectPolicyFindings(
       product,
@@ -1169,6 +2126,24 @@ const T7_5_2 = defineProductTest({
       ],
       "T7.5-2 (kinds restriction — the depends edge matches from and to but " +
         "its kind is not evaluated)",
+    );
+
+    await expectPolicyFindings(
+      product,
+      FORBIDDEN_TWICE_FILES,
+      [
+        {
+          rule: "no-hi-to-lo",
+          edge: {
+            from: "hi/H.mdx#twice",
+            to: "lo/BASE.mdx#a",
+            kind: "depends",
+          },
+        },
+      ],
+      "T7.5-2 (an offending edge spelled twice, `d={[BASE.a, BASE.a]}` — " +
+        "one edge (5.2), so exactly one finding, one per rule and offending " +
+        "edge (14.12), never one per spelling)",
     );
   },
 });
@@ -1315,9 +2290,12 @@ T.t
 
 // (b) `files` selectors match by glob, on both sides: only the edge whose
 // source file matches `from`'s glob AND whose target file matches `to`'s
-// glob is flagged.
-const SELECTOR_FILES_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// glob is flagged. The configuration is a TypeScript staged-source record
+// (module header), as is (c)'s.
+const SELECTOR_FILES_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-4 files selectors xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1333,7 +2311,10 @@ export default defineConfig({
   ]
 })
 `,
-  "specs/inner/A.mdx": `import C from "../C.xspec"
+  ),
+  "specs/inner/A.mdx": stagedMdx(
+    "T7.5-4 files selectors specs/inner/A.mdx",
+    `import C from "../C.xspec"
 import D from "../D.xspec"
 
 <S id="a" d={C.c}>
@@ -1344,22 +2325,81 @@ Inner depends on C.
 Inner depends on D — the to glob does not match this target.
 </S>
 `,
-  "specs/B.mdx": `import C from "./C.xspec"
+  ),
+  "specs/B.mdx": stagedMdx(
+    "T7.5-4 files selectors specs/B.mdx",
+    `import C from "./C.xspec"
 
 <S id="b" d={C.c}>
 Outer depends on C — the from glob does not match this source.
 </S>
 `,
-  "specs/C.mdx": mdxSection("c"),
-  "specs/D.mdx": mdxSection("d"),
+  ),
+  "specs/C.mdx": SECTION_C_SOURCE,
+  "specs/D.mdx": SECTION_D_SOURCE,
+};
+
+// (b') `files` selectors match under 7's glob rules: an inside-root
+// spelling's `.`, `..`, and empty segments match nothing, since a
+// discovered file's workspace-relative path carries none (7). The code
+// source `src/a.ts` bears a marker on `p`, a node of the spec group
+// `product` — a `references` edge (4.5) — and each rule runs on its own such
+// workspace, built under that rule's configuration (a configuration changed
+// after a build may leave graph data stale, T13.4-11(a)): the rule from
+// `{ files: "./src/*.ts" }` loads and matches no source, so `check` reports
+// no policy finding, exit 0, where its twin from `{ files: "src/*.ts" }`
+// reports the edge, exit 1 — a product normalizing a selector glob's
+// spelling before matching flags the edge under both. Each configuration is
+// a TypeScript staged-source record (module header); `src/a.ts` is
+// CODE_MARKER_TO_P and `tgt/P.mdx` the minimal section p.
+function insideRootSelectorFiles(
+  fromGlob: string,
+): Readonly<Record<string, InitialFileContents>> {
+  return {
+    "xspec.config.ts": stagedTs(
+      `T7.5-4 inside-root selector spelling xspec.config.ts (from { files: ` +
+        `"${fromGlob}" })`,
+      `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    product: ["tgt/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  },
+  policy: [
+    {
+      name: "src-to-product",
+      type: "forbidden",
+      from: { files: "${fromGlob}" },
+      to: { group: "product" }
+    }
+  ]
+})
+`,
+    ),
+    "src/a.ts": CODE_MARKER_TO_P,
+    "tgt/P.mdx": SECTION_P_SOURCE,
+  };
+}
+const INSIDE_ROOT_SELECTOR_FILES = insideRootSelectorFiles("./src/*.ts");
+const INSIDE_ROOT_SELECTOR_TWIN_FILES = insideRootSelectorFiles("src/*.ts");
+/** (b')'s one dependency edge: `src/a.ts`'s marker on the product node. */
+const INSIDE_ROOT_SELECTOR_EDGE: GraphEdge = {
+  from: "src/a.ts",
+  kind: "references",
+  to: "tgt/P.mdx#p",
 };
 
 // (c) `tags` selectors match nodes carrying AT LEAST ONE listed tag: `r`
 // carries red only, `b` carries blue (plus the unlisted green) — both match
 // ["red", "blue"] (an all-tags product matches neither); untagged `u` does
 // not.
-const SELECTOR_TAGS_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+const SELECTOR_TAGS_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-4 tags selector xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1376,7 +2416,10 @@ export default defineConfig({
   ]
 })
 `,
-  "pol/P.mdx": `import T from "../tgt/T.xspec"
+  ),
+  "pol/P.mdx": stagedMdx(
+    "T7.5-4 tags selector pol/P.mdx",
+    `import T from "../tgt/T.xspec"
 
 <S id="r" tags="red" d={T.t}>
 Red-tagged dependence.
@@ -1390,7 +2433,8 @@ Blue-and-green-tagged dependence.
 Untagged dependence.
 </S>
 `,
-  "tgt/T.mdx": mdxSection("t"),
+  ),
+  "tgt/T.mdx": SECTION_T_SOURCE,
 };
 
 const T7_5_4 = defineProductTest({
@@ -1398,8 +2442,13 @@ const T7_5_4 = defineProductTest({
   title:
     "selectors: `group` (with `kind` where needed) matches nodes of spec " +
     "groups and code locations of code groups; `files` matches by glob on " +
-    "both sides; `tags` matches nodes carrying at least one listed tag " +
-    "(SPEC 7.5, 14.12)",
+    "both sides, under 7's glob rules — a `forbidden` rule from " +
+    '`{ files: "./src/*.ts" }` (an inside-root spelling\'s `.` segment ' +
+    "matching nothing) loads and reports no policy finding, exit 0, where " +
+    'its twin from `{ files: "src/*.ts" }` reports the marker\'s ' +
+    "references edge into the group `product`, exit 1, each built under " +
+    "its own configuration; `tags` matches nodes carrying at least one " +
+    "listed tag (SPEC 7.5, 7, 14.12)",
   run: async (product) => {
     await expectPolicyFindings(
       product,
@@ -1434,6 +2483,66 @@ const T7_5_4 = defineProductTest({
       ],
       "T7.5-4 (files selectors — glob-unmatched source and glob-unmatched " +
         "target both stay unflagged)",
+    );
+
+    // (b') An inside-root spelling's `.` segment matches nothing (7): the
+    // rule from `./src/*.ts` loads and flags no edge, exit 0, where its
+    // `src/*.ts` twin flags the marker's references edge, exit 1 — each on
+    // its own workspace, built under its own configuration (T13.4-11(a)).
+    await withWorkspace(
+      { files: INSIDE_ROOT_SELECTOR_FILES },
+      async (workspace) => {
+        const base =
+          'T7.5-4 (the inside-root spelling `from: { files: "./src/*.ts" }`)';
+        await buildOk(
+          product,
+          workspace,
+          `${base} \`build\` — the glob lies inside the workspace root by ` +
+            `its spelling (7: a \`.\` segment leaves the depth unchanged), ` +
+            `so the configuration loads without 14.14 (SPEC 7, 7.5, 14.14)`,
+        );
+        const premise = `${base} \`query edges --kinds references\` (fixture premise)`;
+        assertEdgeSetEqual(
+          decodeEdgesReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "edges", "--kinds", "references"],
+              premise,
+            ),
+            premise,
+          ),
+          [INSIDE_ROOT_SELECTOR_EDGE],
+          `${premise}: src/a.ts's marker edge into the product group's node ` +
+            `is present, so the no-findings check below is not vacuous ` +
+            `(SPEC 4.5, 7.5)`,
+        );
+        const label = `${base} \`check --json\``;
+        const result = await expectExit(
+          product,
+          workspace,
+          ["check", "--json"],
+          0,
+          `${label} — a discovered path carries no \`.\` segment, so the ` +
+            `selector matches no source and the edge is no violation: no ` +
+            `policy finding, exit 0; a product normalizing the selector's ` +
+            `spelling before matching flags the edge and exits 1 (SPEC 7, ` +
+            `7.5, 14.12, 12.0)`,
+        );
+        assertPolicyFindings(
+          decodeFindingsReport(parseJsonStdout(result, label), label).findings,
+          [],
+          label,
+        );
+      },
+    );
+    await expectPolicyFindings(
+      product,
+      INSIDE_ROOT_SELECTOR_TWIN_FILES,
+      [{ rule: "src-to-product", edge: INSIDE_ROOT_SELECTOR_EDGE }],
+      'T7.5-4 (the twin `from: { files: "src/*.ts" }`, built under its own ' +
+        "configuration — the selector matches src/a.ts, so the marker's " +
+        "references edge into the product group is a violation, exit 1)",
     );
 
     await expectPolicyFindings(
@@ -1497,9 +2606,12 @@ ALT.n
 // string, the capture takes its one-byte minimum). Targets exist for the
 // correct expansion (tgt/a.mdx), the greedy-capture expansion (tgt/abc.mdx),
 // and the greedy-leading-`*` expansion (tgt/c.mdx); exactly the first is
-// flagged.
-const CAPTURE_STAR_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// flagged. The configuration is a TypeScript staged-source record (module
+// header), as is every configuration and code source of arms (c)-(j).
+const CAPTURE_STAR_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (b) *$1* against abc xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1516,7 +2628,10 @@ export default defineConfig({
   ]
 })
 `,
-  "grp/abc/F.mdx": `import A from "../../tgt/a.xspec"
+  ),
+  "grp/abc/F.mdx": stagedMdx(
+    "T7.5-5 (b) *$1* against abc grp/abc/F.mdx",
+    `import A from "../../tgt/a.xspec"
 import X from "../../tgt/abc.xspec"
 import C from "../../tgt/c.xspec"
 
@@ -1524,16 +2639,19 @@ import C from "../../tgt/c.xspec"
 Depends on every candidate expansion's node.
 </S>
 `,
-  "tgt/a.mdx": mdxSection("a"),
-  "tgt/abc.mdx": mdxSection("x"),
-  "tgt/c.mdx": mdxSection("c"),
+  ),
+  "tgt/a.mdx": SECTION_A_SOURCE,
+  "tgt/abc.mdx": SECTION_X_SOURCE,
+  "tgt/c.mdx": SECTION_C_SOURCE,
 };
 
 // (c) A capture never matches the empty string or `/`: `pre/$1x.mdx` matches
 // pre/ax.mdx ($1 = a) but neither pre/x.mdx ($1 would be empty) nor
 // pre/d/ex.mdx ($1 would be d/e — a whole-path-regex product matches it).
-const CAPTURE_LIMITS_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+const CAPTURE_LIMITS_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (c) capture limits xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1550,32 +2668,44 @@ export default defineConfig({
   ]
 })
 `,
-  "pre/ax.mdx": `import T from "../tgt/T.xspec"
+  ),
+  "pre/ax.mdx": stagedMdx(
+    "T7.5-5 (c) capture limits pre/ax.mdx",
+    `import T from "../tgt/T.xspec"
 
 <S id="s1" d={T.t}>
 Source whose file matches with a one-byte capture.
 </S>
 `,
-  "pre/x.mdx": `import T from "../tgt/T.xspec"
+  ),
+  "pre/x.mdx": stagedMdx(
+    "T7.5-5 (c) capture limits pre/x.mdx",
+    `import T from "../tgt/T.xspec"
 
 <S id="s2" d={T.t}>
 Source whose file would need an empty capture.
 </S>
 `,
-  "pre/d/ex.mdx": `import T from "../../tgt/T.xspec"
+  ),
+  "pre/d/ex.mdx": stagedMdx(
+    "T7.5-5 (c) capture limits pre/d/ex.mdx",
+    `import T from "../../tgt/T.xspec"
 
 <S id="s3" d={T.t}>
 Source whose file would need a capture spanning a slash.
 </S>
 `,
-  "tgt/T.mdx": mdxSection("t"),
+  ),
+  "tgt/T.mdx": SECTION_T_SOURCE,
 };
 
 // (d) The mirror-structure allowedOnly fixture: every edge from src/$1.ts
 // must target a node of m/$1.mdx — src/good.ts → m/good.mdx#g agrees (no
 // finding), src/evil.ts → m/wrong.mdx#w disagrees (a finding).
-const CAPTURE_MIRROR_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+const CAPTURE_MIRROR_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (d) mirror-structure allowedOnly xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1594,17 +2724,289 @@ export default defineConfig({
   ]
 })
 `,
-  "src/good.ts": `import G from "../m/good.xspec"
+  ),
+  "src/good.ts": stagedTs(
+    "T7.5-5 (d) mirror-structure allowedOnly src/good.ts",
+    `import G from "../m/good.xspec"
 
 G.g
 `,
-  "src/evil.ts": `import W from "../m/wrong.xspec"
+  ),
+  "src/evil.ts": stagedTs(
+    "T7.5-5 (d) mirror-structure allowedOnly src/evil.ts",
+    `import W from "../m/wrong.xspec"
 
 W.w
 `,
-  "m/good.mdx": mdxSection("g"),
-  "m/wrong.mdx": mdxSection("w"),
+  ),
+  "m/good.mdx": SECTION_G_SOURCE,
+  "m/wrong.mdx": SECTION_W_SOURCE,
 };
+
+// (e)-(j) Literal `$` forms (SPEC 7.5: a capture is exactly `$` followed by
+// one digit `1`-`9` — every other `$`, `$0` and a trailing `$` included, is a
+// literal byte in either pattern, never a capture or a capture violation,
+// 14.14). Three forms — `$0`, a trailing `$`, and `$` before a non-digit —
+// staged in `from` and in `to`, one arm each (module header: build's success
+// is the load assertion; exact finding sets over bait paths are the match
+// assertion). (e)'s and (g)'s code sources are CODE_MARKER_TO_P, one record
+// (shared fixture material above).
+
+// (e) `$0` in `from` — the spec's own example: `a$0.ts` matches the file
+// `a$0.ts` and never `ab.ts` (a capture reading matches `ab.ts` with $0 = b —
+// and `a0.ts` with $0 = 0, and `a$0.ts` itself with $0 = "$0"); a dropped-`$`
+// reading matches `a0.ts`. All three files bear the same marker edge, so the
+// finding set separates every reading.
+const LITERAL_DOLLAR0_FROM_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (e) $0 in from xspec.config.ts",
+    `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  },
+  policy: [
+    {
+      name: "dz",
+      type: "forbidden",
+      from: { files: "src/a$0.ts" },
+      to: { group: "tgt" }
+    }
+  ]
+})
+`,
+  ),
+  "src/a$0.ts": CODE_MARKER_TO_P,
+  "src/ab.ts": CODE_MARKER_TO_P,
+  "src/a0.ts": CODE_MARKER_TO_P,
+  "tgt/P.mdx": SECTION_P_SOURCE,
+};
+
+// (f) `$0` in `to` — a capture-reading product refuses the configuration
+// (`to` would reference the absent capture $0, 14.14 — the load assertion) or
+// expands into `tb.mdx`; a dropped-`$` reading matches `t0.mdx`. The source
+// depends on every candidate expansion's node.
+const LITERAL_DOLLAR0_TO_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    "xspec.config.ts": stagedTs(
+      "T7.5-5 (f) $0 in to xspec.config.ts",
+      `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "dz",
+      type: "forbidden",
+      from: { group: "pre" },
+      to: { files: "tgt/t$0.mdx" }
+    }
+  ]
+})
+`,
+    ),
+    "pre/S.mdx": stagedMdx(
+      "T7.5-5 (f) $0 in to pre/S.mdx",
+      `import P from "../tgt/t$0.xspec"
+import Q from "../tgt/tb.xspec"
+import R from "../tgt/t0.xspec"
+
+<S id="s" d={[P.p, Q.q, R.r]}>
+Depends on every candidate expansion's node.
+</S>
+`,
+    ),
+    "tgt/t$0.mdx": SECTION_P_SOURCE,
+    "tgt/tb.mdx": SECTION_Q_SOURCE,
+    "tgt/t0.mdx": SECTION_R_SOURCE,
+  };
+
+// (g) Trailing `$` in `from` — the pattern `src/end$` matches only the
+// `$`-suffixed name. The `$`-suffixed discovered file is necessarily a code
+// source (a spec source always ends `.mdx`, 14.19), discovered by the
+// extension-free glob `src/*` (SPEC 7.2 restricts code groups by glob alone).
+// A regex-anchor reading matches `src/end` instead and misses `src/end$`.
+const LITERAL_TRAILING_FROM_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (g) trailing $ in from xspec.config.ts",
+    `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"]
+  },
+  code: {
+    app: ["src/*"]
+  },
+  policy: [
+    {
+      name: "tr",
+      type: "forbidden",
+      from: { files: "src/end$" },
+      to: { group: "tgt" }
+    }
+  ]
+})
+`,
+  ),
+  "src/end$": CODE_MARKER_TO_P,
+  "src/end": CODE_MARKER_TO_P,
+  "tgt/P.mdx": SECTION_P_SOURCE,
+};
+
+// (h) Trailing `$` in `to` — `tgt/T.mdx$` ends in `$`, references no absent
+// capture (the load assertion), and matches no discovered target: edge
+// targets are requirement nodes, whose files always end `.mdx` (14.19), so
+// no path spells the trailing-`$` bytes. The staged edge into `tgt/T.mdx#t`
+// is the regex-anchor bait: an anchor reading matches `tgt/T.mdx` and flags
+// it; the literal reading yields zero findings, `check` exit 0.
+const LITERAL_TRAILING_TO_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    "xspec.config.ts": stagedTs(
+      "T7.5-5 (h) trailing $ in to xspec.config.ts",
+      `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "tr",
+      type: "forbidden",
+      from: { group: "pre" },
+      to: { files: "tgt/T.mdx$" }
+    }
+  ]
+})
+`,
+    ),
+    "pre/S.mdx": stagedMdx(
+      "T7.5-5 (h) trailing $ in to pre/S.mdx",
+      `import T from "../tgt/T.xspec"
+
+<S id="s" d={T.t}>
+Depends on the anchor-reading bait.
+</S>
+`,
+    ),
+    "tgt/T.mdx": SECTION_T_SOURCE,
+  };
+
+/** (h)'s bait edge: what a regex-anchor reading of `tgt/T.mdx$` would flag. */
+const LITERAL_TRAILING_TO_BAIT_EDGE: readonly GraphEdge[] = [
+  { from: "pre/S.mdx#s", kind: "depends", to: "tgt/T.mdx#t" },
+];
+
+// (i) `$` before a non-digit in `from` — `pre/a$x.mdx` matches only the
+// literal name (spec files can spell mid-name `$`): a dropped-`$` or
+// empty-anchor reading matches `ax.mdx`, a one-byte-wildcard reading matches
+// `aQx.mdx`, and a regex reading (mid-pattern `$` unmatchable) matches
+// nothing.
+const LITERAL_NONDIGIT_FROM_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (i) $ before a non-digit in from xspec.config.ts",
+    `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "nd",
+      type: "forbidden",
+      from: { files: "pre/a$x.mdx" },
+      to: { group: "tgt" }
+    }
+  ]
+})
+`,
+  ),
+  "pre/a$x.mdx": stagedMdx(
+    "T7.5-5 (i) $ before a non-digit in from pre/a$x.mdx",
+    `import T from "../tgt/T.xspec"
+
+<S id="s1" d={T.t}>
+Source spelling the literal bytes.
+</S>
+`,
+  ),
+  "pre/ax.mdx": stagedMdx(
+    "T7.5-5 (i) $ before a non-digit in from pre/ax.mdx",
+    `import T from "../tgt/T.xspec"
+
+<S id="s2" d={T.t}>
+Dropped-dollar bait.
+</S>
+`,
+  ),
+  "pre/aQx.mdx": stagedMdx(
+    "T7.5-5 (i) $ before a non-digit in from pre/aQx.mdx",
+    `import T from "../tgt/T.xspec"
+
+<S id="s3" d={T.t}>
+One-byte-wildcard bait.
+</S>
+`,
+  ),
+  "tgt/T.mdx": SECTION_T_SOURCE,
+};
+
+// (j) `$` before a non-digit in `to` — `tgt/t$z.mdx` loads (no capture, no
+// capture violation) and matches only the literal target; baits as in (i).
+const LITERAL_NONDIGIT_TO_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    "xspec.config.ts": stagedTs(
+      "T7.5-5 (j) $ before a non-digit in to xspec.config.ts",
+      `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "nd",
+      type: "forbidden",
+      from: { group: "pre" },
+      to: { files: "tgt/t$z.mdx" }
+    }
+  ]
+})
+`,
+    ),
+    "pre/S.mdx": stagedMdx(
+      "T7.5-5 (j) $ before a non-digit in to pre/S.mdx",
+      `import P from "../tgt/t$z.xspec"
+import Q from "../tgt/tz.xspec"
+import R from "../tgt/tQz.xspec"
+
+<S id="s" d={[P.p, Q.q, R.r]}>
+Depends on every candidate expansion's node.
+</S>
+`,
+    ),
+    "tgt/t$z.mdx": SECTION_P_SOURCE,
+    "tgt/tz.mdx": SECTION_Q_SOURCE,
+    "tgt/tQz.mdx": SECTION_R_SOURCE,
+  };
 
 const CAPTURE_PAIR_EXPECTED: readonly PolicyExpectation[] = [
   {
@@ -1623,9 +3025,12 @@ const T7_5_5 = defineProductTest({
     "captures: $1-$2.ts against a-b-c.ts captures a and b-c, *$1* against " +
     "abc captures a (shortest-match left to right), a capture never matches " +
     "/ or the empty string, a to with captures matches only agreeing " +
-    "expansions (mirror-structure allowedOnly fixture), and the " +
-    "disambiguation is deterministic across repeat runs (SPEC 7.5, 14.12, " +
-    "12.0, H-6)",
+    "expansions (mirror-structure allowedOnly fixture), the disambiguation " +
+    "is deterministic across repeat runs, and the literal $ forms — $0, a " +
+    "trailing $, and $ before a non-digit, staged in from and in to, one " +
+    "arm each — load without 14.14 (a to containing $0 or ending in $ " +
+    "references no absent capture) and match exactly the paths spelling " +
+    "those literal bytes (SPEC 7.5, 14.12, 14.14, 12.0, H-6)",
   run: async (product) => {
     // (a) The $1-$2 tuple, plus determinism: the identical `check --json`
     // twice with byte-identical outputs (H-6) — the capture-dependent
@@ -1713,6 +3118,138 @@ const T7_5_5 = defineProductTest({
         "m/good.mdx agrees with its expansion and passes; src/evil.ts's " +
         "edge into m/wrong.mdx disagrees and violates)",
     );
+
+    // (e) `$0` in `from`: a$0.ts matches the file a$0.ts and never ab.ts —
+    // nor a0.ts (SPEC 7.5's literal-$ example; build's success is the
+    // load-without-14.14 half, module header).
+    await expectPolicyFindings(
+      product,
+      LITERAL_DOLLAR0_FROM_FILES,
+      [
+        {
+          rule: "dz",
+          edge: { from: "src/a$0.ts", to: "tgt/P.mdx#p", kind: "references" },
+        },
+      ],
+      "T7.5-5 ($0 in from — src/a$0.ts is literal bytes: it matches the " +
+        "file src/a$0.ts and never src/ab.ts, which a capture reading of " +
+        "$0 would match, nor src/a0.ts, which a dropped-$ reading would " +
+        "match; SPEC 7.5, 14.14)",
+    );
+
+    // (f) `$0` in `to`: loads — references no absent capture — and matches
+    // only tgt/t$0.mdx.
+    await expectPolicyFindings(
+      product,
+      LITERAL_DOLLAR0_TO_FILES,
+      [
+        {
+          rule: "dz",
+          edge: { from: "pre/S.mdx#s", to: "tgt/t$0.mdx#p", kind: "depends" },
+        },
+      ],
+      "T7.5-5 ($0 in to — a to containing $0 references no absent capture " +
+        "(a capture-reading product refuses the configuration with 14.14 " +
+        "and fails the build step) and matches only the literal " +
+        "tgt/t$0.mdx target, never tgt/tb.mdx or tgt/t0.mdx; SPEC 7.5, " +
+        "14.14)",
+    );
+
+    // (g) Trailing `$` in `from`: the pattern matches only the `$`-suffixed
+    // name. S-9: both code sources are discovered by the extension-free glob
+    // `src/*`, names the default does not reach — declared well-formed by
+    // their record, CODE_MARKER_TO_P, which makes each path judged.
+    await expectPolicyFindings(
+      product,
+      LITERAL_TRAILING_FROM_FILES,
+      [
+        {
+          rule: "tr",
+          edge: { from: "src/end$", to: "tgt/P.mdx#p", kind: "references" },
+        },
+      ],
+      "T7.5-5 (trailing $ in from — src/end$ matches only the $-suffixed " +
+        "name src/end$, never src/end, which a regex-anchor reading would " +
+        "match instead; SPEC 7.5, 14.14)",
+    );
+
+    // (h) Trailing `$` in `to`: loads — ends in `$`, references no absent
+    // capture — and matches no discovered target (fixture comment), so the
+    // staged bait edge yields no finding: `check` exits 0.
+    await withWorkspace(
+      { files: LITERAL_TRAILING_TO_FILES },
+      async (workspace) => {
+        const base = "T7.5-5 (trailing $ in to — tgt/T.mdx$)";
+        await buildOk(
+          product,
+          workspace,
+          `${base} \`build\` — a to ending in $ references no absent ` +
+            `capture: the configuration loads without 14.14 (SPEC 7.5, ` +
+            `14.14)`,
+        );
+        const premise = `${base} \`query edges --kinds depends\` (fixture premise)`;
+        assertEdgeSetEqual(
+          decodeEdgesReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "edges", "--kinds", "depends"],
+              premise,
+            ),
+            premise,
+          ),
+          LITERAL_TRAILING_TO_BAIT_EDGE,
+          `${premise}: the depends edge a regex-anchor reading of ` +
+            `tgt/T.mdx$ would flag is present, so the no-findings check ` +
+            `below is not vacuous (SPEC 2.2, 7.5)`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          `${base} \`check\` — no discovered path spells the trailing-$ ` +
+            `bytes (edge targets are requirement nodes and a spec source ` +
+            `always ends .mdx, 14.19), so the literal pattern matches no ` +
+            `target and the staged edge yields no finding; a regex-anchor ` +
+            `reading flags tgt/T.mdx and exits 1 (SPEC 7.5, 14.12, 12.0)`,
+        );
+      },
+    );
+
+    // (i) `$` before a non-digit in `from`: pre/a$x.mdx matches only the
+    // literal name.
+    await expectPolicyFindings(
+      product,
+      LITERAL_NONDIGIT_FROM_FILES,
+      [
+        {
+          rule: "nd",
+          edge: { from: "pre/a$x.mdx#s1", to: "tgt/T.mdx#t", kind: "depends" },
+        },
+      ],
+      "T7.5-5 ($ before a non-digit in from — pre/a$x.mdx is literal " +
+        "bytes: it matches the file pre/a$x.mdx and never pre/ax.mdx " +
+        "(dropped-$ reading) or pre/aQx.mdx (one-byte-wildcard reading); " +
+        "SPEC 7.5, 14.14)",
+    );
+
+    // (j) `$` before a non-digit in `to`: loads and matches only the
+    // literal target.
+    await expectPolicyFindings(
+      product,
+      LITERAL_NONDIGIT_TO_FILES,
+      [
+        {
+          rule: "nd",
+          edge: { from: "pre/S.mdx#s", to: "tgt/t$z.mdx#p", kind: "depends" },
+        },
+      ],
+      "T7.5-5 ($ before a non-digit in to — tgt/t$z.mdx is neither a " +
+        "capture nor a capture violation: the configuration loads without " +
+        "14.14 and the pattern matches only the literal tgt/t$z.mdx " +
+        "target, never tgt/tz.mdx or tgt/tQz.mdx; SPEC 7.5, 14.14)",
+    );
   },
 });
 
@@ -1792,7 +3329,13 @@ const T7_5_6 = defineProductTest({
       // …and regenerates output: tamper with a generated module, rebuild,
       // and the module is byte-restored (12.1 regenerates every derived
       // file; 12.0 makes the regenerated bytes deterministic, so the
-      // product-to-itself byte comparison is exact — H-4).
+      // product-to-itself byte comparison is exact — H-4). The tampered
+      // module is an edit of product-written bytes — a derived file, no
+      // code source (no code group globs it), whose well-formedness the
+      // document does not declare — so it is staged `unchecked` (S-9):
+      // never a staged-source record (no harness constant equals those
+      // bytes), and never judged, which would turn a product's malformed
+      // module into a harness error (H-8).
       const moduleRel = "hi/H.xspec.ts";
       const original = await readGeneratedModule(
         workspace,
@@ -1800,7 +3343,9 @@ const T7_5_6 = defineProductTest({
         "T7.5-6 after the first build (SPEC 13.1: hi/H.mdx generates " +
           "hi/H.xspec.ts in the source file's directory)",
       );
-      await workspace.file(moduleRel, `${original}// tampered\n`);
+      await workspace.file(moduleRel, `${original}// tampered\n`, {
+        ts: "unchecked",
+      });
       await buildOk(
         product,
         workspace,

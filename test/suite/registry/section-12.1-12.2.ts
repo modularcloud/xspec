@@ -1,5 +1,5 @@
 // TEST-SPEC §12.1 (`xspec build`) and §12.2 (`xspec check`) — SUITE-43:
-// T12.1-1, T12.1-3, T12.1-4, T12.2-1, T12.2-2, T12.2-3.
+// T12.1-1, T12.1-3, T12.1-4, T12.2-1, T12.2-2, T12.2-3, T12.2-4.
 //
 // T12.1-2 (no policy) is a pure cross-reference in TEST-SPEC — its whole text
 // is "T7.5-6." — so no separate body is registered here: its content runs as
@@ -48,30 +48,88 @@
 //   `rename`/`move` (6.4/6.5) and durable files only by their owning
 //   commands (13.4) leave no path a failed `build` or any `check` may
 //   legitimately change.
-// - T12.2-2 runs one workspace per finding family. Families staged as
-//   invalid sources or corrupted durable state cannot fix whether a product
-//   additionally reports 14.10 staleness: whether prior derived state is
-//   detectably stale when "what the current sources generate" is undefined
-//   (invalid sources, unreplayable journal) is not settled by SPEC 13.3/14 —
-//   a regeneration-comparing product reports nothing (masked, 14), a
-//   hash-comparing product reports staleness. Family assertions therefore
-//   count the non-14.10 findings exactly (the family condition may never be
-//   missing, and no phantom non-staleness condition is accepted) and set
-//   14.10 findings aside. The staleness family itself asserts the reverse:
-//   every finding is 14.10, names its file, and instructs rebuilding.
+// - T12.2-2 runs one workspace per finding family, and every family's
+//   `check` findings are pinned exact — the staged conditions and nothing
+//   beside them, 14.10 included. SPEC 14.10 settles staleness on a failing
+//   workspace: where the workspace fails `build`'s validations (invalid
+//   sources, a journal error — SPEC 13.3) the content the current sources
+//   generate is undefined, so the mismatch forms, per file and graph data,
+//   are undetectable and go unreported, while the unreadable-record form
+//   (14.23) and the recorded-file form (a recorded derived path no longer
+//   generated) are reported whatever the validity. Judged per staging,
+//   neither whatever-validity form is staged: the pre-built families edited
+//   to invalid sources (family 1) or given a garbage journal line (family 7)
+//   leave the record readable and every recorded path still generated (the
+//   same sources and configuration); the never-built families (5, 6) hold
+//   no record at all (a failing `build` writes nothing, 12.1); and the
+//   freshly built passing families (8, 9) have nothing stale. So a product
+//   reporting prior derived state as stale beside the family condition — a
+//   hash-comparing product's unit form, a regeneration-comparing product's
+//   per-file form — fails, as does one omitting the family condition. The
+//   staleness family itself asserts the reverse: every finding is 14.10,
+//   names its file, and instructs rebuilding. The families' stagings are
+//   one driver, `runT1222Families`, which hands each checked state to a
+//   visitor: T12.2-2's runs that state's own assertions (`state.home`),
+//   T12.0-15's the human-form twins of `build` and `check` there
+//   (section-12.0-iv.ts), so both tests meet exactly the same states.
 // - The 14.10 arms pin the exact finding where the fixture has exactly one
-//   stale file (hand-edited module, hand-deleted module: sources, config,
-//   and every other derived file stay fresh). The edited-source and
-//   disabled-emission arms cannot enumerate the product's stale set (which
-//   companions embed text, and how graph data records derived paths, are
-//   opaque — 13.1/13.3), so they assert: all findings are 14.10 and the one
-//   file SPEC fixes as stale/orphaned — the emitted Markdown, whose bytes
-//   are the compiled source (3, 13.2) — is among the named files.
-// - 14.21 identification: the corrupt-session finding must let the user find
-//   the session — accepted as the finding naming the session file path or
-//   the message naming the session (H-3 information presence, never exact
-//   wording). Line-level 14.13 naming is T6.1-3's subject; here the family
-//   asserts the condition itself.
+//   stale file (hand-edited module, hand-deleted module, and the
+//   occupant-kind arms — symlink to a byte-identical target, directory:
+//   sources, config, graph data, and every other derived file stay fresh).
+//   The edited-source and disabled-emission arms cannot enumerate the
+//   product's stale set (which companions embed text, and how graph data
+//   records derived paths, are opaque — 13.1/13.3), so they assert: all
+//   findings are 14.10 and the one file SPEC fixes as stale/orphaned — the
+//   emitted Markdown, whose bytes are the compiled source (3, 13.2) — is
+//   among the named files.
+// - The 14.10 unit form ("concerned path the graph-data area, no path
+//   inside it named") is operationalized as: exactly one finding, its
+//   concerned path exactly `.xspec` (the area's workspace-relative path,
+//   no trailing separator, SPEC 11.6) and its locations [] (a
+//   path-concerned condition is unlocated, 12.7) — the T6.6-6 precedent.
+//   "No per-file finding beside it" and "never the mismatch form beside
+//   it" are both the exactly-one count: any second condition-10 finding,
+//   whatever its concerned path, fails it.
+// - The mismatch arm's premise (refresh-then-revert leaves graph data
+//   reflecting the edited sources) is pinned by whole comparison of the
+//   graph-data byte state (T13.3-2's operational path set) before the edit
+//   and after the refreshing read: graph data carries all four hashes
+//   (13.3), so a text edit must change it, and comparing the product's
+//   bytes against the product's own earlier bytes is the H-4
+//   self-comparison carve-out — content stays otherwise unread.
+// - The unreadable-record recovery arm reads `inventory` through the
+//   scoped `recorded`-datum decode (forms.ts): `recorded` is the one
+//   member the recovery contract needs ("`inventory` reports `recorded`
+//   again", 14.10 → 11.6), asserted as a plain list naming the generated
+//   module; the full inventory form and the corrupt-state unavailability
+//   report are T11.6-*'s subject (T11.6-4).
+// - Beside the exact counts, every T12.2-2 family finding of a staged
+//   condition identifies the concern SPEC 14 requires (TEST-SPEC line 9;
+//   SPEC 14, 12.7) — identification, never exact ranges (T14-8's and
+//   T14-11's) or wording (H-3). A located condition carries at least one
+//   location, every one in its staged file and within the offending
+//   construct's byte window (`byteWindow` over the named parts the staged
+//   source is composed of, its bytes and record name unchanged; the window
+//   is end-widened by one byte, `assertFindingLocated`): the build-
+//   validations family's 14.1 within the id-less nested section, its
+//   opening `<S>` through its `</S>` (T1.3-1's window convention; T12.1-4's
+//   first arm stages the identical bytes), and its 14.4 within the
+//   `bad name` section's opening tag; the references family's 14.5, 14.6,
+//   and 14.8 within their spellings in specs/A.mdx — the `d` value
+//   `"nope"`, the embedding `{text("nada")}`, the `d` value `42` — and its
+//   14.7 within the marker chain `A.missing` in src/app.ts; the cycles
+//   family's 14.9 within the self-reference `"s"`. A path-concerned
+//   condition carries its concerned path as 12.7's `path` and `locations`
+//   `[]`: the journal family's 14.13 the journal `.xspec/journal`, its
+//   message naming the malformed line ("naming the lines", 14.13) — line 1,
+//   the journal holding the garbage line alone — in T6.1-3's forms adapted
+//   to line 1 (the line's text, a line/entry 1 citation no "line 10"
+//   satisfies, or a `journal:1` file:line form; H-3 information presence);
+//   the sessions family's 14.21 exactly the session file
+//   `.xspec/reviews/bad.json` (SPEC 14, 10.1, 13.4). The policy family's
+//   14.12 carries exactly T12.2-4's violation (`assertOnlyTheViolation`):
+//   the rule's name and the edge's source identity, kind token, and target
+//   identity, `locations` `[]`, `path` null (SPEC 14.12, 12.7).
 // - "All build validations" (T12.2-2's first family) is asserted through
 //   representatives with unambiguous finding counts (14.1 missing ID, 14.4
 //   invalid segment) staged by editing two files of a previously built valid
@@ -81,23 +139,73 @@
 //   1–7 negative tests and T14-1's completeness matrix. The separately
 //   listed families (references, cycles, journal, policy, sessions) get
 //   their own workspaces below.
+// - T12.2-4 (b) reads one condition-10 finding per orphaned path, concerning
+//   it, and no other: dropping a source from the groups orphans the paths
+//   the record holds for it (13.3) — 13.1 leaves the companion set to the
+//   product, and 14.10 reports one finding per such path — so the expected
+//   set comes from the record, as TEST-SPEC defines it: the dropped
+//   source's module (whose path 13.1 fixes, and which the record must
+//   name), each companion `inventory`'s `recorded` set lists for it after
+//   the build (T11.6-3; attributable through 13.1's naming), and its
+//   Markdown where emitted — none here, the fixture's configuration having
+//   no `markdown` key (7.3). Read on the freshly built workspace, before
+//   the configuration change, never from a listing of the written files: a
+//   product whose written files and record disagree is judged by its
+//   record. Each expected path is pinned a plain file after the build — the
+//   recorded file remaining at the path, the occupant the recorded-file
+//   form concerns (14.10, 13.4). A product without companions reports
+//   exactly one finding. Each arm's `check` and failing `build` run
+//   inside whole-root compares (T12.2-3, T12.1-4), every arm's "no
+//   condition 12" and "no condition 10" are the exact condition multiset
+//   beside the validation finding (located within its section's opening
+//   tag), and the premise `check` on each freshly built workspace pins the
+//   violation as detectable, so its absence on the failing staging is
+//   14.12's confinement rather than the fixture's silence.
 
 import * as fsp from "node:fs/promises";
 import type { Finding } from "../../helpers/adapters/index.js";
-import { decodeFindingsReport } from "../../helpers/adapters/index.js";
-import { fail, parseJsonStdout } from "../../helpers/assertions.js";
+import {
+  GRAPH_DATA_AREA_PATH,
+  corruptGraphDataShapeBlind,
+  decodeFindingsReport,
+  decodeInventoryRecordedDatum,
+  isGraphDataKey,
+} from "../../helpers/adapters/index.js";
+import {
+  assertBytesEqual,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import type {
+  DirectorySnapshot,
+  SnapshotEntry,
+} from "../../helpers/snapshot.js";
+import {
+  assertLeavesUnchanged,
+  diffSnapshots,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { assertGraphDataPresent, deleteGraphData } from "./section-13.3.js";
+import type { FindingSourceExpectation } from "./support.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
+  assertFindingLocated,
+  assertSameJson,
   buildFindings,
   buildOk,
+  byteWindow,
   expectConfigurationError,
   expectExit,
   readGeneratedModule,
+  recordedCompanionPaths,
   runJson,
 } from "./support.js";
 
@@ -118,9 +226,44 @@ export default defineConfig({
 `;
 }
 
+// `markdownConfig`'s two configurations, each staged after a body's first
+// product invocation — emission on by T12.2-2's staleness, graph-data
+// unit-form, and unreadable-record families' workspaces; emission off by
+// T12.1-3's arm-3 rewrite and T12.2-2's staleness arm-4 rewrite and its
+// cycles, journal, and sessions families' workspaces — so S-7's sweep never
+// reaches those stagings against the stub: TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
+// every site, the first workspaces' too.
+const MARKDOWN_EMIT_CONFIG = stagedTs(
+  "T12.0-15/T12.2-2 xspec.config.ts — one spec group, Markdown emission on (markdownConfig(true): the staleness, graph-data unit-form, and unreadable-record families' workspaces)",
+  markdownConfig(true),
+);
+const MARKDOWN_NO_EMIT_CONFIG = stagedTs(
+  "T12.0-15/T12.1-3/T12.2-2 xspec.config.ts — one spec group, Markdown emission off (markdownConfig(false): T12.1-3's arm-3 rewrite; T12.2-2's staleness arm-4 rewrite and its cycles, journal, and sessions families' workspaces)",
+  markdownConfig(false),
+);
+
+// The valid single-section source `a1`, byte-identical wherever it is
+// staged: the initial specs/A.mdx of T12.1-1's and T12.2-1's workspace,
+// T12.1-3's, T12.1-4's, T12.2-3's, and every T12.2-2 family workspace
+// holding a1; T12.1-3's manual-rename copy at specs/C.mdx; and the source
+// T12.1-4, T12.2-2's graph-data mismatch arm, and T12.2-3 stage back over
+// an edit after a build. The later T12.2-2 families' workspaces and the
+// staged-back and copied files follow their body's first product
+// invocation, so S-7's sweep never reaches them against the stub: ONE
+// staged-source record (helpers/staged-mdx.ts; S-9's before-any-product
+// clause) staged at every site — the record rather than a plain spelling
+// of its bytes in the first workspaces too. Exported: T14-4's and T14-6's
+// stale workspace (section-14.ts's STALE_DECL) stages the same bytes as
+// specs/a.mdx.
+export const VALID_A1_SOURCE = stagedMdx(
+  "T12.0-15/T12.1-1/T12.1-3/T12.1-4/T12.2-1/T12.2-2/T12.2-3/T14-4/T14-6 specs/A.mdx (the valid a1 source: every workspace's initial specs/A.mdx holding a1; T12.1-3's manual-rename copy at specs/C.mdx; staged back after a build by T12.1-4, T12.2-2, and T12.2-3; T14-4's and T14-6's stale workspace specs/a.mdx)",
+  ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+);
+
 /** Stage a fresh workspace with the given files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -153,12 +296,15 @@ async function checkFindings(
 }
 
 /**
- * The T12.2-2 family assertion: `check` exits 1 and the non-14.10 findings
- * are exactly the staged family conditions. 14.10 staleness findings are set
- * aside — whether a product reports prior derived state as stale when the
- * staged corruption makes current generation uncomputable is not settled by
- * SPEC (see the module header) — while the family condition may never be
- * missing and no phantom condition is accepted.
+ * The T12.2-2 family assertion: `check` exits 1 and its findings are exactly
+ * the staged family conditions — 14.10 counted with the rest: on a failing
+ * workspace the mismatch forms go unreported, and no family stages a
+ * whatever-validity form (SPEC 14.10; the module header judges each
+ * staging) — so the family condition may never be missing and no phantom
+ * condition, staleness included, is accepted. The families of the staged
+ * error conditions then assert each finding's concern beside the counts
+ * (`assertFamilyFindingsLocated`, `assertFamilyFindingsConcernPath`,
+ * `assertOnlyTheViolation`; the module header).
  */
 async function checkFamilyFindings(
   product: ProductBinding,
@@ -167,15 +313,95 @@ async function checkFamilyFindings(
   context: string,
 ): Promise<readonly Finding[]> {
   const findings = await checkFindings(product, workspace, context);
-  const nonStale = findings.filter((finding) => finding.condition !== "14.10");
   assertConditionCounts(
-    nonStale,
+    findings,
     expected,
-    `${context} — the staged family conditions, counted over the non-14.10 ` +
-      `findings (14.10 staleness against the staged corruption is neither ` +
-      `required nor forbidden; see the module header)`,
+    `${context} — exactly the staged family conditions: 14.10's mismatch ` +
+      `forms go unreported on a failing workspace, and no whatever-validity ` +
+      `form is staged (SPEC 14.10; see the module header)`,
   );
   return findings;
+}
+
+/**
+ * One staged condition's located concern in a T12.2-2 family (the module
+ * header): the family's finding of `condition` locates the offending
+ * construct in `file`, every location within `window` — the construct's
+ * `byteWindow` over the staged source's named parts (SPEC 14, 12.7).
+ */
+interface FamilyLocatedConcern extends FindingSourceExpectation {
+  /** The SPEC 14 condition (`14.N`) the family stages exactly once. */
+  readonly condition: string;
+  /** The offending construct and the SPEC 14 rule placing it (diagnostics). */
+  readonly construct: string;
+  readonly window: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Every finding of each listed condition locates its concern (TEST-SPEC
+ * line 9; SPEC 14: a condition that locates in source carries the
+ * containing file and a range for each offending construct; 12.7) — at
+ * least one location, each in the staged file and within the construct's
+ * window (`assertFindingLocated`); run after `checkFamilyFindings` pinned
+ * exactly one finding per staged condition. Each failure names the family
+ * and cites SPEC 14 with the condition's number and 12.7.
+ */
+function assertFamilyFindingsLocated(
+  findings: readonly Finding[],
+  concerns: readonly FamilyLocatedConcern[],
+  family: string,
+): void {
+  for (const concern of concerns) {
+    for (const finding of findings) {
+      if (finding.condition !== concern.condition) continue;
+      assertFindingLocated(
+        finding,
+        concern,
+        `${family}: the ${concern.condition} finding locates ` +
+          `${concern.construct} in ${concern.file} ` +
+          `(SPEC 14, ${concern.condition}, 12.7)`,
+      );
+    }
+  }
+}
+
+/**
+ * Every finding of a path-concerned `condition` carries `path` as its 12.7
+ * concerned path and no in-source location (TEST-SPEC line 9; SPEC 14:
+ * conditions without an in-source location — journal and session
+ * conditions among them — carry the file or path they concern; 12.7:
+ * `locations` empty for them); run after `checkFamilyFindings` pinned
+ * exactly one. `what` names the concerned path and the rule fixing it
+ * (diagnostics). Returns the condition's findings, for the family's further
+ * checks. Each failure names the family and cites SPEC 14 with the
+ * condition's number and 12.7.
+ */
+function assertFamilyFindingsConcernPath(
+  findings: readonly Finding[],
+  condition: string,
+  path: string,
+  what: string,
+  family: string,
+): readonly Finding[] {
+  const ofCondition = findings.filter(
+    (finding) => finding.condition === condition,
+  );
+  for (const finding of ofCondition) {
+    assertFindingConcernsPath(
+      finding,
+      path,
+      `${family}: the ${condition} finding concerns ${what} ` +
+        `(SPEC 14, ${condition}, 12.7)`,
+    );
+    assertSameJson(
+      finding.locations,
+      [],
+      `${family}: the ${condition} finding has no in-source location — ` +
+        `its concern is the path ${path}, so its locations are empty ` +
+        `(SPEC 14, ${condition}, 12.7)`,
+    );
+  }
+  return ofCondition;
 }
 
 /**
@@ -201,11 +427,11 @@ function assertAllStale(findings: readonly Finding[], context: string): void {
           `${JSON.stringify(finding.condition)} (message: ${JSON.stringify(finding.message)})`,
       );
     }
-    if (finding.file === undefined) {
+    if (finding.path === null) {
       fail(
-        `${context}: a 14.10 finding names the stale or orphaned file ` +
-          `(SPEC 14.10); got a finding without a file (message: ` +
-          `${JSON.stringify(finding.message)})`,
+        `${context}: a 14.10 finding names the stale or orphaned file as ` +
+          `its concerned path (SPEC 14.10, 12.7); got a finding without ` +
+          `one (message: ${JSON.stringify(finding.message)})`,
       );
     }
     if (!/build/i.test(finding.message)) {
@@ -225,13 +451,13 @@ function assertSingleStaleFile(
   context: string,
 ): void {
   assertAllStale(findings, context);
-  if (findings.length !== 1 || findings[0]!.file !== rel) {
+  if (findings.length !== 1 || findings[0]!.path !== rel) {
     fail(
       `${context}: the fixture's only stale file is ${JSON.stringify(rel)} — ` +
         `sources, configuration, and every other derived file are fresh — so ` +
         `exactly one 14.10 finding naming it is expected (SPEC 14.10); got ` +
         JSON.stringify(
-          findings.map(({ condition, file }) => ({ condition, file })),
+          findings.map(({ condition, path }) => ({ condition, path })),
         ),
     );
   }
@@ -243,13 +469,71 @@ function assertStaleFileNamed(
   rel: string,
   context: string,
 ): void {
-  if (!findings.some((finding) => finding.file === rel)) {
+  if (!findings.some((finding) => finding.path === rel)) {
     fail(
       `${context}: a 14.10 finding must name ${JSON.stringify(rel)} (SPEC ` +
-        `14.10: the error names the file); named files: ` +
-        JSON.stringify(findings.map((finding) => finding.file)),
+        `14.10: the error names the file; 12.7 concerned path); named: ` +
+        JSON.stringify(findings.map((finding) => finding.path)),
     );
   }
+}
+
+/**
+ * Exactly one 14.10 finding in the unit form (SPEC 14.10): concerned path
+ * the graph-data area — `.xspec`, its workspace-relative path with no
+ * trailing separator (11.6) — with no path inside the area named (the
+ * record's layout is deliberately unenumerated, 13.3: locations [], and the
+ * concerned path is exactly the area), instructing rebuilding. The
+ * exactly-one count is "no per-file finding beside it" and "never the
+ * mismatch form beside it" at once: one finding either way (14.10).
+ */
+function assertSingleUnitFormFinding(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertAllStale(findings, context);
+  if (findings.length !== 1) {
+    fail(
+      `${context}: the graph-data unit form is one condition-10 finding — ` +
+        `never a per-file finding or a second unit-form finding beside it ` +
+        `(SPEC 14.10: one finding either way; the unit forms are ` +
+        `exclusive); got ` +
+        JSON.stringify(
+          findings.map(({ condition, path }) => ({ condition, path })),
+        ),
+    );
+  }
+  const finding = findings[0]!;
+  assertFindingConcernsPath(
+    finding,
+    GRAPH_DATA_AREA_PATH,
+    `${context}: the unit form's concerned path is the graph-data area — ` +
+      `the .xspec directory spelled as its workspace-relative path, no ` +
+      `trailing separator (SPEC 14.10, 11.6)`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${context}: no path inside the area is named — the record's layout is ` +
+      `deliberately unenumerated (SPEC 14.10, 13.3), and a path-concerned ` +
+      `condition is unlocated: locations [] (SPEC 12.7)`,
+  );
+}
+
+/**
+ * The graph-data entries of a whole-root snapshot, viewed as a snapshot —
+ * T13.3-2's operational path set (every path under `.xspec/` except the
+ * durable journal and reviews paths and the transient lock path with
+ * everything under it; the predicate's one home is the H-3 adapter layer). Used only for whole comparison against the product's own
+ * earlier bytes (H-4: graph-data content is opaque; the self-comparison
+ * carve-out).
+ */
+function graphDataStateOf(snapshot: DirectorySnapshot): DirectorySnapshot {
+  const entries = new Map<string, SnapshotEntry>();
+  for (const [key, entry] of snapshot.entries) {
+    if (isGraphDataKey(key)) entries.set(key, entry);
+  }
+  return { ...snapshot, entries };
 }
 
 /** Assert a plain file exists at `rel`, diagnosed with the SPEC cite. */
@@ -303,10 +587,11 @@ async function expectNoModuleOrCompanions(
 // ---------------------------------------------------------------------------
 
 // Two spec files whose validity requires dependency resolution (B imports A
-// and depends on its node), Markdown emission enabled.
-const PRODUCTS_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": markdownConfig(true),
-  "specs/A.mdx": ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+// and depends on its node), Markdown emission enabled; specs/A.mdx is the
+// valid a1 record.
+const PRODUCTS_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+  "specs/A.mdx": VALID_A1_SOURCE,
   "specs/B.mdx": [
     'import A from "./A.xspec"',
     "",
@@ -414,10 +699,15 @@ const T12_1_1 = defineProductTest({
 
 // Two independent spec files (no cross-references), so removal and manual
 // renaming keep the workspace valid (SPEC 6.6: manual restructuring is a
-// deletion plus an addition).
-const REGEN_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": markdownConfig(true),
-  "specs/A.mdx": ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+// deletion plus an addition). Arm 2's manual rename copies A's source to
+// specs/C.mdx after the arm-1 `build` — a staging after a product
+// invocation, so the ledger record (S-9, helpers/staged-mdx.ts) that is
+// also the initial specs/A.mdx: the fixture's own bytes, which `build`
+// leaves untouched (sources are product-written only by `rename`/`move`,
+// SPEC 12.1, 6.4, 6.5 — pinned as the arm's staging premise).
+const REGEN_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+  "specs/A.mdx": VALID_A1_SOURCE,
   "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
 };
 
@@ -462,9 +752,18 @@ const T12_1_3 = defineProductTest({
       await expectFile(workspace, "specs/A.md", `${arm1} (A survives)`);
 
       // Arm 2 — manually renaming a source (6.6: deletion plus addition):
-      // A's old derived paths disappear, C's appear.
-      const sourceBytes = await workspace.readBytes("specs/A.mdx");
-      await workspace.file("specs/C.mdx", sourceBytes);
+      // A's old derived paths disappear, C's appear. The copy is the
+      // fixture's own bytes (the ledger record), so the staging premise
+      // pins first that `build` left the source untouched.
+      assertBytesEqual(
+        await workspace.readBytes("specs/A.mdx"),
+        VALID_A1_SOURCE.source,
+        "T12.1-3 arm 2 staging premise — `build` writes derived files and " +
+          "graph data only, never a source (SPEC 12.1; sources are " +
+          "product-written only by `rename`/`move`, 6.4, 6.5), so " +
+          "specs/A.mdx still holds the fixture's bytes for the manual rename",
+      );
+      await workspace.file("specs/C.mdx", VALID_A1_SOURCE);
       await fsp.rm(workspace.path("specs/A.mdx"));
       await buildOk(
         product,
@@ -483,7 +782,7 @@ const T12_1_3 = defineProductTest({
       // Arm 3 — disabling emission: the emitted Markdown disappears, the
       // module stays (SPEC 7.3: with emit false, no path is a Markdown emit
       // destination).
-      await workspace.file("xspec.config.ts", markdownConfig(false));
+      await workspace.file("xspec.config.ts", MARKDOWN_NO_EMIT_CONFIG);
       await buildOk(
         product,
         workspace,
@@ -503,29 +802,35 @@ const T12_1_3 = defineProductTest({
 // T12.1-4 — failed build modifies nothing
 // ---------------------------------------------------------------------------
 
-const FAILED_BUILD_VALID_SOURCE = [
+// The valid source with a nested section lacking `id` — condition 14.1, the
+// staged validation error, staged over the built valid source (a ledger
+// record, S-9). Composed of named parts so T12.2-2's build-validations
+// family computes the 14.1 window from them: the id-less nested section's
+// construct, its opening `<S>` through its `</S>` (T1.3-1's window
+// convention), and the bytes before it.
+const FAILED_BUILD_MISSING_ID_PREFIX = [
   '<S id="a1">',
   "Alpha behavior.",
-  "</S>",
+  "",
   "",
 ].join("\n");
-
-// The valid source with a nested section lacking `id` — condition 14.1, the
-// staged validation error.
-const FAILED_BUILD_INVALID_SOURCE = [
-  '<S id="a1">',
-  "Alpha behavior.",
-  "",
+const FAILED_BUILD_MISSING_ID_CONSTRUCT = [
   "<S>",
   "Nested section without an id.",
   "</S>",
-  "</S>",
-  "",
 ].join("\n");
+const FAILED_BUILD_INVALID_SOURCE = stagedMdx(
+  "T12.0-15/T12.1-4/T12.2-2 specs/A.mdx with a nested section lacking id (14.1), staged over the built valid source",
+  `${FAILED_BUILD_MISSING_ID_PREFIX}${FAILED_BUILD_MISSING_ID_CONSTRUCT}\n</S>\n`,
+);
 
 // The valid configuration plus one unknown top-level key — a configuration
-// error (SPEC 7, 14.14).
-const FAILED_BUILD_BOGUS_CONFIG = `import { defineConfig } from "xspec"
+// error (SPEC 7, 14.14), staged over the built workspace: a TypeScript
+// staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), well-formed.
+const FAILED_BUILD_BOGUS_CONFIG = stagedTs(
+  "T12.1-4 xspec.config.ts — an unknown top-level key bogus (arm 2's configuration error, staged over the built workspace)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -534,7 +839,8 @@ export default defineConfig({
   markdown: { emit: true },
   bogus: true
 })
-`;
+`,
+);
 
 const T12_1_4 = defineProductTest({
   id: "T12.1-4",
@@ -543,8 +849,8 @@ const T12_1_4 = defineProductTest({
   run: async (product) => {
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         // Prior derived state.
@@ -573,7 +879,7 @@ const T12_1_4 = defineProductTest({
         // Arm 2 — configuration error: exit 2, nothing modified. The source
         // is restored first so the staged configuration defect is the
         // workspace's only defect.
-        await workspace.file("specs/A.mdx", FAILED_BUILD_VALID_SOURCE);
+        await workspace.file("specs/A.mdx", VALID_A1_SOURCE);
         await workspace.file("xspec.config.ts", FAILED_BUILD_BOGUS_CONFIG);
         await assertLeavesUnchanged(
           workspace.root,
@@ -637,8 +943,47 @@ const T12_2_1 = defineProductTest({
 // non-static `d` value), plus one code file staging 14.7 (an unresolved
 // TypeScript marker). Every reference targets a distinct missing name, so no
 // condition masks another (SPEC 14: each present condition is reported).
-const REFERENCES_FAMILY_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// The family's workspace follows family 1's invocations, so its
+// configuration and code source are TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), wrapped in
+// place. Both sources are composed of named parts — each offending
+// spelling and the bytes before it — so the family computes each finding's
+// window from them (SPEC 14: a reference spelling is located by the span
+// its occurrence occupies or would occupy — a `d` value's expression by its
+// own characters, an MDX embedding's full braced container, a marker's bare
+// reference chain).
+const REFERENCES_DEPENDENCY_PREFIX = '<S id="a1" d={';
+const REFERENCES_UNKNOWN_DEPENDENCY = '"nope"';
+const REFERENCES_TEXT_TARGET_PREFIX =
+  REFERENCES_DEPENDENCY_PREFIX +
+  REFERENCES_UNKNOWN_DEPENDENCY +
+  [
+    "}>",
+    "Unknown dependency target.",
+    "</S>",
+    "",
+    '<S id="a2">',
+    "Unknown text target below.",
+    "",
+    "",
+  ].join("\n");
+const REFERENCES_UNKNOWN_TEXT_TARGET = '{text("nada")}';
+const REFERENCES_NON_STATIC_PREFIX =
+  REFERENCES_TEXT_TARGET_PREFIX +
+  REFERENCES_UNKNOWN_TEXT_TARGET +
+  ["", "</S>", "", '<S id="a3" d={'].join("\n");
+const REFERENCES_NON_STATIC_VALUE = "42";
+const REFERENCES_MARKER_PREFIX = [
+  'import A from "../specs/A.xspec";',
+  "",
+  "function marker(): void {",
+  "  ",
+].join("\n");
+const REFERENCES_UNRESOLVED_MARKER = "A.missing";
+const REFERENCES_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T12.0-15/T12.2-2 references family xspec.config.ts — one spec group and one code group (src/**/*.ts)",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -649,46 +994,73 @@ export default defineConfig({
   }
 })
 `,
-  "specs/A.mdx": [
-    '<S id="a1" d={"nope"}>',
-    "Unknown dependency target.",
-    "</S>",
-    "",
-    '<S id="a2">',
-    "Unknown text target below.",
-    "",
-    '{text("nada")}',
-    "</S>",
-    "",
-    '<S id="a3" d={42}>',
-    "Non-static dependency value.",
-    "</S>",
-    "",
-  ].join("\n"),
-  "src/app.ts": [
-    'import A from "../specs/A.xspec";',
-    "",
-    "function marker(): void {",
-    "  A.missing;",
-    "}",
-    "",
-  ].join("\n"),
+  ),
+  "specs/A.mdx": stagedMdx(
+    "T12.0-15/T12.2-2 references family specs/A.mdx (an unknown d target, an unknown text target, and a non-static d value)",
+    REFERENCES_NON_STATIC_PREFIX +
+      REFERENCES_NON_STATIC_VALUE +
+      ["}>", "Non-static dependency value.", "</S>", ""].join("\n"),
+  ),
+  "src/app.ts": stagedTs(
+    "T12.0-15/T12.2-2 references family src/app.ts (an unresolved TypeScript marker, A.missing)",
+    REFERENCES_MARKER_PREFIX +
+      REFERENCES_UNRESOLVED_MARKER +
+      [";", "}", ""].join("\n"),
+  ),
 };
 
 // Family: cycles. A self-`depends` is a dependency cycle of length one
 // (SPEC 5.3) needing no import — so no spec import cycle is co-staged and
-// the exact condition count holds.
-const CYCLE_FAMILY_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": markdownConfig(false),
-  "specs/A.mdx": ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join(
-    "\n",
+// the exact condition count holds. The source is composed of named parts:
+// the self-reference `"s"`, the one reference spelling recording the
+// cycle's participating edge (SPEC 14: a cycle locates every such
+// spelling), and the bytes before it.
+const CYCLE_DEPENDENCY_PREFIX = '<S id="s" d={';
+const CYCLE_SELF_DEPENDENCY = '"s"';
+const CYCLE_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": MARKDOWN_NO_EMIT_CONFIG,
+  "specs/A.mdx": stagedMdx(
+    "T12.0-15/T12.2-2 cycles family specs/A.mdx (a self-depends cycle of length one)",
+    CYCLE_DEPENDENCY_PREFIX +
+      CYCLE_SELF_DEPENDENCY +
+      ["}>", "Depends on itself.", "</S>", ""].join("\n"),
   ),
 };
 
+// The violating dependence h1 -> lo/L.mdx#l1 under the forbidden rule
+// `no-hi-to-lo`, byte-identical in T12.2-2's policy family, every T12.2-4
+// arm's fixture, and T14-4's and T14-6's policy workspace (section-14.ts,
+// by import), all staged after their body's first product invocation
+// (T12.2-4's arms (b)–(d)): ONE staged-source record (S-9).
+export const POLICY_HI_SOURCE = stagedMdx(
+  "T12.0-15/T12.2-2/T12.2-4/T14-4/T14-6 hi/H.mdx (h1 depending on lo/L.mdx#l1 under the no-hi-to-lo rule: T12.2-2's policy family; every T12.2-4 arm; T14-4's and T14-6's policy workspace)",
+  [
+    'import L from "../lo/L.xspec"',
+    "",
+    '<S id="h1" d={L.l1}>',
+    "Violating dependence.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// The violated target l1, byte-identical in T12.2-2's policy family and
+// T14-4's and T14-6's policy workspace (section-14.ts, by import): ONE
+// staged-source record (S-9).
+export const POLICY_LO_SOURCE = stagedMdx(
+  "T12.0-15/T12.2-2/T14-4/T14-6 lo/L.mdx (the violated target l1: T12.2-2's policy family; T14-4's and T14-6's policy workspace)",
+  ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
+);
+
 // Family: policy (14.12, check-only). One forbidden rule, one violating
-// edge; build-side silence is T7.5-6's subject (T12.1-2).
-const POLICY_FAMILY_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+// edge; build-side silence is T7.5-6's subject (T12.1-2). The family's
+// workspace follows family 1's invocations, so its configuration is a
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), wrapped in place.
+const POLICY_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": stagedTs(
+    "T12.0-15/T12.2-2 policy family xspec.config.ts — hi and lo groups under the forbidden rule no-hi-to-lo",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -705,333 +1077,1008 @@ export default defineConfig({
   ]
 })
 `,
-  "hi/H.mdx": [
-    'import L from "../lo/L.xspec"',
-    "",
-    '<S id="h1" d={L.l1}>',
-    "Violating dependence.",
+  ),
+  "hi/H.mdx": POLICY_HI_SOURCE,
+  "lo/L.mdx": POLICY_LO_SOURCE,
+};
+
+// TEST-SPEC-sanctioned malformed journal line (the T6.1-3 shape), written as
+// the whole journal: its text — which the 14.13 finding's message may echo
+// to name the line — and the line with its terminator.
+const GARBAGE_JOURNAL_TEXT =
+  "?? harness-injected garbage: not a journal entry ??";
+const GARBAGE_JOURNAL_LINE = `${GARBAGE_JOURNAL_TEXT}\n`;
+
+/** The workspace's one journal (SPEC 6.1), the 14.13 concerned path. */
+const JOURNAL_PATH = ".xspec/journal";
+
+const CORRUPT_SESSION_PATH = ".xspec/reviews/bad.json";
+
+// The family stagings made after each family workspace's `build` — the
+// build-validations family's second edit and the staleness and graph-data
+// families' source edits: ledger records (S-9, helpers/staged-mdx.ts). The
+// second edit's opening tag is named: the 14.4 finding locates within it.
+// The build-validations family's valid specs/B.mdx, an initial file of
+// T12.2-2's first workspace — and of T12.0-15's restaging of the family
+// (`runT1222Families`), which follows that body's earlier invocations: a
+// staged-source record (S-9).
+const T12_2_2_B_VALID = stagedMdx(
+  "T12.0-15/T12.2-2 specs/B.mdx (the build-validations family's valid b1, before its invalidating edit)",
+  ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
+);
+const T12_2_2_B_INVALID_SEGMENT_TAG = '<S id="bad name">';
+const T12_2_2_B_INVALID_SEGMENT = stagedMdx(
+  "T12.0-15/T12.2-2 specs/B.mdx with an invalid ID segment (14.4), staged over the built valid source (build-validations family)",
+  [T12_2_2_B_INVALID_SEGMENT_TAG, "Invalid segment.", "</S>", ""].join("\n"),
+);
+const T12_2_2_A_EDITED = stagedMdx(
+  "T12.0-15/T12.2-2 specs/A.mdx with a1's text edited without rebuilding (staleness family, the edited-source arm)",
+  ['<S id="a1">', "Alpha behavior, edited.", "</S>", ""].join("\n"),
+);
+const T12_2_2_A_MISMATCH_EDIT = stagedMdx(
+  "T12.0-15/T12.2-2 specs/A.mdx with a1's text edited for the graph-data mismatch arm (refresh-then-revert)",
+  [
+    '<S id="a1">',
+    "Alpha behavior, edited for the mismatch arm.",
     "</S>",
     "",
   ].join("\n"),
-  "lo/L.mdx": ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
-};
+);
 
-// TEST-SPEC-sanctioned malformed journal line (the T6.1-3 shape).
-const GARBAGE_JOURNAL_LINE =
-  "?? harness-injected garbage: not a journal entry ??\n";
+// The located families' concerns (the module header): each staged
+// condition's file and the offending construct's window, computed from the
+// named parts each staged source is composed of.
+const BUILD_VALIDATIONS_CONCERNS: readonly FamilyLocatedConcern[] = [
+  {
+    condition: "14.1",
+    construct:
+      "the id-less nested section, its opening `<S>` through its `</S>` " +
+      "(a missing id locates the section's opening tag)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      FAILED_BUILD_MISSING_ID_PREFIX,
+      FAILED_BUILD_MISSING_ID_CONSTRUCT,
+    ),
+  },
+  {
+    condition: "14.4",
+    construct:
+      "the `bad name` section's opening tag (a malformed segment locates " +
+      "the `id` attribute)",
+    file: "specs/B.mdx",
+    window: byteWindow("", T12_2_2_B_INVALID_SEGMENT_TAG),
+  },
+];
+const REFERENCES_CONCERNS: readonly FamilyLocatedConcern[] = [
+  {
+    condition: "14.5",
+    construct:
+      'the `d` value `"nope"` (an unresolved reference spelling locates ' +
+      "the expression by its own characters)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      REFERENCES_DEPENDENCY_PREFIX,
+      REFERENCES_UNKNOWN_DEPENDENCY,
+    ),
+  },
+  {
+    condition: "14.6",
+    construct:
+      'the embedding `{text("nada")}` (an MDX embedding locates its full ' +
+      "braced container)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      REFERENCES_TEXT_TARGET_PREFIX,
+      REFERENCES_UNKNOWN_TEXT_TARGET,
+    ),
+  },
+  {
+    condition: "14.7",
+    construct:
+      "the marker `A.missing` (a marker locates its bare reference chain)",
+    file: "src/app.ts",
+    window: byteWindow(REFERENCES_MARKER_PREFIX, REFERENCES_UNRESOLVED_MARKER),
+  },
+  {
+    condition: "14.8",
+    construct:
+      "the `d` value `42` (a non-static reference spelling locates the " +
+      "expression by its own characters)",
+    file: "specs/A.mdx",
+    window: byteWindow(
+      REFERENCES_NON_STATIC_PREFIX,
+      REFERENCES_NON_STATIC_VALUE,
+    ),
+  },
+];
+const CYCLE_CONCERNS: readonly FamilyLocatedConcern[] = [
+  {
+    condition: "14.9",
+    construct:
+      'the self-reference `"s"` (a cycle locates every reference spelling ' +
+      "recording a participating dependency edge)",
+    file: "specs/A.mdx",
+    window: byteWindow(CYCLE_DEPENDENCY_PREFIX, CYCLE_SELF_DEPENDENCY),
+  },
+];
 
-const CORRUPT_SESSION_PATH = ".xspec/reviews/bad.json";
+/**
+ * Does a 14.13 finding's message name the malformed line — line 1, the
+ * journal holding the garbage line alone ("naming the lines", SPEC 14.13)?
+ * T6.1-3's forms adapted to line 1 (the module header; H-3 information
+ * presence, never exact wording): the line's text, a line/entry 1 citation
+ * (`line 1`, `entry #1`; never `line 10`), or a `journal:1` file:line form
+ * (never `journal:10`). The message alone names it: a journal condition's
+ * concern is its path, with no in-source location (SPEC 14, 12.7).
+ */
+function messageNamesJournalLineOne(message: string): boolean {
+  if (message.includes(GARBAGE_JOURNAL_TEXT)) return true;
+  if (/\b(?:line|entry)\s*#?\s*1\b/i.test(message)) return true;
+  return /journal:1(?![0-9])/.test(message);
+}
+
+/**
+ * One state of T12.2-2's families at which `check` runs (TEST-SPEC
+ * T12.2-2): the family and arm (`label`, diagnostics), and T12.2-2's own
+ * assertions there (`home`) — its `check --json`, the findings it pins, and
+ * at the unreadable record the recovery after it. T12.0-15 visits the same
+ * states with its human twins instead (section-12.0-iv.ts), leaving `home`
+ * unrun.
+ */
+export interface T1222CheckState {
+  readonly label: string;
+  readonly home: () => Promise<void>;
+}
+
+/** What one run of T12.2-2's families does at each checked state. */
+export type T1222Visit = (
+  workspace: TestWorkspace,
+  state: T1222CheckState,
+) => Promise<void>;
+
+/**
+ * T12.2-2's family stagings (TEST-SPEC T12.2-2; the module header): one
+ * workspace per finding family, each staged as T12.2-2's arms stage it —
+ * the premise builds, the edits, deletions, and occupants between arms —
+ * and at each checked state `visit` called with the workspace at that
+ * state: T12.2-2 runs the state's own assertions (`state.home()`), T12.0-15
+ * the human twins of `build` and `check` there (section-12.0-iv.ts), each
+ * visit leaving the workspace as the next staging step expects it (T12.0-15's
+ * twins of a run that writes run on byte copies).
+ */
+export async function runT1222Families(
+  product: ProductBinding,
+  visit: T1222Visit,
+): Promise<void> {
+  // Family 1 — build validations, re-validated from the current sources.
+  // Derived state from a prior valid build persists while the sources are
+  // edited to be invalid; a product answering from the persisting outputs
+  // or graph data would find nothing and exit 0.
+  await withWorkspace(
+    {
+      "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+      "specs/A.mdx": VALID_A1_SOURCE,
+      "specs/B.mdx": T12_2_2_B_VALID,
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (build validations) initial `build` — staging: derived " +
+          "state from a prior valid build persists (SPEC 12.1)",
+      );
+      await workspace.file("specs/A.mdx", FAILED_BUILD_INVALID_SOURCE);
+      await workspace.file("specs/B.mdx", T12_2_2_B_INVALID_SEGMENT);
+      await visit(workspace, {
+        label: "build validations",
+        home: async () => {
+          const findings = await checkFamilyFindings(
+            product,
+            workspace,
+            { "14.1": 1, "14.4": 1 },
+            "T12.2-2 (build validations) `check --json` after editing the " +
+              "sources to be invalid — check performs all build validations " +
+              "from the current sources rather than accepting the stale " +
+              "outputs (SPEC 12.2, 14.1, 14.4)",
+          );
+          assertFamilyFindingsLocated(
+            findings,
+            BUILD_VALIDATIONS_CONCERNS,
+            "T12.2-2 (build validations) `check --json`",
+          );
+        },
+      });
+    },
+  );
+
+  // Family 2 — 14.10 per-file staleness and orphans, check-only: the
+  // hand-edit/hand-delete/edited-source/disabled-emission arms plus the
+  // occupant-kind arms.
+  await withWorkspace(
+    {
+      "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+      "specs/A.mdx": VALID_A1_SOURCE,
+    },
+    async (workspace) => {
+      const moduleRel = "specs/A.xspec.ts";
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (staleness) initial `build` (SPEC 12.1)",
+      );
+
+      // Arm 1 — hand-edited generated file: the module is the fixture's
+      // only stale file.
+      const original = await readGeneratedModule(
+        workspace,
+        moduleRel,
+        "T12.2-2 (staleness) after the initial build (SPEC 13.1)",
+      );
+      // The tampered module is an edit of product-written bytes — a
+      // derived file, no code source, whose well-formedness the document
+      // does not declare — so it is staged `unchecked` (S-9): never a
+      // staged-source record (no harness constant equals those bytes), and
+      // never judged, which would turn a product's malformed module into a
+      // harness error (H-8).
+      await workspace.file(moduleRel, `${original}// tampered\n`, {
+        ts: "unchecked",
+      });
+      await visit(workspace, {
+        label: "staleness, hand-edited generated file",
+        home: async () => {
+          assertSingleStaleFile(
+            await checkFindings(
+              product,
+              workspace,
+              "T12.2-2 (staleness, hand-edited generated file) `check --json`",
+            ),
+            moduleRel,
+            "T12.2-2 (staleness, hand-edited generated file) — a generated " +
+              "file whose content does not match what the current sources " +
+              "generate is a 14.10 finding (SPEC 12.2, 14.10)",
+          );
+        },
+      });
+
+      // Arm 2 — hand-deleted generated file.
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (staleness) rebuild between arms — rebuilding resolves " +
+          "the tampered file (SPEC 12.1, 13.4)",
+      );
+      await fsp.rm(workspace.path(moduleRel));
+      await visit(workspace, {
+        label: "staleness, hand-deleted generated file",
+        home: async () => {
+          assertSingleStaleFile(
+            await checkFindings(
+              product,
+              workspace,
+              "T12.2-2 (staleness, hand-deleted generated file) `check --json`",
+            ),
+            moduleRel,
+            "T12.2-2 (staleness, hand-deleted generated file) — a missing " +
+              "generated file does not match what the current sources " +
+              "generate: a 14.10 finding naming it (SPEC 12.2, 14.10)",
+          );
+        },
+      });
+
+      // Occupant-kind arm A — the module's path occupied by a symbolic
+      // link whose target holds byte-identical generated content: the
+      // per-file comparison judges the path's occupant itself, never
+      // traversing a symbolic link (SPEC 14.10, 13.4), so the link is
+      // stale exactly as a missing or content-differing file — the
+      // discriminating arm a link-following product wrongly passes. The
+      // link target lives at the workspace root under a name no group
+      // matches and no derived path claims, so the copy itself changes
+      // nothing else `check` consults.
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (staleness) rebuild between arms — restores the deleted " +
+          "module (SPEC 12.1)",
+      );
+      const generatedBytes = await workspace.readBytes(moduleRel);
+      const linkTargetRel = "module-copy.txt";
+      await workspace.file(linkTargetRel, generatedBytes);
+      await fsp.rm(workspace.path(moduleRel));
+      await workspace.symlink(moduleRel, `../${linkTargetRel}`);
+      // Staging premise: reading THROUGH the link yields byte-identical
+      // generated content — only occupant-kind judgment can find this
+      // arm's staleness, so a link-following product wrongly passes.
+      assertBytesEqual(
+        await workspace.readBytes(moduleRel),
+        generatedBytes,
+        "T12.2-2 (staleness, symlink occupant) staging premise — the " +
+          "link's target holds byte-identical generated content " +
+          "(TEST-SPEC T12.2-2: the discriminating arm)",
+      );
+      await visit(workspace, {
+        label: "staleness, symlink occupant",
+        home: async () => {
+          assertSingleStaleFile(
+            await checkFindings(
+              product,
+              workspace,
+              "T12.2-2 (staleness, symlink occupant) `check --json`",
+            ),
+            moduleRel,
+            "T12.2-2 (staleness, symlink occupant) — the per-file comparison " +
+              "matches only a plain file holding exactly the generated " +
+              "content, never traversing a symbolic link: a symlink whose " +
+              "target holds byte-identical generated content is stale, " +
+              "exactly as a missing or content-differing file " +
+              "(SPEC 12.2, 14.10, 13.4)",
+          );
+        },
+      });
+      await fsp.rm(workspace.path(moduleRel));
+      await fsp.rm(workspace.path(linkTargetRel));
+
+      // Occupant-kind arm B — the module's path occupied by a directory:
+      // a non-plain-file occupant is stale whatever it holds (SPEC 14.10).
+      await fsp.mkdir(workspace.path(moduleRel));
+      await visit(workspace, {
+        label: "staleness, directory occupant",
+        home: async () => {
+          assertSingleStaleFile(
+            await checkFindings(
+              product,
+              workspace,
+              "T12.2-2 (staleness, directory occupant) `check --json`",
+            ),
+            moduleRel,
+            "T12.2-2 (staleness, directory occupant) — a directory at a " +
+              "generated module's path is a non-plain-file occupant: stale, " +
+              "exactly as a missing or content-differing file " +
+              "(SPEC 12.2, 14.10, 13.4)",
+          );
+        },
+      });
+      await fsp.rm(workspace.path(moduleRel), { recursive: true });
+
+      // Arm 3 — source edited without rebuilding: the emitted Markdown's
+      // bytes are the compiled source (SPEC 3, 13.2), so it is stale for
+      // certain; which further derived files change is opaque (module and
+      // companion content beyond the 13.1 contract, graph data, 13.3).
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (staleness) rebuild between arms (SPEC 12.1)",
+      );
+      await workspace.file("specs/A.mdx", T12_2_2_A_EDITED);
+      await visit(workspace, {
+        label: "staleness, source edited without rebuilding",
+        home: async () => {
+          const arm3Findings = await checkFindings(
+            product,
+            workspace,
+            "T12.2-2 (staleness, source edited without rebuilding) `check --json`",
+          );
+          const arm3Context =
+            "T12.2-2 (staleness, source edited without rebuilding) — every " +
+            "finding is 14.10 and the emitted Markdown, whose bytes are the " +
+            "compiled source, is among the named files (SPEC 12.2, 14.10, 3, 13.2)";
+          assertAllStale(arm3Findings, arm3Context);
+          assertStaleFileNamed(arm3Findings, "specs/A.md", arm3Context);
+        },
+      });
+
+      // Arm 4 — emission disabled without rebuilding: the recorded
+      // emitted Markdown remains at a path no longer generated — an
+      // orphaned recorded derived file (SPEC 14.10's second clause).
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (staleness) rebuild between arms — regenerates from the " +
+          "edited, still-valid source (SPEC 12.1)",
+      );
+      await workspace.file("xspec.config.ts", MARKDOWN_NO_EMIT_CONFIG);
+      await visit(workspace, {
+        label: "staleness, emission disabled without rebuilding",
+        home: async () => {
+          const arm4Findings = await checkFindings(
+            product,
+            workspace,
+            "T12.2-2 (staleness, emission disabled without rebuilding) `check --json`",
+          );
+          const arm4Context =
+            "T12.2-2 (staleness, emission disabled without rebuilding) — the " +
+            "recorded emitted Markdown remains at a path the current " +
+            "configuration no longer generates: an orphaned recorded derived " +
+            "file, reported as 14.10 (SPEC 12.2, 14.10, 7.3, 13.3)";
+          assertAllStale(arm4Findings, arm4Context);
+          assertStaleFileNamed(arm4Findings, "specs/A.md", arm4Context);
+        },
+      });
+    },
+  );
+
+  // Family 3 — the graph-data unit form (14.10), missing and mismatch
+  // arms, each positively isolated: every generated file present and
+  // matching, so any per-file finding beside the one unit-form finding
+  // is a phantom.
+  await withWorkspace(
+    {
+      "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+      "specs/A.mdx": VALID_A1_SOURCE,
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (graph-data unit form) initial `build` (SPEC 12.1)",
+      );
+
+      // Missing arm — on the freshly built, otherwise clean workspace,
+      // delete the graph data (T13.3-2's operational definition: every
+      // path under .xspec/ except the durable journal and reviews paths
+      // and the transient lock path). Every generated file stays present
+      // and matching, and the absent record leaves the recorded-file form
+      // nothing to report — so exactly one condition-10 finding, the unit
+      // form, discriminates a product that treats absent graph data as
+      // nothing to verify.
+      await deleteGraphData(
+        workspace,
+        "T12.2-2 (graph-data unit form, missing) staging",
+      );
+      await visit(workspace, {
+        label: "graph-data unit form, missing",
+        home: async () => {
+          assertSingleUnitFormFinding(
+            await checkFindings(
+              product,
+              workspace,
+              "T12.2-2 (graph-data unit form, missing) `check --json`",
+            ),
+            "T12.2-2 (graph-data unit form, missing) — `check` verifies " +
+              "graph data against the current sources and configuration: " +
+              "deleted graph data is missing graph data, exactly one " +
+              "condition-10 finding in the unit form with no per-file " +
+              "finding beside it (SPEC 12.2, 13.3, 14.10)",
+          );
+        },
+      });
+
+      // Mismatch arm — positively isolated via refresh-then-revert
+      // (TEST-SPEC T12.2-2): build, edit the source, run one refreshing
+      // read — graph data then reflects the edit while the generated
+      // files go stale (SPEC 13.3) — and revert the edit: the generated
+      // files again match the current sources while graph data does not.
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (graph-data unit form) rebuild between arms — restores " +
+          "the deleted graph data (SPEC 12.1)",
+      );
+      const wholeFresh = await snapshotDirectory(workspace.root);
+      assertGraphDataPresent(
+        wholeFresh,
+        "T12.2-2 (graph-data unit form, mismatch) staging premise after " +
+          "the rebuild",
+      );
+      const freshGraph = graphDataStateOf(wholeFresh);
+      await workspace.file("specs/A.mdx", T12_2_2_A_MISMATCH_EDIT);
+      await expectExit(
+        product,
+        workspace,
+        ["ids"],
+        0,
+        "T12.2-2 (graph-data unit form, mismatch) one refreshing read " +
+          "(`ids`) over the edited, still-valid sources — the read " +
+          "refreshes graph data before answering (SPEC 13.3, 12.3)",
+      );
+      const refreshedGraph = graphDataStateOf(
+        await snapshotDirectory(workspace.root),
+      );
+      // Staging premise: the refresh rewrote graph data to reflect the
+      // edit — graph data carries all four hashes (SPEC 13.3), so the
+      // text edit must change its bytes (whole comparison against the
+      // product's own earlier bytes; H-4 self-comparison carve-out).
+      if (diffSnapshots(freshGraph, refreshedGraph).length === 0) {
+        fail(
+          "T12.2-2 (graph-data unit form, mismatch) staging premise: " +
+            "graph data is byte-identical before the edit and after the " +
+            "refreshing read — the refresh must rewrite graph data to " +
+            "reflect the edited sources (SPEC 13.3: read results never " +
+            "come from stale data; graph data carries all four hashes, " +
+            "so a text edit changes it), leaving the mismatch arm " +
+            "nothing to stage",
+        );
+      }
+      await workspace.file("specs/A.mdx", VALID_A1_SOURCE);
+      await visit(workspace, {
+        label: "graph-data unit form, mismatch",
+        home: async () => {
+          assertSingleUnitFormFinding(
+            await checkFindings(
+              product,
+              workspace,
+              "T12.2-2 (graph-data unit form, mismatch) `check --json` after " +
+                "reverting the edit",
+            ),
+            "T12.2-2 (graph-data unit form, mismatch) — the generated files " +
+              "again match the current sources while graph data does not: " +
+              "exactly one condition-10 finding in the unit form with no " +
+              "per-file finding beside it, discriminating a product that " +
+              "runs the per-file and record-readability checks but never " +
+              "compares graph data against the current sources and " +
+              "configuration (SPEC 12.2, 13.3, 14.10)",
+          );
+        },
+      });
+    },
+  );
+
+  // Family 4 — the unreadable-record unit form (14.10/14.23): graph data
+  // corrupted shape-blind (T6.6-6's staging; H-3 record-staging adapter,
+  // garbage over T13.3-2's operational path set, product-written files
+  // only), then replaced by a successful `build`.
+  await withWorkspace(
+    {
+      "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+      "specs/A.mdx": VALID_A1_SOURCE,
+    },
+    async (workspace) => {
+      const moduleRel = "specs/A.xspec.ts";
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (unreadable record) initial `build` — the corruption " +
+          "applies to a record the product itself wrote (SPEC 12.1, 13.3)",
+      );
+      await corruptGraphDataShapeBlind(
+        workspace.root,
+        "T12.2-2 (unreadable record) staging",
+      );
+      await visit(workspace, {
+        label: "unreadable record",
+        home: async () => {
+          assertSingleUnitFormFinding(
+            await checkFindings(
+              product,
+              workspace,
+              "T12.2-2 (unreadable record) `check --json`",
+            ),
+            "T12.2-2 (unreadable record) — recorded generation state that " +
+              "exists but cannot be read as a record reports under the " +
+              "unreadable-record unit form alone: never the mismatch form " +
+              "beside it (the unit forms are exclusive), and the " +
+              "recorded-file form, consulting no readable record, is " +
+              "undetectable while the state holds (SPEC 12.2, 14.10, 14.23)",
+          );
+
+          // A successful `build` replaces the state (SPEC 14.10, 12.1,
+          // 13.4: a corrupted derived file is correctly resolved by
+          // rebuilding).
+          await buildOk(
+            product,
+            workspace,
+            "T12.2-2 (unreadable record) `build` over the corrupt-record " +
+              "state — a successful build replaces the record " +
+              "(SPEC 12.1, 13.4, 14.10)",
+          );
+          await expectExit(
+            product,
+            workspace,
+            ["check"],
+            0,
+            "T12.2-2 (unreadable record) `check` after the rebuild — clean " +
+              "(SPEC 14.10: a successful build replaces the state)",
+          );
+          // `inventory` reports `recorded` again — the record-supplied datum
+          // is the plain recorded derived-file paths, naming the generated
+          // module (the corrupt-state unavailability report is T11.6-4's
+          // subject; `inventory` is a JSON-only surface, one document,
+          // exit 0 on the clean workspace, SPEC 11.6, 12.0).
+          const inventoryContext =
+            "T12.2-2 (unreadable record) `inventory` after the rebuild";
+          const recorded = decodeInventoryRecordedDatum(
+            await runJson(product, workspace, ["inventory"], inventoryContext),
+            inventoryContext,
+          );
+          if (recorded.state !== "value") {
+            fail(
+              `${inventoryContext}: after a successful \`build\` replaces ` +
+                `the corrupt record, the record-supplied datum is the plain ` +
+                `recorded derived-file paths again — never unavailability, ` +
+                `never null (SPEC 14.10, 14.23, 11.6, 12.7); got state ` +
+                `${JSON.stringify(recorded.state)}`,
+            );
+          }
+          if (!recorded.value.includes(moduleRel)) {
+            fail(
+              `${inventoryContext}: the recorded derived-file paths — the ` +
+                `paths as last generated, companions included — must name ` +
+                `the generated module ${JSON.stringify(moduleRel)} ` +
+                `(SPEC 11.6, 13.1, 13.3); got ` +
+                JSON.stringify(recorded.value),
+            );
+          }
+        },
+      });
+    },
+  );
+
+  // Family 5 — unresolved and non-static references (14.5, 14.6, 14.7,
+  // 14.8), each staged against a distinct missing name.
+  await withWorkspace(REFERENCES_FAMILY_FILES, async (workspace) => {
+    await visit(workspace, {
+      label: "references",
+      home: async () => {
+        const findings = await checkFamilyFindings(
+          product,
+          workspace,
+          { "14.5": 1, "14.6": 1, "14.7": 1, "14.8": 1 },
+          "T12.2-2 (references) `check --json` — an unknown `d` target, an " +
+            "unknown `text(...)` target, an unresolved TypeScript marker, and " +
+            "a non-static `d` value are each reported (SPEC 12.2, 14.5–14.8)",
+        );
+        assertFamilyFindingsLocated(
+          findings,
+          REFERENCES_CONCERNS,
+          "T12.2-2 (references) `check --json`",
+        );
+      },
+    });
+  });
+
+  // Family 6 — cycles: a self-`depends` cycle of length one (no import
+  // cycle co-staged).
+  await withWorkspace(CYCLE_FAMILY_FILES, async (workspace) => {
+    await visit(workspace, {
+      label: "cycles",
+      home: async () => {
+        const findings = await checkFamilyFindings(
+          product,
+          workspace,
+          { "14.9": 1 },
+          "T12.2-2 (cycles) `check --json` — a dependency cycle is a finding " +
+            "(SPEC 12.2, 5.3, 14.9)",
+        );
+        assertFamilyFindingsLocated(
+          findings,
+          CYCLE_CONCERNS,
+          "T12.2-2 (cycles) `check --json`",
+        );
+      },
+    });
+  });
+
+  // Family 7 — journal integrity (14.13): a malformed journal line.
+  await withWorkspace(
+    {
+      "xspec.config.ts": MARKDOWN_NO_EMIT_CONFIG,
+      "specs/A.mdx": VALID_A1_SOURCE,
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (journal) initial `build` (staging, SPEC 12.1)",
+      );
+      await workspace.file(JOURNAL_PATH, GARBAGE_JOURNAL_LINE);
+      await visit(workspace, {
+        label: "journal",
+        home: async () => {
+          const findings = await checkFamilyFindings(
+            product,
+            workspace,
+            { "14.13": 1 },
+            "T12.2-2 (journal) `check --json` over a journal holding one " +
+              "malformed line — the journal is well-formed and replayable or " +
+              "a 14.13 finding naming the line (SPEC 12.2, 6.1, 14.13)",
+          );
+          const family = "T12.2-2 (journal) `check --json`";
+          const journalFindings = assertFamilyFindingsConcernPath(
+            findings,
+            "14.13",
+            JOURNAL_PATH,
+            `the journal ${JOURNAL_PATH}, the workspace's one journal ` +
+              `(SPEC 6.1)`,
+            family,
+          );
+          for (const finding of journalFindings) {
+            if (!messageNamesJournalLineOne(finding.message)) {
+              fail(
+                `${family}: the 14.13 finding must name the malformed line ` +
+                  `— line 1, the journal holding the garbage line alone — ` +
+                  `in its message: the line's text, a line/entry 1 citation, ` +
+                  `or a journal:1 file:line form (SPEC 14, 14.13: "naming ` +
+                  `the lines"; 12.7: its concern is the path, so the message ` +
+                  `alone names the line; H-3 information presence); got ` +
+                  `${JSON.stringify(finding.message)}`,
+              );
+            }
+          }
+        },
+      });
+    },
+  );
+
+  // Family 8 — policy (14.12, check-only): one forbidden rule, one
+  // violating edge, freshly built so the violation is the only finding.
+  await withWorkspace(POLICY_FAMILY_FILES, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      "T12.2-2 (policy) `build` — build does not evaluate policy " +
+        "(SPEC 12.1; the build-vs-check contrast is T7.5-6's subject)",
+    );
+    await visit(workspace, {
+      label: "policy",
+      home: async () => {
+        const findings = await checkFamilyFindings(
+          product,
+          workspace,
+          { "14.12": 1 },
+          "T12.2-2 (policy) `check --json` — the violating edge is a 14.12 " +
+            "finding (SPEC 12.2, 7.5, 14.12)",
+        );
+        // The same violation T12.2-4 pins (its fixture's identical edge):
+        // the rule's name and the edge's identities, no location, no path.
+        assertOnlyTheViolation(
+          findings,
+          "T12.2-2 (policy) `check --json`: the 14.12 finding (SPEC 14)",
+        );
+      },
+    });
+  });
+
+  // Family 9 — corrupt sessions (14.21): a session file that cannot be
+  // parsed is corrupt categorically (SPEC 10.1).
+  await withWorkspace(
+    {
+      "xspec.config.ts": MARKDOWN_NO_EMIT_CONFIG,
+      "specs/A.mdx": VALID_A1_SOURCE,
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.2-2 (sessions) initial `build` (staging, SPEC 12.1)",
+      );
+      await workspace.file(
+        CORRUPT_SESSION_PATH,
+        "{ this is not a parseable session",
+      );
+      await visit(workspace, {
+        label: "sessions",
+        home: async () => {
+          const context =
+            "T12.2-2 (sessions) `check --json` over one unparseable session " +
+            "file — review sessions are not internally corrupt or a 14.21 " +
+            "finding (SPEC 12.2, 10.1, 14.21)";
+          const findings = await checkFamilyFindings(
+            product,
+            workspace,
+            { "14.21": 1 },
+            context,
+          );
+          assertFamilyFindingsConcernPath(
+            findings,
+            "14.21",
+            CORRUPT_SESSION_PATH,
+            `the corrupt session's file ${CORRUPT_SESSION_PATH}, where the ` +
+              `user finds the session (SPEC 10.1, 13.4)`,
+            "T12.2-2 (sessions) `check --json`",
+          );
+        },
+      });
+    },
+  );
+}
 
 const T12_2_2 = defineProductTest({
   id: "T12.2-2",
   title:
-    "one workspace per finding family, each reported by `check` with exit 1: build validations re-validated from the current sources against persisting derived state; stale generated output and orphaned recorded derived files (14.10) after hand-editing, hand-deleting, editing a source, and disabling emission; unresolved/non-static references; cycles; journal integrity (14.13); policy (14.12); corrupt sessions (14.21) (SPEC 12.2, 14)",
-  timeoutMs: 240_000,
+    "one workspace per finding family, each reported by `check` with exit 1: build validations re-validated from the current sources against persisting derived state; stale generated output and orphaned recorded derived files (14.10) after hand-editing, hand-deleting, editing a source, and disabling emission, plus the occupant-kind arms — the per-file comparison judges the path's occupant itself, never traversing a symbolic link: a generated module's path occupied by a symlink whose target holds byte-identical generated content, and by a directory, each stale; the graph-data unit form, missing and mismatch arms each positively isolated — exactly one condition-10 finding, concerned path the graph-data area, no path inside it named, no per-file finding beside it; the unreadable-record unit form (14.23) reported alone, a successful `build` replacing the state (`check` clean afterward, `inventory` reports `recorded` again); unresolved/non-static references; cycles; journal integrity (14.13); policy (14.12); corrupt sessions (14.21) (SPEC 12.2, 13.3, 13.4, 11.6, 14)",
   run: async (product) => {
-    // Family 1 — build validations, re-validated from the current sources.
-    // Derived state from a prior valid build persists while the sources are
-    // edited to be invalid; a product answering from the persisting outputs
-    // or graph data would find nothing and exit 0.
-    await withWorkspace(
-      {
-        "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
-        "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T12.2-2 (build validations) initial `build` — staging: derived " +
-            "state from a prior valid build persists (SPEC 12.1)",
-        );
-        await workspace.file("specs/A.mdx", FAILED_BUILD_INVALID_SOURCE);
-        await workspace.file(
-          "specs/B.mdx",
-          ['<S id="bad name">', "Invalid segment.", "</S>", ""].join("\n"),
-        );
-        await checkFamilyFindings(
-          product,
-          workspace,
-          { "14.1": 1, "14.4": 1 },
-          "T12.2-2 (build validations) `check --json` after editing the " +
-            "sources to be invalid — check performs all build validations " +
-            "from the current sources rather than accepting the stale " +
-            "outputs (SPEC 12.2, 14.1, 14.4)",
-        );
-      },
-    );
-
-    // Family 2 — 14.10 staleness and orphans, check-only, four arms.
-    await withWorkspace(
-      {
-        "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
-      },
-      async (workspace) => {
-        const moduleRel = "specs/A.xspec.ts";
-        await buildOk(
-          product,
-          workspace,
-          "T12.2-2 (staleness) initial `build` (SPEC 12.1)",
-        );
-
-        // Arm 1 — hand-edited generated file: the module is the fixture's
-        // only stale file.
-        const original = await readGeneratedModule(
-          workspace,
-          moduleRel,
-          "T12.2-2 (staleness) after the initial build (SPEC 13.1)",
-        );
-        await workspace.file(moduleRel, `${original}// tampered\n`);
-        assertSingleStaleFile(
-          await checkFindings(
-            product,
-            workspace,
-            "T12.2-2 (staleness, hand-edited generated file) `check --json`",
-          ),
-          moduleRel,
-          "T12.2-2 (staleness, hand-edited generated file) — a generated " +
-            "file whose content does not match what the current sources " +
-            "generate is a 14.10 finding (SPEC 12.2, 14.10)",
-        );
-
-        // Arm 2 — hand-deleted generated file.
-        await buildOk(
-          product,
-          workspace,
-          "T12.2-2 (staleness) rebuild between arms — rebuilding resolves " +
-            "the tampered file (SPEC 12.1, 13.4)",
-        );
-        await fsp.rm(workspace.path(moduleRel));
-        assertSingleStaleFile(
-          await checkFindings(
-            product,
-            workspace,
-            "T12.2-2 (staleness, hand-deleted generated file) `check --json`",
-          ),
-          moduleRel,
-          "T12.2-2 (staleness, hand-deleted generated file) — a missing " +
-            "generated file does not match what the current sources " +
-            "generate: a 14.10 finding naming it (SPEC 12.2, 14.10)",
-        );
-
-        // Arm 3 — source edited without rebuilding: the emitted Markdown's
-        // bytes are the compiled source (SPEC 3, 13.2), so it is stale for
-        // certain; which further derived files change is opaque (module and
-        // companion content beyond the 13.1 contract, graph data, 13.3).
-        await buildOk(
-          product,
-          workspace,
-          "T12.2-2 (staleness) rebuild between arms (SPEC 12.1)",
-        );
-        await workspace.file(
-          "specs/A.mdx",
-          ['<S id="a1">', "Alpha behavior, edited.", "</S>", ""].join("\n"),
-        );
-        const arm3Findings = await checkFindings(
-          product,
-          workspace,
-          "T12.2-2 (staleness, source edited without rebuilding) `check --json`",
-        );
-        const arm3Context =
-          "T12.2-2 (staleness, source edited without rebuilding) — every " +
-          "finding is 14.10 and the emitted Markdown, whose bytes are the " +
-          "compiled source, is among the named files (SPEC 12.2, 14.10, 3, 13.2)";
-        assertAllStale(arm3Findings, arm3Context);
-        assertStaleFileNamed(arm3Findings, "specs/A.md", arm3Context);
-
-        // Arm 4 — emission disabled without rebuilding: the recorded
-        // emitted Markdown remains at a path no longer generated — an
-        // orphaned recorded derived file (SPEC 14.10's second clause).
-        await buildOk(
-          product,
-          workspace,
-          "T12.2-2 (staleness) rebuild between arms — regenerates from the " +
-            "edited, still-valid source (SPEC 12.1)",
-        );
-        await workspace.file("xspec.config.ts", markdownConfig(false));
-        const arm4Findings = await checkFindings(
-          product,
-          workspace,
-          "T12.2-2 (staleness, emission disabled without rebuilding) `check --json`",
-        );
-        const arm4Context =
-          "T12.2-2 (staleness, emission disabled without rebuilding) — the " +
-          "recorded emitted Markdown remains at a path the current " +
-          "configuration no longer generates: an orphaned recorded derived " +
-          "file, reported as 14.10 (SPEC 12.2, 14.10, 7.3, 13.3)";
-        assertAllStale(arm4Findings, arm4Context);
-        assertStaleFileNamed(arm4Findings, "specs/A.md", arm4Context);
-      },
-    );
-
-    // Family 3 — unresolved and non-static references (14.5, 14.6, 14.7,
-    // 14.8), each staged against a distinct missing name.
-    await withWorkspace(REFERENCES_FAMILY_FILES, async (workspace) => {
-      await checkFamilyFindings(
-        product,
-        workspace,
-        { "14.5": 1, "14.6": 1, "14.7": 1, "14.8": 1 },
-        "T12.2-2 (references) `check --json` — an unknown `d` target, an " +
-          "unknown `text(...)` target, an unresolved TypeScript marker, and " +
-          "a non-static `d` value are each reported (SPEC 12.2, 14.5–14.8)",
-      );
-    });
-
-    // Family 4 — cycles: a self-`depends` cycle of length one (no import
-    // cycle co-staged).
-    await withWorkspace(CYCLE_FAMILY_FILES, async (workspace) => {
-      await checkFamilyFindings(
-        product,
-        workspace,
-        { "14.9": 1 },
-        "T12.2-2 (cycles) `check --json` — a dependency cycle is a finding " +
-          "(SPEC 12.2, 5.3, 14.9)",
-      );
-    });
-
-    // Family 5 — journal integrity (14.13): a malformed journal line.
-    await withWorkspace(
-      {
-        "xspec.config.ts": markdownConfig(false),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T12.2-2 (journal) initial `build` (staging, SPEC 12.1)",
-        );
-        await workspace.file(".xspec/journal", GARBAGE_JOURNAL_LINE);
-        await checkFamilyFindings(
-          product,
-          workspace,
-          { "14.13": 1 },
-          "T12.2-2 (journal) `check --json` over a journal holding one " +
-            "malformed line — the journal is well-formed and replayable or " +
-            "a 14.13 finding (SPEC 12.2, 6.1, 14.13; line naming is " +
-            "T6.1-3's subject)",
-        );
-      },
-    );
-
-    // Family 6 — policy (14.12, check-only): one forbidden rule, one
-    // violating edge, freshly built so the violation is the only finding.
-    await withWorkspace(POLICY_FAMILY_FILES, async (workspace) => {
-      await buildOk(
-        product,
-        workspace,
-        "T12.2-2 (policy) `build` — build does not evaluate policy " +
-          "(SPEC 12.1; the build-vs-check contrast is T7.5-6's subject)",
-      );
-      await checkFamilyFindings(
-        product,
-        workspace,
-        { "14.12": 1 },
-        "T12.2-2 (policy) `check --json` — the violating edge is a 14.12 " +
-          "finding (SPEC 12.2, 7.5, 14.12)",
-      );
-    });
-
-    // Family 7 — corrupt sessions (14.21): a session file that cannot be
-    // parsed is corrupt categorically (SPEC 10.1).
-    await withWorkspace(
-      {
-        "xspec.config.ts": markdownConfig(false),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T12.2-2 (sessions) initial `build` (staging, SPEC 12.1)",
-        );
-        await workspace.file(
-          CORRUPT_SESSION_PATH,
-          "{ this is not a parseable session",
-        );
-        const context =
-          "T12.2-2 (sessions) `check --json` over one unparseable session " +
-          "file — review sessions are not internally corrupt or a 14.21 " +
-          "finding (SPEC 12.2, 10.1, 14.21)";
-        const findings = await checkFamilyFindings(
-          product,
-          workspace,
-          { "14.21": 1 },
-          context,
-        );
-        const corrupt = findings.find(
-          (finding) => finding.condition === "14.21",
-        )!;
-        if (
-          corrupt.file !== CORRUPT_SESSION_PATH &&
-          !/bad/.test(corrupt.message)
-        ) {
-          fail(
-            `${context}: the 14.21 finding must identify the corrupt ` +
-              `session — the finding naming the session file ` +
-              `${CORRUPT_SESSION_PATH} or the message naming the session ` +
-              `"bad" (SPEC 14, 14.21; H-3 information presence); got file ` +
-              `${JSON.stringify(corrupt.file)}, message ${JSON.stringify(corrupt.message)}`,
-          );
-        }
-      },
-    );
+    await runT1222Families(product, (_workspace, state) => state.home());
   },
 });
 
 // ---------------------------------------------------------------------------
-// T12.2-3 — check never refreshes
+// T12.2-3 — check never refreshes, pinned per state
 // ---------------------------------------------------------------------------
+
+// The per-state pins (TEST-SPEC T12.2-3; SPEC 13.3: "`check` never
+// refreshes — it reports staleness instead"):
+// - Missing state (T12.2-2's missing-arm staging): graph data stays absent
+//   around `check` — `check` never rewrites the record, where every
+//   refreshing read on this same state would (T13.3-2's deleted-graph-data
+//   arms). Absence is pinned as a staging premise before the invocations, so
+//   the whole-root compare-around proves "stays absent" positively.
+// - Isolated mismatch state (T12.2-2's refresh-then-revert staging, premise
+//   pinned the same way): graph data and every derived file byte-identical
+//   around the invocation.
+// - Edited-source-without-rebuild state: one content edit after a build
+//   leaves the generated files stale (their bytes compile the old source —
+//   SPEC 3, 13.1, 13.2) and graph data mismatched against the current
+//   sources (it carries all four hashes, SPEC 13.3 — the mismatch premise
+//   pin above shows exactly this edit class rewrites graph data on refresh),
+//   so the state carries per-file and unit staleness together; byte-identity
+//   around the invocation pins that neither form's detection refreshes
+//   anything.
+// Each state's staleness report is asserted in-test, so the state's
+// reachability is positively established, never assumed: the missing and
+// mismatch states report exactly the one unit-form condition-10 finding
+// (T12.2-2's contract), the edited-source state 14.10 findings only. Both
+// output forms run inside each compare, so the byte pin covers the human
+// and the `--json` invocation alike.
+
+// The content edit shared by the mismatch staging and the edited-source
+// state: a text-only edit to the one source (still valid, same node set),
+// staged after the state's rebuild — a ledger record (S-9).
+const T12_2_3_A_EDITED = stagedMdx(
+  "T12.2-3 specs/A.mdx with a1's text edited without rebuilding (the mismatch staging and the edited-source state)",
+  [
+    '<S id="a1">',
+    "Alpha behavior, edited without rebuilding.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T12_2_3 = defineProductTest({
   id: "T12.2-3",
   title:
-    "`check` on a stale workspace reports the staleness (exit 1, 14.10) and never refreshes: graph data and derived files — the whole workspace — stay byte-identical around both the human and the `--json` invocation (SPEC 12.2, 13.3, 14.10)",
+    "`check` reports staleness and never refreshes, pinned per state: on the missing-graph-data state graph data stays absent, where every refreshing read would rewrite it; on the isolated mismatch state and on an edited-source state carrying per-file and unit staleness together, graph data and every derived file — the whole workspace — stay byte-identical around both the human and the `--json` invocation (SPEC 12.2, 13.3, 14.10)",
   run: async (product) => {
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
+        // Both `check` output forms on the current stale state: plain
+        // `check` exits 1, then `check --json` decodes as the findings
+        // report (SPEC 12.2, 12.0; H-3).
+        const checkStale = async (
+          context: string,
+        ): Promise<readonly Finding[]> => {
+          await expectExit(
+            product,
+            workspace,
+            ["check"],
+            1,
+            `${context} \`check\` — staleness is a finding, exit 1 ` +
+              `(SPEC 12.2, 14.10)`,
+          );
+          return await checkFindings(
+            product,
+            workspace,
+            `${context} \`check --json\``,
+          );
+        };
+
+        // State 1 — T12.2-2's missing-arm state: freshly built, otherwise
+        // clean workspace with the graph data deleted (T13.3-2's
+        // operational definition).
         await buildOk(
           product,
           workspace,
-          "T12.2-3 initial `build` (SPEC 12.1)",
+          "T12.2-3 (missing) initial `build` (SPEC 12.1)",
         );
-        // Stale: the source is edited (still valid) without rebuilding.
-        await workspace.file(
-          "specs/A.mdx",
-          ['<S id="a1">', "Alpha behavior, edited.", "</S>", ""].join("\n"),
+        await deleteGraphData(workspace, "T12.2-3 (missing) staging");
+        const missingBefore = graphDataStateOf(
+          await snapshotDirectory(workspace.root),
         );
+        if (missingBefore.entries.size > 0) {
+          fail(
+            "T12.2-3 (missing) staging premise: deleting the graph data — " +
+              "every path under .xspec/ except the durable journal and " +
+              "reviews paths and the transient lock path (T13.3-2's " +
+              "operational definition) — must " +
+              "leave none; found " +
+              JSON.stringify([...missingBefore.entries.keys()].sort()),
+          );
+        }
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
-            await expectExit(
-              product,
-              workspace,
-              ["check"],
-              1,
-              "T12.2-3 `check` on a stale workspace — staleness is a " +
-                "finding, exit 1 (SPEC 12.2, 14.10)",
-            );
-            const findings = await checkFindings(
-              product,
-              workspace,
-              "T12.2-3 `check --json` on a stale workspace",
-            );
-            assertAllStale(
-              findings,
-              "T12.2-3 — `check` reports the staleness: every finding is " +
-                "14.10, naming its file and instructing rebuilding " +
-                "(SPEC 12.2, 14.10)",
+            assertSingleUnitFormFinding(
+              await checkStale("T12.2-3 (missing)"),
+              "T12.2-3 (missing) — `check` reports the absent graph data: " +
+                "exactly one condition-10 finding in the unit form " +
+                "(SPEC 12.2, 13.3, 14.10)",
             );
           },
-          "T12.2-3: `check` never refreshes — graph data and derived files " +
-            "(the whole workspace) byte-identical around both invocations " +
+          "T12.2-3 (missing): graph data stays absent — `check` reports " +
+            "staleness and never rewrites the record, where every " +
+            "refreshing read on this state would (SPEC 13.3, 12.2; " +
+            "TEST-SPEC T13.3-2) — and nothing else changes either",
+        );
+
+        // State 2 — T12.2-2's isolated mismatch state: rebuild, edit the
+        // source, run one refreshing read (graph data then reflects the
+        // edit while the generated files go stale, SPEC 13.3), revert the
+        // edit — the generated files again match the current sources while
+        // graph data does not.
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-3 (mismatch) rebuild — restores the deleted graph data " +
+            "(SPEC 12.1)",
+        );
+        const wholeFresh = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          wholeFresh,
+          "T12.2-3 (mismatch) staging premise after the rebuild",
+        );
+        const freshGraph = graphDataStateOf(wholeFresh);
+        await workspace.file("specs/A.mdx", T12_2_3_A_EDITED);
+        await expectExit(
+          product,
+          workspace,
+          ["ids"],
+          0,
+          "T12.2-3 (mismatch) one refreshing read (`ids`) over the edited, " +
+            "still-valid sources — the read refreshes graph data before " +
+            "answering (SPEC 13.3, 12.3)",
+        );
+        // Staging premise: the refresh rewrote graph data to reflect the
+        // edit — graph data carries all four hashes (SPEC 13.3), so the
+        // text edit must change its bytes (whole comparison against the
+        // product's own earlier bytes; H-4 self-comparison carve-out).
+        if (
+          diffSnapshots(
+            freshGraph,
+            graphDataStateOf(await snapshotDirectory(workspace.root)),
+          ).length === 0
+        ) {
+          fail(
+            "T12.2-3 (mismatch) staging premise: graph data is " +
+              "byte-identical before the edit and after the refreshing " +
+              "read — the refresh must rewrite graph data to reflect the " +
+              "edited sources (SPEC 13.3: read results never come from " +
+              "stale data; graph data carries all four hashes, so a text " +
+              "edit changes it), leaving the mismatch state nothing to " +
+              "stage",
+          );
+        }
+        await workspace.file("specs/A.mdx", VALID_A1_SOURCE);
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            assertSingleUnitFormFinding(
+              await checkStale("T12.2-3 (mismatch)"),
+              "T12.2-3 (mismatch) — the generated files again match the " +
+                "current sources while graph data does not: exactly one " +
+                "condition-10 finding in the unit form (SPEC 12.2, 13.3, " +
+                "14.10)",
+            );
+          },
+          "T12.2-3 (mismatch): `check` never refreshes — on the isolated " +
+            "mismatch state, graph data and every derived file (the whole " +
+            "workspace) byte-identical around both invocations " +
             "(SPEC 13.3, 12.2)",
+        );
+
+        // State 3 — edited source without rebuild: per-file and unit
+        // staleness together.
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-3 (edited source) rebuild (SPEC 12.1)",
+        );
+        await workspace.file("specs/A.mdx", T12_2_3_A_EDITED);
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            assertAllStale(
+              await checkStale("T12.2-3 (edited source)"),
+              "T12.2-3 (edited source) — `check` reports the staleness: " +
+                "every finding is 14.10, naming its file and instructing " +
+                "rebuilding (SPEC 12.2, 14.10)",
+            );
+          },
+          "T12.2-3 (edited source): `check` never refreshes — on the state " +
+            "carrying per-file and unit staleness together, graph data and " +
+            "every derived file (the whole workspace) byte-identical " +
+            "around both invocations (SPEC 13.3, 12.2)",
         );
       },
     );
@@ -1039,6 +2086,413 @@ const T12_2_3 = defineProductTest({
 });
 
 /** TEST-SPEC §12.1–12.2 T12.1-1…T12.2-3, in canonical ID order (SUITE-43). */
+// ---------------------------------------------------------------------------
+// T12.2-4 — staleness and policy on a failing workspace
+// ---------------------------------------------------------------------------
+
+// One fixture for the four stagings (SPEC 7.5, 14.12): the forbidden rule
+// `no-hi-to-lo` with the violating edge hi/H.mdx#h1 --depends--> lo/L.mdx#l1
+// (T7.5-2's shape), a third group `extra` whose one source extra/E.mdx is the
+// source arm (b) drops from the groups, and lo/L.mdx — the "other file" of
+// every arm — whose second section takes the validation error: an unresolved
+// `d` reference (14.5). The file is exact parts, so the finding's window is
+// the offending opening tag's own bytes (`byteWindow`).
+const T12_2_4_L_PATH = "lo/L.mdx";
+const T12_2_4_L_HEAD = '<S id="l1">\nLow one.\n</S>\n\n';
+const T12_2_4_L_BROKEN_TAG = '<S id="l2" d={"nope"}>';
+const T12_2_4_L_TAIL = "\nLow two.\n</S>\n";
+// Both lo/L.mdx states are staged after the arm's `t1224Prepare` build —
+// ledger records (S-9, helpers/staged-mdx.ts); the valid state is also the
+// fixture's initial entry (every arm's workspace, arms (b)–(d) after the
+// body's first product invocation).
+const T12_2_4_L_VALID = stagedMdx(
+  "T12.2-4 lo/L.mdx, the valid source (every arm's initial lo/L.mdx; arm (d)'s repair)",
+  `${T12_2_4_L_HEAD}<S id="l2">${T12_2_4_L_TAIL}`,
+);
+const T12_2_4_L_INVALID = stagedMdx(
+  "T12.2-4 lo/L.mdx with l2's `d` reference unresolved (14.5) — every arm's failing staging",
+  `${T12_2_4_L_HEAD}${T12_2_4_L_BROKEN_TAG}${T12_2_4_L_TAIL}`,
+);
+const T12_2_4_BROKEN_WINDOW = byteWindow(T12_2_4_L_HEAD, T12_2_4_L_BROKEN_TAG);
+
+/**
+ * The fixture's configuration with the `extra` group present — staged by
+ * arms (b)–(d)'s workspaces after the body's first product invocation: a
+ * TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+ * and timing clauses), staged at every site.
+ */
+const T12_2_4_CONFIG = stagedTs(
+  "T12.2-4 xspec.config.ts — hi, lo, and extra groups under the forbidden rule no-hi-to-lo (every arm's workspace)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    hi: ["hi/**/*.mdx"],
+    lo: ["lo/**/*.mdx"],
+    extra: ["extra/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "no-hi-to-lo",
+      type: "forbidden",
+      from: { group: "hi" },
+      to: { group: "lo" }
+    }
+  ]
+})
+`,
+);
+
+/**
+ * The same configuration with the `extra` group dropped (arm (b)), staged
+ * over the built workspace: a TypeScript staged-source record (S-9).
+ */
+const T12_2_4_CONFIG_WITHOUT_EXTRA = stagedTs(
+  "T12.2-4 (b) xspec.config.ts — the extra group dropped without a rebuild (the orphaning rewrite)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    hi: ["hi/**/*.mdx"],
+    lo: ["lo/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "no-hi-to-lo",
+      type: "forbidden",
+      from: { group: "hi" },
+      to: { group: "lo" }
+    }
+  ]
+})
+`,
+);
+
+const T12_2_4_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": T12_2_4_CONFIG,
+  "hi/H.mdx": POLICY_HI_SOURCE,
+  [T12_2_4_L_PATH]: T12_2_4_L_VALID,
+  "extra/E.mdx": stagedMdx(
+    "T12.2-4 extra/E.mdx (the source arm (b) drops from the groups)",
+    ['<S id="e">', "Extra.", "</S>", ""].join("\n"),
+  ),
+};
+
+/**
+ * The violating edge's 14.12 identities, in 14.12's order (SPEC 12.7) —
+ * the edge `POLICY_HI_SOURCE` stages under the rule `no-hi-to-lo`,
+ * identical in every T12.2-4 arm and T12.2-2's policy family, and exported
+ * for T14-4's 14.12 arm (section-14.ts), whose policy workspace stages the
+ * same edge under the same rule.
+ */
+export const T12_2_4_VIOLATION_IDENTITIES: readonly string[] = [
+  "no-hi-to-lo",
+  "hi/H.mdx#h1",
+  "depends",
+  "lo/L.mdx#l1",
+];
+
+/** The 14.10 findings an arm expects beside the validation finding. */
+type T1224StaleExpectation =
+  | { readonly form: "none" }
+  | { readonly form: "recorded-file"; readonly paths: readonly string[] }
+  | { readonly form: "unit" };
+
+/**
+ * Exactly one 14.12 finding carrying the fixture's violating edge: the
+ * violated rule's name and the edge's source identity, kind token, and
+ * target identity in order, no in-source location, no concerned path
+ * (SPEC 7.5, 14.12, 12.7). Shared by every T12.2-4 arm and T12.2-2's
+ * policy family, whose fixtures stage the same edge under the same rule.
+ */
+function assertOnlyTheViolation(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(findings, { "14.12": 1 }, context);
+  const finding = findings[0]!;
+  assertSameJson(
+    finding.identities,
+    T12_2_4_VIOLATION_IDENTITIES,
+    `${context}: the violated rule's name and the edge's source identity, ` +
+      `kind token, and target identity, in order (SPEC 14.12, 12.7)`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${context}: the offending entity is a graph edge, not a spelling — ` +
+      `locations [] (SPEC 14.12, 12.7)`,
+  );
+  if (finding.path !== null) {
+    fail(
+      `${context}: a policy finding concerns no path — path null ` +
+        `(SPEC 14.12, 12.7); got ${JSON.stringify(finding.path)}`,
+    );
+  }
+}
+
+/**
+ * Build the fixture and pin the premise every arm's confinement claim rests
+ * on: on the freshly built valid workspace `check` exits 1 with exactly the
+ * staged violation — so its absence on the failing staging is 14.12's
+ * confinement, never the fixture's silence (SPEC 12.1, 7.5, 14.12).
+ */
+async function t1224Prepare(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(
+    product,
+    workspace,
+    `${context} initial \`build\` — the sources are valid and build does ` +
+      `not evaluate policy (SPEC 12.1, 7.5)`,
+  );
+  const premise = `${context} premise \`check --json\` on the built valid workspace`;
+  assertOnlyTheViolation(
+    await checkFindings(product, workspace, premise),
+    `${premise} — the staged violation is the only finding (SPEC 7.5, 14.12)`,
+  );
+}
+
+/**
+ * The paths dropping a spec source from the groups orphans, as TEST-SPEC
+ * T12.2-4(b) defines them — from the record, never from a listing of the
+ * written files: on the freshly built workspace, before the configuration
+ * change, `inventory`'s `recorded` set is read (SPEC 11.6, T11.6-3), and
+ * the set is the source's module (whose path 13.1 fixes; the record must
+ * name it), each companion the record lists for the source through 13.1's
+ * naming (`recordedCompanionPaths`: none for a product writing no
+ * companions), and its Markdown where emitted — none here, the fixture's
+ * configuration having no `markdown` key (7.3, 13.2). Each path is pinned a
+ * plain file after the build: the recorded derived file remaining at the
+ * path, the occupant 14.10's recorded-file form concerns — a recorded path
+ * holding no plain file is a record naming no derived file the build
+ * generated (13.3, 13.4, 13.1). Returned as workspace-relative paths,
+ * sorted (the fixture's paths are ASCII, so in byte order).
+ */
+async function t1224RecordedOrphans(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  sourcePath: string,
+  context: string,
+): Promise<readonly string[]> {
+  const inventoryContext = `${context} — \`inventory\` after the initial build`;
+  const companions = recordedCompanionPaths(
+    decodeInventoryRecordedDatum(
+      await runJson(product, workspace, ["inventory"], inventoryContext),
+      inventoryContext,
+    ),
+    sourcePath,
+    inventoryContext,
+  );
+  const moduleRel = `${sourcePath.slice(0, -".mdx".length)}.xspec.ts`;
+  const paths = [moduleRel, ...companions].sort();
+  for (const rel of paths) {
+    const kind = await workspace.kind(rel);
+    if (kind !== "file") {
+      fail(
+        `${inventoryContext}: the record lists ${JSON.stringify(rel)} ` +
+          `among ${sourcePath}'s derived paths, but the path holds ` +
+          `${kind} after the build — the record names the derived files ` +
+          `the build generated, every file xspec writes a plain file ` +
+          `(SPEC 13.3, 13.4, 13.1)`,
+      );
+    }
+  }
+  return paths;
+}
+
+/**
+ * The recorded-file form on a failing workspace: one 14.10 finding per
+ * orphaned recorded path, concerning it, each unlocated (a path-concerned
+ * condition, 12.7) and instructing rebuilding — and no other 14.10, the
+ * mismatch forms being undetectable there (SPEC 14.10).
+ */
+function assertStaleFindingsConcernExactly(
+  stale: readonly Finding[],
+  paths: readonly string[],
+  context: string,
+): void {
+  assertAllStale(stale, context);
+  assertSameJson(
+    stale.map((finding) => finding.path ?? "(null)").sort(),
+    [...paths].sort(),
+    `${context}: the 14.10 findings' concerned paths are exactly the ` +
+      `orphaned recorded paths, one finding per path (SPEC 14.10, 12.7)`,
+  );
+  for (const finding of stale) {
+    assertSameJson(
+      finding.locations,
+      [],
+      `${context}: a recorded derived file remaining at a path no longer ` +
+        `generated is a path-concerned finding with no in-source location ` +
+        `(SPEC 14.10, 12.7); path ${JSON.stringify(finding.path)}`,
+    );
+  }
+}
+
+/**
+ * One arm's failing staging: the validation error introduced in lo/L.mdx,
+ * then `check --json` — exit 1, modifying nothing (`check` never refreshes
+ * and never repairs or replaces what it reports, 13.3) — pinned to exactly
+ * the validation finding beside the expected 14.10 findings and never a
+ * 14.12 (on a failing workspace no violation is detectable, 14.12, 7.5),
+ * the 14.5 located within its section's opening tag; then `build --json` on
+ * the same staging: exit 1 with the validation finding alone (14.10 and
+ * 14.12 are check-only), modifying nothing (12.1; T12.1-4).
+ */
+async function t1224FailingStaging(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  stale: T1224StaleExpectation,
+  context: string,
+): Promise<void> {
+  await workspace.file(T12_2_4_L_PATH, T12_2_4_L_INVALID);
+  const expected: Record<string, number> = { "14.5": 1 };
+  if (stale.form === "recorded-file") expected["14.10"] = stale.paths.length;
+  else if (stale.form === "unit") expected["14.10"] = 1;
+
+  const checkContext = `${context} \`check --json\` on the failing staging`;
+  const findings = await assertLeavesUnchanged(
+    workspace.root,
+    () => checkFindings(product, workspace, checkContext),
+    `${context}: \`check\` reports and modifies nothing — it never ` +
+      `refreshes, repairs, or replaces what it reports (SPEC 13.3, 12.2)`,
+  );
+  assertConditionCounts(
+    findings,
+    expected,
+    `${checkContext} — exactly the validation finding` +
+      (stale.form === "none"
+        ? ` and no condition 10`
+        : ` beside the expected condition-10 findings`) +
+      `, never a condition 12: the mismatch forms of 14.10 are undetectable ` +
+      `on a workspace failing build's validations, and no policy violation ` +
+      `is detectable there (SPEC 14.10, 14.12, 7.5)`,
+  );
+  const validation = findings.find((finding) => finding.condition === "14.5")!;
+  assertFindingLocated(
+    validation,
+    { file: T12_2_4_L_PATH, window: T12_2_4_BROKEN_WINDOW },
+    `${checkContext} — the unresolved \`d\` reference located within its ` +
+      `section's opening tag (SPEC 14.5, 14)`,
+  );
+  const staleFindings = findings.filter(
+    (finding) => finding.condition === "14.10",
+  );
+  if (stale.form === "recorded-file") {
+    assertStaleFindingsConcernExactly(
+      staleFindings,
+      stale.paths,
+      `${checkContext} — the recorded-file form is reported whatever the ` +
+        `sources' validity: it compares the record against the set of ` +
+        `generated paths, a set discovery and configuration define on any ` +
+        `workspace (SPEC 14.10, 13.1, 7.3, 11.6)`,
+    );
+  } else if (stale.form === "unit") {
+    assertSingleUnitFormFinding(
+      staleFindings,
+      `${checkContext} — the unreadable-record unit form is reported ` +
+        `whatever the sources' validity, alone among the 14.10 forms: ` +
+        `never the mismatch form beside it (SPEC 14.10, 14.23)`,
+    );
+  }
+
+  const buildContext = `${context} \`build --json\` on the failing staging`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      assertConditionCounts(
+        await buildFindings(product, workspace, buildContext),
+        { "14.5": 1 },
+        `${buildContext} — build reports the validation finding alone: ` +
+          `staleness and policy are check-only (SPEC 12.1, 14.10, 14.12)`,
+      );
+    },
+    `${context}: a build failing with validation errors modifies nothing — ` +
+      `every derived file and all graph data byte-identical (SPEC 12.1; ` +
+      `T12.1-4)`,
+  );
+}
+
+const T12_2_4 = defineProductTest({
+  id: "T12.2-4",
+  title:
+    "14.10 and 14.12 confine themselves on a workspace failing `build`'s validations: from a freshly built valid workspace with a forbidden rule and an edge violating it (the premise `check` reporting exactly that violation), four stagings each given one validation error (an unresolved `d` reference in another file) and run through `check` — (a) a generated module hand-edited: the validation finding and no condition 10, the per-file mismatch form undetectable there; (b) recorded derived paths orphaned by dropping their source from the configuration's groups without a rebuild: the validation finding beside one condition-10 finding per orphaned path, concerning it — the dropped source's module, each companion `inventory`'s `recorded` set lists for it after the build (T11.6-3), and its Markdown where emitted (none: the fixture emits no Markdown) — and no other condition-10 finding, the recorded-file form comparing the record against the set of generated paths, a set defined on any workspace; (c) the record corrupted shape-blind: the unreadable-record unit form beside the validation finding, no mismatch form; (d) the violating edge alone beside the validation error: no condition 12, the violation reported once the error is repaired — exit 1 throughout, `check` modifying nothing, `build` on each failing staging reporting the validation finding alone and modifying nothing (SPEC 12.2, 14.10, 14.12, 7.5, 13.3, 12.1)",
+  run: async (product) => {
+    // (a) A generated module hand-edited — the module of a file other than
+    // the one taking the validation error.
+    await withWorkspace(T12_2_4_FILES, async (workspace) => {
+      const context = "T12.2-4 (a, generated module hand-edited)";
+      await t1224Prepare(product, workspace, context);
+      const moduleRel = "hi/H.xspec.ts";
+      const original = await readGeneratedModule(
+        workspace,
+        moduleRel,
+        `${context} after the initial build (SPEC 13.1)`,
+      );
+      // An edit of product-written bytes, staged `unchecked` (S-9; as
+      // T12.2-2's staleness arm 1 stages its tampered module).
+      await workspace.file(moduleRel, `${original}// tampered\n`, {
+        ts: "unchecked",
+      });
+      await t1224FailingStaging(product, workspace, { form: "none" }, context);
+    });
+
+    // (b) Recorded derived paths orphaned: the `extra` group dropped from
+    // the configuration without a rebuild, the paths the record holds for
+    // its source (read from `inventory` after the build) remaining at paths
+    // no longer generated.
+    await withWorkspace(T12_2_4_FILES, async (workspace) => {
+      const context = "T12.2-4 (b, recorded derived paths orphaned)";
+      await t1224Prepare(product, workspace, context);
+      const orphaned = await t1224RecordedOrphans(
+        product,
+        workspace,
+        "extra/E.mdx",
+        `${context} — the dropped source's recorded derived paths`,
+      );
+      await workspace.file("xspec.config.ts", T12_2_4_CONFIG_WITHOUT_EXTRA);
+      await t1224FailingStaging(
+        product,
+        workspace,
+        { form: "recorded-file", paths: orphaned },
+        context,
+      );
+    });
+
+    // (c) The record corrupted shape-blind (T6.6-6's staging; H-3
+    // record-staging adapter, garbage over T13.3-2's operational path set,
+    // product-written files only).
+    await withWorkspace(T12_2_4_FILES, async (workspace) => {
+      const context = "T12.2-4 (c, record corrupted shape-blind)";
+      await t1224Prepare(product, workspace, context);
+      await corruptGraphDataShapeBlind(workspace.root, `${context} staging`);
+      await t1224FailingStaging(product, workspace, { form: "unit" }, context);
+    });
+
+    // (d) The violating edge alone beside the validation error, then the
+    // error repaired: the violation reported again (T7.5-2).
+    await withWorkspace(T12_2_4_FILES, async (workspace) => {
+      const context = "T12.2-4 (d, the violating edge alone)";
+      await t1224Prepare(product, workspace, context);
+      await t1224FailingStaging(product, workspace, { form: "none" }, context);
+      await workspace.file(T12_2_4_L_PATH, T12_2_4_L_VALID);
+      const repaired = `${context} \`check --json\` once the validation error is repaired`;
+      assertOnlyTheViolation(
+        await assertLeavesUnchanged(
+          workspace.root,
+          () => checkFindings(product, workspace, repaired),
+          `${repaired}: \`check\` modifies nothing (SPEC 13.3)`,
+        ),
+        `${repaired} — the violation is reported once the workspace passes ` +
+          `build's validations again (SPEC 7.5, 14.12; T7.5-2)`,
+      );
+    });
+  },
+});
+
 export const section121to122Tests: readonly ProductTestEntry[] = [
   T12_1_1,
   T12_1_3,
@@ -1046,4 +2500,5 @@ export const section121to122Tests: readonly ProductTestEntry[] = [
   T12_2_1,
   T12_2_2,
   T12_2_3,
+  T12_2_4,
 ];

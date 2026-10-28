@@ -37,8 +37,13 @@ import type { RecordedProfile } from "./review.js";
 import type {
   DecompositionContentSource,
   GeneratedItem,
+  GeneratedNode,
 } from "./review-derive.js";
-import { currentAncestorChain } from "./review-derive.js";
+import {
+  currentAncestorChain,
+  currentChildren,
+  currentDescendants,
+} from "./review-derive.js";
 
 /** The output of one coverage-session generator run (SPEC 10.7). */
 export interface CoverageSessionGeneration {
@@ -63,11 +68,12 @@ const MATCHES_NOTHING: CoveragePathMatcher = {
 /**
  * Compile one recorded glob pattern in plain mode (SPEC 7: group globs
  * support exactly `*`, `?`, and `**`). A validated configuration cannot
- * hold an outside-root group pattern (SPEC 7 → 14.14), so a recorded
- * pattern failing to compile can only enter by external modification of the
- * session file; such a pattern resolves outside the workspace root and can
- * match no discovered source (SPEC 7), so it evaluates as matching nothing
- * — total and deterministic.
+ * hold an outside-root group pattern (SPEC 7 → 14.14), and the session
+ * parser reports a recorded one as malformed — the session corrupt (SPEC
+ * 10.1, 14.21; `parseRecordedGroup` in ./review.ts) — so no generator run
+ * meets a pattern failing to compile. Were one to arrive, it could match
+ * no discovered source (SPEC 7), so it evaluates as matching nothing:
+ * total and deterministic.
  */
 function compileRecordedPattern(pattern: string): CoveragePathMatcher {
   const compiled = compileGlob(pattern, "plain");
@@ -141,13 +147,27 @@ function coverageContentSource(
   graph: WorkspaceGraph,
 ): DecompositionContentSource {
   return {
-    subtreeCoherenceItem: (scopeIdentity): GeneratedItem => ({
+    // SPEC 10.7: a session without a baseline has its scope roots' current
+    // children alone; a stored scope that no longer canonically resolves
+    // (SPEC 10.4) has none.
+    scopeChildren: (scopeIdentity, scopeResolves = true): GeneratedNode[] =>
+      scopeResolves ? currentChildren(graph, scopeIdentity) : [],
+    // A per-child item's scope is the child and all its current
+    // descendants (SPEC 10.7, "as in 10.5 and 10.6"), none beneath a stored
+    // scope that no longer canonically resolves (SPEC 10.4).
+    subtreeCoherenceItem: (
+      scopeIdentity,
+      scopeResolves = true,
+    ): GeneratedItem => ({
       kind: "subtree-coherence",
       scope: {
         identity: scopeIdentity,
         baselineIdentity: null,
         deleted: false,
       },
+      scopeDescendants: scopeResolves
+        ? currentDescendants(graph, scopeIdentity)
+        : [],
       context: currentAncestorChain(graph, scopeIdentity),
       origin: [],
       reason:
@@ -155,28 +175,21 @@ function coverageContentSource(
         `split from its parent's review (SPEC 10.7, 10.5)`,
       blockedBy: [],
     }),
-    splitParentConsistencyItem: (
-      scopeIdentity,
-      childIdentities,
-    ): GeneratedItem => ({
+    splitParentConsistencyItem: (scopeIdentity, children): GeneratedItem => ({
       kind: "parent-consistency",
       scope: {
         identity: scopeIdentity,
         baselineIdentity: null,
         deleted: false,
       },
-      context: childIdentities.map((identity) => ({
-        identity,
-        baselineIdentity: null,
-        deleted: false,
-      })),
+      context: [...children],
       origin: [],
       reason:
         `review the own text of ${scopeIdentity} against its child ` +
         `subtrees — split from its subtree review (SPEC 10.7)`,
-      blockedBy: childIdentities.map((identity) => ({
+      blockedBy: children.map((child) => ({
         kind: "subtree-coherence" as const,
-        scope: identity,
+        scope: child.identity,
       })),
     }),
   };

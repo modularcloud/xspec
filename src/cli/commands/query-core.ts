@@ -1,23 +1,15 @@
-// `xspec query` answering (SPEC 11) over an abstract graph view — the one
-// implementation behind both read paths.
+// `xspec query` answering (SPEC 11) over an abstract graph view.
 //
-// The full path (./query.ts) answers from the refreshed workspace analysis
-// (SPEC 13.3); the store-backed fast path (./query-fast.ts over
-// workspace/fast-read.ts) answers from stored graph data whose recorded
-// derivation inputs all match the current workspace bytes. Both wrap their
-// data as a `QueryView` and call `answerQuery`, so the two paths cannot
-// drift: every subcommand's validation, ordering, and rendering is this
-// module's, once (SPEC 12.0 byte determinism — identical workspaces answer
-// identically on either path).
-//
-// This module's import chain is deliberately light — no analysis pipeline,
-// no TypeScript compiler, no MDX parser — so the fast path loads none of
-// them (the point of answering from the store; see fast-read.ts).
+// `query` (./query.ts) answers from the refreshed workspace analysis
+// (SPEC 13.3: read results never come from stale data), wrapped as a
+// `QueryView` (./analysis-view.ts), through `answerQuery`; `show --json`
+// emits the same node report (./show.ts, `nodeReportOf`). Every
+// subcommand's validation, ordering, and rendering is this module's, once
+// (SPEC 12.0 byte determinism).
 
 import type { ByteRange } from "../../core/bytes.js";
 import type { JsonObject } from "../../core/canonical-json.js";
 import type { CompiledGlob } from "../../core/glob.js";
-import { compileGlob } from "../../core/glob.js";
 import type { GraphEdge, GraphEdgeKind } from "../../core/graph.js";
 import { DEPENDENCY_EDGE_KINDS } from "../../core/graph.js";
 import type { NodeHashes } from "../../core/hashes.js";
@@ -25,8 +17,14 @@ import type { ExitCode } from "../../core/findings.js";
 import { shortestWitnessPath } from "../../core/paths.js";
 import type { Invocation } from "../args.js";
 import { flagList, flagValue } from "../args.js";
-import type { CliWriter } from "../io.js";
-import { emitDocument, rangeJson, usageError } from "./common.js";
+import type { CliWriter, CommandIo } from "../io.js";
+import {
+  compileFileFlag,
+  emitDocument,
+  emitDocumentStreamed,
+  rangeJson,
+  usageError,
+} from "./common.js";
 
 /** One requirement node as the query subcommands consume it (SPEC 11). */
 export interface QueryRow {
@@ -38,8 +36,13 @@ export interface QueryRow {
   readonly isRoot: boolean;
   /** SPEC 1.7: the construct's byte range; the entire file for a root. */
   readonly range: ByteRange;
-  /** SPEC 2.6: the node's tags, in first-occurrence order. */
-  readonly tags: readonly string[];
+  /**
+   * SPEC 2.6, 12.7: the node's tags — a tag set, in byte order (SPEC 12.0),
+   * duplicates collapsed (core/mdx.ts forms it); `[]` for a section carrying
+   * none. Null for a root node, which carries no tags: SPEC 11.1 and 12.4
+   * report a root's tags as absent (5.5), never as the empty tag set.
+   */
+  readonly tags: readonly string[] | null;
   /** SPEC 2.5: the effective coverage attribute — null for a root. */
   readonly coverage: "required" | "none" | null;
   /** SPEC 5.5: the node's four hashes. */
@@ -52,8 +55,7 @@ export interface QueryRow {
 
 /**
  * The graph as the query subcommands read it (SPEC 11) — implemented over
- * the live analysis (./query.ts) and over verified stored graph data
- * (./query-fast.ts).
+ * the refreshed live analysis (./analysis-view.ts).
  */
 export interface QueryView {
   /**
@@ -89,14 +91,16 @@ export function edgeJson(edge: GraphEdge): JsonObject {
 
 /**
  * The one row contract of `nodes`, `subtree`, and `ancestors` (SPEC 11):
- * identity, source range (1.7), tags, coverage attribute — omitted for a
- * root node, which carries none (SPEC 5.5, 2.5).
+ * identity, source range (1.7), tags, coverage attribute — tags and
+ * coverage attribute both absent for a root node, which carries neither
+ * (SPEC 11.1, 5.5, 2.5): both members omitted, never `[]` for the tags,
+ * which would report a tagless section's tag set (12.7).
  */
 function rowJson(row: QueryRow): JsonObject {
   return {
     identity: row.identity,
     sourceRange: rangeJson(row.range),
-    tags: [...row.tags],
+    tags: row.tags === null ? undefined : [...row.tags],
     coverage: row.coverage ?? undefined,
   };
 }
@@ -109,8 +113,9 @@ function rowsDocument(rows: readonly QueryRow[]): JsonObject {
 /**
  * The one requirement-node report (SPEC 11, 12.4): identity, source range
  * (1.7), own and subtree text (fully expanded, 1.6), all four hashes (5.5),
- * tags, coverage attribute (absent for a root, 5.5), and incoming and
- * outgoing edges by kind. `query node` emits it as its document; `show
+ * tags and coverage attribute (both absent for a root, 11.1, 5.5), and
+ * incoming and outgoing edges by kind. `query node` emits it as its
+ * document; `show
  * --json` carries the same shape, so the two commands answer identically
  * (SPEC 12.4: `query node` is the machine-facing equivalent).
  */
@@ -128,8 +133,10 @@ export function nodeReportOf(view: QueryView, row: QueryRow): JsonObject {
       effectiveHash: row.hashes.effectiveHash,
       metadataHash: row.hashes.metadataHash,
     },
-    tags: [...row.tags],
-    // SPEC 11/5.5: reported as absent for a root node (key omitted).
+    // SPEC 11.1/12.4/5.5: a root node's tags and coverage attribute are
+    // both reported as absent (key omitted) — never `[]` for the tags, a
+    // tagless section's tag set (12.7).
+    tags: row.tags === null ? undefined : [...row.tags],
     coverage: row.coverage ?? undefined,
     // SPEC 11: incoming and outgoing edges by kind — the graph's
     // (source, kind, target) order, deterministic (SPEC 12.0). Filters of
@@ -151,6 +158,40 @@ export type RowResolution =
   | { readonly ok: false; readonly message: string };
 
 /**
+ * SPEC 11.1/12.4/12.0: the wrong-kind `<node>` diagnostic — the value names
+ * a code location where a requirement-node identity is required. Shared by
+ * the graph-based resolution below and the parse-local pre-gate check
+ * (./gated-args.ts), so the two judgments — identical by construction on
+ * valid workspaces (SPEC 12.0) — report byte-identically.
+ */
+export function codeLocationNodeMessage(raw: string): string {
+  return (
+    `'${raw}' names a code location — <node> takes a requirement-node ` +
+    `identity: path#id, or a bare path for a file's root node ` +
+    `(SPEC 11, 1.5)`
+  );
+}
+
+/** SPEC 11/12.0: the unknown-`<node>` diagnostic (shared as above). */
+export function unknownNodeMessage(raw: string): string {
+  return (
+    `unknown requirement node '${raw}' — expected path#id, or a bare ` +
+    `path for a file's root node; a path in no configured group is ` +
+    `unknown (SPEC 11, 1.5, 12.0)`
+  );
+}
+
+/** SPEC 11/4.6/12.0: the unknown-`<graph-node>` diagnostic (shared as above). */
+export function unknownGraphNodeMessage(flag: string, raw: string): string {
+  return (
+    `unknown graph node '${raw}' for '${flag}' — expected a requirement ` +
+    `node (path#id, or a bare path for a spec file's root node) or a code ` +
+    `location (path, path#unit, or path#unit@N); a path in no configured ` +
+    `group is unknown (SPEC 11, 1.5, 4.6, 12.0)`
+  );
+}
+
+/**
  * Resolve a `<node>` argument: a requirement-node identity — `path#id`, or
  * a bare path for a file's root node (SPEC 11, 12.4, 1.5). A code-location
  * identity or a path in no configured group is unknown here (12.0).
@@ -161,21 +202,9 @@ export function resolveRow(view: QueryView, raw: string): RowResolution {
     return { ok: true, row };
   }
   if (view.isCodeLocation(raw)) {
-    return {
-      ok: false,
-      message:
-        `'${raw}' names a code location — <node> takes a requirement-node ` +
-        `identity: path#id, or a bare path for a file's root node ` +
-        `(SPEC 11, 1.5)`,
-    };
+    return { ok: false, message: codeLocationNodeMessage(raw) };
   }
-  return {
-    ok: false,
-    message:
-      `unknown requirement node '${raw}' — expected path#id, or a bare ` +
-      `path for a file's root node; a path in no configured group is ` +
-      `unknown (SPEC 11, 1.5, 12.0)`,
-  };
+  return { ok: false, message: unknownNodeMessage(raw) };
 }
 
 /**
@@ -183,7 +212,7 @@ export function resolveRow(view: QueryView, raw: string): RowResolution {
  * a requirement node or a code location. Returns the usage-error message
  * for an unknown identity, null when it resolves.
  */
-function unknownGraphNodeMessage(
+function graphNodeProblem(
   view: QueryView,
   flag: string,
   raw: string,
@@ -191,12 +220,7 @@ function unknownGraphNodeMessage(
   if (view.row(raw) !== undefined || view.isCodeLocation(raw)) {
     return null;
   }
-  return (
-    `unknown graph node '${raw}' for '${flag}' — expected a requirement ` +
-    `node (path#id, or a bare path for a spec file's root node) or a code ` +
-    `location (path, path#unit, or path#unit@N); a path in no configured ` +
-    `group is unknown (SPEC 11, 1.5, 4.6, 12.0)`
-  );
+  return unknownGraphNodeMessage(flag, raw);
 }
 
 /** The `nodes` filters, validated against the configuration alone. */
@@ -215,10 +239,12 @@ type NodesFiltersResult =
  * Validate the configuration-level flag values of `query nodes` (SPEC 11):
  * `--group` accepts only a configured spec group's name — a code group's
  * name is an invalid flag value, the wrong-kind group reference of 14.14,
- * and an unknown name is a usage error (12.0) — and `--file` compiles under
- * the glob rules of 7, where a pattern resolving outside the workspace root
- * is an invalid flag value, exit 2 like its configuration-time counterpart
- * (14.14). Like those counterparts, these checks precede source analysis.
+ * and an unknown name is a usage error (12.0), a check preceding source
+ * analysis like its 14.14 counterparts — and `--file` compiles under the
+ * glob rules of 7. A `--file` pattern outside the workspace root is an
+ * invalid flag value decided by its spelling alone, which the parser has
+ * already refused (12.0's syntax class, before the configuration is
+ * loaded), so it never reaches this check.
  */
 function resolveNodesFilters(
   invocation: Invocation,
@@ -243,26 +269,14 @@ function resolveNodesFilters(
     }
     groupGlobs = specGroup.globs;
   }
-  let fileGlob: CompiledGlob | undefined;
-  const filePattern = flagValue(invocation, "--file");
-  if (filePattern !== undefined) {
-    const compiled = compileGlob(filePattern, "plain");
-    if (!compiled.ok) {
-      // Plain mode has one compile error: outside-root (SPEC 7).
-      return {
-        ok: false,
-        message:
-          `invalid value '${filePattern}' for '--file' — the pattern ` +
-          `resolves outside the workspace root (SPEC 11, 7, 12.0)`,
-      };
-    }
-    fileGlob = compiled.glob;
-  }
+  const fileGlob = compileFileFlag(invocation);
   return {
     ok: true,
     filters: {
       groupGlobs,
       fileGlob,
+      // SPEC 11.1: already judged well-formed (1.4) at parse level
+      // (cli/args.ts); a well-formed tag no node carries matches nothing.
       tag: flagValue(invocation, "--tag"),
       coverage: flagValue(invocation, "--coverage"),
     },
@@ -280,7 +294,11 @@ function rowMatches(row: QueryRow, filters: NodesFilters): boolean {
   if (filters.fileGlob !== undefined && !filters.fileGlob.matches(row.path)) {
     return false;
   }
-  if (filters.tag !== undefined && !row.tags.includes(filters.tag)) {
+  // SPEC 11.1: `--tag` never matches a root — a root carries no tags (5.5).
+  if (
+    filters.tag !== undefined &&
+    (row.tags === null || !row.tags.includes(filters.tag))
+  ) {
     return false;
   }
   // SPEC 11: `--coverage` never matches a root — a root carries no
@@ -352,7 +370,7 @@ function kindSet(
 export function prevalidateQuery(
   invocation: Invocation,
   groups: GroupsView,
-  stderr: CliWriter,
+  io: CommandIo,
 ): { readonly ok: true } | { readonly ok: false; readonly exit: ExitCode } {
   if (invocation.command !== "query nodes") {
     return { ok: true };
@@ -361,7 +379,7 @@ export function prevalidateQuery(
   if (!resolved.ok) {
     return {
       ok: false,
-      exit: usageError(stderr, invocation.command, resolved.message),
+      exit: usageError(invocation, io, resolved.message),
     };
   }
   return { ok: true };
@@ -371,29 +389,33 @@ export function prevalidateQuery(
  * Answer one `query` subcommand from the view (SPEC 11). The caller has
  * already run `prevalidateQuery` (flag validation precedes preparation) and
  * prepared the view; this emits the single JSON document or the usage error
- * (SPEC 12.0).
+ * (SPEC 12.0) — the node report streamed (`emitDocumentStreamed`): it
+ * spells the node's own and subtree text, and a long embedding chain's
+ * root subtree text passes V8's cap on a string's length once escaped
+ * (SPEC 3, 5.3 bound no chain).
  */
-export function answerQuery(
+export async function answerQuery(
   invocation: Invocation,
   view: QueryView,
   groups: GroupsView,
   stdout: CliWriter,
   stderr: CliWriter,
-): ExitCode {
+): Promise<ExitCode> {
+  const io: CommandIo = { stdout, stderr };
   switch (invocation.command) {
     case "query node": {
       const resolved = resolveRow(view, invocation.positionals[0]);
       if (!resolved.ok) {
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
-      return emitDocument(stdout, nodeReportOf(view, resolved.row));
+      return emitDocumentStreamed(stdout, nodeReportOf(view, resolved.row));
     }
     case "query nodes": {
       const resolved = resolveNodesFilters(invocation, groups);
       if (!resolved.ok) {
         // Unreachable after prevalidateQuery; kept total so the answering
         // is correct standalone.
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
       const filters = resolved.filters;
       // SPEC 11/12.0: deterministic order — the graph's requirement-node
@@ -414,9 +436,9 @@ export function answerQuery(
         if (raw === undefined) {
           continue;
         }
-        const message = unknownGraphNodeMessage(view, flag, raw);
+        const message = graphNodeProblem(view, flag, raw);
         if (message !== null) {
-          return usageError(stderr, invocation.command, message);
+          return usageError(invocation, io, message);
         }
       }
       const edges = view.edges.filter(
@@ -430,7 +452,7 @@ export function answerQuery(
     case "query subtree": {
       const resolved = resolveRow(view, invocation.positionals[0]);
       if (!resolved.ok) {
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
       return emitDocument(
         stdout,
@@ -440,7 +462,7 @@ export function answerQuery(
     case "query ancestors": {
       const resolved = resolveRow(view, invocation.positionals[0]);
       if (!resolved.ok) {
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
       return emitDocument(
         stdout,
@@ -462,9 +484,9 @@ export function answerQuery(
         ["--from", from],
         ["--to", to],
       ] as const) {
-        const message = unknownGraphNodeMessage(view, flag, raw);
+        const message = graphNodeProblem(view, flag, raw);
         if (message !== null) {
-          return usageError(stderr, invocation.command, message);
+          return usageError(invocation, io, message);
         }
       }
       const adjacency = new Map<string, Set<string>>();

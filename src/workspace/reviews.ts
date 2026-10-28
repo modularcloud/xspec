@@ -19,35 +19,65 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { compareBytes } from "../core/bytes.js";
 import type { Finding } from "../core/findings.js";
 import type { ReviewSession } from "../core/review.js";
 import {
   corruptSessionFinding,
   corruptSessionOccupantFinding,
-  isValidSessionName,
   parseSessionBytes,
   REVIEWS_DIRECTORY,
   serializeSession,
   sessionFilePath,
   sortSessionNames,
 } from "../core/review.js";
+import { isValidSessionName } from "../core/session-name.js";
 import {
-  classifyOccupant,
   describeOccupant,
+  probeOccupant,
+  readableDirectory,
+  readableDirectoryEntries,
   writeDurableFile,
 } from "./writes.js";
 
 /** The extension a session file bears, byte-exact (SPEC 10.1, 12.0). */
 const SESSION_EXTENSION = ".json";
 
-/** The reviews directory's absolute path under the workspace root. */
-function reviewsAbsolutePath(root: string): string {
-  return path.join(root, ...REVIEWS_DIRECTORY.split("/"));
-}
-
 /** A session file's absolute path under the workspace root. */
 function sessionAbsolutePath(root: string, name: string): string {
-  return path.join(reviewsAbsolutePath(root), `${name}${SESSION_EXTENSION}`);
+  return path.join(root, ...sessionFilePath(name).split("/"));
+}
+
+/**
+ * The session directory's entry names (SPEC 10.1), once
+ * `sessionDirectoryHoldsSessions` has judged it listable. SPEC 14.25: a
+ * listing the environment refuses is the read failure concerning
+ * `.xspec/reviews` — the command making it stops there, exit 2 — never a
+ * directory holding no sessions; a directory gone since lists nothing.
+ */
+async function sessionDirectoryEntries(root: string): Promise<string[]> {
+  return readableDirectoryEntries(root, REVIEWS_DIRECTORY);
+}
+
+/**
+ * SPEC 10.1/13.4: whether the session directory holds sessions at all —
+ * only while a directory occupies `.xspec/reviews` and the graph-data
+ * area's own path `.xspec` above it, each judged by `lstat`
+ * (`readableDirectory`). Absent, occupied by anything other than a
+ * directory — a plain file, or a symbolic link whatever it targets — or
+ * lying below such an occupant of the area's path, it holds none: no
+ * command lists through such an occupant, so every session name is unknown
+ * there (SPEC 10.7, 12.0) and nothing below it is read. The one judge
+ * shared by every session read — `list`, the name-taking subcommands
+ * (`status`, `next`, `show`, `export`, `resolve`, `split`), `create`'s
+ * existing-name checks, `check`'s 14.21 sweep, and `inventory`. SPEC
+ * 14.25: a kind read the environment refuses here is the read failure
+ * concerning the path read (`readableDirectory`), never absence.
+ */
+export async function sessionDirectoryHoldsSessions(
+  root: string,
+): Promise<boolean> {
+  return readableDirectory(root, REVIEWS_DIRECTORY);
 }
 
 /** One loaded session: readable, corrupt (SPEC 14.21), or absent. */
@@ -63,7 +93,8 @@ export type LoadedSession =
        * parsed, or violates a session invariant. Every `review` subcommand
        * naming the session reports `finding` and exits 1, modifying
        * nothing; `list` reports the session corrupt in place of its fields
-       * (SPEC 10.7); `check` reports it as condition 21.
+       * (SPEC 10.7), with `finding` beside the listing (SPEC 14.21, 12.7);
+       * `check` reports it as condition 21.
        */
       readonly state: "corrupt";
       readonly name: string;
@@ -86,20 +117,15 @@ export type LoadedSession =
  * Whether the entry is a plain file is judged at load: a candidate occupied
  * by a directory or symbolic link is a corrupt session (SPEC 13.4 → 14.21),
  * while entries not matching the name pattern are not sessions at all and
- * are ignored. An absent or non-directory `.xspec/reviews` yields no
- * sessions; reads never traverse symbolic links (SPEC 13.4).
+ * are ignored. An absent or non-directory `.xspec/reviews`, or one below a
+ * non-directory `.xspec`, yields no sessions; reads never traverse
+ * symbolic links (SPEC 13.4, `sessionDirectoryHoldsSessions`).
  */
 export async function listSessionNames(root: string): Promise<string[]> {
-  const directory = reviewsAbsolutePath(root);
-  if ((await classifyOccupant(directory)) !== "directory") {
+  if (!(await sessionDirectoryHoldsSessions(root))) {
     return [];
   }
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(directory);
-  } catch {
-    return [];
-  }
+  const entries = await sessionDirectoryEntries(root);
   const names: string[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(SESSION_EXTENSION)) continue;
@@ -111,11 +137,63 @@ export async function listSessionNames(root: string): Promise<string[]> {
 }
 
 /**
+ * SPEC 11.6: every directory entry directly under the review-session
+ * directory whose name is a well-formed session file name
+ * (`<valid-name>.json`, byte-exact on the extension), selected by name
+ * alone, whatever kind of filesystem object occupies it — corrupt sessions,
+ * directories, and symbolic links included: no content is read, so no
+ * 14.21 arises here. Returned as workspace-relative session file paths in
+ * byte order of file name (SPEC 11.6's pinned order — the file name, not
+ * the bare session name). An entry with any other name is not a session
+ * and is never listed; an absent or non-directory `.xspec/reviews`, or
+ * one below a non-directory `.xspec`, yields no sessions, and a symbolic
+ * link at either path is never traversed (SPEC 13.4,
+ * `sessionDirectoryHoldsSessions`).
+ */
+export async function listSessionFilePaths(root: string): Promise<string[]> {
+  if (!(await sessionDirectoryHoldsSessions(root))) {
+    return [];
+  }
+  const entries = await sessionDirectoryEntries(root);
+  const fileNames = entries.filter((entry) => {
+    if (!entry.endsWith(SESSION_EXTENSION)) return false;
+    return isValidSessionName(entry.slice(0, -SESSION_EXTENSION.length));
+  });
+  fileNames.sort(compareBytes);
+  return fileNames.map((entry) => `${REVIEWS_DIRECTORY}/${entry}`);
+}
+
+/**
+ * Whether anything occupies the named session's path — existence judged
+ * against the session directory's exact entry names alone, no content read
+ * and no occupant classified (SPEC 10.1, 12.0: byte-wise, case-sensitive —
+ * on a case-insensitive filesystem a path lookup would reach a
+ * differently-cased entry, so the directory listing is the judge). The
+ * gated `review` subcommands' existence check (SPEC 12.0: a session name
+ * judged against the session directory, before the invalid-workspace
+ * report of 13.3) — which must read no session file, since on a failing
+ * workspace none is ever read (SPEC 13.3). A session directory holding no
+ * sessions (`sessionDirectoryHoldsSessions`) occupies no session's path.
+ */
+export async function sessionOccupied(
+  root: string,
+  name: string,
+): Promise<boolean> {
+  if (!(await sessionDirectoryHoldsSessions(root))) {
+    return false;
+  }
+  const entries = await sessionDirectoryEntries(root);
+  return entries.includes(`${name}${SESSION_EXTENSION}`);
+}
+
+/**
  * Load one session by name (SPEC 10.1). The caller has validated the name
- * (an invalid name is a usage error before any lookup, SPEC 12.0). The
- * path's occupant decides: nothing → absent; a plain file → parsed and
- * validated (core); anything else — a directory or symbolic link included —
- * is never read and the session is corrupt (SPEC 13.4 → 14.21).
+ * (an invalid name is a usage error before any lookup, SPEC 12.0). A
+ * session directory holding no sessions (`sessionDirectoryHoldsSessions`)
+ * makes every name absent. Otherwise the path's occupant decides:
+ * nothing → absent; a plain file → parsed and validated (core); anything
+ * else — a directory or symbolic link included — is never read and the
+ * session is corrupt (SPEC 13.4 → 14.21).
  * Classification uses lstat (writes.ts), so a symbolic link is judged
  * itself, never through its target.
  */
@@ -130,17 +208,20 @@ export async function loadSession(
   // entry names first: no byte-identical entry, no session — `NAME.JSON`
   // is not a session file and `Foo` never resolves to `foo`.
   const entryName = `${name}${SESSION_EXTENSION}`;
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(reviewsAbsolutePath(root));
-  } catch {
+  // SPEC 10.1/13.4: a session directory that holds no sessions — absent,
+  // a non-directory occupant, or below one at `.xspec` — names none.
+  if (!(await sessionDirectoryHoldsSessions(root))) {
     return { state: "absent", name };
   }
+  const entries = await sessionDirectoryEntries(root);
   if (!entries.includes(entryName)) {
     return { state: "absent", name };
   }
   const absolute = sessionAbsolutePath(root, name);
-  const occupant = await classifyOccupant(absolute);
+  // SPEC 14.25: a session file's kind read the environment refuses is the
+  // read failure concerning the session file's path (`probeOccupant`) —
+  // where its refused content read, below, is condition 21.
+  const occupant = await probeOccupant(root, sessionFilePath(name));
   if (occupant === "absent") {
     return { state: "absent", name };
   }
@@ -155,11 +236,15 @@ export async function loadSession(
   try {
     bytes = await fsp.readFile(absolute);
   } catch (error) {
+    // SPEC 14.25 → 14.21: a session file the environment refuses to read
+    // is corrupt. The message names the filesystem's error code alone —
+    // never its own message, which carries the absolute path (SPEC 12.0).
+    const code = (error as NodeJS.ErrnoException).code ?? "an unknown error";
     return {
       state: "corrupt",
       name,
       finding: corruptSessionFinding(name, [
-        `the session file cannot be read: ${(error as Error).message}`,
+        `the session file cannot be read (${code}; SPEC 14.25)`,
       ]),
     };
   }

@@ -67,6 +67,7 @@ import {
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertRequirementCategories, impactAgainst } from "./section-5.6.js";
 import { assertImpactedCode, readSourceText } from "./section-9.js";
@@ -118,6 +119,19 @@ const specSource = (helloText: string): string =>
     "</S>",
     "",
   ].join("\n");
+
+// The edit of print.hello's text and its later restoration are staged after
+// the walkthrough's `build`, so they are ledger records (S-9's
+// before-any-product clause; helpers/staged-mdx.ts) — the same template
+// calls, moved to module level.
+const T15_1_HELLO_EDITED = stagedMdx(
+  "T15-1 specs/SPEC.mdx with print.hello's text edited",
+  specSource("Print hello, edited."),
+);
+const T15_1_HELLO_RESTORED = stagedMdx(
+  "T15-1 specs/SPEC.mdx restored to its original text",
+  specSource("Print hello."),
+);
 
 const DERIVED_SOURCE = [
   'import SPEC from "./SPEC.xspec"',
@@ -210,7 +224,6 @@ const T15_1 = defineProductTest({
   id: "T15-1",
   title:
     "canonical walkthrough: SPEC 15's exact workspace (specs/SPEC.mdx, specs/DERIVED.mdx, src/hello.ts, matching configuration) — the six listed graph edges exactly; a transitive coverage profile targeting print.hello with `src` as code boundary satisfied via hello → derived.hello → print.hello; after editing print.hello's text the listed categories (print.hello changed; print and the SPEC root descendant-changed via print.hello; derived.hello, derived, and the DERIVED root upstream-changed; hello.ts#hello transitively impacted); a default path-blocks session containing exactly the four listed items; and after `xspec rename` of print.hello instead, a journal mapping plus an impact run against the pre-rename baseline reporting no changes (SPEC 15, 5.6, 8, 9.2, 9.3, 10.5, 6.1–6.4, 11)",
-  timeoutMs: 240_000,
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -299,7 +312,7 @@ const T15_1 = defineProductTest({
       );
 
       // --- Editing print.hello's text: the listed categories (SPEC 15) -----
-      await workspace.file(SPEC_FILE, specSource("Print hello, edited."));
+      await workspace.file(SPEC_FILE, T15_1_HELLO_EDITED);
       await buildOk(
         product,
         workspace,
@@ -455,7 +468,7 @@ const T15_1 = defineProductTest({
       // --- The rename taken instead: journal mapping, no-change impact -----
       // "Instead": the edit is reverted to its exact baseline bytes, so the
       // rename operates on the workspace as committed at `base`.
-      await workspace.file(SPEC_FILE, specSource("Print hello."));
+      await workspace.file(SPEC_FILE, T15_1_HELLO_RESTORED);
       await buildOk(
         product,
         workspace,

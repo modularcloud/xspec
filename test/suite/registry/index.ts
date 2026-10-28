@@ -13,6 +13,8 @@
 // Duplicate IDs across modules fail here at import time.
 
 import { ProductTestSuite } from "../../helpers/registry.js";
+import { sealStagedMdxLedger } from "../../helpers/staged-mdx.js";
+import { sealStagedTsLedger } from "../../helpers/staged-ts.js";
 import { section11to12Tests } from "./section-1.1-1.2.js";
 import { section13Tests } from "./section-1.3.js";
 import { section14Tests } from "./section-1.4.js";
@@ -28,17 +30,25 @@ import { section4Tests } from "./section-4.js";
 import { section41to42Tests } from "./section-4.1-4.2.js";
 import { section43to44Tests } from "./section-4.3-4.4.js";
 import { section45Tests } from "./section-4.5.js";
+import { section45iiTests } from "./section-4.5-ii.js";
 import { section46Tests } from "./section-4.6.js";
 import { section51to53Tests } from "./section-5.1-5.3.js";
 import { section54Tests } from "./section-5.4.js";
 import { section55Tests } from "./section-5.5.js";
 import { section56Tests } from "./section-5.6.js";
+import { section57Tests } from "./section-5.7.js";
 import { section61Tests } from "./section-6.1.js";
 import { section62Tests } from "./section-6.2.js";
 import { section63Tests } from "./section-6.3.js";
 import { section64Tests } from "./section-6.4.js";
 import { section65Tests } from "./section-6.5.js";
+import { section65iiTests } from "./section-6.5-ii.js";
+import { section65iiiTests } from "./section-6.5-iii.js";
+import { section65ivTests } from "./section-6.5-iv.js";
+import { section65vTests } from "./section-6.5-v.js";
+import { section65viTests } from "./section-6.5-vi.js";
 import { section66Tests } from "./section-6.6.js";
+import { section67Tests } from "./section-6.7.js";
 import { section7BasicsTests } from "./section-7-basics.js";
 import { section7DiscoveryTests } from "./section-7-discovery.js";
 import { section71to73Tests } from "./section-7.1-7.3.js";
@@ -53,16 +63,35 @@ import { section105Tests } from "./section-10.5.js";
 import { section106Tests } from "./section-10.6.js";
 import { section107iTests } from "./section-10.7-i.js";
 import { section107iiTests } from "./section-10.7-ii.js";
+import { section107iiiTests } from "./section-10.7-iii.js";
 import { section11Tests } from "./section-11.js";
+import { section112Tests } from "./section-11.2.js";
+import { section113Tests } from "./section-11.3.js";
+import { section114Tests } from "./section-11.4.js";
+import { section115Tests } from "./section-11.5.js";
+import { section116Tests } from "./section-11.6.js";
 import { section120iTests } from "./section-12.0-i.js";
 import { section120iiTests } from "./section-12.0-ii.js";
+import { section120iiiTests } from "./section-12.0-iii.js";
+import { section120ivTests } from "./section-12.0-iv.js";
 import { section121to122Tests } from "./section-12.1-12.2.js";
 import { section123to125Tests } from "./section-12.3-12.5.js";
+import { section126Tests } from "./section-12.6.js";
+import { section127Tests } from "./section-12.7.js";
 import { section131to132Tests } from "./section-13.1-13.2.js";
 import { section133Tests } from "./section-13.3.js";
 import { section134Tests } from "./section-13.4.js";
+import { section134iiTests } from "./section-13.4-ii.js";
 import { section135Tests } from "./section-13.5.js";
+import { section135iiTests } from "./section-13.5-ii.js";
+import { section135iiiTests } from "./section-13.5-iii.js";
+import { section135ivTests } from "./section-13.5-iv.js";
+import { section135vTests } from "./section-13.5-v.js";
+import { section135viTests } from "./section-13.5-vi.js";
+import { section135viiTests } from "./section-13.5-vii.js";
 import { section14ValidationTests } from "./section-14.js";
+import { section14iiTests } from "./section-14-ii.js";
+import { section14iiiTests } from "./section-14-iii.js";
 import { section15ExampleTests } from "./section-15.js";
 import { section16P1Tests } from "./section-16-p1.js";
 import { section16P2P3Tests } from "./section-16-p2-p3.js";
@@ -72,6 +101,12 @@ import { section16P7Tests } from "./section-16-p7.js";
 import { section16P8Tests } from "./section-16-p8.js";
 import { section16P9Tests } from "./section-16-p9.js";
 import { section16P10Tests } from "./section-16-p10.js";
+import { section16P11Tests } from "./section-16-p11.js";
+import { section16P12Tests } from "./section-16-p12.js";
+import { section16P13Tests } from "./section-16-p13.js";
+import { section16P14Tests } from "./section-16-p14.js";
+import { section16P15Tests } from "./section-16-p15.js";
+import { section16P16Tests } from "./section-16-p16.js";
 
 export const productTestSuite = new ProductTestSuite([
   // Section registration modules are spread here as they are implemented.
@@ -90,17 +125,25 @@ export const productTestSuite = new ProductTestSuite([
   ...section41to42Tests,
   ...section43to44Tests,
   ...section45Tests,
+  ...section45iiTests,
   ...section46Tests,
   ...section51to53Tests,
   ...section54Tests,
   ...section55Tests,
   ...section56Tests,
+  ...section57Tests,
   ...section61Tests,
   ...section62Tests,
   ...section63Tests,
   ...section64Tests,
   ...section65Tests,
+  ...section65iiTests,
+  ...section65iiiTests,
+  ...section65ivTests,
+  ...section65vTests,
+  ...section65viTests,
   ...section66Tests,
+  ...section67Tests,
   ...section7BasicsTests,
   ...section7DiscoveryTests,
   ...section71to73Tests,
@@ -115,16 +158,35 @@ export const productTestSuite = new ProductTestSuite([
   ...section106Tests,
   ...section107iTests,
   ...section107iiTests,
+  ...section107iiiTests,
   ...section11Tests,
+  ...section112Tests,
+  ...section113Tests,
+  ...section114Tests,
+  ...section115Tests,
+  ...section116Tests,
   ...section120iTests,
   ...section120iiTests,
+  ...section120iiiTests,
+  ...section120ivTests,
   ...section121to122Tests,
   ...section123to125Tests,
+  ...section126Tests,
+  ...section127Tests,
   ...section131to132Tests,
   ...section133Tests,
   ...section134Tests,
+  ...section134iiTests,
   ...section135Tests,
+  ...section135iiTests,
+  ...section135iiiTests,
+  ...section135ivTests,
+  ...section135vTests,
+  ...section135viTests,
+  ...section135viiTests,
   ...section14ValidationTests,
+  ...section14iiTests,
+  ...section14iiiTests,
   ...section15ExampleTests,
   ...section16P1Tests,
   ...section16P2P3Tests,
@@ -134,4 +196,19 @@ export const productTestSuite = new ProductTestSuite([
   ...section16P8Tests,
   ...section16P9Tests,
   ...section16P10Tests,
+  ...section16P11Tests,
+  ...section16P12Tests,
+  ...section16P13Tests,
+  ...section16P14Tests,
+  ...section16P15Tests,
+  ...section16P16Tests,
 ]);
+
+// The staged-source ledger (helpers/staged-mdx.ts, and its TypeScript
+// records, helpers/staged-ts.ts) is complete once every registration module
+// above has loaded: seal both, so that a record created later — at run time,
+// from a test body — throws instead of escaping the S-9 self-test
+// (test/self/s9-staged-sources.test.ts judges every record before any
+// product exists, H-8).
+sealStagedMdxLedger();
+sealStagedTsLedger();

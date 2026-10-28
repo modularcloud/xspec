@@ -5,33 +5,96 @@
 // specification. IMPLEMENTATION (Architecture): the cli layer owns argument
 // parsing, command dispatch, and the exit-code taxonomy.
 //
-// The grammar, from SPEC 12.0 and the per-command forms (6.4, 6.5, 8.2, 9,
-// 10.7, 11, 12.1–12.5):
+// The grammar, from SPEC 12.0's "Invocation grammar" and the per-command
+// forms (6.4, 6.5, 8.2, 9, 10.7, 11, 12.1–12.5). Arguments are tokens, read
+// in stages:
 //
-// - The first argv element names a command from the known table (12.5):
-//   `build`, `check`, `ids`, `show`, `coverage`, `impact`, `review`, `query`,
-//   `rename`, `move`. `review` and `query` take a subcommand as the next
-//   element. Unknown commands and subcommands are usage errors (12.0).
-// - Tokens beginning `--` are flags; a value flag consumes the following
-//   element, verbatim, as its value. The specification writes only the
-//   space-separated form, so a token like `--config=x` is an unknown flag.
-// - Every command supports the global `--json` and `--config <path>` (12.0).
-// - A flag may be given at most once per invocation; repetition is a usage
-//   error, identical values included (12.0).
-// - List-valued flags (`--kinds`) take one comma-separated value (12.0, 11).
-// - All other tokens are positional arguments, checked against the command's
-//   arity; a missing required argument or an unexpected extra argument is a
-//   usage error (12.0: "missing required flags or arguments").
-// - Argument values are interpreted as UTF-8; a value that is not valid
-//   UTF-8 is a usage error (12.0).
+// 1. The token walk (`walkTokens`). A token beginning `--` is a flag token;
+//    no other token is (no single-dash short forms). A flag's arity is fixed
+//    by its name, the same for every command (`FLAG_ARITY`, built from the
+//    whole command table), because flags may precede the command word: a
+//    value-taking flag takes the whole next token as its value, whatever it
+//    looks like, `-`/`--`-prefixed included, and lacks its value when no
+//    token follows; a flag that takes none, and a `--` token naming no flag
+//    of any command, takes none. The token `--` ends flag reading and is
+//    dropped; every later token is a non-flag token. Flag tokens may stand
+//    anywhere — before the command word, between it and its operands, or
+//    after them.
+// 2. JSON output is in effect exactly when a `--json` token is read as a
+//    flag by that walk (a repeated one included, itself a usage error) —
+//    never a `--json` taken as another flag's value or standing after `--`
+//    — or when the invoked surface is JSON-only (10.7, 11, 12.6).
+// 3. The remaining tokens, in order, are the command word from the known
+//    table (12.5: `build`, `check`, `ids`, `show`, `coverage`, `impact`,
+//    `review`, `query`, `occurrences`, `view`, `at`, `inventory`, `rename`,
+//    `move`, `version`), its subcommand (`review`, `query`), and its
+//    operands, matched to the synopsis exactly: no command word, an unknown
+//    command or subcommand, a missing operand, or a surplus one is a usage
+//    error — a surplus token is never accepted and ignored.
+// 4. Each flag the walk read is checked against the command's accepted set
+//    — its own flags plus the global `--json` and `--config <path>` — so
+//    `--name=value`, or a flag of another command, is an unknown flag; a
+//    flag may be given at most once (identical values included); list-valued
+//    flags (`--kinds`) take one comma-separated value (11); and each value
+//    is judged against its fixed vocabulary or spelling rule.
+// 5. The command-level checks: required flags, the co-occurrence rules, the
+//    operand count, and each operand's spelling rule.
+// - Argument values are interpreted as UTF-8; a malformed value is a usage
+//   error judged before every per-flag and per-operand check (12.0).
+// - Stages 3–5 are SPEC 12.0's syntax class, every error the invocation's
+//   arguments alone determine, so all of it is judged here, before `main`
+//   locates the configuration: an unknown command, subcommand, or flag, a
+//   repeated flag, a missing required flag or argument, a surplus operand,
+//   a malformed value, and every invalid flag value or operand spelling that
+//   a fixed vocabulary (`allowed`, `list`), a spelling rule (`SpellingRule`)
+//   or a co-occurrence rule (`exactlyOneOf`, `excludes`,
+//   `positionalConflicts`, `move`'s operand forms) decides. Every other
+//   usage error consults configuration, discovery, or the workspace — an
+//   unknown or wrong-kind name, an `<offset>` beyond the file's length — and
+//   is the command handler's, after the configuration error of 14.14.
 //
-// Every parse failure is a usage error: exit 2, diagnostic on stderr, and an
-// empty standard output — under `--json` the exit-2 error prevents emitting
-// the single JSON document (12.0), and no report is defined for exit-2
-// outcomes in human form either. Diagnostics echo only argv tokens and static
-// text, never resolved filesystem paths, keeping all output byte-deterministic
-// for identical input (12.0: no absolute paths, no environment-dependent
-// content).
+// Every parse failure is a usage error: exit 2 with the diagnostic on
+// stderr. Standard output is empty unless JSON output is in effect (stage 2,
+// decided even when the arguments are themselves the error), in which case
+// the exit-2 error emits the 12.7 error document as the entire standard
+// output (12.0); the parse result carries that determination for the
+// caller. Diagnostics echo only argv tokens and static text, never resolved
+// filesystem paths, keeping all output byte-deterministic for identical
+// input (12.0: no absolute paths, no environment-dependent content).
+
+import { isWellFormedArgumentValue } from "../core/argument-value.js";
+import { nodeSpellingProblem } from "../core/availability.js";
+import { globLiesOutsideRoot } from "../core/glob.js";
+import { sessionNameProblem } from "../core/session-name.js";
+import { describeSegmentViolation, segmentViolation } from "../core/text.js";
+
+/**
+ * SPEC 12.0's syntax class, its spelling rules: "every invalid flag value
+ * or operand spelling that ... a spelling rule ... decides" is an error the
+ * invocation's arguments alone determine, reported without loading
+ * configuration. Each rule judges one value by its spelling alone
+ * (`spellingProblem`):
+ *
+ * - `identity` — a `<node>` or `<graph-node>` value: at most one `#` is
+ *   well-formed (12.0, 1.5); whether it names a node is judged later,
+ *   parse-local against the named file (12.0, 11.1);
+ * - `requirement-node` — `occurrences --to`, whose acceptance is syntactic
+ *   (11.3): a well-formed requirement-node identity (1.4, 1.5);
+ * - `tag` — `query nodes --tag`, likewise syntactic (11.1): a spelling
+ *   some tag can have (1.4);
+ * - `inside-root` — a `--file` glob: inside the workspace root, "decided by
+ *   its spelling alone" (12.0, 7, 11.1, 12.3);
+ * - `session-name` — the form of 10.1;
+ * - `offset` — `at`'s `<offset>`: one or more ASCII decimal digits (11.5);
+ *   whether it lies within the file's length is judged later.
+ */
+type SpellingRule =
+  | "identity"
+  | "requirement-node"
+  | "tag"
+  | "inside-root"
+  | "session-name"
+  | "offset";
 
 /** One flag a command accepts, and how its value (if any) is validated. */
 interface FlagSpec {
@@ -50,6 +113,18 @@ interface FlagSpec {
    * list whose every element must be in this set.
    */
   readonly list?: readonly string[];
+  /**
+   * The spelling rule the flag's value must satisfy (SPEC 12.0's syntax
+   * class): a value it refuses is a usage error judged here, without
+   * loading configuration.
+   */
+  readonly spelling?: SpellingRule;
+  /**
+   * A flag this one excludes, and why — SPEC 12.0's co-occurrence rules:
+   * given together, the two are a usage error of the syntax class, judged
+   * here without loading configuration.
+   */
+  readonly excludes?: { readonly flag: string; readonly why: string };
 }
 
 /** One command (or `review`/`query` subcommand) of the SPEC 12.5 table. */
@@ -60,6 +135,26 @@ interface CommandSpec {
   readonly positionals: readonly string[];
   /** How many trailing positionals are optional (default none). */
   readonly optionalPositionals?: number;
+  /**
+   * The command accepts any number of positionals beyond `positionals`
+   * (SPEC 11.4: `view [<file> …]`); the upper arity bound is not checked.
+   */
+  readonly variadicPositionals?: boolean;
+  /**
+   * Flags that may not be combined with positional operands — SPEC 11.4:
+   * combining `<file>` operands with `--file` is a usage error, a defect
+   * the invocation's syntax alone determines (SPEC 12.0).
+   */
+  readonly positionalConflicts?: readonly string[];
+  /**
+   * The spelling rule of each operand, by position (parallel to
+   * `positionals`; a null entry, or none, has no rule) — SPEC 12.0's syntax
+   * class, judged here without loading configuration. A `<node>` operand
+   * takes the `identity` rule (a multi-`#` spelling is a malformed value);
+   * a bare `<file>` never does — it is a whole path in which `#` has no
+   * delimiter role (`view`, `at`, `rename`'s origin).
+   */
+  readonly operandSpellings?: readonly (SpellingRule | null)[];
   /** Command-specific flags; the SPEC 12.0 globals are added for every command. */
   readonly flags: readonly FlagSpec[];
   /**
@@ -68,6 +163,13 @@ interface CommandSpec {
    * none or more than one is a usage error (12.0).
    */
   readonly exactlyOneOf?: readonly (readonly string[])[];
+  /**
+   * SPEC 12.0: the surface is JSON-only — a single JSON document is its
+   * only output form, with or without `--json` (10.7 `review export`, 11,
+   * 12.6), so JSON output is in effect for every invocation of it, its
+   * exit-2 errors included (the 12.7 error document).
+   */
+  readonly jsonOnly?: boolean;
 }
 
 /** SPEC 12.0: every command supports `--json` and `--config <path>` (7). */
@@ -102,9 +204,29 @@ const TEST_HOLD_FLAG: FlagSpec = {
 };
 
 /**
+ * SPEC 6.6: `rename` and `move` accept `--preview` — full validation and
+ * planning, performed on nothing. Combining it with `--test-hold` is a
+ * usage error (a preview acquires no exclusivity and does not take the
+ * acquisition-tied seam) — SPEC 12.0 lists "`--test-hold` beside
+ * `--preview`" in the syntax class, so it is judged here, before the
+ * configuration is loaded and before any hold file could be created.
+ */
+const PREVIEW_FLAG: FlagSpec = {
+  name: "--preview",
+  takesValue: false,
+  excludes: {
+    flag: "--test-hold",
+    why:
+      "a preview acquires no workspace exclusivity and does not take the " +
+      "acquisition-tied test seam (SPEC 6.6, 13.5, 12.0)",
+  },
+};
+
+/**
  * The known command table (SPEC 12.5), in specification order. Argument
  * forms: `build` 12.1, `check` 12.2, `ids` 12.3, `show` 12.4, `coverage` 8.2,
- * `impact` 9, `review` 10.7, `query` 11, `rename` 6.4, `move` 6.5.
+ * `impact` 9, `review` 10.7, `query` 11.1, `occurrences` 11.3, `view` 11.4,
+ * `at` 11.5, `inventory` 11.6, `rename` 6.4, `move` 6.5, `version` 12.6.
  */
 const COMMANDS: readonly CommandSpec[] = [
   // SPEC 12.1.
@@ -117,12 +239,22 @@ const COMMANDS: readonly CommandSpec[] = [
     positionals: [],
     flags: [
       { name: "--tree", takesValue: false },
-      { name: "--file", takesValue: true, valueName: "<glob>" },
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
       { name: "--unreferenced", takesValue: false },
     ],
   },
   // SPEC 12.4: `show <node>`.
-  { path: "show", positionals: ["<node>"], flags: [] },
+  {
+    path: "show",
+    positionals: ["<node>"],
+    operandSpellings: ["identity"],
+    flags: [],
+  },
   // SPEC 8.2: `coverage` runs all profiles, `coverage <name>` one; `--check`.
   {
     path: "coverage",
@@ -157,23 +289,46 @@ const COMMANDS: readonly CommandSpec[] = [
         allowed: ["audit"],
       },
       { name: "--coverage", takesValue: true, valueName: "<profile>" },
-      { name: "--name", takesValue: true, valueName: "<name>", required: true },
+      {
+        name: "--name",
+        takesValue: true,
+        valueName: "<name>",
+        required: true,
+        spelling: "session-name",
+      },
       TEST_HOLD_FLAG,
     ],
     exactlyOneOf: [["--base", "--strategy", "--coverage"]],
   },
   { path: "review list", positionals: [], flags: [] },
-  { path: "review status", positionals: ["<name>"], flags: [] },
-  { path: "review next", positionals: ["<name>"], flags: [] },
-  { path: "review show", positionals: ["<name>", "<item-id>"], flags: [] },
+  {
+    path: "review status",
+    positionals: ["<name>"],
+    operandSpellings: ["session-name"],
+    flags: [],
+  },
+  {
+    path: "review next",
+    positionals: ["<name>"],
+    operandSpellings: ["session-name"],
+    flags: [],
+  },
+  {
+    path: "review show",
+    positionals: ["<name>", "<item-id>"],
+    operandSpellings: ["session-name", null],
+    flags: [],
+  },
   {
     path: "review split",
     positionals: ["<name>", "<item-id>"],
+    operandSpellings: ["session-name", null],
     flags: [TEST_HOLD_FLAG],
   },
   {
     path: "review resolve",
     positionals: ["<name>", "<item-id>"],
+    operandSpellings: ["session-name", null],
     flags: [
       // SPEC 10.7: `--status` accepts `updated`, `no-change`, and `skipped`;
       // any other value is a usage error.
@@ -188,16 +343,38 @@ const COMMANDS: readonly CommandSpec[] = [
       TEST_HOLD_FLAG,
     ],
   },
-  { path: "review export", positionals: ["<name>"], flags: [] },
-  // SPEC 11: the six query subcommands.
-  { path: "query node", positionals: ["<node>"], flags: [] },
+  // SPEC 10.7: `export` is JSON-only — the entire session as a single JSON
+  // document, its only output form with or without `--json` (12.0).
+  {
+    path: "review export",
+    positionals: ["<name>"],
+    operandSpellings: ["session-name"],
+    flags: [],
+    jsonOnly: true,
+  },
+  // SPEC 11: the six query subcommands — JSON-only surfaces (12.0).
+  {
+    path: "query node",
+    positionals: ["<node>"],
+    operandSpellings: ["identity"],
+    flags: [],
+    jsonOnly: true,
+  },
   {
     path: "query nodes",
     positionals: [],
+    jsonOnly: true,
     flags: [
       { name: "--group", takesValue: true, valueName: "<g>" },
-      { name: "--file", takesValue: true, valueName: "<glob>" },
-      { name: "--tag", takesValue: true, valueName: "<t>" },
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
+      // SPEC 11.1: `--tag` accepts any well-formed tag (1.4) — syntactic
+      // acceptance, as on `occurrences --to` (11.3).
+      { name: "--tag", takesValue: true, valueName: "<t>", spelling: "tag" },
       // SPEC 11: `--coverage required|none`.
       {
         name: "--coverage",
@@ -210,9 +387,20 @@ const COMMANDS: readonly CommandSpec[] = [
   {
     path: "query edges",
     positionals: [],
+    jsonOnly: true,
     flags: [
-      { name: "--from", takesValue: true, valueName: "<graph-node>" },
-      { name: "--to", takesValue: true, valueName: "<graph-node>" },
+      {
+        name: "--from",
+        takesValue: true,
+        valueName: "<graph-node>",
+        spelling: "identity",
+      },
+      {
+        name: "--to",
+        takesValue: true,
+        valueName: "<graph-node>",
+        spelling: "identity",
+      },
       // SPEC 11: `edges --kinds` filters over all four kinds.
       {
         name: "--kinds",
@@ -222,23 +410,38 @@ const COMMANDS: readonly CommandSpec[] = [
       },
     ],
   },
-  { path: "query subtree", positionals: ["<node>"], flags: [] },
-  { path: "query ancestors", positionals: ["<node>"], flags: [] },
+  {
+    path: "query subtree",
+    positionals: ["<node>"],
+    operandSpellings: ["identity"],
+    flags: [],
+    jsonOnly: true,
+  },
+  {
+    path: "query ancestors",
+    positionals: ["<node>"],
+    operandSpellings: ["identity"],
+    flags: [],
+    jsonOnly: true,
+  },
   {
     path: "query reachable",
     positionals: [],
+    jsonOnly: true,
     flags: [
       {
         name: "--from",
         takesValue: true,
         valueName: "<graph-node>",
         required: true,
+        spelling: "identity",
       },
       {
         name: "--to",
         takesValue: true,
         valueName: "<graph-node>",
         required: true,
+        spelling: "identity",
       },
       {
         name: "--kinds",
@@ -248,20 +451,96 @@ const COMMANDS: readonly CommandSpec[] = [
       },
     ],
   },
-  // SPEC 6.4: `rename <file> <old-id> <new-id>`.
+  // SPEC 11.3: `occurrences [--file <glob>] [--to <node>]` — JSON-only
+  // (SPEC 11: a single JSON document is its only output form, with or
+  // without `--json`).
+  {
+    path: "occurrences",
+    positionals: [],
+    jsonOnly: true,
+    flags: [
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
+      // SPEC 11.3: acceptance is syntactic — only a spelling malformed as
+      // a requirement-node identity is a usage error (12.0's syntax class).
+      {
+        name: "--to",
+        takesValue: true,
+        valueName: "<node>",
+        spelling: "requirement-node",
+      },
+    ],
+  },
+  // SPEC 11.4: `view [<file> …] [--file <glob>] [--text]` — JSON-only
+  // (SPEC 11). Operands assert membership while `--file` restricts the
+  // domain; combining them is a usage error.
+  {
+    path: "view",
+    positionals: ["<file>"],
+    optionalPositionals: 1,
+    variadicPositionals: true,
+    positionalConflicts: ["--file"],
+    jsonOnly: true,
+    flags: [
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
+      { name: "--text", takesValue: false },
+    ],
+  },
+  // SPEC 11.5: `at <file> <offset>` — JSON-only (SPEC 11). `<offset>` must
+  // be one or more ASCII decimal digits, a spelling rule judged here (12.0's
+  // syntax class); `<file>` asserts domain membership exactly as a `view`
+  // operand does and the offset must lie within the file's byte length —
+  // checks the handler runs against discovery and the file's bytes, before
+  // answering (SPEC 11.2, 12.0).
+  {
+    path: "at",
+    positionals: ["<file>", "<offset>"],
+    operandSpellings: [null, "offset"],
+    flags: [],
+    jsonOnly: true,
+  },
+  // SPEC 11.6: `inventory` — JSON-only (SPEC 11: a single JSON document is
+  // its only output form, with or without `--json`). No flags beyond the
+  // globals: the inventory is a pure report of the workspace's shape.
+  { path: "inventory", positionals: [], flags: [], jsonOnly: true },
+  // SPEC 6.4: `rename <file> <old-id> <new-id> [--preview]` (6.6).
   {
     path: "rename",
     positionals: ["<file>", "<old-id>", "<new-id>"],
-    flags: [TEST_HOLD_FLAG],
+    flags: [TEST_HOLD_FLAG, PREVIEW_FLAG],
   },
   // SPEC 6.5: `move <old-file> <new-file>` or
-  // `move <file>#<id> <target-file>#<new-id>` — two positionals either way.
-  { path: "move", positionals: ["<old>", "<new>"], flags: [TEST_HOLD_FLAG] },
+  // `move <file>#<id> <target-file>#<new-id>` — two positionals either way,
+  // `[--preview]` on both forms (6.6).
+  {
+    path: "move",
+    positionals: ["<old>", "<new>"],
+    flags: [TEST_HOLD_FLAG, PREVIEW_FLAG],
+  },
+  // SPEC 12.6: `version` — JSON-only (a single JSON document is its only
+  // output form, with or without `--json`); workspace-independent, so
+  // `--config` (a global) is accepted and never consulted — `main`
+  // dispatches it before configuration location.
+  { path: "version", positionals: [], flags: [], jsonOnly: true },
 ];
 
 /** Every dispatch key (`CommandSpec.path`), in specification order. */
 export const COMMAND_PATHS: readonly string[] = COMMANDS.map(
   (spec) => spec.path,
+);
+
+/** The dispatch keys of the JSON-only surfaces (SPEC 12.0; 10.7, 11, 12.6). */
+const JSON_ONLY_PATHS: ReadonlySet<string> = new Set(
+  COMMANDS.filter((spec) => spec.jsonOnly === true).map((spec) => spec.path),
 );
 
 /** A parsed flag value: boolean presence, one value, or a `--kinds` list. */
@@ -273,7 +552,7 @@ export interface Invocation {
   readonly command: string;
   /** Positional arguments in order. */
   readonly positionals: readonly string[];
-  /** SPEC 12.0: the global `--json` flag. */
+  /** SPEC 12.0: the global `--json` flag, read as a flag (not a value). */
   readonly json: boolean;
   /**
    * SPEC 12.0: the global `--config <path>` value, a filesystem path to be
@@ -287,40 +566,142 @@ export interface Invocation {
 
 export type ParseResult =
   | { readonly ok: true; readonly invocation: Invocation }
-  | { readonly ok: false; readonly message: string };
+  | {
+      readonly ok: false;
+      /** The diagnostic, without the `xspec: ` program prefix. */
+      readonly message: string;
+      /**
+       * SPEC 12.0: whether JSON output is in effect for the failed
+       * invocation — a `--json` token read as a flag, not as another
+       * flag's value nor after `--` (even when the arguments are
+       * themselves the error, a repeated `--json` included), or the
+       * invoked surface, as far as the arguments identify one, is
+       * JSON-only. Governs error delivery: with it, the exit-2 error emits
+       * the 12.7 error document as the entire standard output.
+       */
+      readonly jsonInEffect: boolean;
+    };
 
-function usageError(message: string): ParseResult {
-  return { ok: false, message: `xspec: ${message}` };
+function usageError(message: string, jsonInEffect: boolean): ParseResult {
+  return { ok: false, message, jsonInEffect };
 }
 
 /**
- * SPEC 12.0: argument values are interpreted as UTF-8, and a value that is
- * not valid UTF-8 is a usage error. Node materializes `process.argv` by
- * decoding the OS argument bytes as UTF-8 with U+FFFD substituted for every
- * invalid sequence, so invalid input bytes are observable only as U+FFFD in
- * the decoded string: a value containing U+FFFD is indistinguishable from
- * mis-decoded bytes and is treated as not valid UTF-8. A lone surrogate
- * (which no UTF-8 decode produces, but an in-process caller could pass) has
- * no UTF-8 encoding and is rejected the same way.
- *
- * Exported for `move` (SPEC 6.5): the parser exempts `move`'s positionals —
- * a destination path that is not valid UTF-8 is one of 6.5's destination
- * *refusals* (exit 1), not a usage error, so the command classifies its own
- * arguments with this same predicate.
+ * SPEC 6.5: a `move` operand is classified by spelling alone — an operand
+ * containing `#` is a `<file>#<id>` pair under the split of 12.0, one
+ * without is a file. SPEC 12.0: at most one `#` is well-formed in any such
+ * value, so a spelling containing more than one is a malformed value; and
+ * an invocation mixing the two synopses' forms (one pair operand, one bare
+ * file) matches neither synopsis. Both are usage errors the invocation's
+ * syntax alone determines, so they are parse-level: reported without
+ * loading configuration (12.0), before workspace exclusivity or any hold
+ * file (13.5). Returns the diagnostic, or null for a well-formed pair of
+ * operands.
  */
-export function isValidUtf8ArgumentValue(value: string): boolean {
-  for (let index = 0; index < value.length; index += 1) {
-    const unit = value.charCodeAt(index);
-    if (unit === 0xfffd) return false;
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      const next = index + 1 < value.length ? value.charCodeAt(index + 1) : 0;
-      if (next < 0xdc00 || next > 0xdfff) return false;
-      index += 1;
-    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
-      return false;
+function moveOperandsProblem(positionals: readonly string[]): string | null {
+  for (const operand of positionals) {
+    const first = operand.indexOf("#");
+    if (first !== -1 && operand.includes("#", first + 1)) {
+      return (
+        `operand '${operand}' contains more than one '#' — at most one is ` +
+        `well-formed: an operand containing '#' is a <file>#<id> pair and ` +
+        `one without is a file (SPEC 6.5, 12.0)`
+      );
     }
   }
-  return true;
+  const [origin, destination] = positionals;
+  if (
+    origin !== undefined &&
+    destination !== undefined &&
+    origin.includes("#") !== destination.includes("#")
+  ) {
+    return (
+      `operands '${origin}' and '${destination}' mix the two synopses' ` +
+      `forms — an operand containing '#' is a <file>#<id> pair and one ` +
+      `without is a file, so the invocation matches neither ` +
+      `\`move <old-file> <new-file>\` nor ` +
+      `\`move <file>#<id> <target-file>#<new-id>\` (SPEC 6.5, 12.0)`
+    );
+  }
+  return null;
+}
+
+/** SPEC 11.5: an `<offset>` is one or more ASCII decimal digits — nothing else. */
+const OFFSET_SPELLING = /^[0-9]+$/;
+
+/**
+ * Judge one flag value or operand by its spelling rule (`SpellingRule`) —
+ * an error of SPEC 12.0's syntax class: the value alone decides it, so it
+ * is reported here, without loading configuration. `subject` names the
+ * flag (`'--to'`) or operand (`<node>`) for the diagnostic. Returns the
+ * diagnostic, or null for a well-formed spelling.
+ */
+function spellingProblem(
+  rule: SpellingRule,
+  value: string,
+  subject: string,
+): string | null {
+  switch (rule) {
+    case "identity": {
+      // SPEC 12.0: at most one `#` is well-formed in a `<node>` or
+      // `<graph-node>` value — its `#` splits path from id or unit, and no
+      // identity contains one in path, id segment, or unit name (1.4, 1.5,
+      // 4.6) — so a spelling containing more than one is a malformed value.
+      const first = value.indexOf("#");
+      if (first === -1 || !value.includes("#", first + 1)) return null;
+      return (
+        `${subject} value '${value}' contains more than one '#' — at most ` +
+        `one is well-formed: '#' splits path from id or unit, and no ` +
+        `identity contains one (SPEC 12.0, 1.5)`
+      );
+    }
+    case "requirement-node": {
+      // SPEC 11.3: `--to` acceptance is syntactic — only a spelling
+      // malformed as a requirement-node identity is a usage error, while
+      // an unknown or unresolving identity selects nothing.
+      const problem = nodeSpellingProblem(value);
+      if (problem === null) return null;
+      return (
+        `invalid value '${value}' for ${subject} — not a well-formed ` +
+        `requirement-node identity: ${problem} (SPEC 11.3, 1.4, 1.5, 12.0)`
+      );
+    }
+    case "tag": {
+      // SPEC 11.1, 1.4: a spelling no tag can have, judged by the one
+      // shared 1.4 validator; the spelling is quoted as JSON so an
+      // invisible or line-breaking character shows in the one-line message.
+      const violation = segmentViolation(value, "tag");
+      if (violation === null) return null;
+      return (
+        `invalid value for ${subject} — the tag ${JSON.stringify(value)} ` +
+        `${describeSegmentViolation(violation)}, so no tag has this ` +
+        `spelling: a malformed value (SPEC 11.1, 1.4, 12.0)`
+      );
+    }
+    case "inside-root":
+      // SPEC 7, 11.1, 12.3: a `--file` pattern outside the workspace root
+      // is an invalid flag value, "decided by its spelling alone" (12.0) —
+      // the pure depth count 7 applies to a configured glob.
+      if (!globLiesOutsideRoot(value)) return null;
+      return (
+        `invalid value '${value}' for ${subject} — the pattern lies ` +
+        `outside the workspace root, decided by its spelling alone ` +
+        `(SPEC 7, 11.1, 12.3, 12.0)`
+      );
+    case "session-name":
+      // SPEC 10.1: any name outside the form is a usage error (12.0).
+      return sessionNameProblem(value);
+    case "offset":
+      // SPEC 11.5: a sign, whitespace, or any other character is not a
+      // non-negative integer's spelling.
+      if (OFFSET_SPELLING.test(value)) return null;
+      return (
+        `invalid ${subject} value '${value}' — one or more ASCII decimal ` +
+        `digits required (leading zeros permitted; a sign, whitespace, or ` +
+        `any other character is not a non-negative integer's spelling) ` +
+        `(SPEC 11.5, 12.0)`
+      );
+  }
 }
 
 /** `"build, check, ids, …"` for diagnostics, in specification order. */
@@ -363,134 +744,241 @@ function buildTable(): ReadonlyMap<
 const TABLE = buildTable();
 
 /**
+ * SPEC 12.0: "A flag's arity is fixed by its name, the same for every
+ * command — known before the command word is identified, since flags may
+ * precede it". Every flag name of every command, the globals included,
+ * mapped to whether it takes a value; a name absent here — a `--` token
+ * naming no flag of any command — takes none. Built from the command table
+ * itself, so each flag carries one arity everywhere; a name declared with
+ * two arities is a table defect, refused at module load.
+ */
+const FLAG_ARITY: ReadonlyMap<string, boolean> = buildArityTable();
+
+function buildArityTable(): ReadonlyMap<string, boolean> {
+  const arity = new Map<string, boolean>();
+  const flags = [...GLOBAL_FLAGS, ...COMMANDS.flatMap((spec) => spec.flags)];
+  for (const flag of flags) {
+    const known = arity.get(flag.name);
+    if (known !== undefined && known !== flag.takesValue) {
+      throw new Error(
+        `flag '${flag.name}' is declared both with and without a value — ` +
+          `SPEC 12.0 fixes a flag's arity by its name`,
+      );
+    }
+    arity.set(flag.name, flag.takesValue);
+  }
+  return arity;
+}
+
+/** One token the walk read as a flag (SPEC 12.0), with its value. */
+interface WalkedFlag {
+  /** The flag token as spelled, leading `--` included. */
+  readonly token: string;
+  /**
+   * The whole next token, for a value-taking flag followed by one; absent
+   * for a flag that takes none and for a value-taking flag standing last,
+   * which lacks its value.
+   */
+  readonly value: string | undefined;
+}
+
+/** The token walk of SPEC 12.0's invocation grammar. */
+interface TokenWalk {
+  /** Every token read as a flag, in argument order. */
+  readonly flags: readonly WalkedFlag[];
+  /**
+   * The non-flag tokens in order — the command word, its subcommand where
+   * it has one, and its operands — once the flags, their values, and any
+   * `--` are removed.
+   */
+  readonly words: readonly string[];
+  /** Whether a `--json` token was read as a flag (a repeated one included). */
+  readonly json: boolean;
+}
+
+/**
+ * SPEC 12.0: read the argument tokens. While flag reading lasts, a token
+ * beginning `--` is a flag token, wherever it stands — before the command
+ * word, between it and its operands, or after them; a value-taking flag
+ * (by its name: `FLAG_ARITY`) takes the whole next token as its value,
+ * whatever that token looks like, a `-`- or `--`-prefixed one included.
+ * The token `--` ends flag reading and is dropped: every later token is a
+ * non-flag token, `--`-prefixed spellings included. The walk needs no
+ * command word, so it completes on every argument vector, and JSON-in-effect
+ * is decided from it even when the arguments are themselves the error.
+ */
+function walkTokens(argv: readonly string[]): TokenWalk {
+  const flags: WalkedFlag[] = [];
+  const words: string[] = [];
+  let json = false;
+  let readingFlags = true;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index]!;
+    if (readingFlags && token === "--") {
+      readingFlags = false;
+      continue;
+    }
+    if (!readingFlags || !token.startsWith("--")) {
+      words.push(token);
+      continue;
+    }
+    if (token === "--json") json = true;
+    if (FLAG_ARITY.get(token) === true && index + 1 < argv.length) {
+      index += 1;
+      flags.push({ token, value: argv[index]! });
+    } else {
+      flags.push({ token, value: undefined });
+    }
+  }
+  return { flags, words, json };
+}
+
+/**
+ * SPEC 12.0, 12.5: the walk's non-flag tokens matched to the command table
+ * — the command word, then the subcommand of `review` or `query` — with the
+ * operands after them. A failure carries the usage diagnostic and whether
+ * the surface, as far as the words identify one, is JSON-only.
+ */
+type CommandMatch =
+  | {
+      readonly ok: true;
+      readonly spec: CommandSpec;
+      readonly operands: readonly string[];
+    }
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly jsonOnly: boolean;
+    };
+
+function matchCommand(words: readonly string[]): CommandMatch {
+  const commandWord = words[0];
+  if (commandWord === undefined) {
+    return {
+      ok: false,
+      message: `missing command (expected one of: ${commandNameList()})`,
+      jsonOnly: false,
+    };
+  }
+  const entry = TABLE.get(commandWord);
+  if (entry === undefined) {
+    return {
+      ok: false,
+      message:
+        `unknown command '${commandWord}' (expected one of: ` +
+        `${commandNameList()})`,
+      jsonOnly: false,
+    };
+  }
+  if (!(entry instanceof Map)) {
+    return { ok: true, spec: entry, operands: words.slice(1) };
+  }
+  // SPEC 12.0: a command group all of whose subcommands are JSON-only
+  // (`query`, 11) is a JSON-only surface already at the group name.
+  const groupJsonOnly = [...entry.values()].every(
+    (subcommand) => subcommand.jsonOnly === true,
+  );
+  const subcommandWord = words[1];
+  if (subcommandWord === undefined) {
+    return {
+      ok: false,
+      message:
+        `${commandWord}: missing subcommand (expected one of: ` +
+        `${subcommandNameList(entry)})`,
+      jsonOnly: groupJsonOnly,
+    };
+  }
+  const subcommand = entry.get(subcommandWord);
+  if (subcommand === undefined) {
+    return {
+      ok: false,
+      message:
+        `${commandWord}: unknown subcommand '${subcommandWord}' (expected ` +
+        `one of: ${subcommandNameList(entry)})`,
+      jsonOnly: groupJsonOnly,
+    };
+  }
+  return { ok: true, spec: subcommand, operands: words.slice(2) };
+}
+
+/**
  * Parse one invocation's argv (the elements after the executable name)
- * against the SPEC 12.0 conventions and the SPEC 12.5 command table. Returns
- * the parsed invocation, or the usage-error diagnostic the caller must write
- * to stderr before exiting 2 (12.0).
+ * against SPEC 12.0's invocation grammar and the SPEC 12.5 command table,
+ * in the stages the module header lists. Returns the parsed invocation, or
+ * the usage-error failure the caller reports before exiting 2 (12.0): the
+ * diagnostic for stderr (the caller prefixes the program name) and whether
+ * JSON output is in effect — with it, the caller emits the 12.7 error
+ * document as the entire standard output.
  */
 export function parseArgv(argv: readonly string[]): ParseResult {
-  // SPEC 12.0: argument values are interpreted as UTF-8, and a value that is
-  // not valid UTF-8 is a usage error. Checked per token below, because the
-  // `move` command's positionals are exempt (SPEC 6.5: a destination path
-  // that is not valid UTF-8 is a destination refusal, exit 1 — the command
-  // classifies it; a non-UTF-8 origin names no discovered source and stays
-  // in the usage-error class through the existence check).
-  const nonUtf8 = (indexInArgv: number): ParseResult =>
-    usageError(
-      `argument ${String(indexInArgv + 1)} is not valid UTF-8 — argument ` +
-        `values are interpreted as UTF-8`,
-    );
+  // Stages 1–2 (SPEC 12.0): the token walk, and JSON-in-effect decided from
+  // it — a `--json` read as a flag, or a JSON-only surface as far as the
+  // remaining tokens identify one — before any check, so every usage error
+  // below is delivered in the one output form the arguments select.
+  const walk = walkTokens(argv);
+  const match = matchCommand(walk.words);
+  const jsonInEffect =
+    walk.json || (match.ok ? match.spec.jsonOnly === true : match.jsonOnly);
+  const refuse = (message: string): ParseResult =>
+    usageError(message, jsonInEffect);
 
-  if (argv.length === 0) {
-    return usageError(
-      `missing command (expected one of: ${commandNameList()})`,
-    );
-  }
-  const commandToken = argv[0]!;
-  if (!isValidUtf8ArgumentValue(commandToken)) {
-    return nonUtf8(0);
-  }
-  if (commandToken.startsWith("--")) {
-    return usageError(
-      `expected a command before any flags (expected one of: ` +
-        `${commandNameList()})`,
-    );
-  }
-  const entry = TABLE.get(commandToken);
-  if (entry === undefined) {
-    return usageError(
-      `unknown command '${commandToken}' (expected one of: ` +
-        `${commandNameList()})`,
-    );
-  }
-
-  let spec: CommandSpec;
-  let tokens: readonly string[];
-  if (entry instanceof Map) {
-    const subToken = argv.length > 1 ? argv[1]! : undefined;
-    if (subToken === undefined || subToken.startsWith("--")) {
-      return usageError(
-        `${commandToken}: missing subcommand (expected one of: ` +
-          `${subcommandNameList(entry)})`,
+  // SPEC 12.0: argument values are interpreted as UTF-8, and a malformed
+  // value (core/argument-value.ts) is judged before every per-flag and
+  // per-operand check — every token, `move`'s positional operands included:
+  // no argument value may name a non-UTF-8 path (12.0), so 6.5's non-UTF-8
+  // destination clause is unreachable through the CLI.
+  for (let index = 0; index < argv.length; index += 1) {
+    if (!isWellFormedArgumentValue(argv[index]!)) {
+      return refuse(
+        `argument ${String(index + 1)} is not valid UTF-8 — argument ` +
+          `values are interpreted as UTF-8`,
       );
     }
-    if (!isValidUtf8ArgumentValue(subToken)) {
-      return nonUtf8(1);
-    }
-    const subcommand = entry.get(subToken);
-    if (subcommand === undefined) {
-      return usageError(
-        `${commandToken}: unknown subcommand '${subToken}' (expected one ` +
-          `of: ${subcommandNameList(entry)})`,
-      );
-    }
-    spec = subcommand;
-    tokens = argv.slice(2);
-  } else {
-    spec = entry;
-    tokens = argv.slice(1);
   }
 
+  // Stage 3 (SPEC 12.0): the command word and, for `review` and `query`,
+  // the subcommand; the operands are the words after them.
+  if (!match.ok) {
+    return refuse(match.message);
+  }
+  const { spec, operands: positionals } = match;
+
+  // Stage 4 (SPEC 12.0): each flag the walk read, in argument order, against
+  // the command's accepted set — its own flags plus the globals.
   const flagSpecs = new Map<string, FlagSpec>();
   for (const flag of GLOBAL_FLAGS) flagSpecs.set(flag.name, flag);
   for (const flag of spec.flags) flagSpecs.set(flag.name, flag);
 
   const seen = new Set<string>();
   const flags = new Map<string, FlagValue>();
-  const positionals: string[] = [];
-  let json = false;
   let config: string | undefined;
 
-  // Argv index of a token: `tokens` is argv minus the command (and
-  // subcommand) tokens, so the offset restores the original position for
-  // the non-UTF-8 diagnostics.
-  const tokenOffset = argv.length - tokens.length;
-  // SPEC 6.5: `move`'s positional arguments are exempt from the parse-level
-  // UTF-8 usage check (see `isValidUtf8ArgumentValue`); flags and their
-  // values keep it.
-  const utf8ExemptPositionals = spec.path === "move";
-
-  for (let index = 0; index < tokens.length; index += 1) {
-    const token = tokens[index]!;
-    if (!token.startsWith("--")) {
-      if (!utf8ExemptPositionals && !isValidUtf8ArgumentValue(token)) {
-        return nonUtf8(tokenOffset + index);
-      }
-      positionals.push(token);
-      continue;
-    }
-    if (!isValidUtf8ArgumentValue(token)) {
-      return nonUtf8(tokenOffset + index);
-    }
+  for (const { token, value } of walk.flags) {
     const flag = flagSpecs.get(token);
     if (flag === undefined) {
-      // SPEC 12.0: unknown flags are usage errors.
-      return usageError(`${spec.path}: unknown flag '${token}'`);
+      // SPEC 12.0: a `--` token naming no flag the command accepts —
+      // `--name=value`, a flag of another command — is an unknown flag.
+      return refuse(`${spec.path}: unknown flag '${token}'`);
     }
     // SPEC 12.0: a flag may be given at most once per invocation; repeating a
     // flag is a usage error — identical values included.
     if (seen.has(token)) {
-      return usageError(
+      return refuse(
         `${spec.path}: flag '${token}' given more than once — a flag may be ` +
           `given at most once per invocation`,
       );
     }
     seen.add(token);
     if (!flag.takesValue) {
-      if (token === "--json") json = true;
-      else flags.set(token, true);
+      if (token !== "--json") flags.set(token, true);
       continue;
     }
-    index += 1;
-    if (index >= tokens.length) {
-      return usageError(
+    if (value === undefined) {
+      // SPEC 12.0: a value-taking flag with no token after it lacks its value.
+      return refuse(
         `${spec.path}: flag '${token}' requires a value` +
           (flag.valueName === undefined ? "" : ` ${flag.valueName}`),
       );
-    }
-    const value = tokens[index]!;
-    if (!isValidUtf8ArgumentValue(value)) {
-      return nonUtf8(tokenOffset + index);
     }
     if (flag.list !== undefined) {
       // SPEC 12.0: list-valued flags take one comma-separated value; an
@@ -498,7 +986,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       const elements = value.split(",");
       for (const element of elements) {
         if (!flag.list.includes(element)) {
-          return usageError(
+          return refuse(
             `${spec.path}: invalid value '${value}' for '${token}' — one ` +
               `comma-separated list of: ${flag.list.join(", ")}`,
           );
@@ -509,10 +997,20 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     }
     if (flag.allowed !== undefined && !flag.allowed.includes(value)) {
       // SPEC 12.0: invalid flag values are usage errors.
-      return usageError(
+      return refuse(
         `${spec.path}: invalid value '${value}' for '${token}' (expected ` +
           `one of: ${flag.allowed.join(", ")})`,
       );
+    }
+    if (flag.spelling !== undefined) {
+      // SPEC 12.0's syntax class: a value its spelling rule refuses — a
+      // multi-`#` identity, a `--to` or `--tag` malformed as an identity
+      // or tag, a `--file` glob outside the workspace root, a session name
+      // outside 10.1's form — is decided by the value alone.
+      const problem = spellingProblem(flag.spelling, value, `'${token}'`);
+      if (problem !== null) {
+        return refuse(`${spec.path}: ${problem}`);
+      }
     }
     if (token === "--config") config = value;
     else flags.set(token, value);
@@ -521,7 +1019,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
   // SPEC 12.0: missing required flags are usage errors.
   for (const flag of spec.flags) {
     if (flag.required === true && !seen.has(flag.name)) {
-      return usageError(
+      return refuse(
         `${spec.path}: missing required flag '${flag.name}'` +
           (flag.valueName === undefined ? "" : ` ${flag.valueName}`),
       );
@@ -531,31 +1029,95 @@ export function parseArgv(argv: readonly string[]): ParseResult {
   for (const group of spec.exactlyOneOf ?? []) {
     const given = group.filter((name) => seen.has(name));
     if (given.length !== 1) {
-      return usageError(
+      return refuse(
         `${spec.path}: exactly one of ${group.join(", ")} is required` +
           (given.length === 0 ? "" : ` (got ${given.join(" and ")})`),
       );
     }
   }
+  // SPEC 12.0's co-occurrence rules (via `excludes`): `--test-hold` beside
+  // `--preview` (6.6) — reported before the configuration is loaded, so no
+  // hold file is ever created for it.
+  for (const flag of spec.flags) {
+    const excluded = flag.excludes;
+    if (
+      excluded !== undefined &&
+      seen.has(flag.name) &&
+      seen.has(excluded.flag)
+    ) {
+      return refuse(
+        `${spec.path}: ${excluded.flag} cannot be combined with ` +
+          `${flag.name}: ${excluded.why}`,
+      );
+    }
+  }
   // SPEC 12.0: missing required arguments are usage errors; an argument the
-  // command's form does not define is one too.
+  // command's form does not define is one too (a variadic command defines
+  // no upper bound, SPEC 11.4).
   const minimum = spec.positionals.length - (spec.optionalPositionals ?? 0);
   if (positionals.length < minimum) {
-    return usageError(
+    return refuse(
       `${spec.path}: missing required argument ` +
         `${spec.positionals[positionals.length]!}`,
     );
   }
-  if (positionals.length > spec.positionals.length) {
-    return usageError(
+  if (
+    spec.variadicPositionals !== true &&
+    positionals.length > spec.positionals.length
+  ) {
+    return refuse(
       `${spec.path}: unexpected argument ` +
         `'${positionals[spec.positionals.length]!}'`,
     );
   }
+  // SPEC 11.4/12.0: combining positional operands with a domain-restricting
+  // flag is a usage error the invocation's syntax alone determines.
+  for (const conflicting of spec.positionalConflicts ?? []) {
+    if (positionals.length > 0 && seen.has(conflicting)) {
+      return refuse(
+        `${spec.path}: ${spec.positionals[0] ?? "positional"} operands ` +
+          `cannot be combined with '${conflicting}' — operands assert ` +
+          `membership while the flag restricts the domain; give one or ` +
+          `the other`,
+      );
+    }
+  }
+  // SPEC 12.0's syntax class, operand side (via `operandSpellings`): a
+  // multi-`#` `<node>` (`show`, `query node`, `query subtree`, `query
+  // ancestors`), a session name outside 10.1's form (`review`), an
+  // `<offset>` spelled other than in decimal digits (`at`, 11.5).
+  const operandRules = spec.operandSpellings ?? [];
+  for (let index = 0; index < positionals.length; index += 1) {
+    const rule = operandRules[index] ?? null;
+    if (rule === null) continue;
+    const problem = spellingProblem(
+      rule,
+      positionals[index]!,
+      spec.positionals[index]!,
+    );
+    if (problem !== null) {
+      return refuse(`${spec.path}: ${problem}`);
+    }
+  }
+  // SPEC 6.5/12.0: `move` operand classification is by spelling alone — a
+  // multi-`#` operand is a malformed value, and a mixed-synopsis invocation
+  // matches neither form (see `moveOperandsProblem`).
+  if (spec.path === "move") {
+    const problem = moveOperandsProblem(positionals);
+    if (problem !== null) {
+      return refuse(`move: ${problem}`);
+    }
+  }
 
   return {
     ok: true,
-    invocation: { command: spec.path, positionals, json, config, flags },
+    invocation: {
+      command: spec.path,
+      positionals,
+      json: walk.json,
+      config,
+      flags,
+    },
   };
 }
 
@@ -584,6 +1146,17 @@ export function flagPresent(invocation: Invocation, name: string): boolean {
     );
   }
   return true;
+}
+
+/**
+ * SPEC 12.0: whether JSON output is in effect for a parsed invocation — a
+ * `--json` token read as a flag, or the invoked surface is JSON-only, a
+ * single JSON document its only output form with or without `--json`
+ * (10.7 `review export`, 11, 12.6). Governs the whole output form, the
+ * exit-2 error document included (12.7).
+ */
+export function jsonOutputInEffect(invocation: Invocation): boolean {
+  return invocation.json || JSON_ONLY_PATHS.has(invocation.command);
 }
 
 /** The elements of a list-valued flag, or undefined when it was not given. */

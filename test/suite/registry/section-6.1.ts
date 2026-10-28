@@ -13,13 +13,41 @@
 // workspace state; content is otherwise opaque — assertions here stick to the
 // stated observable contract (line-oriented, append-only form; H-4).
 //
-// Staging constraint (CERTIFICATIONS.md §CONF-CORE — T6.1-1 and T6.1-2 are
-// in-scope): their fixtures stay within CONF-CORE's scope — one configured
-// spec group of `.mdx` sources without imports, embeddings, `d` props, or
-// tags; no `code`, `markdown`, `coverage`, or `policy` keys; no git; the only
-// mutating commands driven are `rename` and file-form `move`. In this
-// git-less scope `impact --base` is the exit-2 unreadable-baseline case
-// (SPEC 6.3, 12.0).
+// Staging constraint (CERTIFICATIONS.md §CONF-CORE — T6.1-2 is in-scope):
+// its fixture stays within CONF-CORE's scope — one configured spec group of
+// `.mdx` sources without imports, embeddings, `d` props, or tags; no `code`,
+// `markdown`, `coverage`, or `policy` keys; no git; the only mutating
+// commands driven are `rename` and file-form `move`. T6.1-1 lies outside
+// every certification scope (CERTIFICATIONS.md §Exclusions): its
+// never-modifies sweep covers every command surface, so its workspace adds
+// what the sweep needs on top of the same files — a git baseline commit (a
+// resolvable `impact --base HEAD`, SPEC 6.3), an `audit` review session
+// (`create`/`split`/`resolve` and the read subcommands, 10.7), the 11.2
+// surfaces (`occurrences`, `view`, `at`), `inventory`, `version`, and the
+// 6.6 previews of both operations. Its never-modified compares — the
+// sweep's, the previews' inner ones included — run through
+// `snapshotDirectory` and `assertSnapshotsEqual` of test/helpers/snapshot.ts,
+// filtered to the journal entry (`assertLeavesJournalUnchanged`): the
+// compare-around-command machinery VIOL-CORE-CHATTYREADS certifies over the
+// same journal on T13.5-4 — its held-state comparison, made once its reads
+// have exited, captures the workspace through the same `snapshotDirectory`
+// and compares each entry through the same `describeEntryDifference` — on
+// which CERTIFICATIONS.md's Exclusions bullet for T6.1-1 relies, with
+// `readJournal`'s plain-file check as the premise.
+//
+// T6.1-1's deleted-journal arm (SPEC 6.1: the journal is written only by
+// `rename` and `move`, the file coming into existence with a journaled
+// operation; 13.4: a durable record, never regenerated) runs first, in its
+// own fresh CONF-CORE-shaped workspace (`withCoreWorkspace`), so a product
+// failing the sweep below still meets it: `build`, `rename specs/A.mdx a
+// a2`, the journal read as a plain file at `.xspec/journal`
+// (`readJournal`), the journal deleted, `build` exit 0, and then nothing
+// may stand at `.xspec/journal`. The plain-file read is the positive at the
+// same path that braces the absence check, as the Exclusions bullet reads
+// T6.1-1's first negative: a mislocated absence check fails loud there
+// rather than passing silently. The arm lives here, the journal's home,
+// not in T13.4-5, whose never-regenerated arm is the session file's alone
+// and journal-neutral (section-13.4.ts).
 //
 // Conservative operationalizations (noted per H-4):
 // - "One entry per line" + "the journal is written only by rename and move"
@@ -30,17 +58,51 @@
 // - "Rewrites nothing above it" is asserted as: the prior journal bytes are
 //   a strict byte prefix of the new journal bytes.
 // - T6.1-3 "naming the line": entry content is opaque, so the harness accepts
-//   any of — a location within the garbage line's byte window in
-//   `.xspec/journal`, the message echoing the garbage line's text, or the
-//   message citing line/entry 2 (`line 2`, `entry 2`, or a `journal:2`
-//   file:line form). The garbage sits on line 2 (one legitimate entry
-//   precedes it), so a finding pointing at line 1 or at the whole file
-//   without naming the line fails — the discrimination the TEST-SPEC asks
-//   for.
+//   either of — the message echoing the garbage line's text, or the message
+//   citing line/entry 2 (`line 2`, `entry 2`, or a `journal:2` file:line
+//   form). A journal condition has no in-source location and carries the
+//   path it concerns (SPEC 14, 12.7), and the workspace has one journal
+//   (SPEC 6.1): in every arm, the one 14.13 finding each of `check`,
+//   `build`, and the gated `ids` reports — the journal error being the
+//   workspace's one defect (`assertReportsJournalError`) — carries
+//   `.xspec/journal` as its `path` and empty `locations`, so the line is
+//   named in the message alone, at each of the three. The garbage sits on
+//   line 2 (one legitimate entry precedes it), so a finding naming only
+//   line 1, or the journal as a whole without naming the line, fails — the
+//   discrimination the TEST-SPEC asks for.
+//
+// Staged-source records (TEST-SPEC S-9's before-any-product clause;
+// helpers/staged-mdx.ts, helpers/staged-ts.ts): T6.1-3's directory- and
+// symlink-occupant arms create their workspaces after the garbage-line
+// arm's invocations, and T6.1-1's sweep workspace after the deleted-journal
+// arm's, so `CORE_FILES`'s entries — the configuration and the two `.mdx`
+// sources — are ledger records, judged by
+// test/self/s9-staged-sources.test.ts before any product exists; the two
+// sources' records are named with every body that stages the map, the
+// configuration's with the two that stage it after an invocation (T6.1-1's
+// deleted-journal workspace and T6.1-2's two directories precede any
+// invocation and would not need them).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import type { Finding } from "../../helpers/adapters/index.js";
-import { decodeFindingsReport } from "../../helpers/adapters/index.js";
+import {
+  decodeAtReport,
+  decodeCoverageReport,
+  decodeExportReport,
+  decodeIdsReport,
+  decodeImpactReport,
+  decodeInventoryDocument,
+  decodeItemReport,
+  decodeNextReport,
+  decodeNodeRowsReport,
+  decodeOccurrencesReport,
+  decodePreviewReport,
+  decodeSessionListReport,
+  decodeSessionStatusReport,
+  decodeVersionDocument,
+  decodeViewReport,
+} from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   fail,
@@ -48,36 +110,69 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import {
+  assertLeavesUnchanged,
+  assertSnapshotsEqual,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
+import type {
+  DirectorySnapshot,
+  SnapshotEntry,
+} from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { buildOk, expectExit } from "./support.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import {
+  assertConditionCounts,
+  assertSameJson,
+  buildOk,
+  expectExit,
+  runFindingsReport,
+} from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
-// other keys — the CONF-CORE workspace shape.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// other keys — the CONF-CORE workspace shape. T6.1-1's sweep workspace and
+// T6.1-3's later arms stage it in workspaces created after the body's first
+// invocation, so it is a staged-source record (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.1-1/T6.1-3 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Importless `.mdx` sources: no imports, embeddings, `d` props, or tags
 // (CONF-CORE scope). A.mdx carries a child so `rename` exercises descendant
-// rewriting; B.mdx is the file-form `move` subject.
-const CORE_FILES: Readonly<Record<string, string>> = {
+// rewriting; B.mdx is the file-form `move` subject. Both are staged-source
+// records (module header): the same expressions, wrapped in place, staged
+// under the records' well-formed declaration by every workspace built from
+// the map.
+const CORE_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
-  "specs/A.mdx": [
-    '<S id="a">',
-    "Alpha text.",
-    '<S id="a.k">',
-    "Kid text.",
-    "</S>",
-    "</S>",
-    "",
-  ].join("\n"),
-  "specs/B.mdx": ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+  "specs/A.mdx": stagedMdx(
+    "T6.1-1/T6.1-2/T6.1-3 specs/A.mdx",
+    [
+      '<S id="a">',
+      "Alpha text.",
+      '<S id="a.k">',
+      "Kid text.",
+      "</S>",
+      "</S>",
+      "",
+    ].join("\n"),
+  ),
+  "specs/B.mdx": stagedMdx(
+    "T6.1-1/T6.1-2/T6.1-3 specs/B.mdx",
+    ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+  ),
 };
 
 const JOURNAL_PATH = ".xspec/journal";
@@ -93,6 +188,32 @@ async function withCoreWorkspace<T>(
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * Stage T6.1-1's sweep workspace: the same files plus a git baseline commit
+ * holding the configuration and sources exactly as staged, so `impact --base
+ * HEAD` resolves (SPEC 6.3). The commit precedes `build`, so the ref holds
+ * no derived file and no journal — a journal absent at the ref is the empty
+ * journal, a prefix of every journal, and the current entries replay onto
+ * the baseline identities (6.3).
+ */
+async function withSweepWorkspace<T>(
+  body: (workspace: TestWorkspace) => Promise<T>,
+): Promise<T> {
+  const workspace = await TestWorkspace.create({ files: CORE_FILES });
+  try {
+    await workspace.gitInit();
+    await workspace.gitCommitAll("baseline");
+    return await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** Snapshot exclusion pruning the top-level `.git` subtree. */
+function excludeGitDir(relPathBytes: Uint8Array): boolean {
+  return Buffer.from(relPathBytes).toString("latin1") === ".git";
 }
 
 /**
@@ -133,9 +254,11 @@ function journalLineCount(bytes: Uint8Array): number {
  * Assert one journaled operation appended exactly one line-oriented entry
  * and rewrote nothing above it: the prior bytes are a strict byte prefix of
  * the new bytes, and the journal now holds exactly `operationCount` lines
- * (SPEC 6.1; T6.1-1).
+ * (SPEC 6.1; T6.1-1). Exported for T13.4-5's identity arm
+ * (section-13.4.ts), whose `rename` and `move` are journaled as T6.1-1
+ * asserts.
  */
-function assertJournalAppend(
+export function assertJournalAppend(
   before: Uint8Array,
   after: Uint8Array,
   operationCount: number,
@@ -166,11 +289,55 @@ function assertJournalAppend(
   }
 }
 
+/** The entries of a snapshot whose keys satisfy `keep`. */
+function filteredEntries(
+  entries: ReadonlyMap<string, SnapshotEntry>,
+  keep: (key: string) => boolean,
+): Map<string, SnapshotEntry> {
+  const kept = new Map<string, SnapshotEntry>();
+  for (const [key, entry] of entries) {
+    if (keep(key)) kept.set(key, entry);
+  }
+  return kept;
+}
+
 /**
- * Byte-compare the journal around one command (T6.1-1 "never modify it"):
- * read it, run the command asserting the exact exit code (H-5), read it
- * again, assert byte identity — a deleted or replaced journal fails via
- * `readJournal`'s plain-file check.
+ * View a filtered entry map of `source` as a snapshot for
+ * `assertSnapshotsEqual`: `source`'s root, real root, and acquisition mark
+ * carried over, so the compare is classified as `source`'s (H-6,
+ * helpers/snapshot.ts `lockPathExclusion`).
+ */
+function asSnapshot(
+  source: DirectorySnapshot,
+  entries: ReadonlyMap<string, SnapshotEntry>,
+): DirectorySnapshot {
+  return { ...source, entries };
+}
+
+/** A workspace snapshot viewed as its journal entry alone. */
+function journalView(snapshot: DirectorySnapshot): DirectorySnapshot {
+  return asSnapshot(
+    snapshot,
+    filteredEntries(snapshot.entries, (key) => key === JOURNAL_PATH),
+  );
+}
+
+/**
+ * Byte-compare the journal around one command (T6.1-1 "never modify it")
+ * through the compare-around-command machinery of helpers/snapshot.ts — the
+ * `snapshotDirectory` and `assertSnapshotsEqual` pair, whose capture and
+ * per-entry compare (`describeEntryDifference`) VIOL-CORE-CHATTYREADS
+ * certifies over the same journal on T13.5-4's held-state comparison
+ * (CERTIFICATIONS.md, its Note and the Exclusions bullet for T6.1-1). The
+ * premise first: the journal goes in as a plain file (`readJournal`'s
+ * check), so the compare never passes vacuously over an absent journal.
+ * Then the workspace root is snapshotted, the command runs with its exact
+ * exit code asserted (H-5), the root is snapshotted again, and both
+ * snapshots, viewed as the journal entry alone, are compared — the first
+ * assertion to meet any change to the journal: an append or a rewrite
+ * (`file bytes differ`), a deletion (`removed`), a replacement by another
+ * kind (`kind changed`). Returns the run so the caller can decode its
+ * answer.
  */
 async function assertLeavesJournalUnchanged(
   product: ProductBinding,
@@ -178,30 +345,26 @@ async function assertLeavesJournalUnchanged(
   argv: readonly string[],
   exitCode: number,
   context: string,
-): Promise<void> {
+): Promise<RunResult> {
   const command = argv.join(" ");
-  const before = await readJournal(
-    workspace,
-    `${context}: before \`${command}\``,
-  );
-  await expectExit(
+  await readJournal(workspace, `${context}: before \`${command}\``);
+  const before = await snapshotDirectory(workspace.root);
+  const result = await expectExit(
     product,
     workspace,
     argv,
     exitCode,
     `${context}: \`${command}\``,
   );
-  const after = await readJournal(
-    workspace,
-    `${context}: after \`${command}\``,
-  );
-  assertBytesEqual(
-    after,
-    before,
+  const after = await snapshotDirectory(workspace.root);
+  assertSnapshotsEqual(
+    journalView(before),
+    journalView(after),
     `${context}: \`${command}\` must never modify the journal — it is ` +
       `written only by \`rename\` and \`move\` (byte-compare around the ` +
       `command; SPEC 6.1, 13.4)`,
   );
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,9 +374,50 @@ async function assertLeavesJournalUnchanged(
 const T6_1_1 = defineProductTest({
   id: "T6.1-1",
   title:
-    "no journal exists after `build` in a fresh workspace; the file appears at .xspec/journal with the first rename/move; each subsequent operation appends exactly one line-oriented entry and rewrites nothing above it (byte-prefix asserted); build, check, coverage, impact, review, query never modify it (byte-compare around each) (SPEC 6.1, 13.4)",
+    "no journal exists after `build` in a fresh workspace; the file appears at .xspec/journal with the first rename/move; each subsequent operation appends exactly one line-oriented entry and rewrites nothing above it (byte-prefix asserted); every other command surface — build, check, ids, show, coverage, impact, review (reads and create/split/resolve alike), query, occurrences, view, at, inventory, version, and rename/move --preview — never modifies it (byte-compare around each on the journal-bearing workspace; the previews leave the whole workspace byte-identical); and a journal deleted after a journaled operation stays absent across `build` — never regenerated (SPEC 6.1, 6.6, 13.4)",
   run: async (product) => {
+    // The deleted-journal arm (module header): its own fresh workspace,
+    // before the sweep workspace, so a product failing the sweep still
+    // meets it.
     await withCoreWorkspace(async (workspace) => {
+      const context = "T6.1-1 deleted-journal arm";
+      await buildOk(
+        product,
+        workspace,
+        `${context}: \`build\` in a fresh workspace`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["rename", "specs/A.mdx", "a", "a2"],
+        0,
+        `${context}: \`rename specs/A.mdx a a2\` — the journal comes into ` +
+          `existence with the first journaled operation (SPEC 6.1)`,
+      );
+      // The positive at the same path, bracing the absence check below: the
+      // journal stands as a plain file at .xspec/journal before it is
+      // deleted.
+      await readJournal(workspace, `${context}: after the rename`);
+      await fsp.rm(workspace.path(JOURNAL_PATH));
+      await buildOk(
+        product,
+        workspace,
+        `${context}: \`build\` after deleting the journal (SPEC 12.1, 6.1)`,
+      );
+      const kindAfterDeletion = await workspace.kind(JOURNAL_PATH);
+      if (kindAfterDeletion !== "absent") {
+        fail(
+          `${context}: the deleted journal must stay absent across ` +
+            `\`build\` — the journal is written only by \`rename\` and ` +
+            `\`move\`, the file coming into existence with a journaled ` +
+            `operation (SPEC 6.1), and as a durable record it cannot be ` +
+            `regenerated from source and is never regenerated (SPEC 13.4); ` +
+            `found ${kindAfterDeletion} at ${JOURNAL_PATH}`,
+        );
+      }
+    });
+
+    await withSweepWorkspace(async (workspace) => {
       // Fresh workspace: `build` succeeds and creates no journal.
       await buildOk(
         product,
@@ -292,37 +496,145 @@ const T6_1_1 = defineProductTest({
         "T6.1-1",
       );
 
-      // `build`, `check`, `coverage`, `impact`, `review`, `query` never
-      // modify the journal — byte-compare around each, with the journal
-      // present and non-empty so an append or truncation is visible. Exit
-      // codes (H-5): `build` 0 (the workspace is valid); `check` 0 (rename
-      // and move finish by regenerating derived files exactly as `build`
-      // does, SPEC 6.4/6.5, and the product-written journal is well-formed);
-      // `coverage` 0 reporting zero profiles (no `coverage` key, SPEC 7.4);
-      // `impact --base HEAD` 2 — the git-less workspace makes the baseline
-      // unreadable, a usage error (SPEC 6.3, 12.0), and even the refused
-      // invocation must leave the journal untouched; `review list` 0 (a read
-      // subcommand, informational with no sessions, SPEC 12.0); `query
-      // nodes` 0.
-      const readArms: readonly {
-        readonly argv: readonly string[];
-        readonly exitCode: number;
-      }[] = [
-        { argv: ["build"], exitCode: 0 },
-        { argv: ["check"], exitCode: 0 },
-        { argv: ["coverage"], exitCode: 0 },
-        { argv: ["impact", "--base", "HEAD"], exitCode: 2 },
-        { argv: ["review", "list"], exitCode: 0 },
-        { argv: ["query", "nodes"], exitCode: 0 },
-      ];
-      for (const arm of readArms) {
+      // Every other command surface never modifies the journal (SPEC 6.1
+      // "written only by rename and move"; 13.4): byte-compare it around
+      // each invocation through the snapshot compare
+      // (`assertLeavesJournalUnchanged`: the workspace root snapshotted
+      // before and after, both viewed as the journal entry alone), with the
+      // journal present as a plain, non-empty file so an append, a
+      // truncation, a deletion, or a replacement is visible. Exit codes
+      // (H-5) are all 0: the workspace is valid; `check` finds nothing
+      // (rename and move finish by regenerating derived files exactly as
+      // `build` does, SPEC 6.4/6.5, and the product-written journal is
+      // well-formed); `coverage` reports zero profiles (no `coverage` key,
+      // 7.4); `impact --base HEAD` resolves against the staged baseline
+      // commit, the current journal replaying onto it (6.3); the `review`
+      // subcommands drive an `audit` session (10.6, 10.7); the 11 surfaces
+      // answer complete, finding-free documents; `version` is
+      // workspace-independent (12.6); and each preview succeeds exactly as
+      // its real operation would (6.6). Answers are decoded form-exactly
+      // through the adapters (H-3) — no value assertion is this test's
+      // business beyond a normal completion.
+      const sweepContext = "T6.1-1 never-modifies sweep";
+      const sweep = async (
+        argv: readonly string[],
+        exitCode: number,
+      ): Promise<RunResult> =>
         await assertLeavesJournalUnchanged(
           product,
           workspace,
-          arm.argv,
-          arm.exitCode,
-          "T6.1-1 read sweep",
+          argv,
+          exitCode,
+          sweepContext,
         );
+      const sweepJson = async <T>(
+        argv: readonly string[],
+        decode: (doc: unknown, context: string) => T,
+      ): Promise<T> => {
+        const context = `${sweepContext}: \`${argv.join(" ")}\` answer`;
+        return decode(parseJsonStdout(await sweep(argv, 0), context), context);
+      };
+
+      await sweep(["build"], 0);
+      await sweep(["check"], 0);
+      await sweepJson(["ids", "--json"], decodeIdsReport);
+      await sweep(["show", "specs/A.mdx#a3"], 0);
+      await sweepJson(["coverage", "--json"], decodeCoverageReport);
+      await sweepJson(
+        ["impact", "--base", "HEAD", "--json"],
+        decodeImpactReport,
+      );
+
+      // `review`: `create` under the audit strategy — one subtree-coherence
+      // item per requirement node, leaves unblocked (10.6) — then the reads,
+      // a `split` of `a3`'s item (its scope root has the child `a3.k`), and a
+      // `resolve` of the first unblocked item `next` reports (10.7).
+      await sweep(
+        ["review", "create", "--strategy", "audit", "--name", "s"],
+        0,
+      );
+      await sweepJson(["review", "list", "--json"], decodeSessionListReport);
+      const status = await sweepJson(
+        ["review", "status", "s", "--json"],
+        decodeSessionStatusReport,
+      );
+      const splitRow = status.items.find(
+        (row) =>
+          row.kind === "subtree-coherence" && row.scope === "specs/A.mdx#a3",
+      );
+      if (splitRow === undefined) {
+        fail(
+          `${sweepContext}: the audit session must hold a subtree-coherence ` +
+            `item scoped to specs/A.mdx#a3 — one item per requirement node ` +
+            `(SPEC 10.6); \`review status s --json\` listed ` +
+            `${String(status.items.length)} item(s)`,
+        );
+      }
+      await sweepJson(["review", "next", "s", "--json"], decodeNextReport);
+      await sweep(["review", "split", "s", splitRow.id], 0);
+      const next = await sweepJson(
+        ["review", "next", "s", "--json"],
+        decodeNextReport,
+      );
+      if (next.item === undefined) {
+        fail(
+          `${sweepContext}: \`review next s --json\` must report an ` +
+            `unblocked needing-review item — the leaf items of an audit ` +
+            `session are unblocked and unresolved (SPEC 10.6, 10.7); the ` +
+            `session reports itself fully resolved`,
+        );
+      }
+      await sweep(
+        ["review", "resolve", "s", next.item.id, "--status", "updated"],
+        0,
+      );
+      await sweepJson(
+        ["review", "show", "s", next.item.id, "--json"],
+        decodeItemReport,
+      );
+      await sweepJson(["review", "export", "s"], decodeExportReport);
+
+      await sweepJson(["query", "nodes"], decodeNodeRowsReport);
+      await sweepJson(["occurrences"], decodeOccurrencesReport);
+      await sweepJson(["view"], (doc, context) =>
+        decodeViewReport(doc, { text: false }, context),
+      );
+      await sweepJson(["at", "specs/A.mdx", "0"], decodeAtReport);
+      await sweepJson(["inventory"], decodeInventoryDocument);
+      await sweepJson(["version"], decodeVersionDocument);
+
+      // Previews modify nothing at all (SPEC 6.6: no sources, no journal, no
+      // derived files, no graph data): beyond the journal compare — the
+      // sweep's own, made inside the outer one, so it meets a journal change
+      // first — the whole workspace tree (the git directory aside — a
+      // preview reads no git) is byte-compared around each. `rename`, the
+      // file form of `move`, and the section form — every operation with a
+      // preview.
+      const previewArms: readonly (readonly string[])[] = [
+        ["rename", "specs/A.mdx", "a3", "a4", "--preview"],
+        ["rename", "specs/A.mdx", "a3", "a4", "--preview", "--json"],
+        ["move", "specs/Bmoved.mdx", "specs/B.mdx", "--preview", "--json"],
+        [
+          "move",
+          "specs/A.mdx#a3.k",
+          "specs/Bmoved.mdx#b.k",
+          "--preview",
+          "--json",
+        ],
+      ];
+      for (const argv of previewArms) {
+        const command = argv.join(" ");
+        const result = await assertLeavesUnchanged(
+          workspace.root,
+          () => sweep(argv, 0),
+          `T6.1-1 preview sweep: \`${command}\` must modify nothing — no ` +
+            `sources, no journal, no derived files, no graph data (SPEC 6.6)`,
+          { exclude: excludeGitDir },
+        );
+        if (argv.includes("--json")) {
+          const context = `T6.1-1 preview sweep: \`${command}\` answer`;
+          decodePreviewReport(parseJsonStdout(result, context), context);
+        }
       }
     });
   },
@@ -407,7 +719,7 @@ const T6_1_2 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T6.1-3 — integrity (14.13 at `check`)
+// T6.1-3 — integrity (14.13 at `check`, `build`, and a gated `ids`)
 // ---------------------------------------------------------------------------
 
 // Deliberately structureless bytes no conforming entry format accepts — the
@@ -417,66 +729,125 @@ const T6_1_2 = defineProductTest({
 const GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 
 /**
- * `check --json` over a workspace staged with a journal error: exit 1 with
- * at least one condition-14.13 finding (SPEC 12.2, 14.13). Other findings are
- * tolerated — whether the journal error masks or cascades into further
- * findings is not pinned here. Returns the 14.13 findings.
+ * The three commands T6.1-3 drives over each journal-error staging, in its
+ * TEST-SPEC order, each under `--json`: `check` (SPEC 12.2: every build
+ * validation, journal errors included), `build` (SPEC 14: each condition is
+ * reported by `build` and `check` unless its entry states otherwise, and
+ * 14.13's states nothing), and the gated read `ids` (SPEC 13.3: on a
+ * workspace failing `build`'s validations, journal errors included, the
+ * gate reports exactly the findings a `build` would now report, and the
+ * read exits 1 without answering). Every report is the 12.7 findings-only
+ * document, `ids`' too — a refusing read's findings are its whole report
+ * (SPEC 12.7, 13.3) — so an `ids` answer beside the findings fails the
+ * form-exact decode.
  */
-async function checkReportsJournalError(
+const JOURNAL_ERROR_COMMANDS: readonly (readonly string[])[] = [
+  ["check", "--json"],
+  ["build", "--json"],
+  ["ids", "--json"],
+];
+
+/**
+ * One command's report over a workspace staged with a journal error and no
+ * other defect: exit 1 (SPEC 12.0: findings), and as its entire stdout the
+ * 12.7 findings-only document, decoded form-exact (H-3;
+ * `runFindingsReport`), holding exactly one finding, the journal error
+ * (`{ "14.13": 1 }` over the pinned token table, so its code is exactly
+ * `journal-error`). Nothing else is reportable there: the sources and the
+ * configuration are valid, so the journal error is the one validation
+ * `build` fails (SPEC 12.1, 14), and `check`'s staleness stays silent — on
+ * a workspace failing `build`'s validations 14.10's mismatch forms are
+ * undetectable, and the record, readable and listing only paths still
+ * generated, raises neither of the forms reported whatever the sources'
+ * validity (SPEC 14.10) — so a phantom finding beside it, or the one error
+ * reported twice, fails (SPEC 14: each present condition is reported; the
+ * gate's one finding is T13.3-3's reading too). The finding is asserted
+ * form-exact (TEST-SPEC T6.1-3; SPEC 12.7): `code` `"journal-error"`,
+ * `path` exactly `".xspec/journal"` — 14.13's concerned path is the journal
+ * path, and the workspace has one journal (SPEC 6.1) — and `locations`
+ * `[]`: a journal condition has no in-source location (SPEC 14), so a
+ * product reporting the bad line as a location in `.xspec/journal` with
+ * `path` `null` fails. Returns the finding.
+ */
+async function assertReportsJournalError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<Finding> {
+  const label = `${context}: \`${argv.join(" ")}\``;
+  const findings = await runFindingsReport(
+    product,
+    workspace,
+    argv,
+    1,
+    `${label} — a journal error is a finding at \`check\`, at \`build\`, ` +
+      `and at the gate of \`ids\`, which answers nothing: exit 1, the ` +
+      `findings-only report as the entire stdout (SPEC 12.0, 12.7, 13.3, ` +
+      `14.13)`,
+  );
+  assertConditionCounts(
+    findings,
+    { "14.13": 1 },
+    `${label} — exactly the staged journal error, the workspace's one ` +
+      `defect, is reported (SPEC 14, 14.13, 13.3)`,
+  );
+  const finding = findings[0] as Finding;
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    { code: "journal-error", path: JOURNAL_PATH, locations: [] },
+    `${label} — the journal error's finding, form-exact: code ` +
+      `"journal-error", the journal path ".xspec/journal" as its concerned ` +
+      `path, and empty locations — a journal condition has no in-source ` +
+      `location, so the line is named, never located (SPEC 12.7, 14, ` +
+      `14.13); its message: ${JSON.stringify(finding.message)}`,
+  );
+  return finding;
+}
+
+/**
+ * T6.1-3's three commands over one staged journal error, one after another
+ * on the same workspace — a conforming run of each modifies nothing (SPEC
+ * 12.1: a failing `build`; 13.3: the gate; 12.2: `check` reports, never
+ * refreshes), so each meets the same staged state — each report asserted by
+ * `assertReportsJournalError`; `verifyFinding`, where given, asks each
+ * command's finding more (the garbage-line arm: the line named).
+ */
+async function assertJournalErrorAtEachCommand(
   product: ProductBinding,
   workspace: TestWorkspace,
   context: string,
-): Promise<readonly Finding[]> {
-  const label = `${context}: \`check --json\``;
-  const result = await expectExit(
-    product,
-    workspace,
-    ["check", "--json"],
-    1,
-    label,
-  );
-  const findings = decodeFindingsReport(
-    parseJsonStdout(result, label),
-    label,
-  ).findings;
-  const journalFindings = findings.filter(
-    (finding) => finding.condition === "14.13",
-  );
-  if (journalFindings.length === 0) {
-    fail(
-      `${context}: \`check\` must report the journal error with condition ` +
-        `14.13 (SPEC 12.2, 13.4, 14.13); reported conditions: ` +
-        `${JSON.stringify(findings.map((finding) => finding.condition))}`,
+  verifyFinding?: (finding: Finding, label: string) => void,
+): Promise<void> {
+  for (const argv of JOURNAL_ERROR_COMMANDS) {
+    const finding = await assertReportsJournalError(
+      product,
+      workspace,
+      argv,
+      context,
     );
+    verifyFinding?.(finding, `${context}: \`${argv.join(" ")}\``);
   }
-  return journalFindings;
 }
 
 /**
  * Does a 14.13 finding name the garbage line (line 2)? Accepted forms (H-4
- * operationalization, see the module header): a location within the garbage
- * line's byte window in `.xspec/journal`; the message echoing the garbage
- * line; or the message citing line/entry 2.
+ * operationalization, see the module header): the message echoing the
+ * garbage line or citing line/entry 2. A journal condition carries the
+ * journal path it concerns and no in-source location (SPEC 14, 12.7) —
+ * `assertReportsJournalError` asserts both — so the line is named in the
+ * message alone.
  */
-function findingNamesGarbageLine(
-  finding: Finding,
-  window: { readonly start: number; readonly end: number },
-): boolean {
+function findingNamesGarbageLine(finding: Finding): boolean {
   if (finding.message.includes(GARBAGE_LINE)) return true;
   if (/\b(?:line|entry)\s*#?\s*2\b/i.test(finding.message)) return true;
-  if (finding.message.includes("journal:2")) return true;
-  return (
-    finding.location !== undefined &&
-    (finding.file === undefined || finding.file === JOURNAL_PATH) &&
-    finding.location.start >= window.start &&
-    finding.location.end <= window.end + 1
-  );
+  return finding.message.includes("journal:2");
 }
 
 const T6_1_3 = defineProductTest({
   id: "T6.1-3",
   title:
-    "`check` reports a malformed journal (garbage line) with 14.13, naming the line, and reports a journal path occupied by a directory or by a symbolic link as a journal error 14.13 (SPEC 6.1, 12.2, 13.4, 14.13)",
+    "`check`, `build`, and a gated `ids` (answering nothing) each report a malformed journal (garbage line) with 14.13, naming the line, and a journal path occupied by a directory or by a symbolic link as a journal error 14.13 — each exit 1 with exactly that one finding, form-exact: code `journal-error`, path `.xspec/journal`, locations [] (SPEC 6.1, 12.1, 12.2, 12.7, 13.3, 13.4, 14.13)",
   run: async (product) => {
     // --- Garbage line: one legitimate entry, then harness-appended garbage
     // on line 2 ---
@@ -505,7 +876,6 @@ const T6_1_3 = defineProductTest({
       // whole-line append under either line convention.
       const needsTerminator =
         legitimate.length > 0 && legitimate[legitimate.length - 1] !== LF;
-      const garbageStart = legitimate.length + (needsTerminator ? 1 : 0);
       const tampered = Buffer.concat([
         legitimate,
         Buffer.from(
@@ -514,29 +884,23 @@ const T6_1_3 = defineProductTest({
         ),
       ]);
       await workspace.file(JOURNAL_PATH, tampered);
-      const window = {
-        start: garbageStart,
-        end: garbageStart + Buffer.byteLength(GARBAGE_LINE, "utf8"),
-      };
 
-      const journalFindings = await checkReportsJournalError(
+      await assertJournalErrorAtEachCommand(
         product,
         workspace,
         context,
+        (finding, label) => {
+          if (!findingNamesGarbageLine(finding)) {
+            fail(
+              `${label}: the 14.13 finding must name the malformed line — ` +
+                `the garbage on line 2 (SPEC 14.13 "naming the lines") — ` +
+                `in its message, a journal condition having no in-source ` +
+                `location (SPEC 14, 12.7): the garbage line's text or a ` +
+                `line/entry-2 citation; got ${JSON.stringify(finding)}`,
+            );
+          }
+        },
       );
-      if (
-        !journalFindings.some((finding) =>
-          findingNamesGarbageLine(finding, window),
-        )
-      ) {
-        fail(
-          `${context}: the 14.13 finding must name the malformed line — the ` +
-            `garbage on line 2 (SPEC 14.13 "naming the lines"): a location ` +
-            `within bytes [${String(window.start)}, ${String(window.end)}] of ` +
-            `${JOURNAL_PATH}, the garbage line's text, or a line/entry-2 ` +
-            `citation; got ${JSON.stringify(journalFindings)}`,
-        );
-      }
     });
 
     // --- Journal path occupied by a directory ---
@@ -548,14 +912,19 @@ const T6_1_3 = defineProductTest({
         `${context}: \`build\` before occupying the journal path`,
       );
       await workspace.dir(JOURNAL_PATH);
-      await checkReportsJournalError(product, workspace, context);
+      await assertJournalErrorAtEachCommand(product, workspace, context);
     });
 
     // --- Journal path occupied by a symbolic link ---
     // The link resolves to an empty plain file — an empty journal is a valid
     // journal, so a product that follows the link instead of treating the
     // occupied path as a journal error (13.4: never read through it) sees
-    // nothing wrong and fails this arm.
+    // nothing wrong and fails this arm. The target lies at the workspace
+    // root, outside the graph-data area `.xspec/` — whose layout is
+    // unenumerated (SPEC 13.3), so nothing staged inside it could be told
+    // apart from graph data — and matches no configured group, so nothing
+    // discovers it (SPEC 7): the journal error stays the workspace's one
+    // defect.
     await withCoreWorkspace(async (workspace) => {
       const context = "T6.1-3 symlink-occupant arm";
       await buildOk(
@@ -563,9 +932,9 @@ const T6_1_3 = defineProductTest({
         workspace,
         `${context}: \`build\` before occupying the journal path`,
       );
-      await workspace.file(".xspec/journal-target", "");
-      await workspace.symlink(JOURNAL_PATH, "journal-target");
-      await checkReportsJournalError(product, workspace, context);
+      await workspace.file("journal-target", "");
+      await workspace.symlink(JOURNAL_PATH, "../journal-target");
+      await assertJournalErrorAtEachCommand(product, workspace, context);
     });
   },
 });

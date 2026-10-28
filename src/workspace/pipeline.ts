@@ -23,8 +23,22 @@
 //   file contributes its single 14.20 finding and nothing else, and
 //   references into it report as unresolved (14.5–14.7) during graph
 //   resolution;
-// - invalid source paths (14.19) make the file no source: it is skipped with
-//   its finding.
+// - a discovered file whose own path is invalid (14.19) is no source of the
+//   graph — no identity of it is defined (SPEC 11.2) — but it keeps its
+//   parse-local structure: it is parsed and per-file validated beside its
+//   14.19 finding, its references resolved on their own terms (the graph
+//   reports their 14.5–14.7), and its analysis carried separately
+//   (`invalidPathSpecs`/`invalidPathCode`) for the surfaces of 11.3–11.5;
+// - a discovered source found absent when its content is read — removed or
+//   relocated since discovery (13.5) — reads as undiscovered, as though
+//   discovery had not yielded it (SPEC 14.25): the filesystem analysis
+//   reads every discovered source's content before analyzing and analyzes
+//   the classification made without the vanished files
+//   (`readDiscoveredSources`), so every surface answers as on the
+//   workspace without them — their import designations, group
+//   memberships, findings, emit-destination exclusions, and operand
+//   membership alike — while a content read the environment refuses stays
+//   the file's 14.20 at offset 0 (SPEC 14.25).
 //
 // The journal is loaded here because it is a validation subject (14.13) and
 // a hash input (SPEC 5.4, 5.5): a workspace whose journal is malformed fails
@@ -32,14 +46,22 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { Buffer } from "node:buffer";
 import { compareBytes } from "../core/bytes.js";
 import type { CodeAnalysis } from "../core/code-analysis.js";
 import { analyzeCodeSource } from "../core/code-analysis.js";
 import type { Configuration } from "../core/config.js";
 import type { SourceClassification } from "../core/discovery.js";
-import { markdownEmitDestinations } from "../core/discovery.js";
+import {
+  classifyWithout,
+  markdownEmitDestinations,
+} from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
-import { conditionExitClass } from "../core/findings.js";
+import {
+  codeExitClass,
+  locatedFinding,
+  orderFindings,
+} from "../core/findings.js";
 import { configurationToStored } from "../core/config-data.js";
 import type { StoredInputs } from "../core/graph-data.js";
 import type { SpecFileAnalysis } from "../core/graph.js";
@@ -49,13 +71,21 @@ import type { NodeHashes } from "../core/hashes.js";
 import { computeWorkspaceHashes } from "../core/hashes.js";
 import { Journal } from "../core/journal.js";
 import { parseSpecSource } from "../core/mdx.js";
+import type { PathText } from "../core/path-text.js";
+import { pathTextKey, pathTextOf, renderPathText } from "../core/path-text.js";
 import {
   analyzeSpecImports,
   analyzeSpecReferences,
+  SpecSourceDomain,
 } from "../core/spec-references.js";
+import { propagateWhileRerunPossible } from "../core/stack-exhaustion.js";
 import { WorkspaceTextModel } from "../core/text-model.js";
 import type { LoadedWorkspace } from "./config.js";
 import { discoverSources } from "./discovery.js";
+import {
+  isAbsenceFailure,
+  isFilesystemFailure,
+} from "./environment-refusal.js";
 import type { LoadedJournal } from "./journal.js";
 import { loadJournal } from "./journal.js";
 
@@ -68,6 +98,19 @@ export interface WorkspaceAnalysis {
   readonly specs: readonly SpecFileAnalysis[];
   /** The parseable code sources' analyses, byte-ordered by path. */
   readonly code: readonly CodeAnalysis[];
+  /**
+   * Per-file analyses of parseable discovered sources whose own paths are
+   * invalid (SPEC 14.19), byte-ordered by path — structure is parse-local
+   * (SPEC 11.2), so these files are parsed and validated like any other
+   * while no identity of theirs is defined: they feed no graph nodes, no
+   * hashes, no journal or derived-file interaction, and no recorded
+   * inputs (their 14.19 findings gate every write, SPEC 12.1). Each
+   * `document.file` / `analysis.file` carries the real path; `path` is a
+   * never-rendered stand-in (core/mdx.ts, core/code-analysis.ts).
+   */
+  readonly invalidPathSpecs: readonly SpecFileAnalysis[];
+  /** The code-source counterpart of `invalidPathSpecs`. */
+  readonly invalidPathCode: readonly CodeAnalysis[];
   readonly graph: WorkspaceGraph;
   readonly textModel: WorkspaceTextModel;
   /** SPEC 5.5: the four hashes of every requirement node. */
@@ -77,9 +120,21 @@ export interface WorkspaceAnalysis {
    * SHA-256 (hex) of each discovered source's exact bytes as analyzed —
    * the graph data's recorded derivation inputs (SPEC 13.3;
    * core/graph-data.ts). Unreadable sources have no entry (their 14.20
-   * finding fails validation before any store write).
+   * finding fails validation before any store write), and neither do
+   * invalid-path sources (SPEC 14.19: the finding gates every write, and
+   * recorded state never concerns such a file).
    */
   readonly sourceHashes: ReadonlyMap<string, string>;
+  /**
+   * The byte length of each discovered source whose content this analysis
+   * read — spec, code, and invalid-path sources alike, parseable or not —
+   * keyed by `pathTextKey` of its path; a source whose content the
+   * environment refused has none. `at`'s offset bound (SPEC 11.5) is
+   * judged on the bytes analyzed, never on a second read, so one answer
+   * never mixes a file's state at the analysis with a later one (SPEC
+   * 14.25: a source found absent at a read reads as undiscovered).
+   */
+  readonly sourceByteLengths: ReadonlyMap<string, number>;
   /**
    * Every exit-1 validation finding (SPEC 14), deterministically ordered
    * (file bytes, location, condition — SPEC 12.0). Empty exactly when the
@@ -101,18 +156,19 @@ function absoluteOf(root: string, rel: string): string {
 }
 
 /**
- * SPEC 14: deterministic report order — by file (byte order), then location,
- * then condition number. The sort is stable, so equal keys keep their
- * collection order (which is already document order within a file).
+ * Why a discovered source's content could not be read: the environment
+ * refused to deliver it — permission denied, an I/O error, any other
+ * failure the filesystem reports for the read (SPEC 14.25) — `reason`
+ * naming it by its error code (`EACCES`, `EIO`, …), never the filesystem's
+ * own message, which carries absolute paths (SPEC 12.0). An unparseable
+ * source at offset 0, the file masked exactly as one that fails to parse
+ * (SPEC 14.20, 14.25), whose finding names the correction (SPEC 14:
+ * actionable errors). A source found absent when its content is read is
+ * never this: it reads as undiscovered (SPEC 14.25; `readDiscoveredSources`).
  */
-function orderFindings(findings: readonly Finding[]): Finding[] {
-  return [...findings].sort(
-    (a, b) =>
-      compareBytes(a.file ?? "", b.file ?? "") ||
-      (a.range?.start ?? -1) - (b.range?.start ?? -1) ||
-      (a.range?.end ?? -1) - (b.range?.end ?? -1) ||
-      a.condition - b.condition,
-  );
+export interface SourceReadFailure {
+  readonly unread: "refused";
+  readonly reason: string;
 }
 
 /**
@@ -125,10 +181,23 @@ function orderFindings(findings: readonly Finding[]): Finding[] {
 export interface WorkspaceContent {
   readonly classification: SourceClassification;
   /**
-   * Read one discovered source's exact bytes; null when the content cannot
-   * be read (reported as an unparseable source, SPEC 14.20).
+   * Read one discovered source's exact bytes; a `SourceReadFailure` when
+   * the environment refuses to deliver them (reported as an unparseable
+   * source, SPEC 14.20, 14.25). Every source the classification lists is
+   * present to its reader: the filesystem analysis has dropped those found
+   * absent before analyzing (`readDiscoveredSources`, SPEC 14.25).
    */
-  readonly readSource: (rel: string) => Promise<Uint8Array | null>;
+  readonly readSource: (rel: string) => Promise<Uint8Array | SourceReadFailure>;
+  /**
+   * Read one invalid-path discovered source's exact bytes (SPEC 14.19),
+   * addressed by its exact path bytes — such a path may have no plain
+   * string form (SPEC 12.0). A `SourceReadFailure` when the environment
+   * refuses to deliver them (SPEC 14.20, 14.25). Called only for
+   * `classification.invalidSources` entries.
+   */
+  readonly readInvalidSource: (
+    bytes: Uint8Array,
+  ) => Promise<Uint8Array | SourceReadFailure>;
   /**
    * Load the journal (SPEC 6.1). Called only when analysis proceeds past
    * configuration errors — those precede all source analysis (SPEC 14).
@@ -137,22 +206,176 @@ export interface WorkspaceContent {
 }
 
 /**
- * Analyze the workspace (see the module header): discover, parse, and
- * validate every configured source, load the journal, assemble the graph,
- * and compute the text model and hashes. Total over invalid workspaces —
- * every condition arrives as data in `findings`/`configurationErrors`, and
- * only I/O failures throw.
+ * Discover the workspace's sources (SPEC 7): the classification every
+ * analysis of the filesystem workspace starts from. A listing or kind read
+ * the environment refuses stops the command here, thrown from the walk as
+ * its read failure (SPEC 14.25); a discovery-level configuration error is
+ * carried as data (`discoveryConfigurationErrors`). A mutating command
+ * discovers before acquiring exclusivity and again holding it, and hands
+ * the second classification to `analyzeWorkspace`; a preview discovers
+ * once (SPEC 13.5, 6.6; cli/commands/mutation.ts).
+ */
+export function discoverWorkspace(
+  workspace: LoadedWorkspace,
+): Promise<SourceClassification> {
+  return discoverSources(
+    workspace.root,
+    workspace.configuration,
+    workspace.rootAnchor,
+  );
+}
+
+/**
+ * A classification's discovery-level configuration errors (SPEC 7.2 →
+ * 14.14: a file matched by both a spec and a code group) — usage class
+ * (exit 2, SPEC 12.0), preceding all source analysis (SPEC 14).
+ */
+export function discoveryConfigurationErrors(
+  classification: SourceClassification,
+): readonly Finding[] {
+  return classification.findings.filter(
+    (finding) => codeExitClass(finding.code) === 2,
+  );
+}
+
+/**
+ * Analyze the workspace (see the module header): discover, read every
+ * discovered source's content, then parse and validate every source, load
+ * the journal, assemble the graph, and compute the text model and hashes.
+ * Total over invalid workspaces — every condition arrives as data in
+ * `findings`/`configurationErrors`, and only I/O failures throw.
+ * `discovered`, when given, is this workspace's classification from
+ * `discoverWorkspace`, made earlier by the caller — a mutating command's
+ * second discovery, made holding exclusivity, or a preview's one discovery
+ * (SPEC 13.5, 6.6): the analysis then reads only the discovered sources'
+ * content and the journal. A source found absent at its content read reads
+ * as undiscovered (SPEC 14.25; `readDiscoveredSources`), so the analysis's
+ * `classification` — the one every operand check and every later reader
+ * consults — may hold fewer sources than the discovery it was handed, and
+ * may meet a configuration error that discovery did not (7.2, 7.3).
  */
 export async function analyzeWorkspace(
   workspace: LoadedWorkspace,
+  discovered?: SourceClassification,
 ): Promise<WorkspaceAnalysis> {
   const { root, configuration } = workspace;
-  const classification = await discoverSources(root, configuration);
+  const { classification, contents } = await readDiscoveredSources(
+    root,
+    configuration,
+    discovered ?? (await discoverWorkspace(workspace)),
+  );
   return analyzeWorkspaceContent(configuration, {
     classification,
-    readSource: (rel) => readSourceBytes(root, rel),
+    readSource: (rel) => Promise.resolve(readContent(contents, rel)),
+    readInvalidSource: (bytes) =>
+      Promise.resolve(readContent(contents, pathTextOf(bytes))),
     loadJournal: () => loadJournal(root),
   });
+}
+
+/**
+ * A discovered source's content as `readDiscoveredSources` read it: its
+ * exact bytes, or the environment's refusal to deliver them (SPEC 14.25 →
+ * 14.20).
+ */
+type SourceContent = Uint8Array | SourceReadFailure;
+
+/** The classification to analyze and its sources' content, read. */
+interface DiscoveredContent {
+  /**
+   * The classification as though discovery had not yielded the sources
+   * found absent at their content reads (SPEC 14.25).
+   */
+  readonly classification: SourceClassification;
+  /** Each listed source's content, keyed by `pathTextKey` of its path. */
+  readonly contents: ReadonlyMap<string, SourceContent>;
+}
+
+/**
+ * Read every discovered source's content — spec, code, and invalid-path
+ * sources alike, each once — before any is analyzed (SPEC 14.25, 13.5). A
+ * discovered source found absent when its content is read, removed or
+ * relocated since discovery, reads as undiscovered, as though discovery
+ * had not yielded it: the classification is made again from discovery's
+ * candidates without it (core/discovery.ts `classifyWithout`), and what
+ * that classification newly yields — a file at a vanished spec source's
+ * emit destination (7.3) — is read in turn, until no read finds a file
+ * absent; each round drops a candidate, so the rounds are bounded. A
+ * classification meeting a configuration error (7.2 → 14.14) is read no
+ * further: that error precedes all source analysis (SPEC 14). A read the
+ * environment refuses is no absence: it stays the file's content,
+ * refused, reported as condition 20 at offset 0 (SPEC 14.25).
+ */
+async function readDiscoveredSources(
+  root: string,
+  configuration: Configuration,
+  discovered: SourceClassification,
+): Promise<DiscoveredContent> {
+  let classification = discovered;
+  const contents = new Map<string, SourceContent>();
+  while (discoveryConfigurationErrors(classification).length === 0) {
+    const absent: Uint8Array[] = [];
+    for (const source of [
+      ...classification.specSources,
+      ...classification.codeSources,
+    ]) {
+      const key = pathTextKey(source.path);
+      if (contents.has(key)) continue;
+      const read = await readSourceBytes(root, source.path);
+      if (read === ABSENT) {
+        absent.push(utf8Encoder.encode(source.path));
+      } else {
+        contents.set(key, read);
+      }
+    }
+    for (const source of classification.invalidSources) {
+      const key = pathTextKey(source.path);
+      if (contents.has(key)) continue;
+      const read = await readInvalidSourceBytes(root, source.bytes);
+      if (read === ABSENT) {
+        absent.push(source.bytes);
+      } else {
+        contents.set(key, read);
+      }
+    }
+    if (absent.length === 0) break;
+    classification = classifyWithout(classification, absent, configuration);
+  }
+  return { classification, contents };
+}
+
+/**
+ * The reader of an in-memory reanalysis — `rename`'s and `move`'s
+ * re-validation of the would-be workspace (SPEC 6.4, 6.5) — asked for a
+ * source it does not hold. Such a reanalysis follows a valid workspace's
+ * analysis, every listed source read and parsed and no invalid-path source
+ * discovered (SPEC 14.19, 14.20 gate both operations), so the miss is a
+ * defect of the product's own.
+ */
+export function unheldSource(path: PathText): never {
+  throw new Error(
+    `xspec internal error: an in-memory reanalysis without the source ` +
+      renderPathText(path),
+  );
+}
+
+/**
+ * One listed source's content from `readDiscoveredSources`' reads — every
+ * source the final classification lists was read there, so a miss is a
+ * defect of the product's own.
+ */
+function readContent(
+  contents: ReadonlyMap<string, SourceContent>,
+  path: PathText,
+): SourceContent {
+  const content = contents.get(pathTextKey(path));
+  if (content === undefined) {
+    throw new Error(
+      `xspec internal error: a discovered source analyzed unread: ` +
+        renderPathText(path),
+    );
+  }
+  return content;
 }
 
 /**
@@ -171,9 +394,7 @@ export async function analyzeWorkspaceContent(
   // SPEC 14/14.14: discovery-level configuration errors are usage-class and
   // precede all source analysis — with one present, no source is parsed and
   // no finding-class condition is reported.
-  const configurationErrors = classification.findings.filter(
-    (finding) => conditionExitClass(finding.condition) === 2,
-  );
+  const configurationErrors = discoveryConfigurationErrors(classification);
   if (configurationErrors.length > 0) {
     const graph = buildWorkspaceGraph({ specs: [], code: [] });
     const textModel = new WorkspaceTextModel(graph.embeddingResolver());
@@ -182,6 +403,8 @@ export async function analyzeWorkspaceContent(
       markdownDestinations: new Set(),
       specs: [],
       code: [],
+      invalidPathSpecs: [],
+      invalidPathCode: [],
       graph,
       textModel,
       hashes: new Map(),
@@ -195,15 +418,25 @@ export async function analyzeWorkspaceContent(
         rawBytes: null,
       },
       sourceHashes: new Map(),
+      sourceByteLengths: new Map(),
       findings: [],
       configurationErrors,
     };
   }
 
   const findings: Finding[] = [...classification.findings];
+  const sourceByteLengths = new Map<string, number>();
 
   const specPaths = new Set(
     classification.specSources.map((source) => source.path),
+  );
+  // SPEC 2.1/7.1: import designation consults the ENTIRE discovered
+  // spec-source set — an import designating a discovered member whose own
+  // path is invalid (SPEC 14.19) is valid, the member's identities all
+  // undefined (SPEC 11.2, 14.5–14.7).
+  const specDomain = new SpecSourceDomain(
+    specPaths,
+    classification.invalidSources.filter((source) => source.kind === "spec"),
   );
   // SPEC 7.3: destinations exist exactly while emission is enabled —
   // classification by configuration alone, whether or not emission has run.
@@ -218,11 +451,12 @@ export async function analyzeWorkspaceContent(
   const specs: SpecFileAnalysis[] = [];
   for (const source of classification.specSources) {
     const bytes = await content.readSource(source.path);
-    if (bytes === null) {
-      findings.push(unreadableSourceFinding(source.path));
+    if (!(bytes instanceof Uint8Array)) {
+      findings.push(unreadableSourceFinding(source.path, bytes));
       continue;
     }
     sourceHashes.set(source.path, sha256Hex(bytes));
+    sourceByteLengths.set(pathTextKey(source.path), bytes.length);
     try {
       const parsed = parseSpecSource(source.path, bytes);
       if (parsed.kind === "unparseable") {
@@ -232,28 +466,37 @@ export async function analyzeWorkspaceContent(
         continue;
       }
       const document = parsed.document;
-      const imports = analyzeSpecImports(document, specPaths);
+      const imports = analyzeSpecImports(
+        document,
+        specDomain.designatorFor(source.path),
+      );
       const references = analyzeSpecReferences(document, imports);
       findings.push(...document.findings);
       findings.push(...imports.findings);
       findings.push(...references.findings);
       specs.push({ document, imports, references });
     } catch (error) {
-      // SPEC 14.20: nesting beyond what the recursive analyses can process
-      // (a call-stack overflow surfaces as a RangeError — possible in the
-      // TypeScript re-parse of extracted import/reference expressions even
-      // when the MDX parse itself succeeded) makes the file unparseable —
-      // one finding, the file's contents masked, never a crash (SPEC 12.0).
+      // SPEC 14.20: derivability alone decides well-formedness, so a
+      // call-stack overflow after a successful parse — in the document
+      // builder's walks, or in the re-parse of extracted import and
+      // reference expressions — is no verdict about the file: while the
+      // invocation can still run again on a larger stack, the overflow
+      // propagates to that rerun (core/stack-exhaustion.ts, cli/reruns.ts),
+      // so no answer depends on the stack a run had (SPEC 12.0). Only the
+      // last attempt, or one past its first effect, answers from it: the
+      // file unparseable — one finding, its contents masked, never a crash
+      // (SPEC 12.0: exit codes partition all outcomes).
       if (!(error instanceof RangeError)) throw error;
-      findings.push({
-        condition: 20,
-        file: source.path,
-        range: { start: 0, end: 0 },
-        message:
+      propagateWhileRerunPossible(error);
+      findings.push(
+        locatedFinding(
+          20,
           `unparseable source: not well-formed MDX — the file's nesting ` +
-          `exceeds what the analyzer can process, so no location inside ` +
-          `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-      });
+            `exceeds what the analyzer can process, so no location inside ` +
+            `it can be analyzed; simplify or split the file (SPEC 14.20)`,
+          [{ file: source.path, range: { start: 0, end: 0 } }],
+        ),
+      );
     }
   }
 
@@ -262,13 +505,14 @@ export async function analyzeWorkspaceContent(
   const code: CodeAnalysis[] = [];
   for (const source of classification.codeSources) {
     const bytes = await content.readSource(source.path);
-    if (bytes === null) {
-      findings.push(unreadableSourceFinding(source.path));
+    if (!(bytes instanceof Uint8Array)) {
+      findings.push(unreadableSourceFinding(source.path, bytes));
       continue;
     }
     sourceHashes.set(source.path, sha256Hex(bytes));
+    sourceByteLengths.set(pathTextKey(source.path), bytes.length);
     const analyzed = analyzeCodeSource(source.path, bytes, {
-      specPaths,
+      designate: specDomain.designatorFor(source.path),
       markdownDestinations,
     });
     if (analyzed.kind === "unparseable") {
@@ -279,12 +523,90 @@ export async function analyzeWorkspaceContent(
     code.push(analyzed.analysis);
   }
 
+  // --- invalid-path sources (SPEC 14.19, 11.2) --------------------------
+  //
+  // A discovered file whose own path is invalid keeps its parse-local
+  // structure: it is parsed and per-file validated like any other source
+  // — its located findings (marked byte-form location files) report
+  // beside its 14.19 — while no identity of it is defined: it enters no
+  // graph node, no hash, no recorded input, and no derived-file
+  // derivation (its 14.19 gates every write, SPEC 12.1). An unparseable
+  // one reports its 14.20 beside the 14.19, its contents masked (SPEC 14).
+  const invalidPathSpecs: SpecFileAnalysis[] = [];
+  const invalidPathCode: CodeAnalysis[] = [];
+  for (const source of classification.invalidSources) {
+    const bytes = await content.readInvalidSource(source.bytes);
+    if (!(bytes instanceof Uint8Array)) {
+      findings.push(unreadableSourceFinding(source.path, bytes));
+      continue;
+    }
+    sourceByteLengths.set(pathTextKey(source.path), bytes.length);
+    // The analyzers' identity-space path: a deterministic stand-in (the
+    // lossily decoded path bytes) — never rendered, never resolved
+    // against; `source.path` is the real path (core/mdx.ts SpecDocument).
+    const standIn = lossyDecoder.decode(source.bytes);
+    if (source.kind === "spec") {
+      try {
+        const parsed = parseSpecSource(standIn, bytes, source.path);
+        if (parsed.kind === "unparseable") {
+          findings.push(parsed.finding);
+          continue;
+        }
+        const document = parsed.document;
+        const imports = analyzeSpecImports(
+          document,
+          specDomain.designatorForBytes(source.bytes),
+        );
+        const references = analyzeSpecReferences(document, imports);
+        findings.push(...document.findings);
+        findings.push(...imports.findings);
+        findings.push(...references.findings);
+        invalidPathSpecs.push({ document, imports, references });
+      } catch (error) {
+        // SPEC 14.20: a call-stack overflow, as in the valid-source loop —
+        // propagated to the rerun on a larger stack while one is possible.
+        if (!(error instanceof RangeError)) throw error;
+        propagateWhileRerunPossible(error);
+        findings.push(
+          locatedFinding(
+            20,
+            `unparseable source: not well-formed MDX — the file's nesting ` +
+              `exceeds what the analyzer can process, so no location inside ` +
+              `it can be analyzed; simplify or split the file (SPEC 14.20)`,
+            [{ file: source.path, range: { start: 0, end: 0 } }],
+          ),
+        );
+      }
+    } else {
+      const analyzed = analyzeCodeSource(
+        standIn,
+        bytes,
+        {
+          designate: specDomain.designatorForBytes(source.bytes),
+          markdownDestinations,
+        },
+        source.path,
+      );
+      if (analyzed.kind === "unparseable") {
+        findings.push(analyzed.finding);
+        continue;
+      }
+      findings.push(...analyzed.analysis.findings);
+      invalidPathCode.push(analyzed.analysis);
+    }
+  }
+
   // --- journal (SPEC 6.1, 5.4 → 14.13) ----------------------------------
   const journal = await content.loadJournal();
   findings.push(...journal.findings);
 
   // --- graph, text model, hashes (SPEC 5; conditions 14.5–14.7, 14.9) ---
-  const graph = buildWorkspaceGraph({ specs, code });
+  const graph = buildWorkspaceGraph({
+    specs,
+    code,
+    invalidPathSpecs,
+    invalidPathCode,
+  });
   findings.push(...graph.findings);
   const textModel = new WorkspaceTextModel(graph.embeddingResolver());
   // Total even over invalid workspaces (core/hashes.ts); only valid
@@ -296,11 +618,14 @@ export async function analyzeWorkspaceContent(
     markdownDestinations,
     specs,
     code,
+    invalidPathSpecs,
+    invalidPathCode,
     graph,
     textModel,
     hashes,
     journal,
     sourceHashes,
+    sourceByteLengths,
     findings: orderFindings(findings),
     configurationErrors: [],
   };
@@ -333,34 +658,103 @@ export function workspaceInputsOf(
 }
 
 /**
- * Read one discovered source's exact bytes from the filesystem, null when
- * unreadable — the reader `analyzeWorkspace` hands the shared body.
+ * Deterministic lossy decoding for the identity-space stand-in path of an
+ * invalid-path source (SPEC 14.19): invalid sequences become U+FFFD per
+ * the Unicode maximal-subpart rule — never rendered, only a per-analysis
+ * map key. A leading U+FEFF is kept as a character of the path (SPEC 7,
+ * 1.5: a path is its names' exact bytes), as `pathTextOf` keeps it, so a
+ * path beginning with it and its twin without it keep distinct stand-ins.
+ */
+const lossyDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
+/** The UTF-8 bytes of a valid discovered source's path (SPEC 7). */
+const utf8Encoder = new TextEncoder();
+
+/**
+ * A discovered source found absent when its content is read — no file at
+ * its path any longer (`sourceReadOutcome`): it reads as undiscovered
+ * (SPEC 14.25; `readDiscoveredSources`).
+ */
+const ABSENT = "absent";
+
+/**
+ * Read one discovered source's exact bytes from the filesystem — or
+ * `ABSENT`, or the environment's refusal (`sourceReadOutcome`) — for
+ * `readDiscoveredSources`.
  */
 async function readSourceBytes(
   root: string,
   rel: string,
-): Promise<Uint8Array | null> {
+): Promise<SourceContent | typeof ABSENT> {
   try {
     return await fsp.readFile(absoluteOf(root, rel));
-  } catch {
-    return null;
+  } catch (error) {
+    return sourceReadOutcome(error);
   }
 }
 
 /**
- * SPEC 14.20: a discovered source whose content cannot be read. On the
- * filesystem that means the file vanished (or became unreadable) between
- * the walk and the read — concurrent modification, SPEC 13.5
- * last-write-wins territory; it was discovered, and its content cannot be
- * analyzed.
+ * Read one invalid-path discovered source's exact bytes (SPEC 14.19) —
+ * such a workspace-relative path may have no plain string form, so the
+ * filesystem is addressed with the exact bytes (`/`-separated, as the
+ * walk produced them; every platform Node supports accepts `/` here) — or
+ * `ABSENT`, or the environment's refusal (`sourceReadOutcome`).
  */
-function unreadableSourceFinding(rel: string): Finding {
-  return {
-    condition: 20,
-    file: rel,
-    message:
-      `unparseable source: the discovered file could not be read — it ` +
-      `changed or vanished while the command ran; re-run the command ` +
-      `once the workspace is quiescent (SPEC 13.5, 14.20)`,
-  };
+async function readInvalidSourceBytes(
+  root: string,
+  bytes: Uint8Array,
+): Promise<SourceContent | typeof ABSENT> {
+  try {
+    return await fsp.readFile(
+      Buffer.concat([Buffer.from(root), Buffer.from("/"), Buffer.from(bytes)]),
+    );
+  } catch (error) {
+    return sourceReadOutcome(error);
+  }
+}
+
+/**
+ * Classify a discovered source's failed content read (SPEC 14.25, 14.20).
+ * Discovery lists plain files only (SPEC 7), so a read finding nothing
+ * there (`isAbsenceFailure`: the file removed or relocated, or a directory
+ * component no longer a directory) or a directory there (`EISDIR`) finds
+ * the discovered source absent — removed or relocated since discovery
+ * (13.5) — which is never a read failure: `ABSENT`, the source reading as
+ * undiscovered (SPEC 14.25). Every other failure the filesystem reports —
+ * and the runtime's refusal to deliver a file too large for one buffer
+ * (`ERR_FS_FILE_TOO_LARGE`), the environment refusing the content all the
+ * same — is a refused read naming its code (`SourceReadFailure`). Anything
+ * else is a defect of the product's own and propagates unchanged.
+ */
+function sourceReadOutcome(error: unknown): SourceReadFailure | typeof ABSENT {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (isAbsenceFailure(error) || code === "EISDIR") return ABSENT;
+  if (isFilesystemFailure(error) || code === "ERR_FS_FILE_TOO_LARGE") {
+    return { unread: "refused", reason: code ?? "an unknown error" };
+  }
+  throw error;
+}
+
+/**
+ * SPEC 14.20, 14.25: a discovered source whose content the environment
+ * refuses to deliver — content that cannot be read parses as nothing, so
+ * the file is masked exactly as one that fails to parse, its finding at
+ * offset 0 (the file start, range [0, 0)), naming the refusal and the
+ * correction (SPEC 14: actionable errors): make the file readable, or keep
+ * it out of the configured globs (SPEC 7) — no rerun alone cures it.
+ */
+function unreadableSourceFinding(
+  rel: PathText,
+  failure: SourceReadFailure,
+): Finding {
+  const message =
+    `unparseable source: the environment refused to deliver the ` +
+    `discovered file's content (${failure.reason}) — content that ` +
+    `cannot be read parses as nothing, so the file is masked exactly ` +
+    `as one that fails to parse; make the file readable, or keep it ` +
+    `out of the configured globs, then rerun the command ` +
+    `(SPEC 14.25, 14.20)`;
+  return locatedFinding(20, message, [
+    { file: rel, range: { start: 0, end: 0 } },
+  ]);
 }

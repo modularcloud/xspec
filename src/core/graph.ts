@@ -13,9 +13,14 @@
 //   kind a set: duplicate declarations collapse to a single edge;
 // - reference resolution — every `d` reference, `{text(...)}` target, and
 //   TypeScript reference is resolved; unknown targets report 14.5, 14.6,
-//   and 14.7. Masking (SPEC 14): a reference into an unparseable file
-//   reports as unresolved here while the file's internal conditions stay
-//   masked behind its own 14.20;
+//   and 14.7, and a resolving cross-module `text(...)` call reports 14.11
+//   beside its standing edge and occurrence (SPEC 14.11, 5.7) — an
+//   unresolved one is 14.7 alone. Masking (SPEC 14): a reference into an
+//   unparseable file reports as unresolved here while the file's internal
+//   conditions stay masked behind its own 14.20;
+// - reference occurrences (SPEC 5.7) — one record per textual spelling of
+//   a dependency-kind reference whose target resolves, in occurrence
+//   order: the positions behind the collapsed edge set;
 // - cycles (SPEC 5.3 → 14.9) — dependency cycles over the combined
 //   `contains`+`depends`+`embeds` graph on requirement nodes (a
 //   self-`depends`/self-`embeds` is a cycle of length one; a section
@@ -31,11 +36,19 @@
 // edges. Only valid workspaces ever surface graph content (SPEC 12.1,
 // 13.3).
 
-import { compareBytes, sortByBytes } from "./bytes.js";
+import { compareBytes, sortByBytes, utf8Length } from "./bytes.js";
 import type { ByteRange } from "./bytes.js";
-import type { CodeAnalysis } from "./code-analysis.js";
-import type { Finding } from "./findings.js";
+import type {
+  CalledModule,
+  CodeAnalysis,
+  CodeReference,
+} from "./code-analysis.js";
+import type { Finding, FindingLocation } from "./findings.js";
+import { compareFindings, locatedFinding } from "./findings.js";
 import type { SpecDocument, SpecEmbedding, SpecSection } from "./mdx.js";
+import { definedIdentitySections } from "./mdx.js";
+import type { PathText } from "./path-text.js";
+import { comparePathTexts, pathTextKey, renderPathText } from "./path-text.js";
 import type {
   ReferenceTarget,
   SpecImportModel,
@@ -67,6 +80,14 @@ export interface CodeLocationNode {
   readonly identity: string;
   /** Workspace-relative `/`-separated code file path (SPEC 1.5). */
   readonly path: string;
+  /**
+   * SPEC 1.7: the location's source range — the entire file for a
+   * whole-file location, the construct binding the unit's name for a
+   * named unit (CodeUnit.range). Presented in exactly two outputs —
+   * occurrence records (5.7, 11.3) and review payloads (10.7); everywhere
+   * else a code location remains a bare identity (SPEC 1.7).
+   */
+  readonly range: ByteRange;
 }
 
 export type GraphNode = RequirementNode | CodeLocationNode;
@@ -93,6 +114,48 @@ export interface GraphEdge {
   readonly target: string;
 }
 
+/** SPEC 5.2/5.7: the dependency edge kinds — the kinds occurrences record. */
+export type DependencyEdgeKind = Exclude<GraphEdgeKind, "contains">;
+
+/**
+ * SPEC 5.7: one reference occurrence — one textual spelling of a
+ * dependency-kind reference whose target resolves (SPEC 11.2): each `d`
+ * array entry separately (2.2), each MDX `{text(...)}` embedding (2.3),
+ * each TypeScript `text(...)` call (4.3), and each TypeScript dependency
+ * marker (4.5). Edges are sets; occurrences are the positions behind them
+ * — duplicate references collapsing to a single edge each remain distinct
+ * occurrences. A construct that records no edge records no occurrence.
+ */
+export interface ReferenceOccurrence {
+  /**
+   * The referencing file's real path (SPEC 12.0, 12.7 path value form
+   * capable — the marked byte form for an invalid-path file's occurrence,
+   * SPEC 14.19; such occurrences arise only on failing workspaces).
+   */
+  readonly file: PathText;
+  /**
+   * The occurrence's own span (SPEC 5.7), exact per kind: a `d` reference's
+   * own expression; an MDX embedding's entire braced container, opening
+   * brace through closing brace; a TS `text(...)` call's entire call
+   * expression, callee through closing parenthesis; a marker's bare
+   * reference chain, exclusive of any statement terminator.
+   */
+  readonly range: ByteRange;
+  readonly kind: DependencyEdgeKind;
+  /**
+   * The source graph node's identity — null exactly where SPEC 11.2 leaves
+   * the containing node's identity undefined (a section without a usable
+   * identity; every node of an invalid-path file, SPEC 14.19): the source
+   * datum is then reported explicitly unavailable (SPEC 5.7). The datum's
+   * other half — the source node's own range (SPEC 1.7) — travels with the
+   * identified node itself (a requirement node's section range; a code
+   * location's range), joined at presentation (SPEC 11.3, 12.7).
+   */
+  readonly source: string | null;
+  /** The resolved target's identity (SPEC 1.5) — always a requirement node. */
+  readonly target: string;
+}
+
 /** One parsed spec source with its per-file analyses (T6–T8 outputs). */
 export interface SpecFileAnalysis {
   readonly document: SpecDocument;
@@ -112,6 +175,18 @@ export interface SpecFileAnalysis {
 export interface WorkspaceGraphInputs {
   readonly specs: readonly SpecFileAnalysis[];
   readonly code: readonly CodeAnalysis[];
+  /**
+   * Per-file analyses of discovered spec sources whose own paths are
+   * invalid (SPEC 14.19, 11.2): they contribute no nodes and no edges —
+   * no identity of theirs is defined — but their references are resolved
+   * here on their own terms (a reference out of such a file into a
+   * defined identity resolves finding-free; anything else reports
+   * 14.5/14.6) and their imports participate in the file-level import
+   * relation (spec import cycles, SPEC 2.1 → 14.9).
+   */
+  readonly invalidPathSpecs?: readonly SpecFileAnalysis[];
+  /** The code-source counterpart: references resolve or report 14.7. */
+  readonly invalidPathCode?: readonly CodeAnalysis[];
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +205,7 @@ interface GraphParts {
   readonly requirementNodes: readonly RequirementNode[];
   readonly codeLocations: readonly CodeLocationNode[];
   readonly edges: readonly GraphEdge[];
+  readonly occurrences: readonly ReferenceOccurrence[];
   readonly findings: readonly Finding[];
   readonly requirementIndex: ReadonlyMap<string, RequirementNode>;
   readonly codeIndex: ReadonlyMap<string, CodeLocationNode>;
@@ -141,16 +217,19 @@ interface GraphParts {
  * The assembled workspace graph (SPEC 5). Node lists are ordered by file
  * path (byte order, SPEC 12.0) and within a file by document order, the
  * root (or the whole-file code location) first; `edges` is the collapsed
- * edge set (SPEC 5.2) ordered by (source, kind, target); `findings` holds
- * the graph's own conditions — unresolved references (14.5–14.7) and
- * cycles (14.9) — deterministically ordered. Everything else (structural,
- * prop, import, argument, and code-usage findings) belongs to the
- * per-file analyses this graph was built from.
+ * edge set (SPEC 5.2) ordered by (source, kind, target); `occurrences`
+ * holds every reference occurrence (SPEC 5.7) in occurrence order —
+ * referencing file path bytes, then range start, then range end;
+ * `findings` holds the graph's own conditions — unresolved references
+ * (14.5–14.7) and cycles (14.9) — deterministically ordered. Everything
+ * else (structural, prop, import, argument, and code-usage findings)
+ * belongs to the per-file analyses this graph was built from.
  */
 export class WorkspaceGraph {
   readonly requirementNodes: readonly RequirementNode[];
   readonly codeLocations: readonly CodeLocationNode[];
   readonly edges: readonly GraphEdge[];
+  readonly occurrences: readonly ReferenceOccurrence[];
   readonly findings: readonly Finding[];
 
   private readonly requirementIndex: ReadonlyMap<string, RequirementNode>;
@@ -167,6 +246,7 @@ export class WorkspaceGraph {
     this.requirementNodes = parts.requirementNodes;
     this.codeLocations = parts.codeLocations;
     this.edges = parts.edges;
+    this.occurrences = parts.occurrences;
     this.findings = parts.findings;
     this.requirementIndex = parts.requirementIndex;
     this.codeIndex = parts.codeIndex;
@@ -278,6 +358,8 @@ export function buildWorkspaceGraph(
   // workspace-relative path, content in document order.
   const specs = sortByBytes(inputs.specs, (spec) => spec.document.path);
   const code = sortByBytes(inputs.code, (analysis) => analysis.path);
+  const invalidPathSpecs = inputs.invalidPathSpecs ?? [];
+  const invalidPathCode = inputs.invalidPathCode ?? [];
 
   // --- requirement nodes (SPEC 5.1, 1.5) ----------------------------------
   const requirementNodes: RequirementNode[] = [];
@@ -305,18 +387,21 @@ export function buildWorkspaceGraph(
     requirementNodes.push(root);
     requirementIndex.set(root.identity, root);
     sectionIndex.set(document.root, root);
+    // SPEC 11.2/1.5: only defined node identities are formed, emitted, or
+    // resolved against — a section spelling no identity, a malformed or
+    // structurally invalid spelling (or one anywhere in its chain), and
+    // every bearer of a duplicated spelling (no winner picked) contribute
+    // no identified node; their findings (14.1–14.4, 14.17) account for
+    // them, and references to them report as unresolved (14.5–14.7).
+    const definedSections = definedIdentitySections(document);
     for (const section of document.sections) {
-      if (section.id === null) {
-        // No usable identity — the section's 14.1/14.17 accounts for it.
+      if (section.id === null || !definedSections.has(section)) {
         continue;
       }
       // SPEC 1.5: `path#id`; the `#` is unambiguous because discovered
-      // paths never contain `#` (14.19).
+      // paths never contain `#` (14.19), and definedness makes the
+      // identity unique within the file (SPEC 11.2).
       const identity = `${document.path}#${section.id}`;
-      if (requirementIndex.has(identity)) {
-        // A duplicate ID (14.3): the first declaration keeps the identity.
-        continue;
-      }
       const node: RequirementNode = {
         kind: "requirement",
         identity,
@@ -342,6 +427,10 @@ export function buildWorkspaceGraph(
       kind: "code",
       identity: analysis.path,
       path: analysis.path,
+      // SPEC 1.7: a whole-file location's range spans the entire file —
+      // the analyzed text is the file's exact bytes decoded (SPEC 1.6),
+      // so its UTF-8 length is the file's byte length.
+      range: { start: 0, end: utf8Length(analysis.text) },
     };
     codeLocations.push(file);
     codeIndex.set(file.identity, file);
@@ -351,6 +440,8 @@ export function buildWorkspaceGraph(
         kind: "code",
         identity: unit.identity,
         path: analysis.path,
+        // SPEC 1.7: the construct binding the unit's name.
+        range: unit.range,
       };
       codeLocations.push(node);
       codeIndex.set(node.identity, node);
@@ -364,7 +455,7 @@ export function buildWorkspaceGraph(
     source: string,
     target: string,
   ): void => {
-    const key = `${kind} ${source} ${target}`;
+    const key = `${kind}\u0000${source}\u0000${target}`;
     if (!edgeByKey.has(key)) edgeByKey.set(key, { kind, source, target });
   };
 
@@ -383,6 +474,39 @@ export function buildWorkspaceGraph(
 
   const findings: Finding[] = [];
   const resolution = new Resolver(parsedByPath, requirementIndex, idIndex);
+
+  // SPEC 5.7: one occurrence per textual spelling of a dependency-kind
+  // reference whose target resolves — recorded beside edge recording, so a
+  // construct that records no edge records no occurrence, while a resolving
+  // spelling whose SOURCE node has no defined identity (SPEC 11.2) still
+  // records one, its source datum explicitly unavailable (null).
+  const occurrences: ReferenceOccurrence[] = [];
+  const addOccurrence = (
+    file: PathText,
+    range: ByteRange,
+    kind: DependencyEdgeKind,
+    source: string | null,
+    target: string,
+  ): void => {
+    occurrences.push({ file, range, kind, source, target });
+  };
+
+  // The reference spellings behind each requirement-side dependency edge
+  // (SPEC 5.7 spans), keyed source → target: a cycle locates its full path
+  // in source through every spelling recording a participating edge
+  // (SPEC 14 location cardinality, 14.9).
+  const edgeSpellings = new Map<string, FindingLocation[]>();
+  const addSpelling = (
+    source: string,
+    target: string,
+    file: string,
+    range: ByteRange,
+  ): void => {
+    const key = `${source}\u0000${target}`;
+    let spellings = edgeSpellings.get(key);
+    if (spellings === undefined) edgeSpellings.set(key, (spellings = []));
+    spellings.push({ file, range });
+  };
 
   // SPEC 5.2/2.2: `depends` — declared by the `d` prop; unknown targets
   // are 14.5.
@@ -407,8 +531,26 @@ export function buildWorkspaceGraph(
         continue;
       }
       const source = sectionIndex.get(dependency.section);
+      // SPEC 5.7: a `d` reference occurrence spans that one reference's own
+      // expression — recorded whenever the target resolves, the source
+      // datum unavailable where the declaring section has no defined
+      // identity (SPEC 11.2).
+      addOccurrence(
+        spec.document.file,
+        dependency.reference.range,
+        "depends",
+        source?.identity ?? null,
+        resolved.node.identity,
+      );
       if (source !== undefined) {
         addEdge("depends", source.identity, resolved.node.identity);
+        // SPEC 5.7: a `d` reference's spelling spans its own expression.
+        addSpelling(
+          source.identity,
+          resolved.node.identity,
+          spec.document.path,
+          dependency.reference.range,
+        );
       }
     }
   }
@@ -431,11 +573,14 @@ export function buildWorkspaceGraph(
       );
       if (!resolved.ok) {
         embeddingIndex.set(embedded.embedding, null);
+        // SPEC 14: a no-occurrence spelling of the MDX embedding form is
+        // located by the full braced container, opening brace through
+        // closing brace — the span its occurrence would occupy (5.7).
         findings.push(
           unresolvedFinding(
             6,
             spec.document.path,
-            embedded.reference.range,
+            embedded.embedding.range,
             `unknown text target: the text(...) reference to ` +
               `${resolution.describe(spec.document, embedded.reference.target)} ` +
               `does not resolve — ${resolved.reason}; declare the target ` +
@@ -446,14 +591,35 @@ export function buildWorkspaceGraph(
       }
       embeddingIndex.set(embedded.embedding, resolved.node);
       const source = sectionIndex.get(embedded.embedding.section);
+      // SPEC 5.7: an MDX embedding occurrence spans the entire braced
+      // container, opening brace through closing brace — the innermost
+      // containing section (the root included) is its source, unavailable
+      // where that section has no defined identity (SPEC 11.2).
+      addOccurrence(
+        spec.document.file,
+        embedded.embedding.range,
+        "embeds",
+        source?.identity ?? null,
+        resolved.node.identity,
+      );
       if (source !== undefined) {
         addEdge("embeds", source.identity, resolved.node.identity);
+        // SPEC 5.7: an MDX embedding's spelling spans the entire braced
+        // container, opening brace through closing brace.
+        addSpelling(
+          source.identity,
+          resolved.node.identity,
+          spec.document.path,
+          embedded.embedding.range,
+        );
       }
     }
   }
 
   // SPEC 5.2/4.3/4.5: `references` from TypeScript markers and `embeds`
-  // from TypeScript `text(...)` calls; unknown targets are 14.7.
+  // from TypeScript `text(...)` calls; unknown targets are 14.7, located
+  // by the span the occurrence would occupy (SPEC 14, 5.7): a marker's
+  // bare chain, a `text(...)` call's entire call expression.
   for (const analysis of code) {
     for (const reference of analysis.references) {
       const resolved = resolution.resolveExternal(
@@ -467,28 +633,200 @@ export function buildWorkspaceGraph(
           unresolvedFinding(
             7,
             analysis.path,
-            reference.range,
+            reference.occurrenceRange,
             `unknown TypeScript reference: the ${construct} referencing ` +
               `${describeExternal(reference.modulePath, reference.segments)} ` +
-              `does not resolve — ${resolved.reason}; this is also a type ` +
-              `error against the generated module; correct or remove the ` +
-              `reference (SPEC 4.5, 14.7)`,
+              `does not resolve — ${resolved.reason}` +
+              // SPEC 14.7: the type-error clause holds only for a spelling
+              // free of escape sequences (2.4).
+              (reference.escapeFree
+                ? `; this is also a type error against the generated module`
+                : "") +
+              `; correct or remove the reference (SPEC 4.5, 14.7)`,
           ),
         );
         continue;
       }
+      if (reference.calledModule !== null) {
+        // SPEC 14.11: the argument resolves, so the call passes a node to
+        // another module's `text` export — its edge and occurrence stand
+        // beside the finding (5.7).
+        findings.push(
+          crossModuleTextFinding(
+            analysis.file,
+            reference,
+            reference.calledModule,
+          ),
+        );
+      }
       addEdge(reference.kind, reference.location, resolved.node.identity);
+      // SPEC 5.7: a TS `text(...)` occurrence spans the entire call
+      // expression, callee through closing parenthesis; a marker occurrence
+      // spans the bare reference chain alone. The source is the attributed
+      // code location (SPEC 4.6), whose identity is always defined for a
+      // valid-path file (SPEC 11.2).
+      addOccurrence(
+        analysis.file,
+        reference.occurrenceRange,
+        reference.kind,
+        reference.location,
+        resolved.node.identity,
+      );
     }
   }
 
-  // SPEC 14: deterministic finding order — by file, location, condition.
-  findings.sort(
-    (a, b) =>
-      compareBytes(a.file ?? "", b.file ?? "") ||
-      (a.range?.start ?? 0) - (b.range?.start ?? 0) ||
-      (a.range?.end ?? 0) - (b.range?.end ?? 0) ||
-      a.condition - b.condition,
-  );
+  // --- references of invalid-path files (SPEC 14.19, 11.2) ----------------
+  //
+  // A discovered file whose own path is invalid contributes no nodes and
+  // no edges — no identity of it is defined, and nothing resolves into it
+  // — but its constructs are judged on their own terms (SPEC 11.2, 14):
+  // its extracted references resolve against the defined identities, a
+  // local reference (naming an ID in the invalid-path file itself) never
+  // resolving, and each unresolved reference reports its 14.5/14.6/14.7
+  // located in the file (marked byte form capable). A reference that DOES
+  // resolve is finding-free and records its occurrence (SPEC 5.7), the
+  // source datum explicitly unavailable — no identity of the referencing
+  // file is defined (SPEC 14.19, 11.2).
+  const invalidPathOutcome = (
+    target: ReferenceTarget,
+  ):
+    | { readonly ok: true; readonly node: RequirementNode }
+    | {
+        readonly ok: false;
+        readonly described: string;
+        readonly reason: string;
+      } => {
+    if (target.kind === "local") {
+      return {
+        ok: false,
+        described: `${JSON.stringify(target.idPath)} in this file`,
+        reason:
+          `the reference names an ID in this file, and no identity of ` +
+          `this file is defined because its own path is invalid ` +
+          `(SPEC 14.19, 11.2); rename the file to a valid source path`,
+      };
+    }
+    const resolved = resolution.resolveExternal(
+      target.modulePath,
+      target.segments,
+    );
+    if (resolved.ok) return resolved;
+    return {
+      ok: false,
+      described: describeExternal(target.modulePath, target.segments),
+      reason: resolved.reason,
+    };
+  };
+  for (const spec of invalidPathSpecs) {
+    const file = spec.document.file;
+    for (const dependency of spec.references.dependencies) {
+      const outcome = invalidPathOutcome(dependency.reference.target);
+      if (outcome.ok) {
+        addOccurrence(
+          file,
+          dependency.reference.range,
+          "depends",
+          null,
+          outcome.node.identity,
+        );
+        continue;
+      }
+      findings.push(
+        locatedFinding(
+          5,
+          `unknown dependency: the d reference to ${outcome.described} ` +
+            `does not resolve — ${outcome.reason}; declare the target ` +
+            `section or correct the reference (SPEC 2.2, 14.5)`,
+          [{ file, range: dependency.reference.range }],
+        ),
+      );
+    }
+    for (const embedded of spec.references.embeddings) {
+      if (embedded.reference === null) {
+        // No reference extracted: its 14.8 (or a masking 14.15) accounts
+        // for it (SPEC 14); the text model expands it to nothing.
+        embeddingIndex.set(embedded.embedding, null);
+        continue;
+      }
+      const outcome = invalidPathOutcome(embedded.reference.target);
+      if (outcome.ok) {
+        // SPEC 5.7: the occurrence spans the entire braced container. The
+        // resolved target also enters the embedding index: the text model
+        // expands an invalid-path file's resolving embeddings exactly like
+        // any other (SPEC 11.2 — a defined text value is exact on
+        // imperfect files too), while the file still contributes no nodes
+        // and no edges.
+        embeddingIndex.set(embedded.embedding, outcome.node);
+        addOccurrence(
+          file,
+          embedded.embedding.range,
+          "embeds",
+          null,
+          outcome.node.identity,
+        );
+        continue;
+      }
+      embeddingIndex.set(embedded.embedding, null);
+      // SPEC 14: an embedding-form finding's range is the full braced
+      // container — the span its occurrence would occupy (5.7).
+      findings.push(
+        locatedFinding(
+          6,
+          `unknown text target: the text(...) reference to ` +
+            `${outcome.described} does not resolve — ${outcome.reason}; ` +
+            `declare the target section or correct the reference ` +
+            `(SPEC 2.3, 14.6)`,
+          [{ file, range: embedded.embedding.range }],
+        ),
+      );
+    }
+  }
+  for (const analysis of invalidPathCode) {
+    for (const reference of analysis.references) {
+      const resolved = resolution.resolveExternal(
+        reference.modulePath,
+        reference.segments,
+      );
+      if (resolved.ok) {
+        if (reference.calledModule !== null) {
+          // SPEC 14.11: a resolving cross-module call, judged on its own
+          // terms in a file whose own path is invalid (SPEC 11.2).
+          findings.push(
+            crossModuleTextFinding(
+              analysis.file,
+              reference,
+              reference.calledModule,
+            ),
+          );
+        }
+        addOccurrence(
+          analysis.file,
+          reference.occurrenceRange,
+          reference.kind,
+          null,
+          resolved.node.identity,
+        );
+        continue;
+      }
+      const construct =
+        reference.kind === "references" ? "marker" : "text(...) argument";
+      findings.push(
+        locatedFinding(
+          7,
+          `unknown TypeScript reference: the ${construct} referencing ` +
+            `${describeExternal(reference.modulePath, reference.segments)} ` +
+            `does not resolve — ${resolved.reason}; correct or remove the ` +
+            `reference (SPEC 4.5, 14.7)`,
+          // SPEC 14, 5.7: located as the occurrence would be — a
+          // `text(...)` call callee through closing parenthesis.
+          [{ file: analysis.file, range: reference.occurrenceRange }],
+        ),
+      );
+    }
+  }
+
+  // SPEC 14/12.7: deterministic finding order.
+  findings.sort(compareFindings);
 
   // The collapsed edge set, ordered (source, kind, target) — kinds in
   // SPEC 5.2 listing order (SPEC 12.0 determinism).
@@ -499,16 +837,37 @@ export function buildWorkspaceGraph(
       compareBytes(a.target, b.target),
   );
 
-  // --- cycles (SPEC 5.3, 2.1 → 14.9) ---------------------------------------
-  findings.push(
-    ...dependencyCycleFindings(requirementNodes, requirementIndex, edges),
+  // SPEC 5.7: occurrence order is total and deterministic — referencing
+  // file path bytes (one byte order over both path forms, SPEC 12.0), then
+  // range start, then range end. Distinct occurrences occupy distinct
+  // spans, so no further tiebreak exists.
+  occurrences.sort(
+    (a, b) =>
+      comparePathTexts(a.file, b.file) ||
+      a.range.start - b.range.start ||
+      a.range.end - b.range.end,
   );
-  findings.push(...importCycleFindings(specs, parsedByPath));
+
+  // --- cycles (SPEC 5.3, 2.1 → 14.9) ---------------------------------------
+  // One finding per elementary cycle, however many (pushed one by one, so
+  // no count meets a spread's argument limit).
+  for (const finding of dependencyCycleFindings(
+    requirementNodes,
+    requirementIndex,
+    edges,
+    edgeSpellings,
+  )) {
+    findings.push(finding);
+  }
+  for (const finding of importCycleFindings([...specs, ...invalidPathSpecs])) {
+    findings.push(finding);
+  }
 
   return new WorkspaceGraph({
     requirementNodes,
     codeLocations,
     edges,
+    occurrences,
     findings,
     requirementIndex,
     codeIndex,
@@ -524,7 +883,30 @@ function unresolvedFinding(
   range: ByteRange,
   message: string,
 ): Finding {
-  return { condition, file, range, message };
+  return locatedFinding(condition, message, [{ file, range }]);
+}
+
+/**
+ * The 14.11 finding of a resolving cross-module `text(...)` call (SPEC
+ * 4.4, 14.11): located at the call, callee through closing parenthesis —
+ * the span its standing occurrence occupies (SPEC 14, 5.7) — its
+ * `identities` exactly the called module's root identity, or none where
+ * that module's path is invalid (SPEC 14.11, 12.7).
+ */
+function crossModuleTextFinding(
+  file: PathText,
+  reference: CodeReference,
+  called: CalledModule,
+): Finding {
+  return locatedFinding(
+    11,
+    `cross-module text call: the argument is a node of module ` +
+      `${JSON.stringify(reference.modulePath)} but the "text" export ` +
+      `called belongs to module ${JSON.stringify(called.display)} — pass ` +
+      `a node only to its own module's "text" export (SPEC 4.4, 14.11)`,
+    [{ file, range: reference.occurrenceRange }],
+    called.identity === null ? [] : [called.identity],
+  );
 }
 
 /** A human description of an external reference's target (messages only). */
@@ -537,6 +919,21 @@ function describeExternal(
     return `the root node of ${JSON.stringify(modulePath)}`;
   }
   return JSON.stringify(`${modulePath}#${segments.join(".")}`);
+}
+
+/**
+ * SPEC 2.4, 1.4: a reference is read as spelled — a string literal's value
+ * and a chain segment's name are their characters, no escape sequence or
+ * character reference interpreted — so a spelling holding `\` or `&`
+ * names no valid identity. The note that makes such an unresolved
+ * reference actionable (SPEC 14); empty for any other spelling.
+ */
+function verbatimSpellingNote(spelled: string): string {
+  return spelled.includes("\\") || spelled.includes("&")
+    ? ` — the reference is read as spelled, no escape sequence or ` +
+        `character reference interpreted, and no ID segment contains "\\" ` +
+        `or "&"; spell the ID's characters plainly (SPEC 2.4, 1.4)`
+    : "";
 }
 
 /** Reference resolution against the parsed documents (SPEC 2.2, 2.3, 4.5). */
@@ -560,7 +957,8 @@ class Resolver {
           ok: false,
           reason:
             `no section with ID ${JSON.stringify(target.idPath)} exists ` +
-            `in ${JSON.stringify(document.path)}`,
+            `in ${JSON.stringify(document.path)}` +
+            verbatimSpellingNote(target.idPath),
         };
       }
       return { ok: true, node };
@@ -614,7 +1012,8 @@ class Resolver {
         ok: false,
         reason:
           `no section with ID ${JSON.stringify(id)} exists in ` +
-          JSON.stringify(modulePath),
+          JSON.stringify(modulePath) +
+          verbatimSpellingNote(id),
       };
     }
     return { ok: true, node };
@@ -637,13 +1036,21 @@ class Resolver {
  * SPEC 5.3: dependency cycles over the combined graph of `contains`,
  * `depends`, and `embeds` edges on requirement nodes (`references` edges
  * and code-sourced `embeds` edges have code-location sources and do not
- * participate). One 14.9 finding per cyclic strongly connected component,
- * carrying a full cycle path within it.
+ * participate). One 14.9 finding per elementary cycle (`findCycles`) —
+ * each cycle is its own condition instance, so every one is reported
+ * (SPEC 14: each condition present, not only the first; 5.3: "report
+ * cycles", a section's dependency on its own ancestor among them even
+ * where another cycle runs through the same nodes) — located in source
+ * through every reference spelling recording a dependency edge of that
+ * cycle (SPEC 14 location cardinality: parallel spellings of one step
+ * stay in its one finding; `contains` steps arise from document structure
+ * and spell nothing), the full identity path carried in the message.
  */
 function dependencyCycleFindings(
   requirementNodes: readonly RequirementNode[],
   requirementIndex: ReadonlyMap<string, RequirementNode>,
   edges: readonly GraphEdge[],
+  edgeSpellings: ReadonlyMap<string, readonly FindingLocation[]>,
 ): Finding[] {
   const adjacency = new Map<string, Set<string>>();
   for (const edge of edges) {
@@ -661,77 +1068,151 @@ function dependencyCycleFindings(
     if (start === undefined) {
       throw new Error("xspec internal error: cycle through an unknown node");
     }
-    const finding: Finding = {
-      condition: 9,
-      file: start.path,
-      range: start.section.range,
-      cycle,
-      message:
-        `dependency cycle: ${cycle.join(" → ")} — the combined ` +
+    // SPEC 14/14.9: locate the cycle's full path in source — every
+    // reference spelling recording a participating dependency edge (a
+    // walk step covered only by `contains` contributes no spelling).
+    const locations: FindingLocation[] = [];
+    for (let step = 0; step + 1 < cycle.length; step += 1) {
+      const spellings = edgeSpellings.get(
+        `${cycle[step]}\u0000${cycle[step + 1]}`,
+      );
+      if (spellings !== undefined) locations.push(...spellings);
+    }
+    return locatedFinding(
+      9,
+      `dependency cycle: ${cycle.join(" → ")} — the combined ` +
         `contains/depends/embeds graph over requirement nodes must be ` +
         `acyclic; break the cycle by removing or retargeting one of its ` +
         `depends or embeds references (SPEC 5.3, 14.9)`,
-    };
-    return finding;
+      locations.length > 0
+        ? locations
+        : // Unreachable in practice — `contains` alone cannot cycle — but
+          // a located condition must locate (SPEC 14): fall back to the
+          // cycle's starting section.
+          [{ file: start.path, range: start.section.range }],
+    );
   });
 }
 
 /**
- * SPEC 2.1: spec import cycles — over each parsed file's valid imports'
- * designated files, whether or not the bindings are used (an unused
- * import records no edges, but the import itself still relates the
- * files). A file importing itself is a cycle of length one. One 14.9
- * finding per cyclic component, locating the import that closes the
- * reported cycle.
+ * SPEC 2.1: spec import cycles — over each parsed file's import
+ * declarations' designated files (`SpecImport.designatedFile`, the
+ * resolved target of SPEC 11.4), whether or not the bindings are used (an
+ * unused import records no edges, but the import itself still relates the
+ * files). A declaration relates its file to the file its specifier
+ * designates whatever its binding form: one of an invalid form — a named
+ * or namespace clause beside or instead of the default binding, a bound
+ * compiler-provided name, a side-effect-only import — still imports that
+ * module, since SPEC 11.2 leaves an import's resolved target undefined
+ * only where specifier form or discovery defines none, and its 14.15
+ * makes the cycle no less detectable (SPEC 14: every condition is
+ * reported unless another error makes it undetectable). A declaration
+ * whose specifier designates nothing (out of form, outside the root, or
+ * no discovered spec source) relates no files. A file importing itself is
+ * a cycle of length one. The relation is between FILES, so discovered
+ * spec sources whose own paths are invalid (SPEC 14.19) participate —
+ * their imports were analyzed (SPEC 11.2) and a specifier designates a
+ * member whatever that member's path validity — and the walk therefore
+ * runs over exact path bytes (SPEC 12.0), with every location and message
+ * path rendered from the file's real path (marked byte form capable). One
+ * 14.9 finding per elementary cycle (`findCycles`; a closed path through
+ * distinct files), locating each participating import declaration —
+ * every declaration recording a step of that cycle, valid or not, so
+ * several declarations importing one module stay in the one finding
+ * (SPEC 14 location cardinality) — the full file path carried in the
+ * message.
  */
-function importCycleFindings(
-  specs: readonly SpecFileAnalysis[],
-  parsedByPath: ReadonlyMap<string, SpecFileAnalysis>,
-): Finding[] {
+function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
+  /** Byte key of one parsed file (both `PathText` forms, SPEC 12.0). */
+  const keyed = new Map<string, SpecFileAnalysis>();
+  for (const spec of specs) {
+    keyed.set(pathTextKey(spec.document.file), spec);
+  }
   const adjacency = new Map<string, Set<string>>();
   for (const spec of specs) {
+    const sourceKey = pathTextKey(spec.document.file);
     for (const declared of spec.imports.imports) {
-      if (declared.targetPath === null) continue;
-      let targets = adjacency.get(spec.document.path);
+      // SPEC 2.1, 11.2: the designated file, the declaration's binding
+      // form notwithstanding (see above).
+      if (declared.designatedFile === null) continue;
+      let targets = adjacency.get(sourceKey);
       if (targets === undefined) {
-        adjacency.set(spec.document.path, (targets = new Set()));
+        adjacency.set(sourceKey, (targets = new Set()));
       }
-      targets.add(declared.targetPath);
+      targets.add(pathTextKey(declared.designatedFile));
     }
   }
-  const paths = specs.map((spec) => spec.document.path);
-  const cycles = findCycles(paths, adjacency);
+  const cycles = findCycles([...keyed.keys()], adjacency);
   return cycles.map((cycle) => {
-    // Locate the closing import: the first import of cycle[0] designating
-    // cycle[1] (for a self-import, cycle[1] === cycle[0]).
-    const spec = parsedByPath.get(cycle[0]);
-    const closing = spec?.imports.imports.find(
-      (declared) => declared.targetPath === cycle[1],
-    );
-    const finding: Finding = {
-      condition: 9,
-      file: cycle[0],
-      ...(closing !== undefined ? { range: closing.statement.range } : {}),
-      cycle,
-      message:
-        `spec import cycle: ${cycle.join(" → ")} — import cycles among ` +
+    const fileOf = (key: string): PathText => {
+      const spec = keyed.get(key);
+      if (spec === undefined) {
+        throw new Error("xspec internal error: cycle through unknown file");
+      }
+      return spec.document.file;
+    };
+    // SPEC 14/14.9: locate each participating import declaration — for
+    // every step of the closed walk, every declaration of the step's
+    // source file designating the step's target, valid or not (for a
+    // self-import cycle, the self-designating declarations).
+    const locations: FindingLocation[] = [];
+    for (let step = 0; step + 1 < cycle.length; step += 1) {
+      const spec = keyed.get(cycle[step]);
+      if (spec === undefined) continue;
+      for (const declared of spec.imports.imports) {
+        if (
+          declared.designatedFile !== null &&
+          pathTextKey(declared.designatedFile) === cycle[step + 1]
+        ) {
+          locations.push({
+            file: spec.document.file,
+            range: declared.statement.range,
+          });
+        }
+      }
+    }
+    const renderedCycle = cycle
+      .map((key) => renderPathText(fileOf(key)))
+      .join(" → ");
+    return locatedFinding(
+      9,
+      `spec import cycle: ${renderedCycle} — import cycles among ` +
         `spec source files are invalid, even when no requirement-level ` +
         `dependency cycle exists; remove one of the participating imports ` +
         `(SPEC 2.1, 14.9)`,
-    };
-    return finding;
+      locations.length > 0
+        ? locations
+        : // Unreachable — every step of a reported import cycle came from
+          // a recorded import — but a located condition must locate
+          // (SPEC 14).
+          [{ file: fileOf(cycle[0]), range: { start: 0, end: 0 } }],
+    );
   });
 }
 
 /**
- * Every cycle of the directed graph, one full closed path per cyclic
- * strongly connected component: for each component containing a cycle (more
- * than one node, or a self-loop), the shortest cycle through its
- * byte-least node, as a closed walk (first identity repeated at the end;
- * `[a, a]` for a self-loop). Results are ordered by starting identity.
- * Adjacency entries naming unknown nodes are ignored.
+ * Every elementary cycle of the directed graph — a closed path through
+ * distinct nodes — each exactly once, whatever node it is entered from: as
+ * a closed walk from its byte-least node (that node repeated at the end;
+ * `[a, a]` for a self-loop). SPEC 5.3 and 2.1 make every cycle invalid and
+ * SPEC 14 reports each condition present, so each elementary cycle is its
+ * own finding (14.9) and, for `rename`/`move`, a would-be cycle
+ * `refused-cycle` names and locates (SPEC 6.5, 14) — no representative per
+ * strongly connected component. The list is ordered by node sequence,
+ * element-wise in byte order, a proper prefix first (SPEC 12.0:
+ * deterministic output). Adjacency entries naming unknown nodes are
+ * ignored. Exported for the `rename`/`move` refusal evaluation
+ * (core/refusal.ts), which runs the same detection over the would-be
+ * post-operation graph.
+ *
+ * Johnson's algorithm (SIAM J. Comput. 4(1), 1975) per cyclic strongly
+ * connected component: an acyclic graph costs one Tarjan pass, and a
+ * cyclic one O((n + e)(c + 1)) for its c cycles — output-sensitive, as an
+ * enumeration of every cycle must be. Iterative throughout, explicit
+ * stacks in place of recursion: cycles run through `contains` chains as
+ * deep as the sources nest, and SPEC bounds no nesting depth.
  */
-function findCycles(
+export function findCycles(
   nodes: readonly string[],
   adjacency: ReadonlyMap<string, ReadonlySet<string>>,
 ): string[][] {
@@ -757,64 +1238,179 @@ function findCycles(
       component.length === 1 &&
       neighborLists[component[0]].includes(component[0]);
     if (component.length === 1 && !selfLoop) continue;
-    const members = component.map((index) => ordered[index]);
-    cycles.push(shortestCycleWithin(members, ordered, indexOf, neighborLists));
+    for (const cycle of elementaryCyclesWithin(
+      component.map((index) => ordered[index]),
+      component.map((index) => neighborLists[index]),
+      component,
+    )) {
+      cycles.push(cycle);
+    }
   }
-  return cycles.sort((a, b) => compareBytes(a[0], b[0]));
+  return cycles.sort(compareNodeSequences);
+}
+
+/** Element-wise byte order over node sequences, a proper prefix first. */
+function compareNodeSequences(
+  a: readonly string[],
+  b: readonly string[],
+): number {
+  const shared = Math.min(a.length, b.length);
+  for (let index = 0; index < shared; index += 1) {
+    const byNode = compareBytes(a[index], b[index]);
+    if (byNode !== 0) return byNode;
+  }
+  return a.length - b.length;
 }
 
 /**
- * The shortest cycle through the byte-least member of one cyclic strongly
- * connected component, as a closed walk. Deterministic: BFS with
- * byte-ordered adjacency; within a component every node reaches every
- * other, so a cycle through any member always exists.
+ * Every elementary cycle within one cyclic strongly connected component —
+ * Johnson's circuit search. `names[i]` is member i's node, `neighbors[i]`
+ * its out-neighbors as indices into the whole graph, and `members[i]` its
+ * own index there. Members are renumbered in byte order of their names,
+ * so the byte-least node of any member set is its least local number.
+ *
+ * Each strongly connected subgraph still to search is searched from its
+ * byte-least node `s` for every elementary cycle through `s` — necessarily
+ * each such cycle's byte-least node — and `s` is then set aside: the
+ * cyclic components of the rest are searched in turn. A cycle lies within
+ * one component of every subgraph holding it, so it is found exactly once,
+ * from its own byte-least node; and every subgraph searched holds at least
+ * one cycle through its start, which bounds the work by the output.
  */
-function shortestCycleWithin(
-  members: readonly string[],
-  ordered: readonly string[],
-  indexOf: ReadonlyMap<string, number>,
-  neighborLists: readonly (readonly number[])[],
-): string[] {
-  const inComponent = new Set(members.map((member) => indexOf.get(member)!));
-  const startIdentity = sortByBytes(members, (member) => member)[0];
-  const start = indexOf.get(startIdentity)!;
-  if (neighborLists[start].includes(start)) {
-    // A self-loop: a dependency cycle (or self-import) of length one.
-    return [startIdentity, startIdentity];
-  }
-  const parent = new Map<number, number>();
-  const queue: number[] = [start];
-  for (let head = 0; head < queue.length; head += 1) {
-    const current = queue[head];
-    for (const next of neighborLists[current]) {
-      if (!inComponent.has(next)) continue;
-      if (next === start) {
-        const path: string[] = [];
-        for (let node = current; node !== start; node = parent.get(node)!) {
-          path.push(ordered[node]);
+function elementaryCyclesWithin(
+  names: readonly string[],
+  neighbors: readonly (readonly number[])[],
+  members: readonly number[],
+): string[][] {
+  const order = names
+    .map((_, index) => index)
+    .sort((a, b) => compareBytes(names[a], names[b]));
+  const localOfGlobal = new Map<number, number>();
+  order.forEach((member, local) => localOfGlobal.set(members[member], local));
+  const localNames = order.map((member) => names[member]);
+  // In-component neighbors, renumbered. Each list stays ascending (byte
+  // order) wherever the whole graph's lists are byte-ordered, keeping the
+  // search order fixed (SPEC 12.0); the result is sorted regardless.
+  const localNeighbors: number[][] = order.map((member) => {
+    const list: number[] = [];
+    for (const next of neighbors[member]) {
+      const local = localOfGlobal.get(next);
+      if (local !== undefined) list.push(local);
+    }
+    return list;
+  });
+  const size = order.length;
+
+  const cycles: string[][] = [];
+  const inSubgraph = new Uint8Array(size);
+  const blocked = new Uint8Array(size);
+  // Johnson's B lists: `waiting[w]` holds the nodes to unblock with w.
+  const waiting: Set<number>[] = [];
+  for (let local = 0; local < size; local += 1) waiting.push(new Set());
+
+  /** Johnson's UNBLOCK(node), iterative: release every waiting chain. */
+  const unblock = (node: number): void => {
+    blocked[node] = 0;
+    const work = [node];
+    while (work.length > 0) {
+      const current = work.pop()!;
+      for (const held of waiting[current]) {
+        if (blocked[held] === 1) {
+          blocked[held] = 0;
+          work.push(held);
         }
-        path.reverse();
-        return [startIdentity, ...path, startIdentity];
       }
-      if (next !== start && !parent.has(next)) {
-        parent.set(next, current);
-        queue.push(next);
+      waiting[current].clear();
+    }
+  };
+
+  const pending: number[][] = [order.map((_, local) => local)];
+  while (pending.length > 0) {
+    // Ascending local numbers: the subgraph's byte-least node first.
+    const subgraph = pending.pop()!;
+    const start = subgraph[0];
+    for (const node of subgraph) {
+      inSubgraph[node] = 1;
+      blocked[node] = 0;
+      waiting[node].clear();
+    }
+
+    // Johnson's CIRCUIT(start), iterative: one frame per path node — its
+    // next neighbor position and whether a cycle was closed beneath it.
+    const path: number[] = [start];
+    const framePosition: number[] = [0];
+    const frameFound: boolean[] = [false];
+    blocked[start] = 1;
+    while (path.length > 0) {
+      const top = path.length - 1;
+      const node = path[top];
+      const nodeNeighbors = localNeighbors[node];
+      const position = framePosition[top];
+      if (position < nodeNeighbors.length) {
+        framePosition[top] = position + 1;
+        const next = nodeNeighbors[position];
+        if (inSubgraph[next] === 0) continue;
+        if (next === start) {
+          const cycle = path.map((member) => localNames[member]);
+          cycle.push(localNames[start]);
+          cycles.push(cycle);
+          frameFound[top] = true;
+        } else if (blocked[next] === 0) {
+          blocked[next] = 1;
+          path.push(next);
+          framePosition.push(0);
+          frameFound.push(false);
+        }
+        continue;
+      }
+      // Every neighbor explored: CIRCUIT(node) returns.
+      const found = frameFound[top];
+      path.pop();
+      framePosition.pop();
+      frameFound.pop();
+      if (found) {
+        unblock(node);
+        if (top > 0) frameFound[top - 1] = true;
+      } else {
+        for (const next of nodeNeighbors) {
+          if (inSubgraph[next] === 1) waiting[next].add(node);
+        }
       }
     }
+
+    // Set the start aside; the rest's cyclic components follow.
+    inSubgraph[start] = 0;
+    const rest = subgraph.slice(1);
+    for (const component of stronglyConnectedComponents(localNeighbors, {
+      nodes: rest,
+      member: inSubgraph,
+    })) {
+      if (
+        component.length > 1 ||
+        localNeighbors[component[0]].includes(component[0])
+      ) {
+        pending.push(component.sort((a, b) => a - b));
+      }
+    }
+    for (const node of rest) inSubgraph[node] = 0;
   }
-  throw new Error(
-    "xspec internal error: no cycle found within a cyclic component",
-  );
+  return cycles;
 }
 
 /**
  * Tarjan's strongly-connected-components algorithm, iterative (deep
  * `contains`/`depends` chains must not overflow the call stack). Nodes are
  * integer indices into `neighborLists`; components come out in a
- * deterministic order given the input order.
+ * deterministic order given the input order. With `subgraph`, only the
+ * subgraph its `nodes` induce is decomposed: an edge to a node not marked
+ * 1 in its `member` is ignored.
  */
 function stronglyConnectedComponents(
   neighborLists: readonly (readonly number[])[],
+  subgraph: {
+    readonly nodes: readonly number[];
+    readonly member: Uint8Array;
+  } | null = null,
 ): number[][] {
   const count = neighborLists.length;
   const index = new Int32Array(count).fill(-1);
@@ -824,9 +1420,11 @@ function stronglyConnectedComponents(
   const components: number[][] = [];
   let nextIndex = 0;
 
+  const roots =
+    subgraph === null ? neighborLists.map((_, node) => node) : subgraph.nodes;
   const frameNode: number[] = [];
   const frameNext: number[] = [];
-  for (let root = 0; root < count; root += 1) {
+  for (const root of roots) {
     if (index[root] !== -1) continue;
     frameNode.push(root);
     frameNext.push(0);
@@ -844,7 +1442,9 @@ function stronglyConnectedComponents(
       if (position < neighbors.length) {
         frameNext[frameNext.length - 1] = position + 1;
         const next = neighbors[position];
-        if (index[next] === -1) {
+        if (subgraph !== null && subgraph.member[next] === 0) {
+          // Outside the subgraph: not an edge of it.
+        } else if (index[next] === -1) {
           frameNode.push(next);
           frameNext.push(0);
         } else if (onStack[next] === 1 && index[next] < lowlink[node]) {

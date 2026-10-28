@@ -16,6 +16,15 @@
 // it independent of the product (P-2: "an independent oracle ... the oracle
 // lives in the harness").
 //
+// Grammar boundary (TEST-SPEC T3-1, §16 P-2): constructs exist only where
+// the MDX parse yields them — fenced code blocks and inline code spans are
+// literal text, so construct-like bytes inside them (`<S id="x">`, `<div>`,
+// `import X from "./X.xspec"`, `{text("a")}`) are plain content. Callers
+// express that by passing every fence and span byte as a `content` piece;
+// the oracle treats content uniformly — preserved verbatim, subject only to
+// the drop rule under the 1.4 classes — and never scans content for
+// construct-like patterns (the S-6 grammar-boundary vectors pin this).
+//
 // SPEC.md 3, as implemented here:
 //
 // * Compilation removes spec module imports, `<S>`/`<Spec>` tags together
@@ -51,6 +60,13 @@
 //   other code point belongs to either class — U+00A0, U+0085, and U+2028
 //   are neither whitespace nor line terminators (SPEC.md 1.4; TEST-SPEC
 //   T3-3 class boundaries).
+//
+// Each of its evaluations — `compileMarkdown` and `compileMarkdownSource` — is
+// a harness step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts):
+// synchronous, bounded by construction over the staged input it evaluates, and
+// measured.
+
+import { guardSyncStep } from "../step-guards.js";
 
 /**
  * One segment of a source document, in document order. The document's source
@@ -129,6 +145,13 @@ export function sourceTextOf(pieces: readonly MarkdownPiece[]): string {
  * failure.
  */
 export function compileMarkdown(pieces: readonly MarkdownPiece[]): string {
+  return guardSyncStep("the Markdown oracle (compileMarkdown)", () =>
+    compileMarkdownUnguarded(pieces),
+  );
+}
+
+/** {@link compileMarkdown}'s evaluation, under its guard. */
+function compileMarkdownUnguarded(pieces: readonly MarkdownPiece[]): string {
   for (const piece of pieces) {
     if (piece.kind !== "content" && isWhitespaceOnly(piece.text)) {
       throw new Error(
@@ -225,6 +248,16 @@ export function compileMarkdown(pieces: readonly MarkdownPiece[]): string {
  * a harness defect).
  */
 export function compileMarkdownSource(
+  source: string,
+  constructs: readonly MarkdownConstructSpan[],
+): string {
+  return guardSyncStep("the Markdown oracle (compileMarkdownSource)", () =>
+    compileMarkdownSourceUnguarded(source, constructs),
+  );
+}
+
+/** {@link compileMarkdownSource}'s evaluation, under its guard. */
+function compileMarkdownSourceUnguarded(
   source: string,
   constructs: readonly MarkdownConstructSpan[],
 ): string {

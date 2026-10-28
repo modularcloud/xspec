@@ -1,0 +1,402 @@
+// Coded refusals — a write (SPEC 14.24) or a read (SPEC 14.25) the
+// environment refuses, and a mutating command refused at acquisition, its
+// workspace busy (SPEC 14.26) — carried from the operation that meets one
+// to the CLI's exit-2 report.
+//
+// SPEC 14.24: a write xspec makes — a file's creation, replacement, append,
+// relocation, or removal (13.4, 12.1) — that the environment refuses
+// (permission denied, a read-only filesystem, exhausted storage, or any
+// other failure the filesystem reports for a write the rules of 13.4
+// permit) is reported by the command making the write as a usage error
+// (12.0), not a finding: the command stops at the refused write, attempting
+// no later one and leaving every write already made, each complete (13.5),
+// and exits 2.
+//
+// SPEC 14.25: so is a read the environment refuses (permission denied, an
+// I/O error, any other failure the filesystem reports for a read) wherever
+// the object read has no condition of its own — a directory discovery lists
+// (7), the session directory (10.1), the directories the upward search
+// examines (7), and a path occupant's kind wherever else xspec examines one
+// (6.5, 7, 11.6, 13.4), the journal's, a session file's, and the
+// configuration path's included: the command stops at the read, attempting
+// nothing further, and exits 2. An object's nonexistence is never this
+// condition — each reader reads absence as its own section states. The
+// refused content reads that have conditions of their own (a source's 14.20,
+// the journal's 14.13, a session file's 14.21, the configuration file's
+// 14.14, a derived file's 14.10 to `check`, graph data's 14.23 state) are
+// their readers' to report, never raised through here.
+//
+// SPEC 14.26: a mutating command refused at acquisition by an entry in the
+// lock directory other than its own — another live run's, or a leftover in
+// 13.5's gap — is reported by the refused command as a usage error (12.0),
+// not a finding, concerning the lock path `.xspec/lock` (13.5): it fails
+// there promptly, modifying nothing.
+//
+// SPEC 13.5 with 14.24 and 14.25: acquisition's own refusals — an occupant
+// obstructing it, and a read or write of it the environment refuses — are
+// write and read failures met at acquisition, concerning the area's own
+// path `.xspec` (the area directory's creation, its occupant's examination,
+// an occupant other than a directory there) or else the lock path
+// `.xspec/lock`, whatever lies at or under it.
+//
+// Each refusal travels as a typed error below, thrown at the operation
+// itself so nothing after it runs, and carrying the condition as data — the
+// 12.7 finding form with its stable code and concerned path (IMPLEMENTATION
+// cross-cutting rules) — which the CLI renders once, as the stderr
+// diagnostic and, with JSON output in effect, the 12.0/12.7 error document
+// (cli/main.ts, cli/report.ts).
+//
+// Messages stay byte-deterministic (SPEC 12.0): the concerned path, the
+// filesystem's error code (`EACCES`, `EROFS`, `ENOSPC`, `EIO`, …), and
+// static text — never the filesystem's own message, which carries absolute
+// and temporary paths, and never a lock entry's name or a process
+// identifier, coordination state outside 12.0's determinism (13.4).
+
+import type { Finding } from "../core/findings.js";
+import { pathFinding } from "../core/findings.js";
+import { GRAPH_DATA_AREA, LOCK_PATH } from "../core/graph-data.js";
+import type { PathText } from "../core/path-text.js";
+import { renderPathText } from "../core/path-text.js";
+
+/**
+ * A usage error carrying its condition's stable code and concerned path,
+ * thrown at the operation that meets it (SPEC 12.0, 12.7: the exit-2 error
+ * document holds, for a write failure, a read failure, or a busy workspace,
+ * "its stable code and concerned path"): an environment refusal (14.24,
+ * 14.25) or the busy refusal (14.26). Its one finding — stable code,
+ * message, and concerned path, no locations — is what the CLI renders
+ * (cli/main.ts). Configuration errors (14.14), the remaining coded usage
+ * errors, are reported where the configuration is loaded and the sources
+ * discovered, never thrown.
+ */
+export abstract class CodedRefusal extends Error {
+  readonly finding: Finding;
+
+  protected constructor(finding: Finding) {
+    super(finding.message);
+    this.finding = finding;
+  }
+}
+
+/**
+ * A write (SPEC 14.24) or a read (SPEC 14.25) the environment refused, as
+ * the one finding of the exit-2 error document (SPEC 12.7): stable code,
+ * message, and concerned path, no locations.
+ */
+export class EnvironmentRefusal extends CodedRefusal {
+  constructor(finding: Finding) {
+    super(finding);
+    this.name = "EnvironmentRefusal";
+  }
+}
+
+/**
+ * The busy refusal's diagnostic (SPEC 14.26). Static (SPEC 12.0): no
+ * process identifier, entry name, or absolute path — a lock entry's name is
+ * coordination state outside 12.0's determinism (13.4). Actionable (SPEC
+ * 14): retry once the holder completes; with no mutating command running,
+ * an entry in 13.5's gap — its recorded identifier still listed — is what
+ * blocks, and the lock path may be deleted by hand, 13.4's remedy for a
+ * leftover that blocks.
+ */
+const WORKSPACE_BUSY_MESSAGE =
+  "another mutating command (`rename`, `move`, or a mutating `review` " +
+  "subcommand) holds this workspace's exclusivity, so this command was " +
+  "refused at acquisition and modified nothing; retry once that command " +
+  "completes. If no mutating command is running, a leftover entry whose " +
+  "recorded process identifier is still listed blocks acquisition: delete " +
+  `${LOCK_PATH} by hand, then retry (SPEC 14.26, 13.5, 13.4)`;
+
+/**
+ * SPEC 14.26: a mutating command refused at acquisition by an entry in the
+ * lock directory other than its own, as the one finding of the exit-2
+ * error document (SPEC 12.7): the stable code `workspace-busy`, the static
+ * message above, and the lock path `.xspec/lock` as the concerned path, no
+ * entry named, no locations.
+ */
+export class WorkspaceBusyRefusal extends CodedRefusal {
+  constructor() {
+    super(pathFinding(26, WORKSPACE_BUSY_MESSAGE, LOCK_PATH));
+    this.name = "WorkspaceBusyRefusal";
+  }
+}
+
+/**
+ * The SPEC 14.26 busy refusal, thrown at acquisition so the refused command
+ * stops there, modifying nothing (SPEC 13.5).
+ */
+export function workspaceBusy(): WorkspaceBusyRefusal {
+  return new WorkspaceBusyRefusal();
+}
+
+/**
+ * Whether `error` is a failure the filesystem reported — a system error
+ * carrying the errno code and the failed call (SPEC 14.24, 14.25: "any
+ * other failure the filesystem reports"), as opposed to a defect of the
+ * product's own, which carries no system call.
+ */
+export function isFilesystemFailure(
+  error: unknown,
+): error is NodeJS.ErrnoException {
+  if (!(error instanceof Error)) return false;
+  const { code, syscall } = error as NodeJS.ErrnoException;
+  return typeof code === "string" && typeof syscall === "string";
+}
+
+/**
+ * The write a refusal stopped, as its diagnostic names it (SPEC 14.24):
+ * creating or replacing a file, appending to a durable file, removing a
+ * file, or writing graph data, which concerns the graph-data area.
+ */
+export type RefusedWrite = "write" | "append" | "remove" | "graph-data";
+
+/**
+ * The SPEC 14.24 write failure for one refused write: its concerned path is
+ * the workspace-relative path of the file the write would have produced or
+ * removed — each of a relocation's two writes concerning its own path — or,
+ * for a graph-data write, the graph-data area itself, no path inside it
+ * named (SPEC 14.24, 11.6).
+ */
+export function writeFailure(
+  concerned: string,
+  write: RefusedWrite,
+  cause: NodeJS.ErrnoException,
+): EnvironmentRefusal {
+  const code = cause.code ?? "an unknown error";
+  // SPEC 12.0: the message names the path in the shared human spelling
+  // (core/path-text.ts), as the report line's concerned path does.
+  const spelled = renderPathText(concerned);
+  let what: string;
+  switch (write) {
+    case "write":
+      what = `to write ${spelled}`;
+      break;
+    case "append":
+      what = `an append to ${spelled}`;
+      break;
+    case "remove":
+      what = `the removal of ${spelled}`;
+      break;
+    case "graph-data":
+      what = `a graph-data write in the graph-data area ${spelled}`;
+      break;
+  }
+  return new EnvironmentRefusal(
+    pathFinding(
+      24,
+      `the environment refused ${what} (${code}); the command stopped at ` +
+        `this write, every earlier write complete and no later one made — ` +
+        `make the path writable, then rerun the command (SPEC 14.24, 13.5)`,
+      concerned,
+    ),
+  );
+}
+
+/**
+ * A write of acquisition (SPEC 13.5), as its write failure's diagnostic
+ * names it: the area's directory's creation, which concerns the area's own
+ * path `.xspec`, and — each concerning the lock path `.xspec/lock`, its
+ * entries' names being opaque (13.4) — the lock directory's creation, the
+ * run's entry's addition, and a leftover's removal: the plain file at the
+ * lock path, or one in the lock directory or in a leftover directory below
+ * it, never named (SPEC 14.24).
+ */
+export type AcquisitionWrite =
+  "area" | "lock-directory" | "entry" | "lock-path-leftover" | "leftover";
+
+/**
+ * The SPEC 14.24 write failure for a write of acquisition the environment
+ * refused (SPEC 13.5): it stops the command at acquisition, release
+ * following. Static (SPEC 12.0): the concerned path, the filesystem's error
+ * code, and the SPEC sections — never an entry's name, a process
+ * identifier, or an absolute path (13.4).
+ */
+export function acquisitionWriteFailure(
+  write: AcquisitionWrite,
+  cause: NodeJS.ErrnoException,
+): EnvironmentRefusal {
+  const code = cause.code ?? "an unknown error";
+  const area = renderPathText(GRAPH_DATA_AREA);
+  const lock = renderPathText(LOCK_PATH);
+  const byHand = `or delete ${lock} by hand while no mutating command runs`;
+  let what: string;
+  let remedy: string;
+  switch (write) {
+    case "area":
+      what = `to create the graph-data area's directory ${area}`;
+      remedy = `make the workspace root writable`;
+      break;
+    case "lock-directory":
+      what = `to create the lock directory ${lock}`;
+      remedy = `make ${area} writable`;
+      break;
+    case "entry":
+      what = `to add this run's entry to the lock directory ${lock}`;
+      remedy = `make ${lock} writable, ${byHand}`;
+      break;
+    case "lock-path-leftover":
+      what = `the removal of the leftover plain file at the lock path ${lock}`;
+      remedy = `make ${area} writable, ${byHand}`;
+      break;
+    case "leftover":
+      what = `the removal of a leftover in the lock directory ${lock}`;
+      remedy = `make the leftover removable, ${byHand}`;
+      break;
+  }
+  return new EnvironmentRefusal(
+    pathFinding(
+      24,
+      `the environment refused ${what} (${code}) as this command acquired ` +
+        `workspace exclusivity; the command stopped at acquisition, ` +
+        `modifying nothing — ${remedy}, then rerun the command (SPEC 14.24, ` +
+        `13.5, 13.4)`,
+      write === "area" ? GRAPH_DATA_AREA : LOCK_PATH,
+    ),
+  );
+}
+
+/**
+ * A read of acquisition inside the lock directory (SPEC 13.5), as its read
+ * failure's diagnostic names it: the kind of an occupant there or in a
+ * leftover directory below it, and the listing of a leftover directory
+ * acquisition removes — each concerning the lock path `.xspec/lock`, never
+ * the nested path (SPEC 14.25: the lock path's occupant and everything
+ * under it concern the lock path).
+ */
+export type AcquisitionRead = "occupant-kind" | "leftover-listing";
+
+/**
+ * The SPEC 14.25 read failure for a read inside the lock directory the
+ * environment refused at acquisition (SPEC 13.5): it stops the command at
+ * acquisition, release following. Static (SPEC 12.0): the concerned path,
+ * the filesystem's error code, and the SPEC sections — never a nested path,
+ * an entry's name, or an absolute path (13.4).
+ */
+export function acquisitionReadFailure(
+  read: AcquisitionRead,
+  cause: NodeJS.ErrnoException,
+): EnvironmentRefusal {
+  const code = cause.code ?? "an unknown error";
+  const lock = renderPathText(LOCK_PATH);
+  const what =
+    read === "occupant-kind"
+      ? `to read what occupies a path in the lock directory ${lock}`
+      : `to read the entries of a leftover directory in the lock ` +
+        `directory ${lock}`;
+  return new EnvironmentRefusal(
+    pathFinding(
+      25,
+      `the environment refused ${what} (${code}) as this command acquired ` +
+        `workspace exclusivity; the command stopped at acquisition, ` +
+        `modifying nothing — make what the lock directory holds readable, ` +
+        `or delete ${lock} by hand while no mutating command runs, then ` +
+        `rerun the command (SPEC 14.25, 13.5, 13.4)`,
+      LOCK_PATH,
+    ),
+  );
+}
+
+/**
+ * The SPEC 14.24 write failure for an occupant obstructing acquisition
+ * (SPEC 13.5): the area's own path `.xspec` holding anything but a
+ * directory, or the lock path `.xspec/lock` anything but a directory or a
+ * plain file — a symbolic link, whatever it targets, or any other occupant.
+ * Acquisition removes nothing and traverses nothing; the occupant is left
+ * for manual deletion (13.4). Static, as above.
+ */
+export function acquisitionObstruction(
+  obstructed: "area" | "lock",
+): EnvironmentRefusal {
+  const concerned = obstructed === "area" ? GRAPH_DATA_AREA : LOCK_PATH;
+  const spelled = renderPathText(concerned);
+  const occupant =
+    obstructed === "area"
+      ? `the graph-data area's own path ${spelled} is occupied by something ` +
+        `other than a directory — a plain file, a symbolic link (whatever ` +
+        `it targets), or another non-directory occupant`
+      : `the lock path ${spelled} is occupied by something other than a ` +
+        `directory or a plain file — a symbolic link (whatever it targets), ` +
+        `or another occupant such as a FIFO`;
+  return new EnvironmentRefusal(
+    pathFinding(
+      24,
+      `${occupant}, so this command cannot acquire workspace exclusivity; ` +
+        `it removed nothing and stopped at acquisition, modifying nothing — ` +
+        `delete that occupant by hand (a symbolic link itself, never its ` +
+        `target) while no mutating command runs, then rerun the command ` +
+        `(SPEC 14.24, 13.5, 13.4)`,
+      concerned,
+    ),
+  );
+}
+
+/**
+ * Whether a failed read found nothing to read: no entry of that name, or a
+ * path component that is not a directory. SPEC 14.25: an object's
+ * nonexistence is never a read failure — an absent object reads as its own
+ * section states (an absent journal is empty, 6.1; an absent session
+ * directory holds no sessions, 10.1; an absent configuration path is
+ * missing configuration, 14.14; an absent path is matched by no glob, 7).
+ */
+export function isAbsenceFailure(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+/**
+ * The read a refusal stopped, as its diagnostic names it (SPEC 14.25): a
+ * directory's entries — a listing, or a lookup the upward search makes in
+ * a directory it examines (7) — or a path occupant's kind (7, 13.4).
+ */
+export type RefusedRead = "listing" | "kind";
+
+/**
+ * The SPEC 14.25 read failure for one refused read: its concerned path is
+ * the object's workspace-relative path — for a directory above the
+ * workspace root, or examined before the root is known (7), its anchoring
+ * form (11.6); a caller passes whichever the object has.
+ */
+export function readFailure(
+  concerned: PathText,
+  read: RefusedRead,
+  cause: NodeJS.ErrnoException,
+): EnvironmentRefusal {
+  const code = cause.code ?? "an unknown error";
+  const spelled = renderPathText(concerned);
+  const what =
+    read === "listing"
+      ? `to read the entries of the directory ${spelled}`
+      : `to read what occupies ${spelled}`;
+  return new EnvironmentRefusal(
+    pathFinding(
+      25,
+      `the environment refused ${what} (${code}); the command stopped at ` +
+        `this read, attempting nothing further — make the path readable, ` +
+        `then rerun the command (SPEC 14.25)`,
+      concerned,
+    ),
+  );
+}
+
+/**
+ * SPEC 14.25: run one read that has no condition of its own, turning a
+ * failure the filesystem reports into the read failure concerning
+ * `concerned`, thrown so the command stops at this read. A read that found
+ * nothing (`isAbsenceFailure`) is never refused: `absent` supplies the
+ * answer absence reads as, the caller's own section deciding it. Anything
+ * else — a defect of the product's own — propagates unchanged.
+ */
+export async function performRead<T>(
+  concerned: PathText,
+  read: RefusedRead,
+  reading: () => Promise<T>,
+  absent: () => T,
+): Promise<T> {
+  try {
+    return await reading();
+  } catch (error) {
+    if (isAbsenceFailure(error)) return absent();
+    if (isFilesystemFailure(error)) throw readFailure(concerned, read, error);
+    throw error;
+  }
+}

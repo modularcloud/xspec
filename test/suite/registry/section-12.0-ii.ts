@@ -1,15 +1,15 @@
 // TEST-SPEC §12.0 II (global command conventions, second half) — SUITE-42:
-// T12.0-7, T12.0-8, T12.0-9, T12.0-11, T12.0-12.
+// T12.0-7, T12.0-8, T12.0-9, T12.0-10, T12.0-11, T12.0-12, T12.0-13.
 //
-// T12.0-10 (check ordering) is a pure cross-reference in TEST-SPEC — "Covered
-// by T6.4-4/T6.5-5 (rename/move existence checks precede source validation;
-// unparseable-file masking flips to exit 1) and T6.3-4's precedence arm
-// (baseline resolution precedes source validation)" — so no separate body is
-// registered here: its content runs as the ordering/masking arms of
-// section-6.4.ts, section-6.5.ts, and section-6.3.ts, and the H-7 map ties
-// SPEC 12.0's ordering bullet to those tests. A registered T12.0-10 body
-// would either re-run those bodies (duplicated execution) or pass vacuously
-// against the stub, violating H-8.
+// T12.0-10's rename/move and baseline arms stay cross-references in
+// TEST-SPEC ("Rename/move and baseline arms: T6.4-4/T6.5-5 (existence,
+// kind, and masking) and T6.3-4"): that content runs as the ordering/masking
+// arms of section-6.4.ts, section-6.5.ts, and section-6.3.ts — the H-7 map
+// keeps "12.0" on those three — and a re-registration here would re-run
+// those bodies (duplicated execution). The gated-read, masking (a spec
+// source's id and a code source's unit), spelled-not-defined, kind-check,
+// past-the-gate, and within-class-2 precedence arms are T12.0-10's own
+// registered body below.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -42,33 +42,147 @@
 //   SPEC.md, so output depending on any of them is environment-dependent
 //   content (SPEC 12.0).
 // - T12.0-8 stages, per command, a fixture whose shortest-path candidates are
-//   exactly two equal-length sequences diverging in one element, so the
-//   asserted path is attributable to the byte-least tie-break alone.
+//   exactly two equal-length sequences diverging in one element, the
+//   byte-least one neither the fork node's first `d` entry nor first in
+//   document order: the fork's `d` value lists the other candidate's node
+//   first, and that node's section precedes the byte-least candidate's. A
+//   product reporting the first-found candidate — searching forward in
+//   `d`-list or document order, or backward in document order — therefore
+//   reports the other, never the asserted path.
 // - T12.0-9 asserts exact exit codes (the partition is the contract under
 //   test); stream separation is T12.0-2's. Rows whose class is only
 //   meaningful under a premise (impact *with differences*, coverage with an
-//   uncovered node, fully-resolved `next`, a *blocked* resolve) carry a
-//   light adapter-decoded premise probe so the asserted exit code is
-//   attributable to its class.
+//   uncovered node, fully-resolved `next`, a *blocked* resolve, a code
+//   source *discovered* so a wrong-kind exit 2 is attributable to operand
+//   kind rather than to an unconfigured path) carry a light premise probe so
+//   the asserted exit code is attributable to its class. The class-1
+//   "answers carrying findings or explicitly-unavailable data — emitted in
+//   full" rows assert emission at H-5's protocol grain — stdout parses as
+//   exactly one JSON document (the 11.2 surfaces are JSON-only) — T11.2-5
+//   pinning the full-answer contract; preview rows assert exit codes only,
+//   T6.6-* owning modifies-nothing and report content.
+// - T12.0-10 operationalizes "the same names on a valid twin workspace
+//   giving the same exit-2 errors" and "identically with the workspace's
+//   configuration file invalid or missing" as byte-identical exit-2 stdout —
+//   the entire 12.7 error document (H-5) — across the paired workspaces:
+//   H-4's product-to-itself compare, sound because each check consults
+//   identical state in both (configuration, the session directory, the
+//   named files' parses) and a plain usage error describes the invocation,
+//   never workspace content (SPEC 14). Stderr is asserted nonempty on each
+//   side only — its wording, like all diagnostic text, is unpinned (H-3).
+//   "Reports no validation findings" is asserted at H-5's protocol grain:
+//   the exit-2 stdout is exactly the one 12.7 error document, a form with
+//   no findings member (12.7). The mutating row, `review create --coverage
+//   <unknown-profile> --name n`, is the plain usage error (`code` and
+//   `path` null, no locations) on each side, and "no session written" is
+//   a whole-root compare around each run (H-6's lock-path exclusion: its
+//   acquisition's and release's writes no modification, release deleting
+//   the lock directory and the area's directory its acquisition brought
+//   into existence, SPEC 13.5) with `.xspec/reviews/n.json` absent after
+//   it; a twin control run after every row — the configured profile in
+//   the unknown one's place — creates that very session, so the absence is
+//   the refusal's. The failing workspace's staged findings are its `build`
+//   premise, located file by file: the unparseable `specs/Broken.mdx`
+//   (14.20) and the spelled-not-defined arm's four parseable files —
+//   `specs/Dup.mdx` spelling `dup` twice (one condition-3 finding locating
+//   both bearers, T14-8), `specs/Orphan.mdx` spelling `kid` beneath a
+//   section with no `id` (14.1, masking condition 2 for its child), and
+//   `specs/Braced.mdx`'s `id={"x"}` and `specs/Bare.mdx`'s `<S id>` (one
+//   14.17 each) — no gated row naming any of them, so the twin compare
+//   stays sound. The gated report — the masking arm's and the
+//   spelled-not-defined arms' — is "exactly the findings `build` reports
+//   there" (13.3): that premise's findings, every member but `message`
+//   compared in 12.7's order (wording unpinned, H-3; H-4's
+//   product-to-itself compare, as T6.6-3 projects a refusal's findings).
+//   The code-unit masking arm runs on a workspace of its own (a spec glob
+//   `specs/*.mdx`, a code glob `src/*.ts`, the parseable `specs/A.mdx`
+//   holding `a`, and `src/bad.ts` — `function f() {}` then `let x = ;`,
+//   a declared-unparseable staged-source record, S-9), its `build --json`
+//   premise exactly one 14.20 located in `src/bad.ts`: the nine `query`
+//   runs naming `src/bad.ts#f`, `src/bad.ts#g`, or the bare `src/bad.ts`
+//   each give that premise's gated report as above, while `show
+//   src/bad.ts#f` and `query node src/bad.ts` — the kind check, never
+//   masked — each give the plain usage error alone (exit 2, `code` and
+//   `path` null, the error document the entire stdout). The past-the-gate
+//   arm runs last: a premise workspace first shows `resolve`, `show`, and
+//   `split` naming the unknown item ID on a well-formed session each the
+//   plain usage error (exit 2, `code` null); then every corrupt state of
+//   T10.1-4 is staged by section-10.1.ts's own `T10_1_4_CORRUPT_STATES`
+//   (the same stagings, each on a passing workspace of its own; the
+//   unknown ID checked against the item IDs the product-written session
+//   held, a staging premise), and each of the three subcommands runs
+//   flag-less and with `--json` inside one whole-root compare (nothing
+//   modified; H-6's lock-path exclusion): "reports the corruption" reuses
+//   T10.1-4's operationalization flag-less (exit 1, stdout matching
+//   /corrupt/i — SPEC.md's fixed vocabulary for the state; information
+//   presence, not wording), and "exactly the condition-21 finding" is the
+//   `--json` run's form-exact findings-only report holding exactly one
+//   finding — TEST-SPEC line 9's rule: condition 21's stable code
+//   `corrupt-session`, the session file `.xspec/reviews/cor.json` (a
+//   symbolic link there by its own path) as its 12.7 `path`, and
+//   `locations` [] (SPEC 14, 14.21, 12.7, 10.1, 13.4).
 // - T12.0-11 partitions a whole-workspace byte diff around each git-reading
 //   invocation: any change under `.git/` fails (same file set, same bytes),
 //   and every change outside it must be a write the command's own
 //   specification calls for (the session file; nothing for `impact`).
-// - T12.0-12 guards its own staging: the sweep workspace must have no
-//   enclosing git repository (walked to the filesystem root), thrown as a
-//   harness staging error — an ambient repository would mask a product that
-//   wrongly requires git.
+// - T12.0-12 guards its own staging through H-1's ancestor precondition
+//   (`assertSelfContainedRoot`, helpers/self-contained-root.ts), verified
+//   before the sweep's first invocation: git itself, under the environment
+//   the product runs in, finds no working tree enclosing the sweep
+//   workspace's root, and no ancestor of the root holds an entry named
+//   `xspec.config.ts` — an unmet one a harness error (`HarnessStagingError`),
+//   never a product verdict: an ambient repository would mask a product
+//   that wrongly requires git.
+// - T12.0-13 stages the entry's `specs/a#b.mdx` on every platform (`#` is a
+//   legal file-name byte on every filesystem the harness supports — the
+//   T11.2-3 operationalization of the entry's "(Linux leg)" note, which
+//   exists for that entry's non-UTF-8 siblings, staged nowhere in this
+//   test — so no platform skips it, H-9). Its multi-`#` spellings pair the
+//   entry's literal `a#b#c` with `specs/a#b.mdx#pa`, whose last-`#` split
+//   names a DISCOVERED file plus a SPELLED id: a product splitting at the
+//   last `#` instead of rejecting the value proceeds into the gated read /
+//   move machinery and answers exit 1 on this failing workspace — an
+//   observably different exit — while the first-`#` split's unknown-file
+//   error stays inside exit class 2 and is discriminated by T12.0-10's
+//   valid-twin machinery, not re-staged here. "Malformed value → exit 2" is
+//   asserted with the FP-002 protocol (single 12.7 error document under
+//   JSON output, stderr message present); the no-configuration-load half of
+//   malformed-value precedence is T12.0-10's within-class-2 arm. Its
+//   `rename specs/a#b.mdx x y` arm runs last, the file spelling a section
+//   `x` beside `pa`: naming neither report form, it reads the `--json`
+//   document (H-3) — exit 1, the form-exact findings-only report (12.7)
+//   holding the premise's pinned 14.19 among its findings (membership, as
+//   the entry words it), inside a whole-root compare (nothing modified;
+//   H-6's lock-path exclusion for the rename's acquisition and release,
+//   13.5). A parser splitting the `<file>` operand at `#` names the
+//   unknown file `specs/a`, and a product judging the old ID's existence
+//   over node identities — undefined over the invalid path (11.2) — finds
+//   no `x`: each the usage error, exit 2, where the spelled identity
+//   establishes existence and the invalid-workspace refusal follows (6.4).
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
 import {
+  assertReportMentions,
+  decodeAtReport,
   decodeCoverageReport,
   decodeExportReport,
+  decodeFindingsReport,
   decodeNextReport,
+  decodeOccurrencesReport,
   decodeReachableReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
-import type { ExportReport } from "../../helpers/adapters/index.js";
+import type {
+  ExportReport,
+  Finding,
+  PathValue,
+  SourceRange,
+  ViewAttributeEntry,
+  ViewNode,
+} from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertExitCode,
   fail,
   parseJsonStdout,
@@ -81,27 +195,48 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import {
   assertDirectoriesEqual,
+  assertLeavesUnchanged,
   diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type { SnapshotChange } from "../../helpers/snapshot.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
-  pathExists,
   releaseHoldFile,
+  rethrowHarnessError,
   runProduct,
   startProduct,
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
+import {
+  STREAMS_INVALID_SOURCE,
+  STREAMS_VALID_SOURCE,
+} from "./section-12.0-i.js";
+import { T10_1_4_CORRUPT_STATES } from "./section-10.1.js";
 import { impactAgainst, SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import { assertImpactedCode, SPEC_AND_CODE_CONFIG } from "./section-9.js";
 import {
+  assertConditionCounts,
+  assertFindingConcernsPath,
+  assertFindingLocated,
+  assertPlainUsageError,
   assertSameJson,
+  buildFindings,
   buildOk,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
+  expectPlainUsageError,
+  REPLACEMENT_CHARACTER_SPEC_PATH,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -239,6 +374,10 @@ async function makeStoryWorkspace(): Promise<{
   try {
     await workspace.gitInit();
     const baseRef = await workspace.gitCommitAll("story baseline");
+    // Every caller (T12.0-7, T12.0-9) stages this edit before its first
+    // product invocation (git staging invokes none), so S-7's sweep reaches
+    // it against the stub: plain contents, no ledger record
+    // (helpers/staged-mdx.ts).
     await workspace.file(STORY_FILE_A, storyASource("Omega text v2."));
     return { workspace, baseRef };
   } catch (error) {
@@ -429,7 +568,6 @@ const T12_0_7 = defineProductTest({
   id: "T12.0-7",
   title:
     "determinism: a representative story — build products (generated modules, Markdown, graph data), every report in human and `--json` forms, audit and coverage review sessions, journaled rename and file-form move — produces byte-identical outputs per step across content-identical workspaces at different absolute paths, and byte-identical resulting trees (sources, generated files, Markdown, graph data, journal, session files; `.git/` internals excluded as fixture machinery); reports and rebuilds are byte-identical across repeated runs, and runs with differing irrelevant environment variables are byte-identical in output and workspace state — no wall-clock, randomness, absolute paths, or environment leakage (SPEC 12.0, H-6)",
-  timeoutMs: 360_000,
   run: async (product) => {
     const first = await makeStoryWorkspace();
     try {
@@ -579,18 +717,23 @@ const T12_0_7 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 // `query reachable` fixture: exactly two shortest src → zz paths, diverging
-// only in the middle element (`ma` < `mb` byte-wise).
+// only in the middle element (`ma` < `mb` byte-wise). The byte-least one,
+// via ma, is neither src's first `d` entry nor first in document order: src
+// spells `d={["mb", "ma"]}`, and mb's section — with its `d` edge to zz —
+// precedes ma's, so a first-found search (forward in `d`-list or document
+// order, or backward from zz over its incoming edges in document order)
+// reports the route via mb.
 const TIE_REACHABLE_SOURCE = [
-  '<S id="src" d={["ma", "mb"]}>',
+  '<S id="src" d={["mb", "ma"]}>',
   "Source text.",
-  "</S>",
-  "",
-  '<S id="ma" d={"zz"}>',
-  "Middle a text.",
   "</S>",
   "",
   '<S id="mb" d={"zz"}>',
   "Middle b text.",
+  "</S>",
+  "",
+  '<S id="ma" d={"zz"}>',
+  "Middle a text.",
   "</S>",
   "",
   '<S id="zz">',
@@ -600,8 +743,18 @@ const TIE_REACHABLE_SOURCE = [
 ].join("\n");
 
 // Coverage fixture: boundary group `bnd` (only `b`), target group `tgt`;
-// transitive mode; two equal-length covering paths to `zz` via `ma`/`mb`.
-const TIE_COVERAGE_CONFIG = `import { defineConfig } from "xspec"
+// transitive mode; two equal-length covering paths to `zz`, via `mb` and via
+// `ma`. As in the reachable fixture, the byte-least one (via ma) is neither
+// b's first `d` entry — b spells `d={[T.mb, T.ma]}` — nor first in document
+// order — mb's section precedes ma's in `T.mdx` — so a first-found search
+// reports the route via mb.
+// T12.0-8's coverage and impact arms follow its reachable arm's
+// invocations, so their configurations and code source are TypeScript
+// staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), all well-formed.
+const TIE_COVERAGE_CONFIG = stagedTs(
+  "T12.0-8 coverage arm xspec.config.ts — the spec groups bnd and tgt and the transitive profile prof",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -617,55 +770,93 @@ export default defineConfig({
     }
   ]
 })
-`;
-const TIE_BOUNDARY_SOURCE = [
-  'import T from "../tgt/T.xspec"',
-  "",
-  '<S id="b" d={[T.ma, T.mb]}>',
-  "Boundary text.",
-  "</S>",
-  "",
-].join("\n");
-const TIE_TARGET_SOURCE = [
-  '<S id="ma" d={"zz"}>',
-  "Middle a text.",
-  "</S>",
-  "",
-  '<S id="mb" d={"zz"}>',
-  "Middle b text.",
-  "</S>",
-  "",
-  '<S id="zz">',
-  "End target text.",
-  "</S>",
-  "",
-].join("\n");
+`,
+);
+// The coverage arm follows the reachable arm's `build`: its two sources are
+// staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
+// clause), wrapped in place.
+const TIE_BOUNDARY_SOURCE = stagedMdx(
+  "T12.0-8 coverage arm specs/bnd/B.mdx",
+  [
+    'import T from "../tgt/T.xspec"',
+    "",
+    '<S id="b" d={[T.mb, T.ma]}>',
+    "Boundary text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const TIE_TARGET_SOURCE = stagedMdx(
+  "T12.0-8 coverage arm specs/tgt/T.mdx",
+  [
+    '<S id="mb" d={"zz"}>',
+    "Middle b text.",
+    "</S>",
+    "",
+    '<S id="ma" d={"zz"}>',
+    "Middle a text.",
+    "</S>",
+    "",
+    '<S id="zz">',
+    "End target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-// Impact fixture: `src/app.ts` references `n`; `n` depends on `ca` and `cb`,
+// Impact fixture: `src/app.ts` references `n`; `n` depends on `cb` and `ca`,
 // both edited since the baseline — two equal-length witness paths from `n`.
+// The byte-least one, [n, ca], is neither n's first `d` entry nor first in
+// document order: n spells `d={["cb", "ca"]}`, and cb's section precedes
+// ca's, so a first-found search (forward from n, or backward from the edited
+// nodes in document order) reports [n, cb].
 const TIE_IMPACT_SPEC = "specs/M.mdx";
 const tieImpactSpecSource = (caText: string, cbText: string): string =>
   [
-    '<S id="n" d={["ca", "cb"]}>',
+    '<S id="n" d={["cb", "ca"]}>',
     "Anchor text.",
-    "</S>",
-    "",
-    '<S id="ca">',
-    caText,
     "</S>",
     "",
     '<S id="cb">',
     cbText,
     "</S>",
     "",
+    '<S id="ca">',
+    caText,
+    "</S>",
+    "",
   ].join("\n");
+// The impact arm's initial state (both texts at v1), staged after T12.0-8's
+// first product invocation: a staged-source record, the same template call
+// moved to module level.
+const T12_0_8_M_V1 = stagedMdx(
+  "T12.0-8 specs/M.mdx with ca and cb at v1 (the impact arm's initial source)",
+  tieImpactSpecSource("Changed a v1.", "Changed b v1."),
+);
+// The impact arm's doubly-edited state, staged after T12.0-8's first product
+// invocation (the reachable arm's `build`) into a later-arm workspace S-7's
+// sweep never reaches: a staged-source record (helpers/staged-mdx.ts; S-9's
+// before-any-product clause), the same template call moved to module level.
+const T12_0_8_M_V2 = stagedMdx(
+  "T12.0-8 specs/M.mdx with ca and cb both edited (the impact arm's doubly-edited state)",
+  tieImpactSpecSource("Changed a v2.", "Changed b v2."),
+);
 const TIE_IMPACT_APP = "src/app.ts";
-const TIE_IMPACT_APP_SOURCE = [
-  'import M from "../specs/M.xspec";',
-  "",
-  "M.n;",
-  "",
-].join("\n");
+const TIE_IMPACT_APP_SOURCE = stagedTs(
+  "T12.0-8 impact arm src/app.ts — the reference M.n",
+  ['import M from "../specs/M.xspec";', "", "M.n;", ""].join("\n"),
+);
+// The imported configurations stay plain for their owners' bodies and for
+// this module's first workspaces; the later workspaces stage records of this
+// module's own wrapping them, the same expressions moved here.
+const T12_0_8_9_SPEC_AND_CODE_CONFIG = stagedTs(
+  "T12.0-8/T12.0-9 xspec.config.ts — one spec group and one code group (section-9.ts's SPEC_AND_CODE_CONFIG)",
+  SPEC_AND_CODE_CONFIG,
+);
+const T12_0_9_10_SPECS_ONLY_CONFIG = stagedTs(
+  "T12.0-9/T12.0-10 xspec.config.ts — one spec group (section-5.6.ts's SPECS_ONLY_CONFIG)",
+  SPECS_ONLY_CONFIG,
+);
 
 const T12_0_8 = defineProductTest({
   id: "T12.0-8",
@@ -709,9 +900,11 @@ const T12_0_8 = defineProductTest({
         assertSameJson(
           report.path,
           ["specs/R.mdx#src", "specs/R.mdx#ma", "specs/R.mdx#zz"],
-          `${context}: exactly two shortest witness paths exist, via ma and ` +
-            `via mb; the element-wise byte-least node-identity sequence — ` +
-            `through ma ("…#ma" < "…#mb") — is the reported one (SPEC 12.0, 11)`,
+          `${context}: exactly two shortest witness paths exist, via mb ` +
+            `(src's first \`d\` entry and first in document order) and via ` +
+            `ma; the element-wise byte-least node-identity sequence — ` +
+            `through ma ("…#ma" < "…#mb") — is the reported one, not the ` +
+            `first-found one (SPEC 12.0, 11)`,
         );
       },
     );
@@ -746,8 +939,8 @@ const T12_0_8 = defineProductTest({
         );
         if (covered === undefined) {
           fail(
-            `${context}: zz is covered — transitive paths b → ma → zz and ` +
-              `b → mb → zz exist (SPEC 8) — so it must appear among the ` +
+            `${context}: zz is covered — transitive paths b → mb → zz and ` +
+              `b → ma → zz exist (SPEC 8) — so it must appear among the ` +
               `covered nodes; got ${JSON.stringify(
                 profile.covered.map((entry) => entry.identity),
               )}`,
@@ -756,9 +949,10 @@ const T12_0_8 = defineProductTest({
         assertSameJson(
           covered.path,
           ["specs/bnd/B.mdx#b", "specs/tgt/T.mdx#ma", "specs/tgt/T.mdx#zz"],
-          `${context}: zz's two shortest covering paths run through ma and ` +
-            `mb; the element-wise byte-least sequence — through ma — is the ` +
-            `reported one (SPEC 8.2, 12.0)`,
+          `${context}: zz's two shortest covering paths run through mb (b's ` +
+            `first \`d\` entry and first in document order in T.mdx) and ` +
+            `through ma; the element-wise byte-least sequence — through ma — ` +
+            `is the reported one, not the first-found one (SPEC 8.2, 12.0)`,
         );
       },
     );
@@ -767,34 +961,47 @@ const T12_0_8 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-          [TIE_IMPACT_SPEC]: tieImpactSpecSource(
-            "Changed a v1.",
-            "Changed b v1.",
-          ),
+          "xspec.config.ts": T12_0_8_9_SPEC_AND_CODE_CONFIG,
+          [TIE_IMPACT_SPEC]: T12_0_8_M_V1,
           [TIE_IMPACT_APP]: TIE_IMPACT_APP_SOURCE,
         },
       },
       async (workspace) => {
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("tie-break baseline");
-        await workspace.file(
-          TIE_IMPACT_SPEC,
-          tieImpactSpecSource("Changed a v2.", "Changed b v2."),
-        );
+        await workspace.file(TIE_IMPACT_SPEC, T12_0_8_M_V2);
         await buildOk(
           product,
           workspace,
           "T12.0-8 impact-arm `build` over the doubly-edited workspace",
         );
         const context = "T12.0-8 `impact --base <baseline> --json`";
+        const report = await impactAgainst(product, workspace, base, context);
+        // n's own subtree is untouched, so the location is transitively
+        // impacted only; the two equal-length witness candidates from n end
+        // at the edited cb (n's first `d` entry and first in document order)
+        // and ca, and the byte-least sequence — [n, ca] — is reported, not
+        // the first-found [n, cb] (SPEC 9.2, 9.3, 12.0). The witness path is
+        // compared on its own first, so a wrong pick is diagnosed as the
+        // tie-break's; the whole code groups follow (the shared helper's
+        // diagnosis speaks of fixtures whose shortest path is unique).
+        const witness = report.code.transitive.find(
+          (entry) => entry.location === TIE_IMPACT_APP,
+        );
+        if (witness !== undefined) {
+          assertSameJson(
+            witness.path,
+            ["specs/M.mdx#n", "specs/M.mdx#ca"],
+            `${context}: ${TIE_IMPACT_APP}'s two shortest witness paths run ` +
+              `from n to the edited cb (n's first \`d\` entry and first in ` +
+              `document order) and to the edited ca; the element-wise ` +
+              `byte-least sequence — through ca — is the reported one, not ` +
+              `the first-found one (SPEC 9.3, 12.0)`,
+          );
+        }
         assertImpactedCode(
-          await impactAgainst(product, workspace, base, context),
+          report,
           {
-            // n's own subtree is untouched, so the location is transitively
-            // impacted only; the two equal-length witness candidates from n
-            // end at the edited ca and cb, and the byte-least sequence —
-            // [n, ca] — is reported (SPEC 9.2, 9.3, 12.0).
             direct: [],
             transitive: [
               {
@@ -825,6 +1032,15 @@ interface PartitionRow {
   readonly what: string;
   readonly argv: readonly string[];
   readonly expect: 0 | 1 | 2;
+  /**
+   * Assert the answer document is still emitted beside the exit code: stdout
+   * parses as exactly one JSON document. For the class-1 rows of the 11.2
+   * surfaces (JSON-only, SPEC 11), whose class is "answers carrying findings
+   * or explicitly-unavailable data — emitted in full": exit 1 signals
+   * imperfection and never withholds the answer (SPEC 11.2), asserted here
+   * at H-5's protocol grain — T11.2-5 pins the full-answer contract.
+   */
+  readonly emitsAnswer?: true;
 }
 
 async function runPartitionRows(
@@ -833,7 +1049,7 @@ async function runPartitionRows(
   rows: readonly PartitionRow[],
 ): Promise<void> {
   for (const row of rows) {
-    await expectExit(
+    const result = await expectExit(
       product,
       workspace,
       row.argv,
@@ -842,14 +1058,61 @@ async function runPartitionRows(
         `partition all outcomes, and this outcome is in the ` +
         `${String(row.expect)} class (SPEC 12.0)`,
     );
+    if (row.emitsAnswer === true) {
+      parseJsonStdout(
+        result,
+        `T12.0-9 \`${row.argv.join(" ")}\` — ${row.what}: the answer is ` +
+          `emitted in full beside exit ${String(row.expect)} — exit 1 ` +
+          `signals imperfection and never withholds the answer, and the ` +
+          `surface is JSON-only, so stdout is exactly one JSON document ` +
+          `(SPEC 11.2, 11, H-5)`,
+      );
+    }
   }
 }
+
+// Staged-source records for the workspaces T12.0-9 creates after its story
+// workspace's invocations (helpers/staged-mdx.ts; S-9's before-any-product
+// clause): the findings arm's id-less section, and the minimal `alpha`
+// section the wrong-kind and exclusion arms stage — the same bytes
+// T12.0-10's precedence pair and syntax workspace stage, so one record
+// named with both tests; the findings arm's `specs/A.mdx` and the
+// corrupt-session and configuration-error arms' are §12.0-i's records.
+const T12_0_9_U_SOURCE = stagedMdx(
+  "T12.0-9 findings arm specs/U.mdx (a section spelling no identity)",
+  ["<S>", "Section spelling no identity.", "</S>", ""].join("\n"),
+);
+const ALPHA_SECTION_STAGED = stagedMdx(
+  "T12.0-9/T12.0-10 specs/A.mdx (the minimal section alpha: T12.0-9's wrong-kind and exclusion arms; T12.0-10's precedence pair and syntax workspace)",
+  ['<S id="alpha">', "Alpha text.", "</S>", ""].join("\n"),
+);
+
+// T12.0-9's later arms (and T12.0-10's invalid-configuration workspace)
+// stage these after a product invocation: TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), the inline
+// literals moved here. The unknown-key configuration is well-formed
+// TypeScript (14.20), an invalid configuration (SPEC 7, 14.14).
+const T12_0_9_KIND_APP_SOURCE = stagedTs(
+  "T12.0-9 wrong-kind arm src/app.ts — valid, reference-free TypeScript",
+  "export function noop(): void {}\n",
+);
+const T12_0_9_10_UNKNOWN_KEY_CONFIG = stagedTs(
+  "T12.0-9/T12.0-10 xspec.config.ts — an unknown top-level key (T12.0-9's configuration-error arm, T12.0-10's invalid-configuration workspace)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`,
+);
 
 const T12_0_9 = defineProductTest({
   id: "T12.0-9",
   title:
-    "exit-code partition: a table-driven sweep asserting one representative per class per command family — 0 for success and informational reports (`ids`, `show`, `impact` with differences, `query`, review reads including fully-resolved `next`, `coverage` without `--check`); 1 for findings (failing `build`, `check` findings, `coverage --check` uncovered, refused `rename`/`move`, refused review operations, corrupt-session reports); 2 for usage and configuration errors (unknown command/flag, missing required flag and argument, invalid flag value, unknown profile/session/group/item/node/file, invalid session name, configuration errors, unreadable baseline, mutual-exclusion refusal) (SPEC 12.0)",
-  timeoutMs: 360_000,
+    "exit-code partition: a table-driven sweep asserting one representative per class per command family — 0 for success and informational reports (`ids`, `show`, `impact` with differences, `query`, review reads including fully-resolved `next`, `coverage` without `--check`, `version`, and complete finding-free answers: `occurrences`/`view`/`at` over a clean domain, `inventory`, a successful preview); 1 for findings (failing `build`, `check` findings, `coverage --check` uncovered, refused `rename`/`move` and their refused previews, refused review operations, corrupt-session reports, and answers carrying findings or explicitly-unavailable data — emitted in full); 2 for usage and configuration errors (unknown command/flag, missing required flag and argument, invalid flag value, unknown profile/session/group/item/node/file — except `occurrences --to`, where only a malformed spelling is a usage error — wrong-kind operands: a code source where a spec source or a requirement-node identity is required, invalid session name, configuration errors, unreadable baseline, mutual-exclusion refusal) (SPEC 12.0, 11.2, 11.6, 6.6, 12.6)",
   run: async (product) => {
     // --- The valid story workspace: informational, refusal, and usage rows.
     const { workspace, baseRef } = await makeStoryWorkspace();
@@ -1066,6 +1329,44 @@ const T12_0_9 = defineProductTest({
           argv: ["coverage"],
           expect: 0,
         },
+        // Complete finding-free answers over the clean domain (SPEC 11.2):
+        // the premise — every discovered source finding-free — is the
+        // staging `build`'s exit 0 above.
+        {
+          what: "workspace-independent `version` (SPEC 12.6)",
+          argv: ["version"],
+          expect: 0,
+        },
+        {
+          what: "complete finding-free `occurrences` answer over the clean domain (SPEC 11.2, 11.3)",
+          argv: ["occurrences"],
+          expect: 0,
+        },
+        {
+          what: "`occurrences --to` accepts a well-formed unknown identity — unknown is not a usage error on this filter, the selection empty over the finding-free domain (SPEC 11.3)",
+          argv: ["occurrences", "--to", "specs/NoSuch.mdx#nope"],
+          expect: 0,
+        },
+        {
+          what: "complete finding-free `view` answer over the clean domain (SPEC 11.2, 11.4)",
+          argv: ["view"],
+          expect: 0,
+        },
+        {
+          what: "complete finding-free `at` answer over the clean domain (SPEC 11.2, 11.5)",
+          argv: ["at", STORY_FILE_A, "0"],
+          expect: 0,
+        },
+        {
+          what: "finding-free `inventory` (SPEC 11.6)",
+          argv: ["inventory"],
+          expect: 0,
+        },
+        {
+          what: "successful preview — the real rename would proceed (`gamma` claimed by nothing in the fixture), so its `--preview` succeeds, modifying nothing (SPEC 6.6)",
+          argv: ["rename", STORY_FILE_A, "alpha", "gamma", "--preview"],
+          expect: 0,
+        },
         // 1 — findings.
         {
           what: "`coverage --check` with uncovered requirements",
@@ -1080,6 +1381,19 @@ const T12_0_9 = defineProductTest({
         {
           what: "refused `move` (the destination file already exists, SPEC 6.5)",
           argv: ["move", STORY_FILE_A, STORY_FILE_B],
+          expect: 1,
+        },
+        // Refused previews: a preview is refused exactly when the real
+        // operation would be (SPEC 6.6) — each twin rides the refusal its
+        // real row above just demonstrated on this same state.
+        {
+          what: "refused rename preview (the same ID collision as the real refusal, SPEC 6.6, 6.4)",
+          argv: ["rename", STORY_FILE_A, "alpha", "omega", "--preview"],
+          expect: 1,
+        },
+        {
+          what: "refused move preview (the same occupied destination as the real refusal, SPEC 6.6, 6.5)",
+          argv: ["move", STORY_FILE_A, STORY_FILE_B, "--preview"],
           expect: 1,
         },
         {
@@ -1160,6 +1474,11 @@ const T12_0_9 = defineProductTest({
           expect: 2,
         },
         {
+          what: "`occurrences --to` malformed spelling (an empty segment) — the exception to the unknown class: on this filter only a malformed spelling is a usage error, the well-formed unknown row above exiting 0 (SPEC 11.3)",
+          argv: ["occurrences", "--to", "a#b..c"],
+          expect: 2,
+        },
+        {
           what: "invalid session name (a leading `.`, SPEC 10.1)",
           argv: ["review", "create", "--strategy", "audit", "--name", ".bad"],
           expect: 2,
@@ -1179,8 +1498,8 @@ const T12_0_9 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
+          "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
       async (corruptWorkspace) => {
@@ -1226,23 +1545,25 @@ const T12_0_9 = defineProductTest({
       },
     );
 
-    // --- Findings (exit 1): failing build and check over invalid sources.
+    // --- Findings (exit 1): failing build and check over invalid sources,
+    // and the 11.2 surfaces answering on the same failing workspace — the
+    // domain's findings accompany, an id-less section's identity is
+    // explicitly unavailable (SPEC 11.2), and each answer is emitted in
+    // full beside its exit 1 (`emitsAnswer`).
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": [
-            '<S id="a" d={"missing"}>',
-            "Alpha text.",
-            "</S>",
-            "",
-          ].join("\n"),
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
+          "specs/A.mdx": STREAMS_INVALID_SOURCE,
+          // A parseable section spelling no identity: its 14.1 finding and
+          // its explicitly-unavailable identity ride the answers below.
+          "specs/U.mdx": T12_0_9_U_SOURCE,
         },
       },
       async (invalidWorkspace) => {
         await runPartitionRows(product, invalidWorkspace, [
           {
-            what: "failing `build` (an unresolved reference, SPEC 14.5)",
+            what: "failing `build` (an unresolved reference, SPEC 14.5; a missing ID, SPEC 14.1)",
             argv: ["build"],
             expect: 1,
           },
@@ -1250,6 +1571,68 @@ const T12_0_9 = defineProductTest({
             what: "`check` findings over the same invalid sources",
             argv: ["check"],
             expect: 1,
+          },
+          {
+            what: "`occurrences` answer carrying the consulted domain's findings — emitted in full (SPEC 11.2, 11.3)",
+            argv: ["occurrences"],
+            expect: 1,
+            emitsAnswer: true,
+          },
+          {
+            what: "`view` answer carrying findings and an explicitly-unavailable identity (the id-less section) — emitted in full (SPEC 11.2, 11.4)",
+            argv: ["view"],
+            expect: 1,
+            emitsAnswer: true,
+          },
+          {
+            what: "`at` answer carrying an explicitly-unavailable identity and its file's finding — emitted in full (SPEC 11.2, 11.5)",
+            argv: ["at", "specs/U.mdx", "0"],
+            expect: 1,
+            emitsAnswer: true,
+          },
+        ]);
+      },
+    );
+
+    // --- Wrong-kind operands (exit 2, SPEC 12.0): a code source named where
+    // a spec source or a requirement-node identity is required. The premise
+    // probe pins `src/app.ts` as discovered: `query edges --from` on it
+    // answers an edgeless known graph node with an empty answer, exit 0,
+    // where a path in no configured group would be unknown, exit 2 (SPEC
+    // 11.1) — so the rows' exit 2 is attributable to operand kind alone.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": T12_0_8_9_SPEC_AND_CODE_CONFIG,
+          "specs/A.mdx": ALPHA_SECTION_STAGED,
+          // Valid, reference-free TypeScript: discovered through the code
+          // group's glob, bearing no requirement nodes (SPEC 7.2).
+          "src/app.ts": T12_0_9_KIND_APP_SOURCE,
+        },
+      },
+      async (kindWorkspace) => {
+        await buildOk(product, kindWorkspace, "T12.0-9 wrong-kind-arm `build`");
+        await expectExit(
+          product,
+          kindWorkspace,
+          ["query", "edges", "--from", "src/app.ts"],
+          0,
+          "T12.0-9 wrong-kind-arm premise `query edges --from src/app.ts` — " +
+            "the reference-free code source is discovered, a known graph " +
+            "node answering an empty edge set (SPEC 11.1, 7.2), so the " +
+            "wrong-kind rows are attributable to operand kind, not to an " +
+            "unconfigured path",
+        );
+        await runPartitionRows(product, kindWorkspace, [
+          {
+            what: "wrong-kind operand: a code source named where a requirement-node identity is required (`show`, SPEC 12.4, 12.0)",
+            argv: ["show", "src/app.ts"],
+            expect: 2,
+          },
+          {
+            what: "wrong-kind operand: a code source named where a spec source is required (`view`, SPEC 11.4, 12.0)",
+            argv: ["view", "src/app.ts"],
+            expect: 2,
           },
         ]);
       },
@@ -1259,16 +1642,8 @@ const T12_0_9 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  bogus: true
-})
-`,
-          "specs/A.mdx": ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+          "xspec.config.ts": T12_0_9_10_UNKNOWN_KEY_CONFIG,
+          "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
       async (configWorkspace) => {
@@ -1288,10 +1663,8 @@ export default defineConfig({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": ['<S id="alpha">', "Alpha text.", "</S>", ""].join(
-            "\n",
-          ),
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
+          "specs/A.mdx": ALPHA_SECTION_STAGED,
         },
       },
       async (holdWorkspace) => {
@@ -1314,6 +1687,7 @@ export default defineConfig({
           try {
             await running.waitForFile(holdPath);
           } catch (error) {
+            rethrowHarnessError(error);
             fail(
               `${holdContext}: the mutating command creates the hold file ` +
                 `immediately after acquiring workspace exclusivity ` +
@@ -1346,6 +1720,1297 @@ export default defineConfig({
         }
       },
     );
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T12.0-10 — argument-check precedence
+// ---------------------------------------------------------------------------
+
+// The precedence pair: a failing workspace and its valid twin, identical in
+// everything the seven gated argument checks consult — the configuration (a
+// spec group, a code group, one coverage profile), the session directory
+// (no session), the parseable named spec source, and the discovered code
+// source with one named unit — differing exactly in the files that make
+// `build` fail: the unparseable file (14.20) and the spelled-not-defined
+// arm's four parseable files, each carrying findings of its own (14.1,
+// 14.3, 14.17).
+const PRECEDENCE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  },
+  coverage: [
+    {
+      name: "prof",
+      target: "main",
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`;
+
+const PREC_SPEC_FILE = "specs/A.mdx";
+const PREC_CODE_FILE = "src/app.ts";
+const PREC_BROKEN_FILE = "specs/Broken.mdx";
+// The spelled-not-defined arm's files (SPEC 12.0, 11.2).
+const PREC_DUP_FILE = "specs/Dup.mdx";
+const PREC_ORPHAN_FILE = "specs/Orphan.mdx";
+const PREC_BRACED_FILE = "specs/Braced.mdx";
+const PREC_BARE_FILE = "specs/Bare.mdx";
+// The session `review create --coverage <unknown-profile> --name n` names:
+// never written by that row, written by its closing twin control.
+const PREC_SESSION_NAME = "n";
+const PREC_SESSION_REL = `.xspec/reviews/${PREC_SESSION_NAME}.json`;
+
+const PRECEDENCE_TWIN_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": PRECEDENCE_CONFIG,
+  [PREC_SPEC_FILE]: ALPHA_SECTION_STAGED,
+  [PREC_CODE_FILE]: "export function known(): void {}\n",
+};
+
+// Every file below is staged in no gated row's name, so every argument
+// check of the gated rows is judged from consulted state identical to the
+// twin's; only the masking and spelled-not-defined arms name them,
+// deliberately.
+const PRECEDENCE_FAILING_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    ...PRECEDENCE_TWIN_FILES,
+    // An unclosed section tag: unparseable MDX (14.20), the masking arm's
+    // named file.
+    [PREC_BROKEN_FILE]: ['<S id="broken">', "Text that never closes.", ""].join(
+      "\n",
+    ),
+    // `dup`, spelled by two sections: duplicate spellings leave every
+    // bearer's node identity undefined (11.2), one condition-3 finding
+    // locating both bearers (14.3, T14-8).
+    [PREC_DUP_FILE]: [
+      '<S id="dup">',
+      "First bearer.",
+      "</S>",
+      "",
+      '<S id="dup">',
+      "Second bearer.",
+      "</S>",
+      "",
+    ].join("\n"),
+    // `kid`, spelled by the one section beneath an ancestor spelling no
+    // identity — its `id` absent (14.1, masking condition 2 for its child):
+    // the chain conditions are inherited, so `kid`'s bearer has no defined
+    // identity (11.2).
+    [PREC_ORPHAN_FILE]: [
+      "<S>",
+      "Parent spelling no identity.",
+      "",
+      '<S id="kid">',
+      "Kid text.",
+      "</S>",
+      "</S>",
+      "",
+    ].join("\n"),
+    // An `id` braced (naming `x`) and an `id` valueless (naming `true`, the
+    // value JSX gives a bare attribute): neither is the quoted static-string
+    // form, so neither section spells an identity (11.2) — one 14.17 each.
+    [PREC_BRACED_FILE]: ['<S id={"x"}>', "Braced id.", "</S>", ""].join("\n"),
+    [PREC_BARE_FILE]: ["<S id>", "Valueless id.", "</S>", ""].join("\n"),
+  };
+
+/** One finding the failing workspace's staging makes (its `build` premise). */
+interface StagedFinding {
+  /** The condition (SPEC 14). */
+  readonly condition: string;
+  /** The file every one of its locations lies in. */
+  readonly file: string;
+  /** What stages it. */
+  readonly what: string;
+}
+
+// Exactly the findings `build` reports on the failing workspace (SPEC 14:
+// every condition present reported), listed in no particular order.
+const PRECEDENCE_FAILING_FINDINGS: readonly StagedFinding[] = [
+  {
+    condition: "14.1",
+    file: PREC_ORPHAN_FILE,
+    what: "the section spelling no `id` (a missing ID)",
+  },
+  {
+    condition: "14.3",
+    file: PREC_DUP_FILE,
+    what: "`dup`'s two bearers (one duplicate-ID finding locating both, T14-8)",
+  },
+  {
+    condition: "14.17",
+    file: PREC_BRACED_FILE,
+    what: 'the braced `id={"x"}` (an invalid prop)',
+  },
+  {
+    condition: "14.17",
+    file: PREC_BARE_FILE,
+    what: "the valueless `<S id>` (an invalid prop)",
+  },
+  {
+    condition: "14.20",
+    file: PREC_BROKEN_FILE,
+    what: "the unclosed section (an unparseable source)",
+  },
+];
+
+/**
+ * One spelled-not-defined row (SPEC 12.0: an `id` judged over the named
+ * file's spelled identities, 11.2, as 6.4 judges the old ID): an ID named
+ * in a parseable file of the failing workspace, no node identity defined
+ * for it there.
+ */
+interface SpelledIdRow {
+  /** Why the ID's would-be bearer has no defined identity. */
+  readonly what: string;
+  readonly file: string;
+  readonly id: string;
+  /**
+   * Whether the file spells the ID: the check passes and the gated report
+   * follows, exit 1 — else the unknown-node usage error alone, exit 2.
+   */
+  readonly spelled: boolean;
+}
+
+const SPELLED_NOT_DEFINED_ROWS: readonly SpelledIdRow[] = [
+  {
+    what:
+      "an ID two sections of the file both spell, each bearer's node " +
+      "identity undefined (SPEC 11.2: duplicate spellings leave every " +
+      "bearer undefined, no winner picked)",
+    file: PREC_DUP_FILE,
+    id: "dup",
+    spelled: true,
+  },
+  {
+    what:
+      "an ID whose only bearer spells it beneath an ancestor spelling no " +
+      "identity, its `id` absent — the bearer's node identity undefined " +
+      "(SPEC 11.2: the chain conditions are inherited)",
+    file: PREC_ORPHAN_FILE,
+    id: "kid",
+    spelled: true,
+  },
+  {
+    what:
+      'an ID whose only would-be bearer spells none — its `id` braced (`id={"x"}`), ' +
+      "naming `x` (SPEC 11.2: a value in any other form than the quoted " +
+      "static string, braced included, spells no identity)",
+    file: PREC_BRACED_FILE,
+    id: "x",
+    spelled: false,
+  },
+  {
+    what:
+      "an ID whose only would-be bearer spells none — its `id` valueless " +
+      "(`<S id>`), naming `true`, the value JSX gives a bare attribute " +
+      "(SPEC 11.2: a valueless `id` spells no identity)",
+    file: PREC_BARE_FILE,
+    id: "true",
+    spelled: false,
+  },
+];
+
+/** One gated-read row: a usage-error argument checked before the 13.3 gate. */
+interface GatedUsageRow {
+  /** What the row's check consults and why the argument is a usage error. */
+  readonly what: string;
+  readonly argv: readonly string[];
+  /**
+   * A mutating subcommand's row: the session file its `--name` would write
+   * — absent after the run, which modifies nothing, its error the plain
+   * usage error (`expectGatedUsageError`).
+   */
+  readonly session?: string;
+}
+
+const GATED_USAGE_ROWS: readonly GatedUsageRow[] = [
+  {
+    what: "an unknown profile, judged against the configuration (SPEC 7.4)",
+    argv: ["coverage", "no-such-profile"],
+  },
+  {
+    what:
+      "an unknown profile given to a mutating subcommand, judged against " +
+      "the configuration — `review create`'s argument checks follow " +
+      "acquisition and precede the gate (SPEC 7.4, 10.7, 13.5)",
+    argv: [
+      "review",
+      "create",
+      "--coverage",
+      "no-such-profile",
+      "--name",
+      PREC_SESSION_NAME,
+    ],
+    session: PREC_SESSION_REL,
+  },
+  {
+    what:
+      "a code group's name where `--group` requires a configured spec " +
+      "group's — an invalid flag value (SPEC 11.1)",
+    argv: ["query", "nodes", "--group", "app"],
+  },
+  {
+    what: "an unknown session, judged against the session directory (SPEC 10.1)",
+    argv: ["review", "status", "no-such-session"],
+  },
+  {
+    what:
+      "an unknown id, judged parse-local over the named file's spelled " +
+      "identities (SPEC 11.2)",
+    argv: ["show", `${PREC_SPEC_FILE}#unspelled`],
+  },
+  {
+    what:
+      "a wrong-kind operand — a code source where a requirement-node " +
+      "identity is required (SPEC 11.1, 12.0)",
+    argv: ["query", "node", PREC_CODE_FILE],
+  },
+  {
+    what:
+      "an unknown code unit, judged parse-local over the named file's " +
+      "named units (SPEC 4.6)",
+    argv: ["query", "edges", "--from", `${PREC_CODE_FILE}#unspelled`],
+  },
+];
+
+/**
+ * Run one usage-error invocation (the caller's argv puts JSON output in
+ * effect): exit 2 exactly; stdout exactly the single 12.7 error document —
+ * a form with no findings member, so no validation finding rides the error
+ * report (SPEC 12.0, 12.7, H-5) — and a nonempty stderr (usage and
+ * configuration error messages are standard-error content, their wording
+ * free, H-3).
+ */
+async function expectUsageErrorDocument(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<{ readonly result: RunResult; readonly error: Finding }> {
+  const result = await expectExit(product, workspace, argv, 2, context);
+  const error = expectErrorDocument(result, context);
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: usage and configuration error messages are ` +
+        `standard-error content (SPEC 12.0), but stderr is empty`,
+    );
+  }
+  return { result, error };
+}
+
+/**
+ * One gated row's run on one workspace of the precedence pair: the usage
+ * error document (`expectUsageErrorDocument`) — and, for a mutating
+ * subcommand's row, that run inside a whole-root compare (H-6's lock-path
+ * exclusion: its acquisition's and release's writes no modification, its
+ * release deleting what its acquisition brought into existence, SPEC
+ * 13.5), its error the plain usage error (`code` and `path` null, no
+ * locations; SPEC 12.7, 14) and the row's session file absent after it: no
+ * session written. Returns the run for the pair's byte compare.
+ */
+async function expectGatedUsageError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  row: GatedUsageRow,
+  argv: readonly string[],
+  context: string,
+): Promise<RunResult> {
+  const { session } = row;
+  if (session === undefined) {
+    return (await expectUsageErrorDocument(product, workspace, argv, context))
+      .result;
+  }
+  return await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const { result, error } = await expectUsageErrorDocument(
+        product,
+        workspace,
+        argv,
+        context,
+      );
+      assertSameJson(
+        { code: error.code, path: error.path, locations: error.locations },
+        { code: null, path: null, locations: [] },
+        `${context}: an unknown name is a plain usage error — \`code\` ` +
+          `null, \`path\` null, no locations (SPEC 12.0, 12.7, 14) ` +
+          `(message: ${JSON.stringify(error.message)})`,
+      );
+      const occupant = await workspace.kind(session);
+      if (occupant !== "absent") {
+        fail(
+          `${context}: no session written — the argument check refuses ` +
+            `the invocation before the gate, so nothing occupies ` +
+            `${session} afterwards (SPEC 12.0, 10.7, 13.5); found a ` +
+            `${occupant} there`,
+        );
+      }
+      return result;
+    },
+    `${context}: the usage error modifies nothing — no session written; ` +
+      `sources, journal, derived files, and graph data byte-identical ` +
+      `(SPEC 12.0, 10.7, 13.5)`,
+  );
+}
+
+/**
+ * The comparable projection of one 12.7 finding for T12.0-10's
+ * gated-report compares: every member but `message` — code, locations,
+ * concerned path, identities (module header; wording unpinned, H-3).
+ */
+function gateComparable(finding: Finding): unknown {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+    identities: finding.identities,
+  };
+}
+
+/**
+ * A gated read past its argument checks on a workspace failing `build`'s
+ * validations (`argv` puts JSON output in effect): exit 1 exactly with the
+ * findings-only report of 13.3 as the entire stdout, decoded form-exact
+ * (12.7, H-5), carrying exactly the findings `build --json` reported there
+ * (`expected`, the workspace's premise) — under the module header's
+ * projection, in 12.7's order — so the read answers nothing, never meeting
+ * an argument check's exit 2 (SPEC 12.0, 13.3).
+ */
+async function expectGatedReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  expected: readonly Finding[],
+  context: string,
+): Promise<void> {
+  const findings = await runFindingsReport(
+    product,
+    workspace,
+    argv,
+    1,
+    context,
+  );
+  assertSameJson(
+    findings.map(gateComparable),
+    expected.map(gateComparable),
+    `${context}: the gate reports exactly the findings \`build\` reports ` +
+      `on the workspace — every member but the message, in 12.7's order ` +
+      `(SPEC 13.3, 12.7, 14)`,
+  );
+}
+
+// The code-unit masking workspace (SPEC 12.0: a code unit judged over the
+// named file's named units, an unparseable named file masking the check;
+// 4.6, 14.20): a spec glob `specs/*.mdx` and a code glob `src/*.ts`, the
+// parseable spec source `specs/A.mdx` holding a section `a`, and
+// `src/bad.ts` — `function f() {}` followed by the line `let x = ;`, not
+// well-formed TypeScript (14.20, T14-11) — so `build` fails through that
+// one code source alone. The workspace follows the body's first product
+// invocation, so its initial files are staged-source records
+// (helpers/staged-ts.ts, helpers/staged-mdx.ts; S-9's timing clause),
+// `src/bad.ts` declared unparseable.
+const CODE_MASK_SPEC_FILE = "specs/A.mdx";
+const CODE_MASK_CODE_FILE = "src/bad.ts";
+const CODE_MASK_CONFIG = stagedTs(
+  "T12.0-10 xspec.config.ts — the spec glob specs/*.mdx and the code glob src/*.ts (the code-unit masking workspace)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: ["src/*.ts"]
+  }
+})
+`,
+);
+const CODE_MASK_SPEC_SOURCE = stagedMdx(
+  "T12.0-10 specs/A.mdx holding the section a (the code-unit masking workspace's parseable spec source)",
+  ['<S id="a">', "A text.", "</S>", ""].join("\n"),
+);
+const CODE_MASK_BAD_SOURCE = stagedTs(
+  "T12.0-10 src/bad.ts — function f() {} followed by the line let x = ; (the code-unit masking workspace's unparseable code source, 14.20)",
+  ["function f() {}", "let x = ;", ""].join("\n"),
+  "unparseable",
+);
+const CODE_MASK_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "xspec.config.ts": CODE_MASK_CONFIG,
+  [CODE_MASK_SPEC_FILE]: CODE_MASK_SPEC_SOURCE,
+  [CODE_MASK_CODE_FILE]: CODE_MASK_BAD_SOURCE,
+};
+
+// The units the code-unit masking arm names in `src/bad.ts`: one the file
+// spells and one spelled nowhere in it.
+const CODE_MASK_UNITS: readonly {
+  readonly unit: string;
+  readonly what: string;
+}[] = [
+  { unit: "f", what: "a unit the file spells (`function f() {}`)" },
+  { unit: "g", what: "a unit spelled nowhere in the file" },
+];
+
+/**
+ * The code-unit masking arm's four gated reads naming `src/bad.ts#<unit>`
+ * (SPEC 11.1): `query edges` from and to the code location, and `query
+ * reachable` from it to the section `specs/A.mdx#a` and from that section
+ * to it.
+ */
+function codeUnitMaskedQueries(unit: string): readonly (readonly string[])[] {
+  const location = `${CODE_MASK_CODE_FILE}#${unit}`;
+  const section = `${CODE_MASK_SPEC_FILE}#a`;
+  return [
+    ["query", "edges", "--from", location],
+    ["query", "edges", "--to", location],
+    ["query", "reachable", "--from", location, "--to", section],
+    ["query", "reachable", "--from", section, "--to", location],
+  ];
+}
+
+// The kind check on the same workspace (SPEC 12.0, 6.4, 11.1): a code
+// source named where a requirement-node identity is required — a code
+// location's identity, and a bare code-source path.
+const CODE_MASK_KIND_ROWS: readonly (readonly string[])[] = [
+  ["show", `${CODE_MASK_CODE_FILE}#f`],
+  ["query", "node", CODE_MASK_CODE_FILE],
+];
+
+// The unknown item ID named by the past-the-gate arm (no session ever
+// contains it; harness-prefixed so a collision is impossible by staging,
+// and each corrupt state's staging premise checks it against the item IDs
+// the product-written session held).
+const PRECEDENCE_NO_SUCH_ITEM = "xspec-harness-no-such-item";
+
+// The past-the-gate premise's well-formed session.
+const PAST_GATE_PREMISE_SESSION = "s";
+
+/**
+ * The past-the-gate arm's three `review` subcommands naming `session` and
+ * the unknown item ID, in TEST-SPEC's order (SPEC 12.0, 10.7).
+ */
+function pastTheGateInvocations(
+  session: string,
+): readonly (readonly string[])[] {
+  return [
+    [
+      "review",
+      "resolve",
+      session,
+      PRECEDENCE_NO_SUCH_ITEM,
+      "--status",
+      "updated",
+    ],
+    ["review", "show", session, PRECEDENCE_NO_SUCH_ITEM],
+    ["review", "split", session, PRECEDENCE_NO_SUCH_ITEM],
+  ];
+}
+
+// The within-class-2 rows' staging: the session name `review create --name n`
+// spells and the `<file>` the lone-operand `at` row names, each staged beside
+// the invalid configuration so the syntax-alone check is seen to precede what
+// the same command would consult next (SPEC 12.0, 10.7, 11.5).
+const SYNTAX_SESSION_NAME = "n";
+const SYNTAX_SESSION_REL = `.xspec/reviews/${SYNTAX_SESSION_NAME}.json`;
+const SYNTAX_AT_FILE = "specs/A.mdx";
+
+/** One syntax-class row: an error the invocation's arguments alone determine. */
+interface SyntaxClassRow {
+  /** Which member of the syntax class the row exercises (SPEC 12.0). */
+  readonly what: string;
+  /**
+   * The invocation. `--json` rides along wherever the surface takes it, so
+   * the error document is the entire stdout; the JSON-only surfaces of 11.3
+   * and 11.4 (`occurrences`, `view`) emit it with or without the flag.
+   */
+  readonly argv: readonly string[];
+}
+
+// One row per member of the syntax class as SPEC 12.0 enumerates it — every
+// error the arguments alone determine: an unknown command, subcommand, or
+// flag, a repeated flag, a missing required flag or argument, a surplus
+// operand, operands matching no synopsis form by their spelling alone (6.5),
+// a malformed value, and every invalid flag value or operand spelling that
+// a fixed vocabulary, a spelling rule, or a co-occurrence rule decides.
+// Each is reported without loading configuration, so a product that loads
+// it first answers 14.14 on the invalid-configuration workspace and fails
+// the plain-error pin; the rows naming `specs/A.mdx` or the session `n`
+// name what the same command would consult next, staged beside the invalid
+// configuration (above) so a product consulting it before the syntax check
+// is observed — the `move` rows and the backslash `--to` row spell
+// TEST-SPEC's `a.mdx` values, staged nowhere, their spelling judged before
+// anything is consulted. The escape character, U+2028, and U+2029 are built
+// from their code points (no tool layer decodes a `\\` or a line-terminator
+// spelling on the way in).
+const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
+  {
+    what: "an unknown command",
+    argv: ["definitely-not-a-command", "--json"],
+  },
+  {
+    what: "an unknown subcommand (`query bogus`, T12.0-14)",
+    argv: ["query", "bogus", "--json"],
+  },
+  {
+    what: "an unknown flag (`--bogus`)",
+    argv: ["ids", "--bogus", "--json"],
+  },
+  {
+    what:
+      "the `--name=value` token, which spells no flag (an unknown flag, " +
+      "T12.0-14)",
+    argv: ["review", "create", "--strategy", "audit", "--name=n", "--json"],
+  },
+  {
+    what: "a repeated flag",
+    argv: ["ids", "--json", "--json"],
+  },
+  {
+    what:
+      "a missing required flag (`review create --name n` with none of " +
+      "`--base`, `--strategy audit`, or `--coverage`, SPEC 10.7)",
+    argv: ["review", "create", "--name", SYNTAX_SESSION_NAME, "--json"],
+  },
+  {
+    what:
+      "a missing required argument (`at <file>` alone, its `<offset>` " +
+      "absent, SPEC 11.5)",
+    argv: ["at", SYNTAX_AT_FILE, "--json"],
+  },
+  {
+    what:
+      "a value-taking flag as the last token (`--file` lacking its value, " +
+      "T12.0-14)",
+    argv: ["ids", "--json", "--file"],
+  },
+  {
+    what: "a surplus operand (`ids extra`)",
+    argv: ["ids", "extra", "--json"],
+  },
+  {
+    what: "a fourth `rename` operand (SPEC 6.4's three-operand synopsis)",
+    argv: ["rename", SYNTAX_AT_FILE, "alpha", "beta", "gamma", "--json"],
+  },
+  {
+    what:
+      "a synopsis mismatch decided by operand spelling alone — `move a.mdx " +
+      "b.mdx#y`, a file-form origin beside a `<file>#<id>` destination, " +
+      "mixing the two forms (SPEC 6.5, 12.0; T6.5-5)",
+    argv: ["move", "a.mdx", "b.mdx#y", "--json"],
+  },
+  {
+    what:
+      "a synopsis mismatch decided by operand spelling alone — `move a.mdx " +
+      "b#c.mdx`, its `#`-containing destination a `<file>#<id>` pair under " +
+      "the 12.0 split beside a file-form origin (SPEC 6.5, 12.0; T6.5-5)",
+    argv: ["move", "a.mdx", "b#c.mdx", "--json"],
+  },
+  {
+    what: "the malformed multi-`#` value (T12.0-13's spelling)",
+    argv: ["show", "a#b#c", "--json"],
+  },
+  {
+    what: "a U+FFFD-bearing value (T12.0-5; SPEC 12.0's argument-value rule)",
+    argv: ["show", REPLACEMENT_CHARACTER_SPEC_PATH, "--json"],
+  },
+  {
+    what: "`--status bogus`, outside `resolve`'s fixed vocabulary (SPEC 10.7)",
+    argv: [
+      "review",
+      "resolve",
+      SYNTAX_SESSION_NAME,
+      "item",
+      "--status",
+      "bogus",
+      "--json",
+    ],
+  },
+  {
+    what: "`--strategy bogus`, outside `create`'s fixed vocabulary (SPEC 10.7)",
+    argv: [
+      "review",
+      "create",
+      "--strategy",
+      "bogus",
+      "--name",
+      SYNTAX_SESSION_NAME,
+      "--json",
+    ],
+  },
+  {
+    what: "`query nodes --coverage bogus`, outside `required|none` (SPEC 11.1)",
+    argv: ["query", "nodes", "--coverage", "bogus", "--json"],
+  },
+  {
+    what: "a `--kinds` element outside its vocabulary (SPEC 11.1)",
+    argv: ["query", "edges", "--kinds", "bogus", "--json"],
+  },
+  {
+    what: "an empty `--kinds` element (`depends,`, a trailing comma, SPEC 11.1)",
+    argv: ["query", "edges", "--kinds", "depends,", "--json"],
+  },
+  {
+    what:
+      "`review create` with two of its exactly-one-of flags (`--strategy " +
+      "audit` beside `--base`, SPEC 10.7)",
+    argv: [
+      "review",
+      "create",
+      "--strategy",
+      "audit",
+      "--base",
+      "HEAD",
+      "--name",
+      SYNTAX_SESSION_NAME,
+      "--json",
+    ],
+  },
+  {
+    what: "`--test-hold` beside `--preview` (excluded under `--preview`, SPEC 6.6)",
+    argv: [
+      "rename",
+      SYNTAX_AT_FILE,
+      "alpha",
+      "beta",
+      "--preview",
+      "--test-hold",
+      "hold",
+      "--json",
+    ],
+  },
+  {
+    what: "a `<file>` operand beside `--file` on `view` (SPEC 11.4)",
+    argv: ["view", SYNTAX_AT_FILE, "--file", "specs/*.mdx"],
+  },
+  {
+    what: "a session name outside the form of 10.1 (`.x`, a leading `.`)",
+    argv: ["review", "create", "--strategy", "audit", "--name", ".x", "--json"],
+  },
+  {
+    what: "an `<offset>` spelled `+7` — a sign is no decimal digit (SPEC 11.5)",
+    argv: ["at", SYNTAX_AT_FILE, "+7", "--json"],
+  },
+  {
+    what:
+      "a `--to` malformed as an identity (`a.mdx#x\\y`, its id segment " +
+      "carrying `\\`, the escape character, SPEC 11.3, 1.4 — a `#`-less " +
+      "`--to` is wholly its path part, held to no segment rule, so " +
+      "`--to 'a\\b'` is no member)",
+    argv: ["occurrences", "--to", `a.mdx#x${String.fromCodePoint(0x5c)}y`],
+  },
+  {
+    what:
+      "a `--tag` malformed as a tag (`a\\b`, the escape character, SPEC " +
+      "11.1, 1.4)",
+    argv: [
+      "query",
+      "nodes",
+      "--tag",
+      `a${String.fromCodePoint(0x5c)}b`,
+      "--json",
+    ],
+  },
+  {
+    what:
+      "a `--tag` spelled with U+2028 (LINE SEPARATOR, between two letters " +
+      "as T1.4-1 spells it) — a well-formed argument value (SPEC 12.0) " +
+      "that no tag can be, malformed under 1.4's quote-and-escape bullet " +
+      "(SPEC 11.1, 1.4)",
+    argv: [
+      "query",
+      "nodes",
+      "--tag",
+      `a${String.fromCodePoint(0x2028)}b`,
+      "--json",
+    ],
+  },
+  {
+    what:
+      "a `--to` whose id segment carries U+2029 (PARAGRAPH SEPARATOR, " +
+      "between two letters as T1.4-1 spells it) — a well-formed argument " +
+      "value (SPEC 12.0) malformed as an identity, its segment barred by " +
+      "1.4's quote-and-escape bullet (SPEC 11.3, 1.4)",
+    argv: [
+      "occurrences",
+      "--to",
+      `${SYNTAX_AT_FILE}#a${String.fromCodePoint(0x2029)}b`,
+    ],
+  },
+  {
+    what:
+      "a `--file` pattern outside the workspace root (`../x`, decided by " +
+      "its spelling alone, SPEC 7, 11.1)",
+    argv: ["ids", "--file", "../x", "--json"],
+  },
+];
+
+const T12_0_10 = defineProductTest({
+  id: "T12.0-10",
+  title:
+    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `review create --coverage <unknown-profile> --name n` (a mutating subcommand, its argument checks following acquisition and preceding the gate: the plain usage error, `code` `null`, no session written, the run modifying nothing, where the configured profile creates that session on the twin), `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the findings `build` reports there (every member but the message); spelled, not defined: on the failing workspace `show <file>#<id>` and `query node <file>#<id>` naming an ID two sections of the file both spell, and one whose only bearer spells it beneath an ancestor spelling no identity (its `id` absent) — each bearer's node identity undefined — pass the check, the gated report following, exit 1, never the unknown-node exit 2, while naming an ID whose only would-be bearer spells none — its `id` braced (`id={\"x\"}`, naming `x`) or valueless (`<S id>`, naming `true`) — fails it, exit 2, the plain usage error alone though that file carries a 14.17 finding; masking reaches a code unit alike: on a workspace failing `build`'s validations through one code source alone — under a spec glob `specs/*.mdx` and a code glob `src/*.ts`, `src/bad.ts` holding `function f() {}` followed by the line `let x = ;` (14.20), beside a parseable `specs/A.mdx` holding a section `a` — `query edges --from src/bad.ts#f`, `query edges --to src/bad.ts#f`, `query reachable --from src/bad.ts#f --to specs/A.mdx#a`, and `query reachable --from specs/A.mdx#a --to src/bad.ts#f`, each with `f` (a unit the file spells) and again with `g` (spelled nowhere in it), and the bare `query edges --from src/bad.ts` (a discovered path of the code kind) each end at the gate — exactly the findings `build` reports there, `src/bad.ts`'s condition 20, exit 1, never the unknown-node exit 2 — while the kind check asks no content question and is never masked: `show src/bad.ts#f` and `query node src/bad.ts` each exit 2, the plain usage error alone; past the gate: on a passing workspace `review resolve <corrupt-session> <item-id> --status updated`, `review show <corrupt-session> <item-id>`, and `review split <corrupt-session> <item-id>`, `<item-id>` an ID the session never held, each report exactly the condition-21 finding (`corrupt-session`, the session's own file its path, `locations` []), exit 1, nothing modified, never the unknown-item exit 2 — the session read, meeting the corruption, precedes the unknown item ID (the same three invocations on a well-formed session each exit 2, `code` `null`, as the premise) — on every corrupt state of T10.1-4 (its own stagings), its unparseable bytes and each of its adapter-layer stagings alike; within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a synopsis mismatch decided by operand spelling alone (`move a.mdx b.mdx#y` and `move a.mdx b#c.mdx`, mixing the two forms); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`--to 'a.mdx#x\\y'`, its id segment carrying `\\`, and `--tag 'a\\b'` — a `#`-less `--to` being wholly its path part, held to no segment rule, so `--to 'a\\b'` is no member; and, one arm each, a `--tag` spelled with U+2028 and a `--to` whose id segment carries U+2029, each malformed under 1.4's quote-and-escape bullet); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 13.4, 13.5, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 1.4, 11.4, 11.5, 6.4, 6.5, 6.6, 7, 14.1, 14.3, 14.14, 14.17, 14.20, 14.21, 12.7)",
+  run: async (product) => {
+    // --- Gated reads: usage-error arguments precede the 13.3 gate, judged
+    // from what they consult, identically on the failing workspace and its
+    // valid twin; masking flips `show` on the unparseable file to the gated
+    // report.
+    await withWorkspace(
+      {
+        files: PRECEDENCE_FAILING_FILES,
+        mdx: { unparseable: [PREC_BROKEN_FILE] },
+      },
+      async (failing) => {
+        await withWorkspace({ files: PRECEDENCE_TWIN_FILES }, async (twin) => {
+          // Twin premises: the twin is valid, and every name the rows turn
+          // on resolves there — the profile, the spec group, the named
+          // file's spelled id, the discovered code source (a known graph
+          // node, SPEC 11.1) and its named unit — so each row's exit 2 is
+          // attributable to its staged usage error alone.
+          await buildOk(product, twin, "T12.0-10 valid-twin `build`");
+          const controls: readonly (readonly string[])[] = [
+            ["coverage", "prof"],
+            ["query", "nodes", "--group", "main"],
+            ["show", `${PREC_SPEC_FILE}#alpha`],
+            ["query", "edges", "--from", PREC_CODE_FILE],
+            ["query", "edges", "--from", `${PREC_CODE_FILE}#known`],
+          ];
+          for (const argv of controls) {
+            await expectExit(
+              product,
+              twin,
+              argv,
+              0,
+              `T12.0-10 twin control \`${argv.join(" ")}\` — the configured ` +
+                `profile, the spec group, the named file's spelled id, and ` +
+                `the discovered code source with its named unit all resolve ` +
+                `on the valid twin (SPEC 8.2, 11.1, 11.2, 4.6), so each ` +
+                `precedence row's exit 2 is attributable to its staged ` +
+                `usage error alone`,
+            );
+          }
+
+          // Failing-workspace premise: the workspace fails `build`'s
+          // validations with exactly the staged findings, each located in
+          // its staged file — the findings whose non-appearance the exit-2
+          // rows assert and whose report the masking and
+          // spelled-not-defined arms expect.
+          const premiseContext =
+            "T12.0-10 failing-workspace `build --json` premise";
+          const premiseFindings = await buildFindings(
+            product,
+            failing,
+            `${premiseContext} — the staged workspace fails build ` +
+              `validation (an unparseable source, a missing ID, a ` +
+              `duplicate ID, and two invalid props; SPEC 14)`,
+          );
+          const premiseCounts: Record<string, number> = {};
+          for (const staged of PRECEDENCE_FAILING_FINDINGS) {
+            premiseCounts[staged.condition] =
+              (premiseCounts[staged.condition] ?? 0) + 1;
+          }
+          assertConditionCounts(
+            premiseFindings,
+            premiseCounts,
+            `${premiseContext}: the staged files' findings are the ` +
+              `workspace's validation findings, each reported (SPEC 14, ` +
+              `14.1, 14.3, 14.17, 14.20)`,
+          );
+          for (const staged of PRECEDENCE_FAILING_FINDINGS) {
+            const finding = premiseFindings.find(
+              (candidate) =>
+                candidate.condition === staged.condition &&
+                candidate.locations.some(
+                  (location) => location.file === staged.file,
+                ),
+            );
+            if (finding === undefined) {
+              fail(
+                `${premiseContext}: ${staged.condition} must be reported ` +
+                  `for ${staged.what}, located in ${staged.file} (SPEC ` +
+                  `14) — got ${JSON.stringify(
+                    premiseFindings.map((candidate) => ({
+                      code: candidate.code,
+                      files: candidate.locations.map(
+                        (location) => location.file,
+                      ),
+                    })),
+                  )}`,
+              );
+            }
+            assertFindingLocated(
+              finding,
+              { file: staged.file },
+              `${premiseContext}: the ${staged.condition} finding for ` +
+                `${staged.what} locates in ${staged.file} (SPEC 14)`,
+            );
+          }
+
+          for (const row of GATED_USAGE_ROWS) {
+            const argv = [...row.argv, "--json"];
+            const command = argv.join(" ");
+            const onFailing = await expectGatedUsageError(
+              product,
+              failing,
+              row,
+              argv,
+              `T12.0-10 \`${command}\` on the failing workspace — ` +
+                `${row.what}: a gated read's argument checks precede the ` +
+                `invalid-workspace report of 13.3, so the usage error is ` +
+                `reported, exit 2, whatever findings the workspace ` +
+                `carries, and no validation finding rides the report ` +
+                `(SPEC 12.0, 13.3)`,
+            );
+            const onTwin = await expectGatedUsageError(
+              product,
+              twin,
+              row,
+              argv,
+              `T12.0-10 \`${command}\` on the valid twin — ${row.what}: ` +
+                `the same name is the same usage error on a valid ` +
+                `workspace (SPEC 12.0)`,
+            );
+            assertBytesEqual(
+              onFailing.stdoutBytes,
+              onTwin.stdoutBytes,
+              `T12.0-10 \`${command}\`: the check is judged from what it ` +
+                `consults — configuration, the session directory, the ` +
+                `named file's parse, identical in both workspaces — ` +
+                `identically on valid and failing workspaces, so the same ` +
+                `name gives the same exit-2 error document (SPEC 12.0, 14: ` +
+                `a plain usage error describes the invocation, never ` +
+                `workspace content; H-4's product-to-itself compare)`,
+            );
+          }
+
+          // The mutating row's twin control, run once every row has met
+          // the twin as staged: with the configured profile in the unknown
+          // one's place the same invocation creates the session `n` (SPEC
+          // 10.7), so the row's "no session written" is the refusal's, never
+          // an unwritable session directory's.
+          const createControl = [
+            "review",
+            "create",
+            "--coverage",
+            "prof",
+            "--name",
+            PREC_SESSION_NAME,
+            "--json",
+          ];
+          await expectExit(
+            product,
+            twin,
+            createControl,
+            0,
+            `T12.0-10 twin control \`${createControl.join(" ")}\` — the ` +
+              `configured profile resolves on the valid twin, so the ` +
+              `unknown profile's exit 2 is attributable to that name alone ` +
+              `(SPEC 10.7, 7.4)`,
+          );
+          if ((await twin.kind(PREC_SESSION_REL)) !== "file") {
+            fail(
+              `T12.0-10 twin control \`${createControl.join(" ")}\`: ` +
+                `\`review create\` must store the session at ` +
+                `${PREC_SESSION_REL} (SPEC 10.1) — the session the ` +
+                `unknown-profile row must never write`,
+            );
+          }
+
+          // Masking: the named file itself is unparseable, so the id check
+          // cannot be judged — the gated report of 13.3 takes its place,
+          // exit 1 (as in 6.4). The file even contains the bytes
+          // `id="broken"`, so a product scraping identities out of the
+          // unparseable text and answering (exit 0), or reporting an
+          // unknown id (exit 2), fails either way.
+          const maskCommand = `show ${PREC_BROKEN_FILE}#broken --json`;
+          await expectGatedReport(
+            product,
+            failing,
+            ["show", `${PREC_BROKEN_FILE}#broken`, "--json"],
+            premiseFindings,
+            `T12.0-10 \`${maskCommand}\` (masking) — an unparseable named ` +
+              `file masks the parse-local id check as in 6.4: the gated ` +
+              `report of 13.3 is emitted and the command exits 1, never 2 ` +
+              `(SPEC 12.0, 13.3, 14.20)`,
+          );
+
+          // Spelled, not defined: an `id` is judged over the named file's
+          // spelled identities (11.2), as 6.4 judges the old ID — never
+          // over defined ones. An ID the file spells passes the check
+          // though no bearer's node identity is defined, so the gated
+          // report follows, exit 1, failing a product that judges gated
+          // reads against defined identities (its unknown-node exit 2); an
+          // ID only a braced or valueless `id` would bear is spelled
+          // nowhere, so the check fails, exit 2, the usage error alone
+          // though the file carries a 14.17 finding — failing a product
+          // that reads the braced string or the bare attribute's JSX value
+          // as a spelling (it would pass the check into the gate, exit 1).
+          for (const row of SPELLED_NOT_DEFINED_ROWS) {
+            for (const read of [["show"], ["query", "node"]]) {
+              const argv = [...read, `${row.file}#${row.id}`, "--json"];
+              const context =
+                `T12.0-10 \`${argv.join(" ")}\` on the failing workspace ` +
+                `(spelled, not defined) — ${row.what}`;
+              if (row.spelled) {
+                await expectGatedReport(
+                  product,
+                  failing,
+                  argv,
+                  premiseFindings,
+                  `${context}: the file spells the ID, so the parse-local ` +
+                    `check passes though no bearer's identity is defined — ` +
+                    `the gated report of 13.3 follows, exit 1, never the ` +
+                    `unknown-node exit 2 (SPEC 12.0, 11.2, 13.3)`,
+                );
+              } else {
+                assertPlainUsageError(
+                  await runCli(product, failing, argv),
+                  `${context}: no section of the file spells the ID, so ` +
+                    `the parse-local check fails — the unknown-node usage ` +
+                    `error, exit 2, the error document the entire stdout ` +
+                    `though the file carries a 14.17 finding: the usage ` +
+                    `error alone reported, never the gated report (SPEC ` +
+                    `12.0, 11.2, 12.7, H-5)`,
+                );
+              }
+            }
+          }
+        });
+      },
+    );
+
+    // --- Masking reaches a code unit alike (SPEC 12.0: a code unit judged
+    // over the named file's named units, an unparseable named file masking
+    // the check), on a workspace failing `build`'s validations through
+    // `src/bad.ts` alone; the kind check, asking no content question, is
+    // never masked (12.0, 6.4).
+    await withWorkspace({ files: CODE_MASK_FILES }, async (workspace) => {
+      const premiseContext =
+        "T12.0-10 code-unit masking workspace `build --json` premise";
+      const premiseFindings = await buildFindings(
+        product,
+        workspace,
+        `${premiseContext} — the workspace fails build validation through ` +
+          `${CODE_MASK_CODE_FILE}, not well-formed TypeScript (SPEC 14.20)`,
+      );
+      assertConditionCounts(
+        premiseFindings,
+        { "14.20": 1 },
+        `${premiseContext}: exactly ${CODE_MASK_CODE_FILE}'s condition 20 — ` +
+          `the workspace's one validation finding, beside the parseable ` +
+          `${CODE_MASK_SPEC_FILE} (SPEC 14, 14.20)`,
+      );
+      assertFindingLocated(
+        premiseFindings[0],
+        { file: CODE_MASK_CODE_FILE },
+        `${premiseContext}: the condition-20 finding locates in ` +
+          `${CODE_MASK_CODE_FILE}, the unparseable code source (SPEC 14, ` +
+          `14.20)`,
+      );
+      // A unit the file spells and one it spells nowhere: neither can be
+      // judged over an unparseable file's named units, so each masks — a
+      // product parsing the named file to judge `path#unit` and answering
+      // "unknown node" when the parse fails exits 2 on both, one judging
+      // the unit over an error-tolerant parse answers `f`'s queries.
+      for (const { unit, what } of CODE_MASK_UNITS) {
+        for (const query of codeUnitMaskedQueries(unit)) {
+          const argv = [...query, "--json"];
+          await expectGatedReport(
+            product,
+            workspace,
+            argv,
+            premiseFindings,
+            `T12.0-10 \`${argv.join(" ")}\` (code-unit masking) — ` +
+              `\`${unit}\`, ${what}: the named code file is unparseable, so ` +
+              `the check of the unit against its named units is masked — ` +
+              `the gated report of 13.3 follows, exit 1, answering nothing, ` +
+              `never the unknown-node exit 2 (SPEC 12.0, 13.3, 4.6, 14.20)`,
+          );
+        }
+      }
+      const bareArgv = [
+        "query",
+        "edges",
+        "--from",
+        CODE_MASK_CODE_FILE,
+        "--json",
+      ];
+      await expectGatedReport(
+        product,
+        workspace,
+        bareArgv,
+        premiseFindings,
+        `T12.0-10 \`${bareArgv.join(" ")}\` (code-unit masking) — a bare ` +
+          `discovered path of the code kind passes the check (SPEC 11.1) and ` +
+          `ends at the gate alike: the gated report of 13.3, exit 1 (SPEC ` +
+          `12.0, 13.3)`,
+      );
+      // The kind check: a code source named where a requirement-node
+      // identity is required is a usage error whatever the file holds, so
+      // a product masking every check against an unparseable named file —
+      // answering the gated report — fails it.
+      for (const kindArgv of CODE_MASK_KIND_ROWS) {
+        const argv = [...kindArgv, "--json"];
+        assertPlainUsageError(
+          await runCli(product, workspace, argv),
+          `T12.0-10 \`${argv.join(" ")}\` (kind check) — a code source ` +
+            `named where a requirement-node identity is required: the kind ` +
+            `check asks no content question and is never masked, so the ` +
+            `usage error alone is reported, exit 2, the error document the ` +
+            `entire stdout, never the gated report of the unparseable named ` +
+            `file (SPEC 12.0, 6.4, 11.1, 12.7, H-5)`,
+        );
+      }
+    });
+
+    // --- Within class 2: an error the invocation's syntax alone determines
+    // is reported without loading configuration — identically with the
+    // configuration file invalid or missing — while a configuration error
+    // precedes every check that consults configuration (SPEC 12.0, 14.14).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": T12_0_9_10_UNKNOWN_KEY_CONFIG,
+          // What the missing-flag and missing-argument rows would consult
+          // next, staged so a product judging it before the syntax check is
+          // observed: a session already named `n` — SPEC 10.7 refuses
+          // `review create` with an existing session's name, exit 1; a
+          // conforming invocation never reads it, so any bytes serve — and
+          // the `at` row's `<file>`, present here and absent from the
+          // missing-configuration workspace, so a product judging the file
+          // before the argument count answers the two states differently
+          // and fails the byte-identical compare below.
+          [SYNTAX_SESSION_REL]: "xspec-harness pre-existing session\n",
+          [SYNTAX_AT_FILE]: ALPHA_SECTION_STAGED,
+        },
+      },
+      async (invalidConfig) => {
+        await withWorkspace({}, async (missingConfig) => {
+          for (const row of T12_0_10_SYNTAX_ROWS) {
+            const command = row.argv.join(" ");
+            // An error the arguments alone determine is reported before
+            // anything else, so the invocation modifies nothing — the
+            // mutating `review create`, `review resolve`, and `rename`
+            // rows included, whose session directory already holds `n`
+            // and whose named file is present (whole-root compare,
+            // `.xspec/` included; a `--test-hold` file created beside
+            // `--preview` would appear at the root).
+            const onInvalid = await assertLeavesUnchanged(
+              invalidConfig.root,
+              () =>
+                expectPlainUsageError(
+                  product,
+                  invalidConfig,
+                  row.argv,
+                  `T12.0-10 \`${command}\` with the configuration file ` +
+                    `invalid — ${row.what} is determined by the ` +
+                    `invocation's arguments alone and reported without ` +
+                    `loading configuration: the plain usage error, ` +
+                    `\`code\` and \`path\` null, never 14.14 (SPEC 12.0, ` +
+                    `12.7)`,
+                ),
+              `T12.0-10 \`${command}\` with the configuration file invalid ` +
+                `— a syntax-class usage error modifies nothing (SPEC 12.0)`,
+            );
+            const onMissing = await assertLeavesUnchanged(
+              missingConfig.root,
+              () =>
+                expectPlainUsageError(
+                  product,
+                  missingConfig,
+                  row.argv,
+                  `T12.0-10 \`${command}\` with the configuration file ` +
+                    `missing — ${row.what} is reported without loading ` +
+                    `configuration: the plain usage error, \`code\` and ` +
+                    `\`path\` null, never 14.14 (SPEC 12.0, 12.7)`,
+                ),
+              `T12.0-10 \`${command}\` with the configuration file missing ` +
+                `— a syntax-class usage error modifies nothing (SPEC 12.0)`,
+            );
+            assertBytesEqual(
+              onInvalid.stdoutBytes,
+              onMissing.stdoutBytes,
+              `T12.0-10 \`${command}\`: reported identically with the ` +
+                `workspace's configuration file invalid or missing — the ` +
+                `error document depends on the invocation's arguments ` +
+                `alone, never on configuration state (SPEC 12.0; H-4's ` +
+                `product-to-itself compare)`,
+            );
+          }
+
+          // A configuration error precedes every check that consults
+          // configuration or discovery: the unknown-profile check of the
+          // gated-read arm, run under invalid configuration, reports 14.14
+          // — the stable code `configuration-error`, where the unknown
+          // profile's plain usage error carries a null code.
+          await expectConfigurationError(
+            product,
+            invalidConfig,
+            ["coverage", "no-such-profile"],
+            "T12.0-10 `coverage no-such-profile` with invalid " +
+              "configuration — a configuration error precedes every " +
+              "argument check that consults configuration or discovery: " +
+              "14.14 is reported, not the unknown profile (SPEC 12.0, " +
+              "14.14)",
+          );
+          // Likewise the wrong-kind group check of 11.1: whether `app`
+          // names a code group, a spec group, or nothing is read from the
+          // configuration, so the configuration error precedes it.
+          await expectConfigurationError(
+            product,
+            invalidConfig,
+            ["query", "nodes", "--group", "app"],
+            "T12.0-10 `query nodes --group app` with invalid " +
+              "configuration — the group check of 11.1 consults the " +
+              "configuration, so the configuration error precedes it: " +
+              "14.14 is reported, not the wrong-kind or unknown group " +
+              "(SPEC 12.0, 11.1, 14.14)",
+          );
+        });
+      },
+    );
+
+    // --- Past the gate: the session read, meeting a named session's
+    // corruption, precedes the unknown item ID (SPEC 12.0, 10.7, 10.1,
+    // 14.21). Last in the body: every corrupt state of T10.1-4, each on a
+    // passing workspace of its own.
+    //
+    // Premise: with the session well-formed, an item ID it never held is a
+    // usage error at each of the three subcommands (SPEC 10.7, 12.0;
+    // T10.7-10, T10.7-15) — so the exit-1 flip below is attributable to
+    // the corruption, met at the session read before the ID is judged.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
+          "specs/A.mdx": STREAMS_VALID_SOURCE,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T12.0-10 past-the-gate premise `build`",
+        );
+        const createArgv = [
+          "review",
+          "create",
+          "--strategy",
+          "audit",
+          "--name",
+          PAST_GATE_PREMISE_SESSION,
+          "--json",
+        ];
+        await runJson(
+          product,
+          workspace,
+          createArgv,
+          `T12.0-10 past-the-gate premise staging \`${createArgv.join(" ")}\``,
+        );
+        for (const argv of pastTheGateInvocations(PAST_GATE_PREMISE_SESSION)) {
+          const jsonArgv = [...argv, "--json"];
+          await expectPlainUsageError(
+            product,
+            workspace,
+            jsonArgv,
+            `T12.0-10 past-the-gate premise \`${jsonArgv.join(" ")}\` — an ` +
+              `item ID a well-formed session never held is a usage error: ` +
+              `exit 2, the plain usage error, \`code\` null (SPEC 10.7, ` +
+              `12.0; T10.7-10, T10.7-15)`,
+          );
+        }
+      },
+    );
+
+    // Every corrupt state of T10.1-4 — its unparseable bytes, each of its
+    // adapter-layer stagings, and the rest (section-10.1.ts's
+    // `T10_1_4_CORRUPT_STATES`, the same stagings) — each on a passing
+    // workspace of its own: `resolve`, `show`, and `split` naming an item
+    // ID the session never held each report exactly the condition-21
+    // finding, exit 1, nothing modified, never the unknown-item exit 2. A
+    // product parsing the session, checking the item ID, and validating
+    // the invariants only afterwards fails the parseable states.
+    for (const corrupt of T10_1_4_CORRUPT_STATES) {
+      await withWorkspace({ files: corrupt.files }, async (workspace) => {
+        const label = `T12.0-10 [${corrupt.state}]`;
+        const staged = await corrupt.stage(product, workspace, label);
+        if (staged.heldItemIds.includes(PRECEDENCE_NO_SUCH_ITEM)) {
+          fail(
+            `${label}: staging premise — the arm names an item ID the ` +
+              `session never held, but the product-written session ` +
+              `${staged.session} held ${PRECEDENCE_NO_SUCH_ITEM} (item IDs ` +
+              `read before the corruption: ` +
+              `${JSON.stringify(staged.heldItemIds)})`,
+          );
+        }
+        for (const argv of pastTheGateInvocations(staged.session)) {
+          const context = `${label} \`${argv.join(" ")}\` (corrupt session)`;
+          const jsonArgv = [...argv, "--json"];
+          const jsonContext = `${label} \`${jsonArgv.join(" ")}\` (corrupt session)`;
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              const result = await runCli(product, workspace, argv);
+              assertExitCode(
+                result,
+                1,
+                `${context} — past the gate the session read, meeting the ` +
+                  `corruption, precedes the item ID: the corruption is ` +
+                  `reported, exit 1 — never the unknown-item exit 2 (SPEC ` +
+                  `12.0, 10.7, 10.1, 14.21)`,
+              );
+              assertReportMentions(
+                result,
+                [/corrupt/i],
+                `${context} — the report identifies the session as corrupt ` +
+                  `(SPEC 10.1/14.21 vocabulary; T10.1-4's ` +
+                  `operationalization: information presence, never exact ` +
+                  `wording, H-3)`,
+              );
+              const findings = await runFindingsReport(
+                product,
+                workspace,
+                jsonArgv,
+                1,
+                `${jsonContext} — past the gate the session read, meeting ` +
+                  `the corruption, precedes the item ID: exit 1, the ` +
+                  `findings-only report the entire stdout — never the ` +
+                  `unknown-item exit 2 (SPEC 12.0, 10.7, 10.1, 14.21, 12.7)`,
+              );
+              assertConditionCounts(
+                findings,
+                { "14.21": 1 },
+                `${jsonContext} — exactly the condition-21 finding, its ` +
+                  `exact stable code \`corrupt-session\`: the corruption ` +
+                  `reported in the item check's place (SPEC 12.0, 10.7, ` +
+                  `10.1, 14, 14.21, 12.7)`,
+              );
+              const corruption = findings[0];
+              assertFindingConcernsPath(
+                corruption,
+                staged.path,
+                `${jsonContext}: a session condition carries the session ` +
+                  `file it concerns — the corrupt session's own path ` +
+                  `${staged.path}, a symbolic link there by its own path ` +
+                  `(SPEC 14, 14.21, 12.7, 10.1, 13.4)`,
+              );
+              assertSameJson(
+                corruption.locations,
+                [],
+                `${jsonContext}: a session condition has no in-source ` +
+                  `location — locations [] (SPEC 14, 14.21, 12.7, 10.1)`,
+              );
+            },
+            `${context}, then with --json — a \`review\` subcommand naming ` +
+              `a corrupt session modifies nothing (SPEC 10.1, 10.7, 13.5)`,
+          );
+        }
+      });
+    }
   },
 });
 
@@ -1446,6 +3111,9 @@ const T12_0_11 = defineProductTest({
         // Edit omega after the commit, so the baseline session derives one
         // unblocked path-blocks item (omega's subtree-coherence item; omega
         // has no non-root ancestor, SPEC 10.5) for `next` and `resolve`.
+        // The edit precedes the body's first product invocation (the `build`
+        // below), so S-7's sweep reaches it against the stub: plain
+        // contents, no ledger record (helpers/staged-mdx.ts).
         await workspace.file(GITRO_FILE, gitroSource("Omega text v2."));
         await buildOk(product, workspace, "T12.0-11 `build` (fresh fixture)");
 
@@ -1526,27 +3194,6 @@ const T12_0_11 = defineProductTest({
 // T12.0-12 — git-less operation
 // ---------------------------------------------------------------------------
 
-/**
- * Staging guard: the sweep workspace must sit under no git repository at all
- * (an enclosing repository would mask a product that wrongly requires git).
- * A violation is a harness staging error, not a product observation.
- */
-async function assertNoEnclosingGitRepository(startAbs: string): Promise<void> {
-  let dir = startAbs;
-  for (;;) {
-    if (await pathExists(path.join(dir, ".git"))) {
-      throw new Error(
-        `T12.0-12 staging: ${dir} contains a .git entry — the git-less ` +
-          `sweep needs a workspace that is not a git repository and has no ` +
-          `enclosing repository (harness staging error)`,
-      );
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return;
-    dir = parent;
-  }
-}
-
 const GITLESS_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1621,6 +3268,16 @@ const GITLESS_STEPS: readonly GitlessStep[] = [
   { what: "coverage", argv: () => ["coverage"] },
   { what: "query node", argv: () => ["query", "node", GITLESS_ALPHA] },
   { what: "query edges", argv: () => ["query", "edges"] },
+  // The 11.3–11.6 surfaces answer over the clean domain — complete,
+  // finding-free, exit 0 (SPEC 11.2) — and `version` (12.6) is
+  // workspace-independent; none consults git. All five are JSON-only
+  // surfaces that accept `--json` per T12.0-1, so the sweep's uniform
+  // `--json` append holds for them too.
+  { what: "occurrences", argv: () => ["occurrences"] },
+  { what: "view", argv: () => ["view"] },
+  { what: "at", argv: () => ["at", GITLESS_FILE, "0"] },
+  { what: "inventory", argv: () => ["inventory"] },
+  { what: "version", argv: () => ["version"] },
   {
     what: "review create (audit)",
     argv: () => ["review", "create", "--strategy", "audit", "--name", "aud"],
@@ -1717,9 +3374,22 @@ const GITLESS_STEPS: readonly GitlessStep[] = [
     ],
   },
   { what: "review list (both sessions)", argv: () => ["review", "list"] },
+  // Each `--preview` invocation performs the real operation's full
+  // validation and planning while modifying nothing (SPEC 6.6) — a
+  // git-less planning run at the same state as the real operation that
+  // follows it, and a successful preview since the real operation
+  // proceeds (exit 0, T12.0-9).
+  {
+    what: "rename --preview",
+    argv: () => ["rename", GITLESS_FILE, "omega", "omega2", "--preview"],
+  },
   {
     what: "rename",
     argv: () => ["rename", GITLESS_FILE, "omega", "omega2"],
+  },
+  {
+    what: "move --preview",
+    argv: () => ["move", GITLESS_FILE, "specs/B.mdx", "--preview"],
   },
   { what: "move", argv: () => ["move", GITLESS_FILE, "specs/B.mdx"] },
 ];
@@ -1727,8 +3397,7 @@ const GITLESS_STEPS: readonly GitlessStep[] = [
 const T12_0_12 = defineProductTest({
   id: "T12.0-12",
   title:
-    "git-less operation: the non-baseline surface — `build`, `check`, `ids`, `show`, `coverage`, `query`, `rename`, file-form `move`, and `review` with the audit and coverage strategies through create/list/status/next/show/split/resolve/export (an `updated` resolve re-running the recorded-profile generator included) — runs to its specified outcomes in a workspace that is not a git repository and has no enclosing repository; only baseline-taking invocations require git (SPEC 12.0, SPEC.md preamble; T10.6-1's git-less audit is one instance)",
-  timeoutMs: 240_000,
+    "git-less operation: the non-baseline surface — `build`, `check`, `ids`, `show`, `coverage`, `query`, `occurrences`, `view`, `at`, `inventory`, `version`, `rename` and file-form `move` (their `--preview` invocations included), and `review` with the audit and coverage strategies through create/list/status/next/show/split/resolve/export (an `updated` resolve re-running the recorded-profile generator included) — runs to its specified outcomes in a workspace that is not a git repository and has no enclosing repository; only baseline-taking invocations require git (SPEC 12.0, 11.2, 12.6, 6.6, SPEC.md preamble; T10.6-1's git-less audit is one instance)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -1738,7 +3407,13 @@ const T12_0_12 = defineProductTest({
         },
       },
       async (workspace) => {
-        await assertNoEnclosingGitRepository(workspace.root);
+        // Staging guard (module header): an enclosing repository would mask
+        // a product that wrongly requires git (H-1).
+        await assertSelfContainedRoot(
+          product,
+          workspace.root,
+          "T12.0-12 (the git-less sweep's workspace)",
+        );
         const state: GitlessState = {};
         for (const step of GITLESS_STEPS) {
           const argv = [...step.argv(state), "--json"];
@@ -1764,10 +3439,645 @@ const T12_0_12 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T12.0-13 — `#` in operands
+// ---------------------------------------------------------------------------
+//
+// SPEC 12.0: `<node>` and `<graph-node>` values are identities in the form of
+// 1.5, their `#` splitting path from id or unit, and the split applies
+// equally to an operand spelled `<file>#<id>` (6.5); at most one `#` is
+// well-formed in any such value — 11.3 pins the same bound for `--to` — so a
+// spelling containing more than one `#` is a malformed value, a usage error,
+// and the split is never ambiguous. A bare `<file>` operand and a `--file`
+// glob are instead a whole path or pattern: `#` has no delimiter role in
+// them, so a `#`-containing spelling names the discovered file of that
+// invalid path (14.19, 11.4), never a `path#id` pair — `rename`'s `<file>`
+// operand included (6.4), the split belonging to identity values and
+// `move`'s `<file>#<id>` operands alone (12.0, 6.5).
+//
+// One workspace serves both halves: valid `specs/OK.mdx` (the move origin and
+// valid-side contrast) beside `specs/a#b.mdx` — the entry's literal name, its
+// content deliberately condition-free (well-formed unique ids `pa` and `x`,
+// multi-byte prose prefix shifting every later byte offset, SPEC 1.7) so the
+// staging premise `build --json` reports EXACTLY one 14.19 and every later
+// observation is attributable to the path alone. The section `x` is the
+// entry's renamed section: `rename specs/a#b.mdx x y` names the discovered
+// file, its argument checks pass — the spelled `x` establishes the old ID's
+// existence, parse-local over spelled identities though the invalid path
+// leaves its node identity undefined (6.4, 11.2; T6.4-4) — and the
+// invalid-workspace refusal follows, exit 1, the condition-19 finding among
+// its findings, nothing modified (6.4, 14), never the unknown-file usage error
+// (exit 2) of a parser splitting the operand at `#`. The workspace failing
+// `build` is itself load-bearing twice over: the malformed-value exit 2 must
+// precede the gated report (12.0 — argument checks precede the
+// invalid-workspace report), and a product that instead splits
+// `specs/a#b.mdx#pa` at the last `#` finds a discovered file whose spelled
+// identities include `pa`, passes its parse-local argument check, and answers
+// the gated report exit 1 — the sharpest observable divergence from the
+// required exit 2. The `--file` control `specs/zz#*` (a `#`-containing pattern
+// matching nothing) pins the other side: the empty admitted set is an empty,
+// finding-free answer, exit 0 (11.3), so the exit-1-with-14.19 answer on
+// `specs/a#*` is attributable to the pattern MATCHING the invalid path.
+
+/**
+ * Running byte-offset fixture assembler (the T5.7-2/T1.7-2 discipline;
+ * the module-local class of section-11.2/-11.4/-11.5): `add` appends a
+ * segment and returns its byte range, `attr` an attribute segment as the
+ * expected `{name, range, text}` view entry (SPEC 11.4). Every expected
+ * offset is composed from the same parts the staged file is.
+ */
+class ByteFixture {
+  private readonly parts: string[] = [];
+  private bytes = 0;
+
+  get pos(): number {
+    return this.bytes;
+  }
+
+  get source(): string {
+    return this.parts.join("");
+  }
+
+  add(segment: string): SourceRange {
+    const start = this.bytes;
+    this.parts.push(segment);
+    this.bytes += Buffer.byteLength(segment, "utf8");
+    return { start, end: this.bytes };
+  }
+
+  attr(name: string, text: string): ViewAttributeEntry {
+    return { name, range: this.add(text), text };
+  }
+}
+
+/** The 12.7 unavailability marker, as decoded (one-datum state). */
+const UNAVAILABLE = { unavailable: true } as const;
+
+/** Fixture self-check (T5.7-2 discipline): a claimed range slices the staged bytes to exactly `expected` — before the product is ever invoked. */
+function sliceCheck(
+  source: string,
+  range: SourceRange,
+  expected: string,
+  what: string,
+): void {
+  const actual = Buffer.from(source, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (actual !== expected) {
+    throw new Error(
+      `section-12.0-ii fixture self-check: ${what} — expected the range ` +
+        `[${String(range.start)}, ${String(range.end)}) to slice to ` +
+        `${JSON.stringify(expected)}, got ${JSON.stringify(actual)}; the ` +
+        `staging arithmetic is wrong (harness defect, not a product result)`,
+    );
+  }
+}
+
+// --- specs/OK.mdx — valid path: the move origin and valid-side contrast -----
+const H13_OK_FILE = "specs/OK.mdx";
+const H13_OK_SOURCE = ['<S id="ok">', "Anchor text.", "</S>", ""].join("\n");
+
+// --- specs/a#b.mdx — the `#`-containing discovered spec source (14.19) ------
+// The path is the file's ONLY defect: `pa` and `x` are well-formed, unique,
+// and structurally valid, so the premise `build` reports exactly one 14.19.
+// The first section deliberately spells `pa` so the multi-`#` operand
+// `specs/a#b.mdx#pa` below is a last-`#`-split trap: both split halves name
+// real staged things, and only rejecting the value gives exit 2. The second
+// spells `x`, the entry's renamed section (`rename specs/a#b.mdx x y`, the
+// file spelling a section `x`): a spelled identity, which establishes the
+// old ID's existence (SPEC 6.4, T6.4-4) though the invalid path leaves its
+// node identity undefined (11.2).
+const H13_FILE = "specs/a#b.mdx";
+const H13 = new ByteFixture();
+H13.add("Ancré — préfixe multi-octets.\n\n");
+const H13_PA_START = H13.pos;
+H13.add("<S ");
+const H13_PA_ID = H13.attr("id", 'id="pa"');
+H13.add(">\nHash-path text.\n</S>");
+const H13_PA_RANGE: SourceRange = { start: H13_PA_START, end: H13.pos };
+H13.add("\n\n");
+const H13_X_START = H13.pos;
+H13.add("<S ");
+const H13_X_ID = H13.attr("id", 'id="x"');
+H13.add(">\nRenamed-section text.\n</S>");
+const H13_X_RANGE: SourceRange = { start: H13_X_START, end: H13.pos };
+H13.add("\n");
+const H13_SOURCE = H13.source;
+const H13_ROOT_RANGE: SourceRange = { start: 0, end: H13.pos };
+/** The entry's rename: the old ID the file spells, and a fresh new ID. */
+const H13_RENAME_OLD_ID = "x";
+const H13_RENAME_NEW_ID = "y";
+
+/**
+ * The asserted projection of the 14.19 finding (SPEC 14, 12.7): the stable
+ * code token, the empty locations of a path-level condition, and the
+ * concerned path. Message and identities stay unpinned (informational).
+ */
+interface PathFindingExpectation {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: PathValue | null;
+}
+
+function projectPathFinding(finding: Finding): PathFindingExpectation {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+const H13_19: PathFindingExpectation = {
+  code: "invalid-source-path",
+  locations: [],
+  path: H13_FILE,
+};
+
+/**
+ * One malformed multi-`#` operand invocation (SPEC 12.0): run with `--json`,
+ * assert exit 2 exactly — reported whatever findings the workspace carries
+ * (the argument checks precede the gated report and source validation,
+ * 12.0) — the single 12.7 error document as the entire stdout (no report, no
+ * validation findings; H-5), and a usage error message on stderr (presence,
+ * not wording — H-3).
+ */
+async function expectMalformedOperandError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const rendered = ["xspec", ...argv, "--json"].join(" ");
+  const result = await runCli(product, workspace, [...argv, "--json"]);
+  assertExitCode(
+    result,
+    2,
+    `${context}: \`${rendered}\` — a value containing more than one \`#\` ` +
+      `is a malformed value, a usage error: exit 2, whatever findings the ` +
+      `workspace carries (SPEC 12.0)`,
+  );
+  expectErrorDocument(
+    result,
+    `${context}: \`${rendered}\` — with JSON output in effect, the exit-2 ` +
+      `error document is the entire stdout: the malformed value emits no ` +
+      `report and no validation findings (SPEC 12.0, 12.7, H-5)`,
+  );
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: \`${rendered}\` — usage error messages are ` +
+        `standard-error content (SPEC 12.0), but stderr is empty`,
+    );
+  }
+}
+
+/** The malformed spellings: the entry's literal, and the last-`#`-split trap. */
+const H13_MULTI_HASH_VALUES: readonly { value: string; trap: string }[] = [
+  {
+    value: "a#b#c",
+    trap: "the entry's literal spelling — no staged interpretation",
+  },
+  {
+    value: `${H13_FILE}#pa`,
+    trap:
+      "the last-`#` split names the discovered file specs/a#b.mdx plus its " +
+      "spelled id `pa`, so an accepting product proceeds and answers exit 1 " +
+      "on this failing workspace",
+  },
+];
+
+/**
+ * The tree projection the view arm pins (T11.2-1's named clauses): per node,
+ * the identity datum (the 11.2 three-state), the construct range (1.7), the
+ * raw attribute entries as parsed, and the children in document order. The
+ * opening/closing decompositions and interpreted tags/coverage stay outside
+ * (T11.4-1, T11.2-2/T11.4-3 pin those); the form-exact decode has already
+ * validated their forms.
+ */
+interface ViewTreeExpectation {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly children: readonly ViewTreeExpectation[];
+}
+
+function projectViewNode(node: ViewNode): ViewTreeExpectation {
+  return {
+    identity: node.identity,
+    range: node.range,
+    attributes: node.attributes.map((entry) => ({
+      name: entry.name,
+      range: entry.range,
+      text: entry.text,
+    })),
+    children: node.children.map(projectViewNode),
+  };
+}
+
+const T12_0_13 = defineProductTest({
+  id: "T12.0-13",
+  title:
+    "`#` in operands: a `<node>`, `<graph-node>`, `--to`, or move-operand value containing more than one `#` (the literal `a#b#c`, and `specs/a#b.mdx#pa` — whose last-`#` split would name a discovered file plus a spelled id) is a malformed value — exit 2 with the single 12.7 error document on `show`, `query node`, `occurrences --to`, and `move` (origin and destination operands alike, the destination the T6.5-4 dead-letter spelling — `#` in the section form's target-file part; each move wrapped in a whole-root modifies-nothing compare), the usage error preceding the failing workspace's findings; a bare `<file>` operand or `--file` glob is a whole path or pattern with no delimiter role for `#`: with `specs/a#b.mdx` discovered (condition 19 — the staging premise `build --json` fails with exactly that one pinned 14.19, modifying nothing), `view specs/a#b.mdx` names the discovered file — membership holds: exactly its one per-file view, tree and ranges on view with every node identity explicitly unavailable, its condition-19 finding accompanying, exit 1 — never a `specs/a` + `b.mdx` pair (which would be exit 2, unknown file); `at specs/a#b.mdx 0` resolves the same way (the root construct, identity unavailable, no containing occurrence); `occurrences --file specs/a#*` matches it as a pattern — domain membership proven by the accompanying 14.19, exit 1, against the matching-nothing control `specs/zz#*` (empty, finding-free, exit 0); and `rename specs/a#b.mdx x y`, the file spelling a section `x`, names it likewise — its argument checks pass (the spelled identity establishes the old ID's existence, the invalid path's undefined node identities notwithstanding) and the invalid-workspace refusal follows: exit 1, the form-exact findings-only report holding the condition-19 finding among its findings, nothing modified (a whole-root compare) — never the unknown-file usage error (exit 2) of a parser splitting the operand at `#`, the split belonging to identity values and `move`'s `<file>#<id>` operands alone (SPEC 12.0, 11.2-11.5, 12.7, 14, 6.4, 6.5)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes before any product invocation.
+    sliceCheck(
+      H13_SOURCE,
+      H13_PA_RANGE,
+      '<S id="pa">\nHash-path text.\n</S>',
+      "the pa section construct",
+    );
+    sliceCheck(
+      H13_SOURCE,
+      H13_PA_ID.range,
+      H13_PA_ID.text,
+      "pa's id attribute",
+    );
+    sliceCheck(
+      H13_SOURCE,
+      H13_X_RANGE,
+      '<S id="x">\nRenamed-section text.\n</S>',
+      "the x section construct",
+    );
+    sliceCheck(H13_SOURCE, H13_X_ID.range, H13_X_ID.text, "x's id attribute");
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [H13_OK_FILE]: H13_OK_SOURCE,
+        [H13_FILE]: H13_SOURCE,
+      },
+    });
+    try {
+      // --- Staging premise: `build --json` fails with EXACTLY one 14.19 —
+      // the content of both files stages no other condition, so the path is
+      // the sole defect — the finding pinned (stable code, no in-source
+      // locations, the file as concerned path; SPEC 14, 12.7), and a
+      // failing build modifies nothing (SPEC 12.1).
+      const buildContext =
+        "T12.0-13 `build --json` (staging premise: the `#` path is the " +
+        "workspace's one defect)";
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const result = await expectExit(
+            product,
+            workspace,
+            ["build", "--json"],
+            1,
+            buildContext,
+          );
+          const findings = decodeFindingsReport(
+            parseJsonStdout(result, buildContext),
+            buildContext,
+          ).findings;
+          assertConditionCounts(
+            findings,
+            { "14.19": 1 },
+            `${buildContext} — exactly one condition-19 finding for the ` +
+              `discovered \`#\` path and nothing else: both files' content ` +
+              `is condition-free (SPEC 14.19)`,
+          );
+          assertSameJson(
+            findings.map(projectPathFinding),
+            [H13_19],
+            `${buildContext} — the finding carries the stable code ` +
+              `"invalid-source-path", no in-source locations (a path-level ` +
+              `condition), and the offending file as its concerned path ` +
+              `(SPEC 14, 12.7)`,
+          );
+        },
+        `${buildContext} — a failing build modifies nothing (SPEC 12.1)`,
+      );
+
+      // --- Malformed multi-`#` values: exit 2 on `show`, `query node`, and
+      // `occurrences --to` (SPEC 12.0; 11.3 pins the `--to` bound — a lax
+      // product reading the spelling as well-formed selects the empty set
+      // and answers exit 1 with the domain's findings, never 2).
+      for (const spelling of H13_MULTI_HASH_VALUES) {
+        const rows: readonly { argv: readonly string[]; what: string }[] = [
+          {
+            argv: ["show", spelling.value],
+            what: "`show <node>`",
+          },
+          {
+            argv: ["query", "node", spelling.value],
+            what: "`query node <node>`",
+          },
+          {
+            argv: ["occurrences", "--to", spelling.value],
+            what: "`occurrences --to <node>`",
+          },
+        ];
+        for (const row of rows) {
+          await expectMalformedOperandError(
+            product,
+            workspace,
+            row.argv,
+            `T12.0-13 ${row.what}, value ${JSON.stringify(spelling.value)} ` +
+              `(${spelling.trap})`,
+          );
+        }
+      }
+
+      // --- Malformed multi-`#` move operands (SPEC 12.0, 6.5): the
+      // destination arm is T6.5-4's dead letter realized — a `#` in the
+      // section form's target-file part makes a two-`#` operand — and an
+      // accepting product's last-`#` split names the discovered
+      // specs/a#b.mdx as target file (or as origin), proceeds, and answers
+      // exit 1 (the invalid-workspace refusal) or worse, writes; each arm
+      // rides a whole-root modifies-nothing compare.
+      const moveRows: readonly {
+        readonly argv: readonly string[];
+        readonly what: string;
+      }[] = [
+        {
+          argv: ["move", `${H13_OK_FILE}#ok`, `${H13_FILE}#pa`],
+          what:
+            "destination operand with two `#` (the T6.5-4 dead-letter " +
+            "spelling: `#` in the section form's target-file part)",
+        },
+        {
+          argv: [`move`, `${H13_FILE}#pa`, `${H13_OK_FILE}#zz`],
+          what: "origin operand with two `#`",
+        },
+      ];
+      for (const row of moveRows) {
+        const context = `T12.0-13 \`move\`, ${row.what}`;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            await expectMalformedOperandError(
+              product,
+              workspace,
+              row.argv,
+              context,
+            );
+          },
+          `${context} — a usage error modifies nothing (SPEC 6.5, 12.0)`,
+        );
+      }
+
+      // --- `view specs/a#b.mdx`: a bare `<file>` operand is a whole path —
+      // the `#`-containing spelling names the DISCOVERED file, so
+      // membership holds (never a `specs/a` + `b.mdx` pair, which would be
+      // exit 2, unknown file): exactly its one per-file view is served,
+      // structure on view, every node identity explicitly unavailable, its
+      // condition-19 finding accompanying, exit 1 (SPEC 12.0, 11.4, 11.2).
+      const viewContext = `T12.0-13 \`view ${H13_FILE}\``;
+      const viewResult = await runCli(product, workspace, ["view", H13_FILE]);
+      assertExitCode(
+        viewResult,
+        1,
+        `${viewContext} — the \`#\`-containing operand names the ` +
+          `discovered file (membership holds, never an unknown-file exit ` +
+          `2), and the answer carries its finding and unavailable ` +
+          `identities: exit 1 with the full document (SPEC 12.0, 11.4, 11.2)`,
+      );
+      const viewReport = decodeViewReport(
+        parseJsonStdout(
+          viewResult,
+          `${viewContext} — a single JSON document is the only output ` +
+            `form, with or without --json (SPEC 11)`,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        viewReport.findings.map(projectPathFinding),
+        [H13_19],
+        `${viewContext} — the consulted domain is the requested file ` +
+          `alone: exactly its condition-19 finding accompanies (SPEC 11.2, ` +
+          `11.4)`,
+      );
+      assertSameJson(
+        viewReport.views.map((view) => view.file),
+        [H13_FILE],
+        `${viewContext} — exactly one per-file view, for the requested ` +
+          `\`#\` path presented as the whole workspace-relative path ` +
+          `(SPEC 11.4, 12.0)`,
+      );
+      const h13View = viewReport.views[0]!;
+      assertSameJson(
+        projectViewNode(h13View.root),
+        {
+          identity: UNAVAILABLE,
+          range: H13_ROOT_RANGE,
+          attributes: [],
+          children: [
+            {
+              identity: UNAVAILABLE,
+              range: H13_PA_RANGE,
+              attributes: [H13_PA_ID],
+              children: [],
+            },
+            {
+              identity: UNAVAILABLE,
+              range: H13_X_RANGE,
+              attributes: [H13_X_ID],
+              children: [],
+            },
+          ],
+        },
+        `${viewContext} — the invalid-path file keeps its full positional ` +
+          `tree with byte-exact construct ranges and raw attribute entries ` +
+          `while every node identity, root included, is explicitly ` +
+          `unavailable (SPEC 11.2, 1.5)`,
+      );
+      assertSameJson(
+        [h13View.imports, h13View.occurrences, h13View.comments],
+        [[], [], []],
+        `${viewContext} — the file holds no imports, occurrences, or ` +
+          `comments: empty arrays, never null (SPEC 12.7)`,
+      );
+
+      // --- `at specs/a#b.mdx 0` resolves the same way (SPEC 11.5): the
+      // operand names the discovered file; offset 0 lies in the prose
+      // before any section, so the innermost enclosing construct is the
+      // ROOT, its identity explicitly unavailable; no containing
+      // occurrence; exactly the file's own finding; exit 1.
+      const atContext = `T12.0-13 \`at ${H13_FILE} 0\``;
+      const atResult = await runCli(product, workspace, ["at", H13_FILE, "0"]);
+      assertExitCode(
+        atResult,
+        1,
+        `${atContext} — the \`<file>\` operand asserts membership exactly ` +
+          `as a view operand does; the answer carries the file's finding ` +
+          `and an unavailable identity: exit 1 (SPEC 11.5, 11.2, 12.0)`,
+      );
+      const atReport = decodeAtReport(
+        parseJsonStdout(
+          atResult,
+          `${atContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        atContext,
+      );
+      assertSameJson(
+        atReport.findings.map(projectPathFinding),
+        [H13_19],
+        `${atContext} — the consulted domain is the named file alone: ` +
+          `exactly its condition-19 finding (SPEC 11.2, 11.5)`,
+      );
+      assertSameJson(
+        atReport.resolution,
+        {
+          section: { identity: UNAVAILABLE, range: H13_ROOT_RANGE },
+          occurrence: null,
+        },
+        `${atContext} — offset 0 (prose) resolves to the root construct, ` +
+          `its identity explicitly unavailable, within no occurrence ` +
+          `(SPEC 11.5, 11.2)`,
+      );
+
+      // --- `occurrences --file specs/a#*` matches the file as a PATTERN
+      // (SPEC 12.0, 11.3, 7): `#` is a literal glob byte, `*` any run of
+      // bytes within the segment, so the admitted set is {specs/a#b.mdx} —
+      // proven by the accompanying condition-19 finding (a finding is a
+      // domain file's exactly when that file is its concerned path, 11.2) —
+      // while the control pattern admits the empty set: an empty,
+      // finding-free answer, exit 0 (11.3), pinning that the exit-1 answer
+      // is attributable to the pattern MATCHING the `#` path.
+      const occContext = `T12.0-13 \`occurrences --file specs/a#*\``;
+      const occResult = await runCli(product, workspace, [
+        "occurrences",
+        "--file",
+        "specs/a#*",
+      ]);
+      assertExitCode(
+        occResult,
+        1,
+        `${occContext} — the pattern matches the discovered \`#\` path ` +
+          `(no delimiter role in a --file glob), whose finding accompanies ` +
+          `the answer: exit 1 (SPEC 12.0, 11.3, 11.2)`,
+      );
+      const occReport = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertSameJson(
+        occReport.findings.map(projectPathFinding),
+        [H13_19],
+        `${occContext} — the admitted set is exactly {${H13_FILE}}: its ` +
+          `condition-19 finding accompanies, and no other file's finding ` +
+          `can (SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        occReport.occurrences,
+        [],
+        `${occContext} — the file spells no references: an empty ` +
+          `enumeration, [] never null (SPEC 11.3, 12.7)`,
+      );
+      const ctrlContext = `T12.0-13 \`occurrences --file specs/zz#*\` (control)`;
+      const ctrlResult = await runCli(product, workspace, [
+        "occurrences",
+        "--file",
+        "specs/zz#*",
+      ]);
+      assertExitCode(
+        ctrlResult,
+        0,
+        `${ctrlContext} — a \`#\`-containing pattern matching nothing ` +
+          `admits the empty set: an empty, finding-free answer, exit 0 — ` +
+          `never an unknown-file usage error (SPEC 11.3)`,
+      );
+      assertSameJson(
+        decodeOccurrencesReport(
+          parseJsonStdout(
+            ctrlResult,
+            `${ctrlContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          ctrlContext,
+        ),
+        { findings: [], occurrences: [] },
+        `${ctrlContext} — empty and finding-free: the empty admitted set ` +
+          `consults no file (SPEC 11.3, 11.2)`,
+      );
+
+      // --- `rename specs/a#b.mdx x y`, the file spelling a section `x`:
+      // `rename`'s `<file>` operand is a whole path too — the split belongs
+      // to identity values and `move`'s `<file>#<id>` operands alone (SPEC
+      // 12.0, 6.5) — so it names the discovered file, and the argument
+      // checks pass: the file is a discovered spec source, and the section
+      // spelling `x` establishes the old ID's existence, parse-local over
+      // spelled identities, the invalid path's undefined node identities
+      // notwithstanding (SPEC 6.4, 11.2; T6.4-4). The invalid-workspace
+      // refusal follows: exit 1, the workspace's findings — the
+      // condition-19 finding among them — nothing modified (SPEC 6.4, 14).
+      // Naming neither report form, the arm reads the `--json` document
+      // (H-3), the form-exact findings-only report (12.7); the whole-root
+      // compare leaves out the lock path the rename's acquisition and
+      // release act on, and it alone (H-6, SPEC 13.5). A parser splitting
+      // the operand at `#` names the unknown file `specs/a`, and a product
+      // judging existence over node identities finds no `x`: each the
+      // usage error, exit 2.
+      const renameArgv = [
+        "rename",
+        H13_FILE,
+        H13_RENAME_OLD_ID,
+        H13_RENAME_NEW_ID,
+        "--json",
+      ];
+      const renameContext = `T12.0-13 \`${renameArgv.join(" ")}\``;
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const renameResult = await runCli(product, workspace, renameArgv);
+          assertExitCode(
+            renameResult,
+            1,
+            `${renameContext} — the \`#\`-containing \`<file>\` operand ` +
+              `names the discovered file and the spelled \`x\` establishes ` +
+              `the old ID's existence, so the argument checks pass and the ` +
+              `invalid-workspace refusal follows: exit 1, never the ` +
+              `unknown-file (or unknown-old-ID) usage error, exit 2, of a ` +
+              `parser splitting the operand at \`#\` (SPEC 12.0, 6.4, 6.5, ` +
+              `11.2)`,
+          );
+          const renameFindings = decodeFindingsReport(
+            parseJsonStdout(
+              renameResult,
+              `${renameContext} — with JSON output in effect, the single ` +
+                `JSON document is the entire stdout (SPEC 12.0)`,
+            ),
+            `${renameContext} — a refused operation's report is the ` +
+              `form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+          ).findings;
+          const expected = JSON.stringify(H13_19);
+          if (
+            !renameFindings.some(
+              (finding) =>
+                JSON.stringify(projectPathFinding(finding)) === expected,
+            )
+          ) {
+            fail(
+              `${renameContext}: the invalid-workspace refusal reports the ` +
+                `workspace's findings, the condition-19 finding among them ` +
+                `— stable code "invalid-source-path", \`locations\` [], ` +
+                `\`path\` ${JSON.stringify(H13_FILE)} (SPEC 6.4, 14, 14.19, ` +
+                `12.7); got ` +
+                JSON.stringify(renameFindings.map(projectPathFinding)),
+            );
+          }
+        },
+        `${renameContext} — the invalid-workspace refusal modifies nothing ` +
+          `(SPEC 6.4)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 export const section120iiTests: readonly ProductTestEntry[] = [
   T12_0_7,
   T12_0_8,
   T12_0_9,
+  T12_0_10,
   T12_0_11,
   T12_0_12,
+  T12_0_13,
 ];

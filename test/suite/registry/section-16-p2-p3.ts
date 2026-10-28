@@ -3,11 +3,14 @@
 // Two registered product-facing property tests (C-2 "one code path") sharing
 // one seeded random-document generator (helpers/property.ts, H-10; fixed seed
 // set in CI, E-5). Each trial generates a workspace of 1–3 `.mdx` spec
-// sources composed of prose blocks, nested sections, imports, single- and
-// multi-line MDX comments, and same-file and cross-file `{text(...)}`
-// embeddings, over mixed line terminators (LF, CRLF, lone CR), with content
-// weighted toward the whitespace/non-whitespace boundary code points of
-// SPEC 1.4 (U+00A0, U+0085, U+2028 included) — exactly the P-2 input space.
+// sources composed of prose blocks — fenced code blocks and inline code
+// spans spelling tag-, import-, and expression-like bytes included (T3-1's
+// grammar boundary: such bytes are content) — nested sections, imports,
+// single- and multi-line MDX comments, and same-file and cross-file
+// `{text(...)}` embeddings, over mixed line terminators (LF, CRLF, lone CR),
+// with content weighted toward the whitespace/non-whitespace boundary code
+// points of SPEC 1.4 (U+00A0, U+0085, U+2028 included) — exactly the P-2
+// input space.
 //
 //   * P-2 — for every file, `build` under `markdown: { emit: true }` emits
 //     Markdown byte-equal to the independent harness oracle
@@ -27,7 +30,10 @@
 //     children yielding N + 1 runs, so |subtree| = |own| + Σ|child subtree|
 //     and a run decomposition exists that splits the reported own text into
 //     exactly N + 1 runs (empty runs counting) around the children's
-//     reported subtree texts.
+//     reported subtree texts. A node's children are the product's answer
+//     too: the targets of its `query node` answer's outgoing `contains`
+//     edges (SPEC 5.2), put in document order by the source ranges (1.7)
+//     each child's own `query node` answer reports.
 //
 // CONF-MD in-scope (CERTIFICATIONS.md): both properties run against the
 // CONF-MD conformer, and P-2 is certified by §VIOL-MD-CLASS (the line-drop
@@ -38,29 +44,82 @@
 // 1.4/3, dropped under the CLASS deviation), and lone-CR terminators on and
 // around removal-affected lines (line extents, and therefore drops and kept
 // bytes, diverge under the CR deviation) — verified by a per-seed dry-run
-// against deviation-simulating oracles at implementation time. P-3 asserts
+// against deviation-simulating oracles at implementation time, and
+// re-verified per seed against the violator executables themselves when the
+// fence/code-span staging landed (the choice streams shifted). P-3 asserts
 // only product-internal consistency, which both violators preserve
 // ("consistently in Markdown output and, through 1.6, in own and subtree
 // text"), so P-3 passes against every CONF-MD fixture while P-2 fails
 // against exactly the violators. The bodies stay within the CONF-MD command
-// surface: `build` plus `query node` decoded through the scoped own/subtree
-// text adapter (decodeNodeTextSummary) — nothing beyond own and subtree
-// text is demanded of a scoped fixture product.
+// surface, on the route its P-3 staging constraint fixes: `build`, plus one
+// `query node` per node decoded through the scoped text-algebra adapter
+// (decodeNodeTextAlgebraSummary: own and subtree text, source range, and
+// the targets of the outgoing `contains` edges — nothing else is demanded
+// of a scoped fixture product). P-3 reads each node's own and subtree text
+// from its own answer, takes its children from that same answer's outgoing
+// `contains` edges ordered by the source ranges the children's own answers
+// report, and enumerates a document's nodes from the generated document
+// itself — never through `view` (with or without `--text`) or
+// `query subtree`. The generator's record of the structure
+// (`DocNode.childRefs`) is never consulted, so no harness model stands
+// between the product's answers.
 //
 // Staging discipline (byte-exact per HARNESS-01; the generator, not the
 // oracle, owns these choices):
-//   * Generated prose draws from an alphabet that excludes MDX-structural
-//     characters — `<`, `{`, `}`, backtick, `~`, `>`, `&`, `\` — so a prose
-//     byte can never open a fence, JSX tag, expression container, blockquote
-//     lazy-continuation, or character reference that would make the
-//     product's construct parse diverge from the generator's structure.
-//     Everything else (Markdown punctuation included) is plain content to
-//     SPEC 3, which never interprets Markdown semantics.
-//   * Section tags, imports, and embeddings are single-line and ASCII; the
-//     exotic bytes live in content, where P-2 aims them. Multi-line comments
+//   * Generated free prose draws from an alphabet that excludes
+//     MDX-structural characters — `<`, `{`, `}`, backtick, `~`, `>`, `&`,
+//     `\` — so a prose byte can never open a fence, JSX tag, expression
+//     container, blockquote lazy-continuation, or character reference that
+//     would make the product's construct parse diverge from the generator's
+//     structure — and the inline-delimiter punctuation `*`, `_`, `[`, `]`,
+//     `(`, `)`, whose CommonMark pairs (emphasis, links) can straddle an
+//     inline section's tag within a paragraph, a shape the MDX grammar
+//     rejects (S-9: every composed form derives; `P2_P3_FORM_VECTORS`
+//     below is the fixed vector set, and every draw is checked before the
+//     product sees it). Everything else (the remaining Markdown
+//     punctuation included) is plain content to SPEC 3, which never
+//     interprets Markdown semantics.
+//   * Backticks and `~` appear only inside deliberately staged fenced code
+//     blocks and inline code spans (T3-1's grammar boundary, the P-2 entry's
+//     named inclusion) — complete by construction and within the grammar
+//     subset every certified model shares: fences open at column 0 with a
+//     run of 3–4 backticks or tildes plus an optional backtick-free
+//     identifier info string, close with a bare run of the same character
+//     and length, and hold interior lines that never spell a fence marker
+//     (the interior alphabet has no backtick or `~`); code spans are
+//     single-line, open and close with equal-length runs of 1–2 backticks,
+//     and hold a non-empty backtick-free interior (an empty interior would
+//     merge the two runs into one). Interior bytes spell the construct-like
+//     forms T3-1 fixes — `<S id="x">`, `<div>`,
+//     `import X from "./X.xspec"`, `{text("a")}` — plus free prose. Every
+//     fence and span byte is a `content` entry: constructs exist only where
+//     the MDX parse yields them, so the oracle treats these bytes as
+//     content (preserved verbatim; their lines carry the marker or span
+//     runs as non-whitespace, and interior blank or whitespace-only lines
+//     are untouched lines, kept), and the direct byte-preservation
+//     assertion sees them as ordinary untouched lines.
+//   * Section tags and imports are single-line and ASCII; the exotic bytes
+//     live in content, where P-2 aims them. Comments take every form of
+//     SPEC 2.7 and embeddings every form of 2.3 (`mdxComment`,
+//     `embeddingContainer` below: `{}`, block-comment sequences,
+//     line-comment containers ended by a drawn terminator, the run-on
+//     `{// c}` form, ECMAScript-only whitespace between braces; whitespace
+//     and comments beside a `text(...)` call — T2.7-4's and T2.3-3's positive
+//     forms), and an ESM block carries JavaScript comments beside its
+//     imports and `;`-terminated declarations (T3-7). Multi-line containers
 //     carry 1–2 internal terminators and no internal blank line (MDX
-//     expressions admit none); the comment alphabet contains no `/`, so a
-//     premature `*/` cannot form.
+//     expressions admit none); the comment alphabets contain no `/` or `*`,
+//     so a premature `*/` cannot form, and a line comment's alphabet has no
+//     U+2028 or U+2029, at which the lexical grammar would end it while
+//     14.20's deletion judgement runs on (T2.7-4's negative arms).
+//   * A generated line's lead never opens a CommonMark container (a list
+//     item: `-` or digits with `.`/`)`, then whitespace, after any
+//     indentation) or an ATX heading (`#`s then whitespace): inside a
+//     container the continuation line of a multi-line expression is a lazy
+//     line the grammar rejects, and a heading ends at its line, so a
+//     multi-line container it hosts never closes (`opensBlockConstruct`,
+//     applied by `keptProse`). Every other lead — `-a`, `9.a`, `#{`, `---`
+//     (a thematic break), a setext underline — is harmless.
 //   * Line terminators are drawn per line; a deterministic guard keeps a
 //     lone-CR terminator from being followed by an empty line's LF (the two
 //     bytes would merge into one CRLF terminator and desynchronize the
@@ -81,8 +140,11 @@
 //     the interior compiles compositionally; validated against T3-2's
 //     hand-derived chain).
 
-import { decodeNodeTextSummary } from "../../helpers/adapters/index.js";
-import type { NodeTextSummary } from "../../helpers/adapters/index.js";
+import { decodeNodeTextAlgebraSummary } from "../../helpers/adapters/index.js";
+import type {
+  NodeTextAlgebraSummary,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
   assertFileBytes,
   assertFilesEqual,
@@ -90,19 +152,29 @@ import {
 } from "../../helpers/assertions.js";
 import type { MarkdownPiece } from "../../helpers/oracles/markdown.js";
 import { compileMarkdown } from "../../helpers/oracles/markdown.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
+import { guardSyncStep } from "../../helpers/step-guards.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import { buildOk, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): one spec group, emission
 // enabled with the default destination next to each source (SPEC 7.3, 13.2).
 // The spec-group glob matches only `.mdx` files, so no glob matches a
 // Markdown emit destination.
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+// A TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), well-formed: every trial stages it afresh, from the
+// second trial on after the body's first product invocation — an initial
+// file S-7's sweep never reaches, so the ledger self-test judges it before
+// any product exists.
+const EMIT_TRUE_CONFIG = stagedTs(
+  "P-2/P-3 xspec.config.ts — one spec group, Markdown emission enabled",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -110,7 +182,26 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
+
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the one configuration file P-2 and P-3 share, the record above —
+ * judged as a record by test/self/s9-staged-sources.test.ts too, and here
+ * beside every generated configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts); neither composes a code
+ * source.
+ */
+export const P2_P3_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = [
+  [
+    "P-2/P-3 configuration (EMIT_TRUE_CONFIG)",
+    "xspec.config.ts",
+    EMIT_TRUE_CONFIG.source,
+  ],
+];
 
 /** The character with the given code point (hex-spelled, tool-safe). */
 function cp(codePoint: number): string {
@@ -128,6 +219,15 @@ const CRLF = CR + LF;
 const NBSP = cp(0x00a0);
 const NEL = cp(0x0085);
 const LS = cp(0x2028);
+// ECMAScript's remaining line terminator and its zero-width no-break space:
+// whitespace between braces and within an ESM block (SPEC 14.20), content
+// bytes everywhere else (1.4).
+const PS = cp(0x2029);
+const FEFF = cp(0xfeff);
+// Fence and code-span marker characters — staged only inside deliberately
+// constructed fences and spans, never drawn into free prose (module header).
+const BACKTICK = cp(0x0060);
+const TILDE = cp(0x007e);
 
 // ---------------------------------------------------------------------------
 // Document IR
@@ -163,7 +263,11 @@ export type TargetShape =
 export interface DocNode {
   /** `path` for a root, `path#dotted.id` for a section (SPEC 1.5). */
   readonly ref: string;
-  /** Direct child sections' refs, in document order (SPEC 1.6). */
+  /**
+   * Direct child sections' refs, in document order (SPEC 1.6) — the
+   * generator's own record, never consulted by P-3, which takes each node's
+   * children from the product's `contains` edges (module header).
+   */
   readonly childRefs: readonly string[];
 }
 
@@ -219,9 +323,18 @@ function materializePieces(
  * contributes its interior bytes exactly; a block section with own-line tags
  * contributes its compiled interior — the drop rule is line-local, so whole
  * interior lines compile identically in isolation (validated against T3-2's
- * hand-derived expansions).
+ * hand-derived expansions). The oracle's evaluation is a harness step under
+ * its own guard (TEST-SPEC S-3, helpers/step-guards.ts): synchronous,
+ * bounded by construction over the draw, measured.
  */
 export function specSubtreeTexts(doc: GeneratedDoc): Map<string, string> {
+  return guardSyncStep("P-2/P-3's subtree-text oracle (specSubtreeTexts)", () =>
+    subtreeTextsOf(doc),
+  );
+}
+
+/** {@link specSubtreeTexts}' evaluation, under its guard. */
+function subtreeTextsOf(doc: GeneratedDoc): Map<string, string> {
   const subtreeOf = new Map<string, string>();
   for (const [key, shape] of doc.targets) {
     switch (shape.kind) {
@@ -283,24 +396,31 @@ const PROSE_ALPHABET: ReadonlyArray<readonly [number, string]> = [
   // (JS regex `\s`-style) classifier would misclassify, plus multi-byte and
   // astral content so byte counting is exercised.
   [1, cp(0x2000)],
-  [1, cp(0x2029)],
+  [1, PS],
   [1, cp(0x3000)],
   [2, cp(0x00e9)],
   [1, cp(0x4e2d)],
   [1, cp(0x1f600)],
   // Markdown punctuation — plain content to SPEC 3 (compilation never
-  // interprets Markdown semantics).
+  // interprets Markdown semantics) — restricted to characters that open no
+  // CommonMark inline construct: the emphasis delimiters `*` and `_` and
+  // the link characters `[`, `]`, `(`, `)` are excluded because their pairs
+  // can straddle an inline section's tag — within one line or across a
+  // paragraph's lines — and the MDX grammar rejects a JSX element whose tag
+  // lies inside an emphasis or link that closes outside it (S-9; found by
+  // the fixed form vectors below). Block-level punctuation (`#`, `-`, `|`,
+  // `:`, `!`, `.`) cannot pair across a tag.
   [2, "."],
   [2, "-"],
-  [1, "_"],
+  [1, ";"],
   [1, "#"],
-  [1, "*"],
+  [1, ","],
   [1, "|"],
   [1, ":"],
-  [1, "["],
-  [1, "]"],
-  [1, "("],
-  [1, ")"],
+  [1, "%"],
+  [1, "@"],
+  [1, "?"],
+  [1, "$"],
   [1, "!"],
 ];
 
@@ -330,12 +450,49 @@ function run(element: Gen<string>, min: number, max: number): Gen<string> {
 /** Free prose (may be empty or whitespace-only). */
 const prose: Gen<string> = run(proseChar, 0, 10);
 
-/** Prose guaranteed to contain a plain non-whitespace character. */
+/**
+ * Whether a line beginning with `lead` would open a CommonMark container or
+ * an ATX heading: after any indentation (MDX disables indented code, so no
+ * amount of leading whitespace makes a code block), a list marker — `-`, or
+ * one to nine digits then `.` or `)` — or one to six `#`, followed by
+ * whitespace or by the end of the lead (whatever follows the lead is judged
+ * as if it were whitespace, the conservative reading). `+`, `*`, and `>` are
+ * not in the prose alphabet. A container makes the continuation line of a
+ * multi-line expression a lazy line, which the expression grammar rejects,
+ * and a heading ends at its line, so a multi-line container hosted on one
+ * never closes (S-9; both found by the per-draw check).
+ */
+function opensBlockConstruct(lead: string): boolean {
+  const isWhitespace = (char: string | undefined): boolean =>
+    char === undefined || INLINE_WHITESPACE.includes(char as never);
+  let i = 0;
+  while (i < lead.length && isWhitespace(lead[i])) i += 1;
+  let j = i;
+  if (lead[j] === "-") {
+    j += 1;
+  } else if (lead[j] === "#") {
+    while (j < lead.length && j - i < 6 && lead[j] === "#") j += 1;
+  } else {
+    while (j < lead.length && j - i < 9 && lead[j] >= "0" && lead[j] <= "9") {
+      j += 1;
+    }
+    if (j === i || (lead[j] !== "." && lead[j] !== ")")) return false;
+    j += 1;
+  }
+  return isWhitespace(lead[j]);
+}
+
+/**
+ * Prose guaranteed to contain a plain non-whitespace character — a line's
+ * lead, so it never opens a container or a heading (`opensBlockConstruct`:
+ * a letter is prepended when the draw would; no choice is consumed).
+ */
 const keptProse: Gen<string> = (choices) => {
   const before = run(proseChar, 0, 4)(choices);
   const anchor = plainChar(choices);
   const after = run(proseChar, 0, 4)(choices);
-  return before + anchor + after;
+  const text = before + anchor + after;
+  return opensBlockConstruct(text) ? `a${text}` : text;
 };
 
 /** Plain-only prose (letters/digits/space) with a guaranteed anchor. */
@@ -368,6 +525,235 @@ const terminator: Gen<string> = (choices) =>
     [3, CRLF],
     [3, CR],
   ]);
+
+// ---------------------------------------------------------------------------
+// The refined container and ESM-block forms (TEST-SPEC §16 P-2: T2.7-4's
+// comment forms, T2.3-3's embedding forms, T3-7's ESM-block comments)
+
+// Line-comment interiors: the prose alphabet minus ECMAScript's line
+// terminators U+2028 and U+2029 — the lexical grammar ends a line comment at
+// either while 14.20's deletion judgement runs it through the first U+000A or
+// U+000D alone, and the two disagreeing makes the file unparseable (T2.7-4's
+// negative arms, never staged here). A block comment may hold them (a
+// terminator inside one changes nothing), so block-comment interiors keep
+// the whole alphabet (`commentProse`). Neither alphabet spells `/` or `*`.
+const LINE_COMMENT_ALPHABET: ReadonlyArray<readonly [number, string]> =
+  PROSE_ALPHABET.filter(([, char]) => char !== LS && char !== PS);
+
+const lineCommentProse: Gen<string> = (choices) =>
+  ` ${run((c: Choices) => c.weightedPick(LINE_COMMENT_ALPHABET), 0, 6)(choices)} `;
+
+/**
+ * The whitespace P-2 draws between a comment container's braces: ECMAScript's
+ * whitespace and line terminators that 1.4 excludes (14.20, T2.7-4) — U+FEFF,
+ * U+2028, U+2029, and every Unicode 15.1 space separator but U+0020: U+00A0,
+ * U+1680, U+2000 through U+200A, U+202F, U+205F, and U+3000 (TEST-SPEC §16
+ * P-2). Code point order, U+00A0 (the shrink target) first.
+ */
+export const ECMASCRIPT_ONLY_WHITESPACE: readonly string[] = [
+  NBSP,
+  cp(0x1680),
+  ...Array.from({ length: 0x200a - 0x2000 + 1 }, (_, k) => cp(0x2000 + k)),
+  LS,
+  PS,
+  cp(0x202f),
+  cp(0x205f),
+  cp(0x3000),
+  FEFF,
+];
+
+const ecmascriptOnlyWhitespaceChar: Gen<string> = (choices) =>
+  choices.pick(ECMASCRIPT_ONLY_WHITESPACE);
+
+/**
+ * A gap of a block-comment sequence: a space, nothing, or — a third of the
+ * time, shared equally — one of the ECMAScript-only whitespace characters.
+ * One draw whatever the set's size; integer weights keep the space and
+ * nothing shares exact.
+ */
+const SEQUENCE_GAPS: ReadonlyArray<readonly [number, string]> = [
+  [3 * ECMASCRIPT_ONLY_WHITESPACE.length, SPACE],
+  [ECMASCRIPT_ONLY_WHITESPACE.length, ""],
+  ...ECMASCRIPT_ONLY_WHITESPACE.map((char): readonly [number, string] => [
+    2,
+    char,
+  ]),
+];
+
+/** Whitespace beside a `text(...)` call in an embedding container (the gaps
+ * of a comment's block-comment sequence are `SEQUENCE_GAPS`): 1.4's inline
+ * whitespace and, less often, ECMAScript's own. */
+const containerWhitespace: Gen<string> = run(
+  (choices: Choices) =>
+    choices.weightedPick<string>([
+      [6, SPACE],
+      [1, TAB],
+      [1, NBSP],
+      [1, LS],
+    ]),
+  1,
+  2,
+);
+
+/**
+ * An MDX comment container in one of 2.7's forms (T2.7-4's positive forms),
+ * the usual block-comment form dominant — the certified flip classes ride the
+ * residues beside it, not the form: `{}`; a block-comment sequence with
+ * whitespace (ECMAScript's included) or nothing between the comments;
+ * ECMAScript-only whitespace between the braces; and, when `multiLine`
+ * allows, the line-comment containers — ended by a drawn terminator (LF,
+ * CRLF, lone CR: 14.20 ends a line comment at U+000A or U+000D alike)
+ * before the closing brace, the run-on `{// c}` form whose first brace lies
+ * on the commented-out line and closes nothing, and mixed sequences. A
+ * multi-line container's terminator is among its own characters: deleted
+ * with it, the lines it spans merging (SPEC 3), never a line of the
+ * generator's line model.
+ */
+function mdxComment(choices: Choices, multiLine = true): string {
+  type Form =
+    | "usual"
+    | "empty"
+    | "sequence"
+    | "ecmascriptWhitespace"
+    | "lineComment"
+    | "runOn"
+    | "blockThenLine"
+    | "lineThenBlock"
+    | "twoLines";
+  const forms: (readonly [number, Form])[] = [
+    [12, "usual"],
+    [2, "empty"],
+    [2, "sequence"],
+    [2, "ecmascriptWhitespace"],
+  ];
+  if (multiLine) {
+    forms.push(
+      [2, "lineComment"],
+      [2, "runOn"],
+      [1, "blockThenLine"],
+      [1, "lineThenBlock"],
+      [1, "twoLines"],
+    );
+  }
+  const block = (): string => `/*${commentProse(choices)}*/`;
+  const line = (): string => `//${lineCommentProse(choices)}`;
+  const gap = (): string => choices.weightedPick(SEQUENCE_GAPS);
+  switch (choices.weightedPick(forms)) {
+    case "usual":
+      return `{${block()}}`;
+    case "empty":
+      return "{}";
+    case "sequence":
+      return `{${gap()}${block()}${gap()}${block()}${gap()}}`;
+    case "ecmascriptWhitespace":
+      return `{${run(ecmascriptOnlyWhitespaceChar, 1, 2)(choices)}}`;
+    case "lineComment":
+      return `{${line()}${terminator(choices)}}`;
+    case "runOn":
+      return `{${line()}}${terminator(choices)}}`;
+    case "blockThenLine":
+      return `{${block()} ${line()}${terminator(choices)}}`;
+    case "lineThenBlock":
+      return `{${line()}${terminator(choices)}${block()}}`;
+    case "twoLines":
+      return `{${line()}${terminator(choices)}${line()}${terminator(choices)}}`;
+  }
+}
+
+/**
+ * An embedding container around `text(<argText>)` in one of 2.3's forms
+ * (T2.3-3's positive forms), the bare `{text(...)}` dominant: whitespace
+ * beside the call (ECMAScript's included), a block comment before it, after
+ * it, or both, and, when `multiLine` allows, a line comment before the call
+ * ended by a drawn terminator, the run-on `{// c}` form holding the call on
+ * the next line, and a line comment after the call ended before the closing
+ * brace. The whole container is the embedding's own characters (SPEC 3, 2.3:
+ * replaced whole, interior terminator included).
+ */
+function embeddingContainer(
+  choices: Choices,
+  argText: string,
+  multiLine = true,
+): string {
+  type Form =
+    | "bare"
+    | "whitespace"
+    | "blockBefore"
+    | "blockAfter"
+    | "blockBoth"
+    | "lineBefore"
+    | "runOn"
+    | "lineAfter";
+  const forms: (readonly [number, Form])[] = [
+    [12, "bare"],
+    [2, "whitespace"],
+    [2, "blockBefore"],
+    [2, "blockAfter"],
+    [1, "blockBoth"],
+  ];
+  if (multiLine) {
+    forms.push([2, "lineBefore"], [2, "runOn"], [1, "lineAfter"]);
+  }
+  const call = `text(${argText})`;
+  const block = (): string => `/*${commentProse(choices)}*/`;
+  const line = (): string => `//${lineCommentProse(choices)}`;
+  switch (choices.weightedPick(forms)) {
+    case "bare":
+      return `{${call}}`;
+    case "whitespace":
+      return `{${containerWhitespace(choices)}${call}${containerWhitespace(choices)}}`;
+    case "blockBefore":
+      return `{${block()} ${call}}`;
+    case "blockAfter":
+      return `{${call} ${block()}}`;
+    case "blockBoth":
+      return `{ ${block()} ${call} ${block()} }`;
+    case "lineBefore":
+      return `{${line()}${terminator(choices)}${call}}`;
+    case "runOn":
+      return `{${line()}}${terminator(choices)}${call}}`;
+    case "lineAfter":
+      return `{${call} ${line()}${terminator(choices)}}`;
+  }
+}
+
+// Construct-like literal bytes (T3-1's grammar-boundary set, the P-2 entry's
+// named inclusion): spelled inside fenced code blocks and inline code spans,
+// where the MDX parse makes them plain content. A product recognizing
+// constructs by textual pattern instead of by parse turns them into phantom
+// constructs — a finding failing `build` exit 0, or bytes missing from the
+// compiled output failing the oracle and byte-preservation arms. Backtick-
+// and tilde-free, so none can close a span or spell a fence marker.
+const CONSTRUCT_LIKE_LINES = [
+  '<S id="x">',
+  "<div>",
+  'import X from "./X.xspec"',
+  '{text("a")}',
+  "</S>",
+  "{/* not a comment */}",
+] as const;
+
+/** Single-line code-span interiors: non-empty, backtick-free (module header). */
+const CONSTRUCT_LIKE_SPAN_INTERIORS = [
+  '<S id="x">',
+  '{text("a")}',
+  '<S id="x">{text("a")}',
+  'import X from "./X.xspec"',
+  "<div>",
+] as const;
+
+/**
+ * A complete inline code span on one line: equal-length runs of 1–2
+ * backticks around a non-empty backtick-free construct-like interior — the
+ * exact shape both the CommonMark/MDX grammar and CONF-MD's modeled subset
+ * close where the generator says (an empty interior would merge the two runs
+ * into one). Always emitted as a `content` entry: span bytes are literal
+ * text (T3-1).
+ */
+const codeSpan: Gen<string> = (choices) => {
+  const marker = BACKTICK.repeat(choices.intInclusive(1, 2));
+  return `${marker}${choices.pick(CONSTRUCT_LIKE_SPAN_INTERIORS)}${marker}`;
+};
 
 // ---------------------------------------------------------------------------
 // Per-file generation
@@ -497,6 +883,7 @@ function genBlock(
     | "comment"
     | "multiComment"
     | "embedLine"
+    | "fence"
     | "section"
     | "selfClosing"
   >([
@@ -506,6 +893,7 @@ function genBlock(
     [3, "comment"],
     [2, "multiComment"],
     [3, "embedLine"],
+    [2, "fence"],
     [5, "section"],
     [2, "selfClosing"],
   ]);
@@ -526,6 +914,9 @@ function genBlock(
     case "multiComment":
       genMultiLineComment(choices, ctx, out);
       return;
+    case "fence":
+      genFenceBlock(choices, ctx, out);
+      return;
     case "embedLine": {
       const ref = pickRef(choices, ctx);
       if (ref === null) {
@@ -534,7 +925,7 @@ function genBlock(
       }
       out.push({
         kind: "embed",
-        text: `{text(${ref.argText})}`,
+        text: embeddingContainer(choices, ref.argText),
         targetKey: ref.targetKey,
       });
       endLine(choices, ctx, out, false);
@@ -571,12 +962,13 @@ function registerSection(
 }
 
 /**
- * A prose line: free content, optionally hosting one inline construct — an
- * inline comment, an inline embedding, a one-line section, or a self-closing
- * section — with content around it. A line hosting an inline section always
- * carries a guaranteed-kept plain prose anchor, so the line is kept under
- * SPEC 3 and the section's contribution is exactly its interior bytes
- * (module header).
+ * A prose line: free content, optionally hosting one inline element — an
+ * inline comment, an inline embedding, an inline code span whose
+ * construct-like bytes are literal content (T3-1), a one-line section, or a
+ * self-closing section — with content around it. A line hosting an inline
+ * section always carries a guaranteed-kept plain prose anchor, so the line
+ * is kept under SPEC 3 and the section's contribution is exactly its
+ * interior bytes (module header).
  */
 function genProseLine(
   choices: Choices,
@@ -591,24 +983,29 @@ function genProseLine(
     return;
   }
   const inline = choices.weightedPick<
-    "comment" | "embed" | "inlineSection" | "inlineSelfClosing"
+    "comment" | "embed" | "codeSpan" | "inlineSection" | "inlineSelfClosing"
   >([
     [3, "comment"],
     [3, "embed"],
+    [2, "codeSpan"],
     [3, "inlineSection"],
     [1, "inlineSelfClosing"],
   ]);
   const pieces: DocEntry[] = [{ kind: "content", text: lead }];
   switch (inline) {
     case "comment":
-      pieces.push({ kind: "removal", text: `{/*${commentProse(choices)}*/}` });
+      pieces.push({ kind: "removal", text: mdxComment(choices) });
+      break;
+    case "codeSpan":
+      // Literal span bytes amid prose — content, never a construct (T3-1).
+      pieces.push({ kind: "content", text: codeSpan(choices) });
       break;
     case "embed": {
       const ref = pickRef(choices, ctx);
       if (ref !== null) {
         pieces.push({
           kind: "embed",
-          text: `{text(${ref.argText})}`,
+          text: embeddingContainer(choices, ref.argText),
           targetKey: ref.targetKey,
         });
       }
@@ -649,17 +1046,16 @@ function genProseLine(
  * A single-line own-line comment, optionally with a residue on the line —
  * weighted toward the T3-3 arms: a boundary-code-point-only residue (kept
  * under SPEC 1.4, the §VIOL-MD-CLASS flip), a 1.4-whitespace residue (the
- * line still drops), mixes, and plain kept residues.
+ * line still drops), mixes, plain kept residues, and an inline code span as
+ * the line's sole other survivor (non-whitespace literal content, T3-1: the
+ * removal-affected line is kept holding exactly the span bytes).
  */
 function genCommentLine(
   choices: Choices,
   ctx: FileContext,
   out: DocEntry[],
 ): void {
-  const comment: DocEntry = {
-    kind: "removal",
-    text: `{/*${commentProse(choices)}*/}`,
-  };
+  const comment: DocEntry = { kind: "removal", text: mdxComment(choices) };
   const residue = choices.weightedPick<Gen<string>>([
     [4, () => ""],
     [4, run(boundaryChar, 1, 3)],
@@ -681,6 +1077,7 @@ function genCommentLine(
         )(c),
     ],
     [2, run(plainChar, 1, 3)],
+    [2, codeSpan],
   ])(choices);
   const residueFirst = choices.boolean(0.3);
   if (residue !== "" && residueFirst) {
@@ -715,6 +1112,46 @@ function genMultiLineComment(
   if (before !== "") out.push({ kind: "content", text: before });
   out.push({ kind: "removal", text });
   if (after !== "") out.push({ kind: "content", text: after });
+  endLine(choices, ctx, out, false);
+}
+
+/**
+ * A fenced code block (T3-1's grammar boundary; module header): an opening
+ * fence line — column 0, a run of 3–4 backticks or tildes, an optional
+ * backtick-free identifier info string — 0–3 interior lines spelling
+ * construct-like bytes, free prose, or nothing, and a bare closing fence of
+ * the same character and length. Every byte is a `content` entry: fences are
+ * literal text under the MDX grammar, so the oracle and a conforming product
+ * alike treat the interior's construct-like spellings as plain content, and
+ * the fence's lines are ordinary logical lines (marker lines carry
+ * non-whitespace; interior blank or whitespace-only lines are untouched and
+ * kept). Interior alphabets contain no backtick or `~`, so no interior line
+ * can spell a fence marker and the fence closes exactly where the generator
+ * says it does — fenced code blocks interrupt paragraphs in CommonMark, so
+ * no blank-line separation is needed around the block.
+ */
+function genFenceBlock(
+  choices: Choices,
+  ctx: FileContext,
+  out: DocEntry[],
+): void {
+  const marker = choices
+    .pick([BACKTICK, TILDE] as const)
+    .repeat(choices.intInclusive(3, 4));
+  const info = choices.pick(["", "ts", "md"] as const);
+  out.push({ kind: "content", text: `${marker}${info}` });
+  endLine(choices, ctx, out, false);
+  const interiorLines = choices.intInclusive(0, 3);
+  for (let index = 0; index < interiorLines; index += 1) {
+    const line = choices.weightedPick<Gen<string>>([
+      [4, (c: Choices) => c.pick(CONSTRUCT_LIKE_LINES)],
+      [2, prose],
+      [1, () => ""],
+    ])(choices);
+    if (line !== "") out.push({ kind: "content", text: line });
+    endLine(choices, ctx, out, line === "");
+  }
+  out.push({ kind: "content", text: marker });
   endLine(choices, ctx, out, false);
 }
 
@@ -811,12 +1248,44 @@ export const generatedDoc: Gen<GeneratedDoc> = (choices) => {
       },
     };
 
-    for (const { binding, path: p } of imports) {
+    // The ESM block (SPEC 14.20): one declaration per line, each optionally
+    // `;`-terminated (the `;` among its own characters, T3-7's terminator
+    // arm), with JavaScript comments beside the declarations — content under
+    // SPEC 3, no MDX comment (T3-7): a line or block comment after an import
+    // on its line, an own-line `// note` between two imports or after the
+    // last, and a block comment before an import on the block's second line
+    // onward. Never before the first line: an ESM block begins at an import
+    // keyword, so a comment there would make the block a paragraph.
+    const jsLineComment = (): string => `//${lineCommentProse(choices)}`;
+    const jsBlockComment = (): string => `/*${commentProse(choices)}*/`;
+    imports.forEach(({ binding, path: p }, importIndex) => {
       const name = p.slice("specs/".length, -".mdx".length);
+      if (importIndex > 0 && choices.boolean(0.2)) {
+        entries.push({ kind: "content", text: jsLineComment() });
+        endLine(choices, ctx, entries, false);
+      }
+      if (importIndex > 0 && choices.boolean(0.2)) {
+        entries.push({ kind: "content", text: `${jsBlockComment()} ` });
+      }
+      const semicolon = choices.boolean(0.25) ? ";" : "";
       entries.push({
         kind: "removal",
-        text: `import ${binding} from "./${name}.xspec"`,
+        text: `import ${binding} from "./${name}.xspec"${semicolon}`,
       });
+      const trailing = choices.weightedPick<"none" | "line" | "block">([
+        [7, "none"],
+        [2, "line"],
+        [1, "block"],
+      ]);
+      if (trailing === "line") {
+        entries.push({ kind: "content", text: ` ${jsLineComment()}` });
+      } else if (trailing === "block") {
+        entries.push({ kind: "content", text: ` ${jsBlockComment()}` });
+      }
+      endLine(choices, ctx, entries, false);
+    });
+    if (imports.length > 0 && choices.boolean(0.15)) {
+      entries.push({ kind: "content", text: jsLineComment() });
       endLine(choices, ctx, entries, false);
     }
     // A mandatory blank line after the import block: MDX ESM blocks extend
@@ -855,6 +1324,629 @@ export const generatedDoc: Gen<GeneratedDoc> = (choices) => {
 };
 
 // ---------------------------------------------------------------------------
+// Fixed form vectors (TEST-SPEC 17 S-9; 16 preamble)
+//
+// The enumerated forms this generator can compose — not draws — each spelled
+// from the generator's own constants and templates as a complete source, in
+// every context the generator can place it (directly after a prose line,
+// after a blank line, and as a block section's interior, all in one
+// document), so that S-9's self-test
+// (test/self/s9-fixture-well-formedness.test.ts) proves before any product
+// exists that every form derives under the grammar 14.20 fixes; at property
+// time every draw is checked the same way before the product sees it
+// (`drawSources` on the registrations below; helpers/property.ts). A form
+// added to the generator is added here.
+
+/** Every character of the prose alphabet, once, in alphabet order. */
+const ALL_PROSE_CHARS = PROSE_ALPHABET.map(([, char]) => char).join("");
+/** Every character of the line-comment alphabet, once, in alphabet order. */
+const ALL_LINE_COMMENT_CHARS = LINE_COMMENT_ALPHABET.map(
+  ([, char]) => char,
+).join("");
+/** The mandatory construct-free plain-prose first line (module header). */
+const FORM_FIRST_LINE = "a0 first";
+const FORM_TRAIL_LINE = "z9 trail";
+
+function codePointName(char: string): string {
+  const codePoint = char.codePointAt(0);
+  if (codePoint === undefined) throw new Error("empty character");
+  return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+/** A fresh dotted id allocator under a prefix (`""` at root level). */
+function formIds(prefix: string): () => string {
+  let counter = 0;
+  return () => {
+    const dotted = `${prefix}s${String(counter)}`;
+    counter += 1;
+    return dotted;
+  };
+}
+
+/** One form: its lines, given an id allocator for the sections it spells. */
+interface FormSpelling {
+  readonly name: string;
+  readonly lines: (id: () => string) => readonly string[];
+}
+
+const FORM_TERMINATORS: ReadonlyArray<readonly [string, string]> = [
+  ["LF", LF],
+  ["CRLF", CRLF],
+  ["CR", CR],
+];
+
+/** The comment-line residue classes of genCommentLine. */
+const FORM_RESIDUES: ReadonlyArray<readonly [string, string]> = [
+  ["boundary-only", NBSP + NEL + LS],
+  ["whitespace-only", SPACE + TAB + VT],
+  ["mixed", SPACE + NBSP + NEL + LS + TAB],
+  ["plain", "ab9"],
+  ["code-span", `${BACKTICK}${CONSTRUCT_LIKE_SPAN_INTERIORS[0]}${BACKTICK}`],
+];
+
+/** Every code span: 1–2 backtick runs around each interior (codeSpan). */
+const FORM_CODE_SPANS: ReadonlyArray<readonly [string, string]> = [
+  1, 2,
+].flatMap((length) =>
+  CONSTRUCT_LIKE_SPAN_INTERIORS.map((interior): readonly [string, string] => [
+    `code span, ${String(length)}-backtick runs around ${JSON.stringify(interior)}`,
+    `${BACKTICK.repeat(length)}${interior}${BACKTICK.repeat(length)}`,
+  ]),
+);
+
+/** The prop combinations of extraProps, in its spelling order (d, coverage, tags). */
+const FORM_PROPS: ReadonlyArray<readonly [string, string]> = [
+  ["no props", ""],
+  ["d single local", ' d={"s0"}'],
+  ["d single external", " d={M1.s0}"],
+  ["d pair", ' d={["s0", M1.s0]}'],
+  ["coverage required", ' coverage="required"'],
+  ["coverage none", ' coverage="none"'],
+  ["tags one", ' tags="t1"'],
+  ["tags two", ' tags="t1 t2"'],
+  ["tags alpha", ' tags="alpha"'],
+  ["all props", ' d={["s0", M1.s0]} coverage="required" tags="t1 t2"'],
+];
+
+const FORM_FENCE_MARKERS = [3, 4].flatMap((length) => [
+  BACKTICK.repeat(length),
+  TILDE.repeat(length),
+]);
+const FORM_FENCE_INFOS = ["", "ts", "md"] as const;
+
+/** The block forms of genBlock (and the import lines), one entry each. */
+const BLOCK_FORMS: readonly FormSpelling[] = [
+  { name: "blank line", lines: () => [""] },
+  ...INLINE_WHITESPACE.map((char): FormSpelling => ({
+    name: `whitespace-only line of ${codePointName(char)}`,
+    lines: () => [char],
+  })),
+  {
+    name: "whitespace-only line, a run of all four whitespace characters",
+    lines: () => [INLINE_WHITESPACE.join("")],
+  },
+  {
+    name: "prose line of every alphabet character",
+    lines: () => [ALL_PROSE_CHARS],
+  },
+  ...PROSE_ALPHABET.map(([, char]): FormSpelling => ({
+    name: `prose line of ${codePointName(char)} alone`,
+    lines: () => [char],
+  })),
+  {
+    name: "comment line, alphabet interior",
+    lines: () => [`{/* ${ALL_PROSE_CHARS} */}`],
+  },
+  { name: "comment line, empty interior", lines: () => ["{/*  */}"] },
+  ...FORM_RESIDUES.flatMap(([residueName, residue]): FormSpelling[] => [
+    {
+      name: `comment line, ${residueName} residue before`,
+      lines: () => [`${residue}{/* ab */}`],
+    },
+    {
+      name: `comment line, ${residueName} residue after`,
+      lines: () => [`{/* ab */}${residue}`],
+    },
+  ]),
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): FormSpelling[] => [
+      {
+        name: `multi-line comment, one internal ${terminatorName}`,
+        lines: () => [`{/* ab${terminator}cd */}`],
+      },
+      {
+        name: `multi-line comment, two internal ${terminatorName}`,
+        lines: () => [`{/* ab${terminator}cd${terminator}ef */}`],
+      },
+      {
+        name: `multi-line comment with residues, internal ${terminatorName}`,
+        lines: () => [`a0 lead{/* ab${terminator}cd */}${ALL_PROSE_CHARS}`],
+      },
+    ],
+  ),
+  {
+    name: "multi-line comment, mixed internal terminators",
+    lines: () => [`{/* ab${LF}cd${CR}ef */}`],
+  },
+  // The refined comment forms of 2.7 (mdxComment), own-line.
+  { name: "comment line, `{}`", lines: () => ["{}"] },
+  {
+    name: "comment line, block-comment sequence with spaces between",
+    lines: () => [`{ /* ${ALL_PROSE_CHARS} */ /* ab */ }`],
+  },
+  {
+    name: "comment line, block-comment sequence with nothing between",
+    lines: () => ["{/* ab *//* cd */}"],
+  },
+  {
+    name: "comment line, block-comment sequence with ECMAScript-only whitespace between",
+    lines: () => [`{${NBSP}/* ab */${LS}/* cd */${FEFF}}`],
+  },
+  // Each brace-side whitespace character P-2 names (TEST-SPEC §16 P-2), alone
+  // between the braces and in every gap of a block-comment sequence.
+  ...ECMASCRIPT_ONLY_WHITESPACE.flatMap((char): FormSpelling[] => [
+    {
+      name: `comment line, ${codePointName(char)} between the braces`,
+      lines: () => [`{${char}}`],
+    },
+    {
+      name: `comment line, block-comment sequence with ${codePointName(char)} in every gap`,
+      lines: () => [`{${char}/* ab */${char}/* cd */${char}}`],
+    },
+  ]),
+  {
+    name: "comment line, every ECMAScript-only whitespace between the braces",
+    lines: () => [`{${ECMASCRIPT_ONLY_WHITESPACE.join("")}}`],
+  },
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): FormSpelling[] => [
+      {
+        name: `line-comment container ended by ${terminatorName}, alphabet interior`,
+        lines: () => [`{// ${ALL_LINE_COMMENT_CHARS}${terminator}}`],
+      },
+      {
+        name: `line-comment container ended by ${terminatorName}, empty interior`,
+        lines: () => [`{//  ${terminator}}`],
+      },
+      {
+        name: `run-on line-comment container, ${terminatorName}`,
+        lines: () => [`{// ${ALL_LINE_COMMENT_CHARS}}${terminator}}`],
+      },
+      {
+        name: `block comment then line comment, ${terminatorName}`,
+        lines: () => [`{/* ${ALL_PROSE_CHARS} */ // ab${terminator}}`],
+      },
+      {
+        name: `line comment then block comment, ${terminatorName}`,
+        lines: () => [`{// ab${terminator}/* ${ALL_PROSE_CHARS} */}`],
+      },
+      {
+        name: `two line comments, ${terminatorName}`,
+        lines: () => [`{// ab${terminator}// cd${terminator}}`],
+      },
+      {
+        name: `line-comment container with residues, ${terminatorName}`,
+        lines: () => [`a0 lead{// ab${terminator}}${ALL_PROSE_CHARS}`],
+      },
+      {
+        name: `run-on container with residues, ${terminatorName}`,
+        lines: () => [`a0 lead{// ab}${terminator}}${ALL_PROSE_CHARS}`],
+      },
+      ...FORM_RESIDUES.flatMap(([residueName, residue]): FormSpelling[] => [
+        {
+          name: `line-comment container, ${residueName} residue before, ${terminatorName}`,
+          lines: () => [`${residue}{// ab${terminator}}`],
+        },
+        {
+          name: `line-comment container, ${residueName} residue after, ${terminatorName}`,
+          lines: () => [`{// ab${terminator}}${residue}`],
+        },
+      ]),
+    ],
+  ),
+  ...FORM_FENCE_MARKERS.flatMap((marker) =>
+    FORM_FENCE_INFOS.map((info): FormSpelling => ({
+      name: `fenced code block ${marker}${info}, full interior`,
+      lines: () => [
+        `${marker}${info}`,
+        ...CONSTRUCT_LIKE_LINES,
+        ALL_PROSE_CHARS,
+        "",
+        marker,
+      ],
+    })),
+  ),
+  ...CONSTRUCT_LIKE_LINES.map((line): FormSpelling => ({
+    name: `fenced code block holding ${JSON.stringify(line)} alone`,
+    lines: () => [FORM_FENCE_MARKERS[0], line, FORM_FENCE_MARKERS[0]],
+  })),
+  {
+    name: "fenced code block, empty",
+    lines: () => [FORM_FENCE_MARKERS[0], FORM_FENCE_MARKERS[0]],
+  },
+  { name: "embedding line, local reference", lines: () => ['{text("s0")}'] },
+  {
+    name: "embedding line, external reference",
+    lines: () => ["{text(M1.s0)}"],
+  },
+  // The refined embedding forms of 2.3 (embeddingContainer), own-line.
+  {
+    name: "embedding line, whitespace beside the call",
+    lines: () => [`{ ${TAB}text("s0")${NBSP}${LS} }`],
+  },
+  {
+    name: "embedding line, block comment before the call",
+    lines: () => [`{/* ${ALL_PROSE_CHARS} */ text(M1.s0)}`],
+  },
+  {
+    name: "embedding line, block comment after the call",
+    lines: () => [`{text("s0") /* ${ALL_PROSE_CHARS} */}`],
+  },
+  {
+    name: "embedding line, block comments on both sides",
+    lines: () => ["{ /* ab */ text(M1.s0) /* cd */ }"],
+  },
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): FormSpelling[] => [
+      {
+        name: `embedding line, line comment before the call, ${terminatorName}`,
+        lines: () => [`{// ${ALL_LINE_COMMENT_CHARS}${terminator}text("s0")}`],
+      },
+      {
+        name: `embedding line, run-on line comment holding the call, ${terminatorName}`,
+        lines: () => [
+          `{// ${ALL_LINE_COMMENT_CHARS}}${terminator}text(M1.s0)}`,
+        ],
+      },
+      {
+        name: `embedding line, line comment after the call, ${terminatorName}`,
+        lines: () => [`{text("s0") // ${ALL_LINE_COMMENT_CHARS}${terminator}}`],
+      },
+    ],
+  ),
+  ...TAG_NAMES.flatMap((tag): FormSpelling[] => [
+    {
+      name: `self-closing section line <${tag}>`,
+      lines: (id) => [`<${tag} id="${id()}" />`],
+    },
+    {
+      name: `block section <${tag}>`,
+      lines: (id) => [`<${tag} id="${id()}">`, "interior a", `</${tag}>`],
+    },
+  ]),
+  ...FORM_PROPS.map(([propsName, props]): FormSpelling => ({
+    name: `block section, ${propsName}`,
+    lines: (id) => [`<S id="${id()}"${props}>`, "interior a", "</S>"],
+  })),
+  { name: "block section, empty", lines: (id) => [`<S id="${id()}">`, "</S>"] },
+  {
+    name: "block sections nested three deep",
+    lines: (id) => {
+      const outer = id();
+      return [
+        `<S id="${outer}">`,
+        `<Spec id="${outer}.s0">`,
+        `<S id="${outer}.s0.s0">`,
+        "x",
+        "</S>",
+        "</Spec>",
+        "</S>",
+      ];
+    },
+  },
+];
+
+/** The inline elements of genProseLine, each spelled once. */
+const INLINE_ELEMENTS: ReadonlyArray<
+  readonly [string, (id: () => string) => string]
+> = [
+  ["inline comment", () => "{/* ab */}"],
+  ["inline embedding, local reference", () => '{text("s0")}'],
+  ["inline embedding, external reference", () => "{text(M1.s0)}"],
+  // The refined comment and embedding forms, in text position.
+  ["inline comment `{}`", () => "{}"],
+  ["inline block-comment sequence", () => `{ /* ab */${NBSP}/* cd */ }`],
+  [
+    "inline comment of ECMAScript-only whitespace",
+    () => `{${ECMASCRIPT_ONLY_WHITESPACE.join("")}}`,
+  ],
+  ...ECMASCRIPT_ONLY_WHITESPACE.flatMap(
+    (char): (readonly [string, () => string])[] => [
+      [
+        `inline comment, ${codePointName(char)} between the braces`,
+        () => `{${char}}`,
+      ],
+      [
+        `inline block-comment sequence with ${codePointName(char)} in every gap`,
+        () => `{${char}/* ab */${char}/* cd */${char}}`,
+      ],
+    ],
+  ),
+  ["inline embedding, whitespace beside the call", () => `{ text("s0")${LS}}`],
+  [
+    "inline embedding, block comments beside the call",
+    () => "{/* ab */ text(M1.s0) /* cd */}",
+  ],
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): (readonly [string, () => string])[] => [
+      [
+        `inline line-comment container, ${terminatorName}`,
+        () => `{// ${ALL_LINE_COMMENT_CHARS}${terminator}}`,
+      ],
+      [
+        `inline run-on container, ${terminatorName}`,
+        () => `{// ab}${terminator}}`,
+      ],
+      [
+        `inline embedding, line comment before the call, ${terminatorName}`,
+        () => `{// ab${terminator}text("s0")}`,
+      ],
+      [
+        `inline embedding, run-on line comment holding the call, ${terminatorName}`,
+        () => `{// ab}${terminator}text(M1.s0)}`,
+      ],
+      [
+        `inline embedding, line comment after the call, ${terminatorName}`,
+        () => `{text("s0") // ab${terminator}}`,
+      ],
+    ],
+  ),
+  ...FORM_CODE_SPANS.map(
+    ([spanName, span]): readonly [string, () => string] => [
+      spanName,
+      () => span,
+    ],
+  ),
+  ...TAG_NAMES.flatMap(
+    (tag): (readonly [string, (id: () => string) => string])[] => [
+      [
+        `inline section <${tag}>, alphabet interior`,
+        (id) => `<${tag} id="${id()}">${ALL_PROSE_CHARS}</${tag}>`,
+      ],
+      ...INLINE_WHITESPACE.map(
+        (char): readonly [string, (id: () => string) => string] => [
+          `inline section <${tag}>, ${codePointName(char)} interior`,
+          (id) => `<${tag} id="${id()}">${char}</${tag}>`,
+        ],
+      ),
+      [
+        `inline section <${tag}>, two-character whitespace interior`,
+        (id) => `<${tag} id="${id()}">${FF}${VT}</${tag}>`,
+      ],
+      [
+        `inline section <${tag}>, empty interior`,
+        (id) => `<${tag} id="${id()}"></${tag}>`,
+      ],
+      [
+        `inline self-closing section <${tag}>`,
+        (id) => `<${tag} id="${id()}" />`,
+      ],
+    ],
+  ),
+];
+
+/** The prose-line forms: a kept lead, an inline element, an optional tail. */
+const PROSE_LINE_FORMS: readonly FormSpelling[] = [
+  ...INLINE_ELEMENTS.flatMap(([elementName, element]): FormSpelling[] => [
+    {
+      name: `prose line hosting ${elementName}, no tail`,
+      lines: (id) => [`a0 ${element(id)}`],
+    },
+    {
+      name: `prose line hosting ${elementName}, alphabet tail`,
+      lines: (id) => [`a0 ${element(id)}${ALL_PROSE_CHARS}`],
+    },
+  ]),
+  // The character adjoining a construct on either side: each alphabet
+  // character directly before the opening tag and directly after the
+  // closing tag of an inline section, and around an inline comment.
+  ...PROSE_ALPHABET.flatMap(([, char]): FormSpelling[] => [
+    {
+      name: `inline section adjoined by ${codePointName(char)} on both sides`,
+      lines: (id) => [`a${char}<S id="${id()}">x</S>${char}a`],
+    },
+    {
+      name: `inline comment adjoined by ${codePointName(char)} on both sides`,
+      lines: () => [`a${char}{/* ab */}${char}a`],
+    },
+    {
+      name: `run-on container adjoined by ${codePointName(char)} on both sides`,
+      lines: () => [`a${char}{// ab}${LF}}${char}a`],
+    },
+  ]),
+  // Leads the container/heading guard leaves reachable (opensBlockConstruct):
+  // a marker character not followed by whitespace opens nothing.
+  {
+    name: "prose line led by U+002D then a letter, hosting a run-on container",
+    lines: () => [`-a {// ab}${LF}}`],
+  },
+  {
+    name: "prose line led by a digit and U+002E then a letter, hosting a line-comment container",
+    lines: () => [`9.a {// ab${LF}}`],
+  },
+  {
+    name: "prose line led by U+0023 then a letter (no heading), hosting a two-line embedding",
+    lines: () => [`#a {// ab${LF}text("s0")}`],
+  },
+  {
+    name: "prose line led by whitespace, U+0023, and a letter, hosting a multi-line comment",
+    lines: () => [` ${TAB}#a {/* ab${LF}cd */}`],
+  },
+];
+
+/** The import block: one import per earlier file, then the mandatory blank. */
+const FORM_IMPORT_LINES = [
+  'import M1 from "./A.xspec"',
+  'import M2 from "./B.xspec"',
+] as const;
+
+/**
+ * The ESM-block forms of generatedDoc (T3-7): `;`-terminated declarations
+ * and JavaScript comments beside the imports — each block's lines, the
+ * mandatory blank line after it excluded. The last entry spells every form
+ * in one block; the composites below carry it under every terminator.
+ */
+const FORM_ESM_BLOCKS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["one import", [FORM_IMPORT_LINES[0]]],
+  ["two imports", [...FORM_IMPORT_LINES]],
+  [
+    "`;`-terminated imports",
+    ['import M1 from "./A.xspec";', 'import M2 from "./B.xspec";'],
+  ],
+  [
+    "a line comment after an import",
+    [
+      `import M1 from "./A.xspec" // ${ALL_LINE_COMMENT_CHARS}`,
+      FORM_IMPORT_LINES[1],
+    ],
+  ],
+  [
+    "a block comment after an import",
+    [
+      `import M1 from "./A.xspec" /* ${ALL_PROSE_CHARS} */`,
+      FORM_IMPORT_LINES[1],
+    ],
+  ],
+  [
+    "an own-line line comment between two imports",
+    [
+      FORM_IMPORT_LINES[0],
+      `// ${ALL_LINE_COMMENT_CHARS}`,
+      FORM_IMPORT_LINES[1],
+    ],
+  ],
+  [
+    "a block comment before an import on the block's second line",
+    [
+      FORM_IMPORT_LINES[0],
+      `/* ${ALL_PROSE_CHARS} */ import M2 from "./B.xspec"`,
+    ],
+  ],
+  [
+    "an own-line line comment after the last import",
+    [FORM_IMPORT_LINES[0], `// ${ALL_LINE_COMMENT_CHARS}`],
+  ],
+  [
+    "a `;`-terminated single import with a line comment after it",
+    [`import M1 from "./A.xspec"; // ${ALL_LINE_COMMENT_CHARS}`],
+  ],
+  [
+    "every ESM-block form in one block",
+    [
+      `import M1 from "./A.xspec"; // ${ALL_LINE_COMMENT_CHARS}`,
+      `// ${ALL_LINE_COMMENT_CHARS}`,
+      `/* ${ALL_PROSE_CHARS} */ import M2 from "./B.xspec" /* ${ALL_PROSE_CHARS} */`,
+      `// ${ALL_LINE_COMMENT_CHARS}`,
+    ],
+  ],
+];
+const FORM_ESM_BLOCK_ALL = FORM_ESM_BLOCKS[FORM_ESM_BLOCKS.length - 1][1];
+
+/**
+ * One form's document: the form after the first prose line, after a blank
+ * line, and as a block section's interior (with dotted ids beneath it).
+ */
+function formDocument(form: FormSpelling): string {
+  const lines = [
+    FORM_FIRST_LINE,
+    ...form.lines(formIds("")),
+    FORM_TRAIL_LINE,
+    "",
+    ...form.lines(formIds("t")),
+    "",
+    '<S id="u">',
+    ...form.lines(formIds("u.")),
+    "</S>",
+    FORM_TRAIL_LINE,
+  ];
+  return lines.join(LF) + LF;
+}
+
+/**
+ * Every form in one document under one terminator drawn for every line
+ * (the composite the generator's per-line terminator draw can reach; the
+ * multi-line container forms keep their own internal terminators), the
+ * all-forms ESM block at its head. `cycle` draws LF, CRLF, CR in turn,
+ * applying endLine's lone-CR guard.
+ */
+function compositeDocument(
+  terminatorOf: (
+    index: number,
+    lineIsEmpty: boolean,
+    previous: string,
+  ) => string,
+  stripFinal: boolean,
+): string {
+  const id = formIds("");
+  const lines = [
+    ...FORM_ESM_BLOCK_ALL,
+    "",
+    FORM_FIRST_LINE,
+    ...BLOCK_FORMS.flatMap((form) => form.lines(id)),
+    ...PROSE_LINE_FORMS.flatMap((form) => form.lines(id)),
+    FORM_TRAIL_LINE,
+  ];
+  let text = "";
+  let previous = "";
+  lines.forEach((line, index) => {
+    const terminator = terminatorOf(index, line === "", previous);
+    text += line + terminator;
+    previous = terminator;
+  });
+  return stripFinal ? text.slice(0, -previous.length) : text;
+}
+
+const CYCLED_TERMINATORS = [LF, CRLF, CR] as const;
+
+/**
+ * The fixed form-vector set of the P-2/P-3 generator (S-9): name and source.
+ */
+export const P2_P3_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ...BLOCK_FORMS.map((form): readonly [string, string] => [
+    form.name,
+    formDocument(form),
+  ]),
+  ...PROSE_LINE_FORMS.map((form): readonly [string, string] => [
+    form.name,
+    formDocument(form),
+  ]),
+  ...FORM_ESM_BLOCKS.flatMap(([blockName, block]) =>
+    FORM_TERMINATORS.map(
+      ([terminatorName, terminator]): readonly [string, string] => [
+        `import block, ${blockName}, then the mandatory blank line, under ${terminatorName}`,
+        [...block, "", FORM_FIRST_LINE, "{text(M1.s0)}"].join(terminator) +
+          terminator,
+      ],
+    ),
+  ),
+  [
+    "lone-CR terminator followed by an empty line (endLine's guard: CR, never LF)",
+    `a${CR}${CR}b${LF}`,
+  ],
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): (readonly [string, string])[] => [
+      [
+        `every form under ${terminatorName} terminators`,
+        compositeDocument(() => terminator, false),
+      ],
+      [
+        `every form under ${terminatorName} terminators, final terminator stripped`,
+        compositeDocument(() => terminator, true),
+      ],
+    ],
+  ),
+  [
+    "every form under cycled terminators (endLine's lone-CR guard applied)",
+    compositeDocument((index, lineIsEmpty, previous) => {
+      const drawn = CYCLED_TERMINATORS[index % CYCLED_TERMINATORS.length];
+      return lineIsEmpty && previous === CR && drawn === LF ? CR : drawn;
+    }, false),
+  ],
+];
+
+// ---------------------------------------------------------------------------
 // Rendering
 
 /** Counterexample rendering: per-file sources with escapes readable. */
@@ -871,10 +1963,24 @@ function mdPathOf(sourcePath: string): string {
   return `${sourcePath.slice(0, -".mdx".length)}.md`;
 }
 
-function workspaceFiles(doc: GeneratedDoc): Record<string, string> {
-  const files: Record<string, string> = { "xspec.config.ts": EMIT_TRUE_CONFIG };
+function workspaceFiles(
+  doc: GeneratedDoc,
+): Record<string, InitialFileContents> {
+  const files: Record<string, InitialFileContents> = {
+    "xspec.config.ts": EMIT_TRUE_CONFIG,
+  };
   for (const file of doc.files) files[file.path] = sourceOf(file);
   return files;
+}
+
+/**
+ * S-9's per-draw check (helpers/property.ts `drawSources`): every file a
+ * draw composes — the `.mdx` sources are judged before the product sees
+ * them. The configuration staged beside them is no draw's: a staged-source
+ * record, judged by the ledger self-test before any product exists.
+ */
+function stagedSources(doc: GeneratedDoc): DrawSource[] {
+  return doc.files.map((file): DrawSource => [file.path, sourceOf(file)]);
 }
 
 /**
@@ -964,9 +2070,14 @@ async function runP2Trial(
 ): Promise<void> {
   const expected = specCompiledOutputs(doc);
   const files = workspaceFiles(doc);
-  const first = await TestWorkspace.create({ files });
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedSources` above) — declared per draw, as every initial
+  // `.mdx` file a trial stages after the body's first product invocation
+  // must be (helpers/workspace.ts).
+  const mdx = { perDraw: mdxPathsOf(files) };
+  const first = await TestWorkspace.create({ files, mdx });
   try {
-    const second = await TestWorkspace.create({ files });
+    const second = await TestWorkspace.create({ files, mdx });
     try {
       await buildOk(
         product,
@@ -1067,41 +2178,70 @@ function excerpt(text: string): string {
   return rendered.length <= 160 ? rendered : `${rendered.slice(0, 160)}…`;
 }
 
-/** The SPEC 1.6 algebra for one node, over product-reported values only. */
+/**
+ * One child of a node as the P-3 algebra reads it: an identity named by the
+ * node's outgoing `contains` edges, with the source range and subtree text
+ * the child's own `query node` answer reports.
+ */
+interface P3Child {
+  readonly identity: string;
+  readonly sourceRange: SourceRange;
+  readonly subtreeText: string;
+}
+
+/** Document order of siblings: by reported source range (SPEC 1.7). */
+function bySourceRange(a: P3Child, b: P3Child): number {
+  return (
+    a.sourceRange.start - b.sourceRange.start ||
+    a.sourceRange.end - b.sourceRange.end
+  );
+}
+
+function describeChildren(children: readonly P3Child[]): string {
+  if (children.length === 0) return "(none)";
+  return children
+    .map(
+      (child) =>
+        `\n    ${child.identity} ` +
+        `[${String(child.sourceRange.start)}, ${String(child.sourceRange.end)}): ` +
+        excerpt(child.subtreeText),
+    )
+    .join("");
+}
+
+/**
+ * The SPEC 1.6 algebra for one node, over product-reported values only: the
+ * node's own answer and the children its outgoing `contains` edges name, in
+ * document order (`children`, already ordered by their reported ranges).
+ */
 function assertTextAlgebra(
-  node: DocNode,
-  texts: ReadonlyMap<string, NodeTextSummary>,
+  identity: string,
+  self: NodeTextAlgebraSummary,
+  children: readonly P3Child[],
   context: string,
 ): void {
-  const self = texts.get(node.ref);
-  if (self === undefined) {
-    throw new Error(`P-3 harness defect: no queried texts for ${node.ref}`);
-  }
-  const children = node.childRefs.map((ref) => {
-    const child = texts.get(ref);
-    if (child === undefined) {
-      throw new Error(`P-3 harness defect: no queried texts for ${ref}`);
-    }
-    return child.subtreeText;
-  });
-  const childrenLength = children.reduce((sum, text) => sum + text.length, 0);
+  const childTexts = children.map((child) => child.subtreeText);
+  const childrenLength = childTexts.reduce((sum, text) => sum + text.length, 0);
   if (self.subtreeText.length !== self.ownText.length + childrenLength) {
     fail(
-      `${context}: for ${node.ref}, |subtree text| must equal |own text| plus the sum of ` +
-        `the ${String(children.length)} children's |subtree text| — the children interleave ` +
-        `with exactly N + 1 own-text runs and nothing else (SPEC 1.6); got ` +
+      `${context}: for ${identity}, |subtree text| must equal |own text| plus the sum of ` +
+        `the ${String(children.length)} children's |subtree text| — the children its ` +
+        `outgoing \`contains\` edges name interleave with exactly N + 1 own-text runs and ` +
+        `nothing else (SPEC 1.6, 5.2); got ` +
         `${String(self.subtreeText.length)} vs ${String(self.ownText.length)} + ${String(childrenLength)}\n` +
-        `  subtree: ${excerpt(self.subtreeText)}\n  own:     ${excerpt(self.ownText)}`,
+        `  subtree:  ${excerpt(self.subtreeText)}\n  own:      ${excerpt(self.ownText)}\n` +
+        `  children (by source range): ${describeChildren(children)}`,
     );
   }
-  if (!interleavingExists(self.subtreeText, self.ownText, children)) {
+  if (!interleavingExists(self.subtreeText, self.ownText, childTexts)) {
     fail(
-      `${context}: for ${node.ref}, the reported subtree text does not decompose as the ` +
-        `reported own text's N + 1 runs interleaved with the ${String(children.length)} ` +
-        `children's reported subtree texts in document order (SPEC 1.6)\n` +
+      `${context}: for ${identity}, the reported subtree text does not decompose as the ` +
+        `reported own text's N + 1 runs interleaved with the reported subtree texts of the ` +
+        `${String(children.length)} children its outgoing \`contains\` edges name, in ` +
+        `document order by their reported source ranges (SPEC 1.6, 5.2, 1.7)\n` +
         `  subtree:  ${excerpt(self.subtreeText)}\n` +
         `  own:      ${excerpt(self.ownText)}\n` +
-        `  children: ${children.map(excerpt).join(", ")}`,
+        `  children (by source range): ${describeChildren(children)}`,
     );
   }
 }
@@ -1110,34 +2250,42 @@ async function runP3Trial(
   product: ProductBinding,
   doc: GeneratedDoc,
 ): Promise<void> {
-  const workspace = await TestWorkspace.create({ files: workspaceFiles(doc) });
+  const files = workspaceFiles(doc);
+  // S-9: the draw's sources, declared per draw (see runP2Trial).
+  const workspace = await TestWorkspace.create({
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
+  });
   try {
     await buildOk(
       product,
       workspace,
       "P-3: `build` of the generated workspace with `markdown: { emit: true }`",
     );
+    // One `query node` answer per identity, each node queried once whether
+    // it is reached by enumeration or named by a parent's `contains` edge
+    // (a named identity outside the enumeration is queried too, so the
+    // algebra compares the product's answers to each other alone).
+    const answers = new Map<string, NodeTextAlgebraSummary>();
+    const answerOf = async (
+      identity: string,
+    ): Promise<NodeTextAlgebraSummary> => {
+      const known = answers.get(identity);
+      if (known !== undefined) return known;
+      const label = `P-3 \`query node ${identity}\``;
+      const answer = decodeNodeTextAlgebraSummary(
+        await runJson(product, workspace, ["query", "node", identity], label),
+        label,
+      );
+      answers.set(identity, answer);
+      return answer;
+    };
     for (const file of doc.files) {
-      const texts = new Map<string, NodeTextSummary>();
-      for (const node of file.nodes) {
-        const label = `P-3 \`query node ${node.ref}\``;
-        texts.set(
-          node.ref,
-          decodeNodeTextSummary(
-            await runJson(
-              product,
-              workspace,
-              ["query", "node", node.ref],
-              label,
-            ),
-            label,
-          ),
-        );
-      }
-      const root = texts.get(file.path);
-      if (root === undefined) {
-        throw new Error(`P-3 harness defect: no root texts for ${file.path}`);
-      }
+      // The document's nodes are enumerated from the generated document
+      // itself (CERTIFICATIONS.md §CONF-MD's P-3 staging constraint admits
+      // it); every text, range, and child below is the product's answer.
+      for (const node of file.nodes) await answerOf(node.ref);
+      const root = await answerOf(file.path);
       const mdRel = mdPathOf(file.path);
       await assertFileBytes(
         workspace.path(mdRel),
@@ -1146,7 +2294,18 @@ async function runP3Trial(
           `output emitted at ${mdRel}, byte for byte (SPEC 1.6, 1.2, 3)`,
       );
       for (const node of file.nodes) {
-        assertTextAlgebra(node, texts, "P-3");
+        const self = await answerOf(node.ref);
+        const children: P3Child[] = [];
+        for (const identity of self.containsTargets) {
+          const child = await answerOf(identity);
+          children.push({
+            identity,
+            sourceRange: child.sourceRange,
+            subtreeText: child.subtreeText,
+          });
+        }
+        children.sort(bySourceRange);
+        assertTextAlgebra(node.ref, self, children, "P-3");
       }
     }
   } finally {
@@ -1160,14 +2319,15 @@ async function runP3Trial(
 const P_2 = defineProductTest({
   id: "P-2",
   title:
-    "property: random documents (prose, nested sections, imports, single- and multi-line " +
-    "comments, embeddings, mixed line terminators, boundary-code-point-weighted content) " +
-    "compile to Markdown byte-equal to the harness's SPEC 3 oracle, deterministically " +
-    "across directories, preserving content bytes outside removed constructs " +
-    "(SPEC 3, 1.4, 1.6, 7.3; TEST-SPEC §16 P-2)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two
-  // workspaces and two builds per trial, plus the shrink budget.
-  timeoutMs: 300_000,
+    "property: random documents (prose, fenced code blocks and inline code spans spelling " +
+    "tag-, import-, and expression-like bytes as literal content, nested sections, imports " +
+    "with JavaScript comments and `;` terminators beside them in their ESM block, comments " +
+    "in every form of 2.7 — `{}`, block-comment sequences, line-comment containers, the " +
+    "run-on `{// c}` form, ECMAScript-only whitespace between braces — embeddings with " +
+    "whitespace and comments beside the call, mixed line terminators, " +
+    "boundary-code-point-weighted content) compile to Markdown byte-equal to the harness's " +
+    "SPEC 3 oracle, deterministically across directories, preserving content bytes outside " +
+    "removed constructs (SPEC 3, 1.4, 1.6, 7.3; TEST-SPEC §16 P-2)",
   run: async (product) => {
     await checkProperty(
       "P-2 Markdown compilation",
@@ -1175,7 +2335,12 @@ const P_2 = defineProductTest({
       async (doc) => {
         await runP2Trial(product, doc);
       },
-      { runs: 12, maxShrinkExecutions: 150, render: renderDoc },
+      {
+        runs: 12,
+        maxShrinkExecutions: 150,
+        render: renderDoc,
+        drawSources: stagedSources,
+      },
     );
   },
 });
@@ -1184,12 +2349,10 @@ const P_3 = defineProductTest({
   id: "P-3",
   title:
     "property: for random documents, the root's subtree text equals the compiled Markdown " +
-    "output, and every node's subtree text equals its own-text runs interleaved with its " +
-    "children's subtree texts in document order, N children yielding N + 1 runs — asserted " +
-    "as internal consistency of the product's reported values (SPEC 1.6, 3; TEST-SPEC §16 P-3)",
-  // Wall-clock hang guard only (H-10): one build plus one `query node` per
-  // requirement node per trial, three fixed seeds (E-5), plus shrinking.
-  timeoutMs: 300_000,
+    "output, and every node's subtree text equals its own-text runs interleaved with the " +
+    "subtree texts of the children its `contains` edges name, in document order, N children " +
+    "yielding N + 1 runs — asserted as internal consistency of the product's reported values " +
+    "(SPEC 1.6, 5.2, 3; TEST-SPEC §16 P-3)",
   run: async (product) => {
     await checkProperty(
       "P-3 text algebra",
@@ -1197,7 +2360,12 @@ const P_3 = defineProductTest({
       async (doc) => {
         await runP3Trial(product, doc);
       },
-      { runs: 6, maxShrinkExecutions: 100, render: renderDoc },
+      {
+        runs: 6,
+        maxShrinkExecutions: 100,
+        render: renderDoc,
+        drawSources: stagedSources,
+      },
     );
   },
 });

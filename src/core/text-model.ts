@@ -354,24 +354,87 @@ function buildFileStructure(document: SpecDocument): FileStructure {
 // ---------------------------------------------------------------------------
 
 /**
+ * A suspended computation's request for the replacement value of one
+ * `text(...)` expression (SPEC 3) that no memo holds yet. The driver
+ * (`WorkspaceTextModel.evaluate`) answers it — computing the target's
+ * subtree text on its own work stack when that is needed too — and resumes
+ * the asking computation with the value.
+ */
+interface ExpansionRequest {
+  readonly document: SpecDocument;
+  readonly embedding: SpecEmbedding;
+}
+
+/**
+ * A resumable computation: it yields an `ExpansionRequest` for each
+ * expansion value it needs that no memo holds, is resumed with that value,
+ * and returns its result.
+ */
+type Steps<T> = Generator<ExpansionRequest, T, string>;
+
+/** One computation on the driver's work stack. */
+interface Task {
+  readonly steps: Steps<string>;
+  /**
+   * The node whose subtree text the task computes — marked in progress
+   * until the task finishes — or null for an own-text task.
+   */
+  readonly section: SpecSection | null;
+  /**
+   * Records the finished value (the memo writes) and returns the value
+   * delivered to the task below.
+   */
+  readonly finish: (value: string) => string;
+}
+
+/**
+ * The index of the first of `groups` ending after `from` — the first a
+ * span starting at `from` touches, the groups being contiguous and in
+ * position order — or `groups.length` when none does.
+ */
+function firstGroupEndingAfter(
+  groups: readonly LineGroup[],
+  from: number,
+): number {
+  let low = 0;
+  let high = groups.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (groups[middle].end <= from) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  return low;
+}
+
+/**
  * The text model over a workspace's parsed documents: compiled Markdown
  * output (SPEC 3), per-node subtree and own text (SPEC 1.6, fully
  * expanded), and per-node own content sequences (SPEC 1.6, replacement
  * suspended). One instance per consistent set of documents; every value is
  * memoized, so repeated queries are cheap and deterministic (SPEC 12.0).
  *
- * Expansion recurses through the resolver: `text(...)` is replaced by the
- * target's compiled subtree text, fully expanded (SPEC 3), which may
- * require other nodes' subtree texts across files. In a valid workspace
- * the recursion terminates: an expansion chain is a path over `contains`
- * and `embeds` edges, and cycles over those edges are invalid (SPEC 5.3).
- * Invalid workspaces never surface these values (SPEC 12.1, 13.3); should
- * one be evaluated anyway, re-entering a node's computation yields the
- * empty string, keeping the model total and terminating.
+ * Expansion follows the resolver: `text(...)` is replaced by the target's
+ * compiled subtree text, fully expanded (SPEC 3), which may require other
+ * nodes' subtree texts across files. In a valid workspace the expansion
+ * terminates: an expansion chain is a path over `contains` and `embeds`
+ * edges, and cycles over those edges are invalid (SPEC 5.3). SPEC bounds
+ * no chain's length, so expansion never recurses on the call stack: each
+ * value is a resumable computation (`Steps`) that asks for the expansion
+ * values it needs, and the driver (`evaluate`) computes a target's subtree
+ * text on an explicit work stack above the asker — in exactly the order,
+ * and with exactly the memo writes, of the plain recursion subtree text →
+ * expansion → subtree text. Invalid workspaces never surface these values
+ * (SPEC 12.1, 13.3); should one be evaluated anyway, re-entering a node's
+ * computation yields the empty string, keeping the model total and
+ * terminating.
  */
 export class WorkspaceTextModel {
   private readonly structures = new Map<SpecDocument, FileStructure>();
   private readonly subtreeMemo = new Map<SpecSection, string>();
+  private readonly ownMemo = new Map<SpecSection, string>();
   private readonly expansionMemo = new Map<SpecEmbedding, string>();
   private readonly expandedDropMemo = new Map<LineGroup, boolean>();
   private readonly inProgress = new Set<SpecSection>();
@@ -412,36 +475,30 @@ export class WorkspaceTextModel {
       // that would cause it); the empty string keeps the model total.
       return "";
     }
-    this.inProgress.add(section);
-    try {
-      const span =
-        section.parent === null
-          ? { start: 0, end: document.text.length }
-          : indexSpan(document, section.range);
-      const value = this.renderExpanded(
-        this.structure(document),
-        span.start,
-        span.end,
-      );
-      this.subtreeMemo.set(section, value);
-      return value;
-    } finally {
-      this.inProgress.delete(section);
-    }
+    return this.evaluate(this.subtreeTask(document, section, null));
   }
 
   /**
    * SPEC 1.6: the node's subtree text with every child's contribution
    * excised — its own-text runs (empty runs included) joined exactly at
-   * the excision points.
+   * the excision points. Memoized like `subtreeText`: rendering walks the
+   * file's line groups, and review asks for one ancestor's own text once
+   * per item framed by it (SPEC 10.7: an ancestor chain's context text),
+   * so an unmemoized deep chain re-rendered its gaps once per such ask.
    */
   ownText(document: SpecDocument, section: SpecSection): string {
-    const structure = this.structure(document);
-    let out = "";
-    for (const gap of gapSpans(document, section)) {
-      out += this.renderExpanded(structure, gap.start, gap.end);
+    const memoized = this.ownMemo.get(section);
+    if (memoized !== undefined) {
+      return memoized;
     }
-    return out;
+    return this.evaluate({
+      steps: this.ownTextSteps(document, section),
+      section: null,
+      finish: (value) => {
+        this.ownMemo.set(section, value);
+        return value;
+      },
+    });
   }
 
   /**
@@ -502,29 +559,156 @@ export class WorkspaceTextModel {
   }
 
   /**
+   * Run `task` to completion on an explicit work stack (SPEC 3: expansion
+   * chains are as long as the sources make them) and return its value. A
+   * computation asking for an expansion no memo holds is answered as
+   * `text(...)` replacement directs: nothing for an unresolved embedding
+   * (see `EmbeddingResolver`), the target's memoized subtree text, the
+   * empty string for a target in progress (re-entry, see `subtreeText`),
+   * and otherwise the target's subtree text, computed by a task pushed
+   * above the asker — the stack, never the call stack, growing with the
+   * chain. The answer is memoized as the embedding's expansion.
+   */
+  private evaluate(task: Task): string {
+    const stack: Task[] = [task];
+    let input = "";
+    try {
+      for (;;) {
+        const top = stack[stack.length - 1];
+        const step = top.steps.next(input);
+        if (step.done === true) {
+          stack.pop();
+          input = top.finish(step.value);
+          if (stack.length === 0) {
+            return input;
+          }
+          continue;
+        }
+        const { document, embedding } = step.value;
+        const target = this.resolveEmbedding(document, embedding);
+        if (target === null) {
+          input = "";
+        } else {
+          const memoized = this.subtreeMemo.get(target.section);
+          if (memoized !== undefined) {
+            input = memoized;
+          } else if (this.inProgress.has(target.section)) {
+            input = "";
+          } else {
+            // The target's computation runs first; its task records the
+            // expansion when it finishes. A computation's first resumption
+            // carries no value.
+            stack.push(
+              this.subtreeTask(target.document, target.section, embedding),
+            );
+            input = "";
+            continue;
+          }
+        }
+        this.expansionMemo.set(embedding, input);
+      }
+    } finally {
+      // An exception abandons the unfinished tasks: their nodes are no
+      // longer in progress.
+      for (const pending of stack) {
+        if (pending.section !== null) {
+          this.inProgress.delete(pending.section);
+        }
+      }
+    }
+  }
+
+  /**
+   * The task computing `section`'s subtree text (SPEC 1.6), the section
+   * marked in progress from now until the task finishes. For an
+   * expansion's target, `embedding` names the embedding whose replacement
+   * value (SPEC 3) the finished text also is.
+   */
+  private subtreeTask(
+    document: SpecDocument,
+    section: SpecSection,
+    embedding: SpecEmbedding | null,
+  ): Task {
+    this.inProgress.add(section);
+    return {
+      steps: this.subtreeSteps(document, section),
+      section,
+      finish: (value) => {
+        this.subtreeMemo.set(section, value);
+        this.inProgress.delete(section);
+        if (embedding !== null) {
+          this.expansionMemo.set(embedding, value);
+        }
+        return value;
+      },
+    };
+  }
+
+  /**
+   * SPEC 1.6: the subtree text's computation — the section construct's
+   * whole span (the entire file for the root, SPEC 1.2), compiled.
+   */
+  private *subtreeSteps(
+    document: SpecDocument,
+    section: SpecSection,
+  ): Steps<string> {
+    const span =
+      section.parent === null
+        ? { start: 0, end: document.text.length }
+        : indexSpan(document, section.range);
+    return yield* this.renderExpandedSteps(
+      this.structure(document),
+      span.start,
+      span.end,
+    );
+  }
+
+  /**
+   * SPEC 1.6: the own text's computation — the N + 1 gaps the node's child
+   * constructs leave, each compiled, joined exactly at the excision points.
+   */
+  private *ownTextSteps(
+    document: SpecDocument,
+    section: SpecSection,
+  ): Steps<string> {
+    const structure = this.structure(document);
+    let out = "";
+    for (const gap of gapSpans(document, section)) {
+      out += yield* this.renderExpandedSteps(structure, gap.start, gap.end);
+    }
+    return out;
+  }
+
+  /**
    * The compiled value of the span [from, to) in expanded mode: kept
    * characters, expansions at embedding positions, kept terminators —
    * dropped groups contributing nothing. Callers pass construct-edge
    * boundaries (section ranges and gap edges), which no kept fragment or
    * construct straddles, so position filtering is exact.
    */
-  private renderExpanded(
+  private *renderExpandedSteps(
     structure: FileStructure,
     from: number,
     to: number,
-  ): string {
+  ): Steps<string> {
     if (from >= to) {
       return "";
     }
+    const { document, groups } = structure;
     let out = "";
-    for (const group of structure.groups) {
-      if (group.end <= from) {
-        continue;
-      }
+    for (
+      let index = firstGroupEndingAfter(groups, from);
+      index < groups.length;
+      index += 1
+    ) {
+      const group = groups[index];
       if (group.start >= to) {
         break;
       }
-      if (this.droppedExpanded(structure, group)) {
+      const dropped =
+        this.expandedDropMemo.get(group) ??
+        (yield* this.droppedExpandedSteps(document, group));
+      if (dropped) {
         continue;
       }
       for (const piece of group.pieces) {
@@ -532,9 +716,11 @@ export class WorkspaceTextModel {
           continue;
         }
         if (piece.kind === "kept") {
-          out += structure.document.text.slice(piece.pos, piece.end);
+          out += document.text.slice(piece.pos, piece.end);
         } else if (piece.kind === "embedding") {
-          out += this.expansion(structure.document, piece.embedding);
+          out +=
+            this.expansionMemo.get(piece.embedding) ??
+            (yield { document, embedding: piece.embedding });
         } else {
           out += piece.text;
         }
@@ -543,7 +729,7 @@ export class WorkspaceTextModel {
     return out;
   }
 
-  /** As `renderExpanded`, in own-content mode: embeddings excised. */
+  /** As `renderExpandedSteps`, in own-content mode: embeddings excised. */
   private renderContent(
     structure: FileStructure,
     from: number,
@@ -552,11 +738,14 @@ export class WorkspaceTextModel {
     if (from >= to) {
       return "";
     }
+    const groups = structure.groups;
     let out = "";
-    for (const group of structure.groups) {
-      if (group.end <= from) {
-        continue;
-      }
+    for (
+      let index = firstGroupEndingAfter(groups, from);
+      index < groups.length;
+      index += 1
+    ) {
+      const group = groups[index];
       if (group.start >= to) {
         break;
       }
@@ -584,18 +773,20 @@ export class WorkspaceTextModel {
    * source but is left empty or whitespace-only purely by removals, or by
    * `text(...)` replacements whose expansions are empty, is dropped with
    * its terminator. A non-empty expansion — whitespace-only included —
-   * keeps the group: the loss is then not purely the listed causes.
+   * keeps the group: the loss is then not purely the listed causes. The
+   * verdict is memoized; the caller consults the memo first.
    */
-  private droppedExpanded(structure: FileStructure, group: LineGroup): boolean {
-    const memoized = this.expandedDropMemo.get(group);
-    if (memoized !== undefined) {
-      return memoized;
-    }
+  private *droppedExpandedSteps(
+    document: SpecDocument,
+    group: LineGroup,
+  ): Steps<boolean> {
     let dropped = false;
     if (group.hadNonWhitespace && group.keptWhitespaceOnly) {
       dropped = true;
       for (const embedding of group.embeddings) {
-        if (this.expansion(structure.document, embedding) !== "") {
+        const expansion =
+          this.expansionMemo.get(embedding) ?? (yield { document, embedding });
+        if (expansion !== "") {
           dropped = false;
           break;
         }
@@ -603,23 +794,5 @@ export class WorkspaceTextModel {
     }
     this.expandedDropMemo.set(group, dropped);
     return dropped;
-  }
-
-  /**
-   * SPEC 3: the replacement value of one `text(...)` expression — the
-   * target's compiled subtree text, fully expanded (recursively, across
-   * files). An unresolved embedding expands to nothing (see
-   * `EmbeddingResolver`: never surfaced, the workspace is invalid).
-   */
-  private expansion(document: SpecDocument, embedding: SpecEmbedding): string {
-    const memoized = this.expansionMemo.get(embedding);
-    if (memoized !== undefined) {
-      return memoized;
-    }
-    const target = this.resolveEmbedding(document, embedding);
-    const value =
-      target === null ? "" : this.subtreeText(target.document, target.section);
-    this.expansionMemo.set(embedding, value);
-    return value;
   }
 }

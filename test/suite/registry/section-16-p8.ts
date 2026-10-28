@@ -9,15 +9,32 @@
 //
 //   * every command terminates — operationalized by the subprocess driver's
 //     hang guard (helpers/subprocess.ts): a run killed by the per-invocation
-//     timeout or by the runaway-output cap is converted into a *diagnosed
-//     assertion failure* (H-8), because termination is this property's
-//     assertion, not merely its harness hygiene;
+//     timeout is converted into a *diagnosed assertion failure* (H-8; S-3:
+//     hangs are reported as failures), because termination is this
+//     property's assertion, not merely its harness hygiene. The guard is
+//     dimensioned to the staged answer scale, `view --text` over the
+//     largest draw included (H-11; `FUZZ_COMMAND_TIMEOUT_MS`), and its kill
+//     is reported unshrunk, as P-11's is, since every shrink candidate that
+//     re-observes it costs a full guard (a shrink candidate's kill ends the
+//     shrink as the reported counterexample). A run killed by the driver's
+//     output-capture cap is never converted: an exhausted capture limit is
+//     a loud harness error, which `checkProperty` reports with the seed —
+//     never a falsified property, since a truncated capture is
+//     indistinguishable from a partial document (H-11; S-8 dimensions the
+//     cap to the staged answer scale and pins this division);
 //   * a command never dies by signal and always exits 0, 1, or 2 — the
 //     SPEC 12.0 exit-code partition ("exit codes partition all outcomes");
-//   * under `--json`, stdout is never a partial JSON document: exit 0/1
-//     emits exactly one JSON document as the entire stdout, and exit 2 emits
-//     byte-empty stdout (SPEC 12.0; the shared `assertJsonOutputConvention`,
-//     H-5);
+//   * whenever JSON output is in effect, stdout is never a partial JSON
+//     document: exit 0/1 emits exactly one JSON document as the entire
+//     stdout, and exit 2 emits the 12.7 error document — `{"error": …}` —
+//     as that document (SPEC 12.0; the shared `assertJsonOutputConvention`,
+//     H-5). JSON output is in effect by flag or by surface, as 12.0 reads
+//     it (`jsonOutputInEffect`, helpers/invocation-grammar.ts, the reading
+//     the subprocess driver shares): a `--json` token read as a flag, or a
+//     JSON-only surface — `query`, `occurrences`, `view`, `at`, and
+//     `inventory` (11), `version` (12.6), `review export` (10.7) — with or
+//     without `--json`; every other run is held to the exit partition
+//     alone;
 //   * a failing `build` — exit 1 or exit 2 — modifies nothing: the whole
 //     workspace tree, prior derived files and graph data included, is
 //     byte-identical around the invocation (SPEC 12.1, H-4; snapshot
@@ -59,36 +76,131 @@
 //                  mid-code-point);
 //   * shuffle    — a drawn byte range removed and reinserted at a drawn
 //                  position (closers before openers, headers displaced);
-//   * garbage    — the whole file replaced by 0–64 uniformly drawn bytes.
+//   * garbage    — the whole file replaced by 0–64 uniformly drawn bytes;
+//   * fragment   — `<>…</>` insertion and unbalancing: a balanced fragment
+//                  around a drawn interior (empty, prose, a section, an
+//                  embedding, a comment, a nested fragment, a multi-line
+//                  interior), a lone `<>` or `</>`, or a fragment wrapping a
+//                  drawn byte range (crossing whatever constructs it spans);
+//   * braces     — brace content at the comment/expression/parse-failure
+//                  boundaries of SPEC 2.7 and 14.20, applied to a drawn
+//                  `{…}` container of the file (one seeded when it holds
+//                  none): comment ↔ expression rewrites (the content wrapped
+//                  in a block comment, an expression beside it, comments and
+//                  line comments before or after it — the U+000A-, U+000D-,
+//                  and U+2028-ended and run-on forms of T2.3-3/T2.7-4 —
+//                  empty braces, two comments, and the ECMAScript-whitespace
+//                  and non-whitespace singletons of T2.7-4); the content
+//                  replaced by a boundary expression (the early errors,
+//                  comma sequences, `await`, and function forms of T14-12,
+//                  the negative embedding forms of T2.3-3, JSX and a section
+//                  inside braces, two expressions, an unclosed call, a lone
+//                  `]`, an unclosed block comment); the spread grammar pair
+//                  of T2.7-3 and its neighbours inserted on a `<S ` tag;
+//                  empty braces in flow, text, and attribute-value position
+//                  (`d={}`, `d={ /* c */ }`, `coverage={}`); and unbalanced
+//                  braces at EOF (an unclosed embedding, brace, comment, or
+//                  attribute value appended, a stray `}`, or the file's last
+//                  `}` deleted);
+//   * esmBlock   — ESM-block mutations on a drawn `import`/`export` line
+//                  (one seeded at a drawn line start when the file holds
+//                  none): comment insertion (own-line line and block
+//                  comments before it, a block comment spanning lines, a
+//                  comment on its line before the declaration, trailing
+//                  comments, an own-line comment after it with no blank line
+//                  between); terminator changes (`;` appended or removed, the
+//                  line's terminator rewritten to CR, CRLF, U+2028, U+2029, a
+//                  blank line, or a space joining the next line); indentation
+//                  (spaces or a tab before the declaration); splitting and
+//                  joining blocks (a second declaration after a blank line
+//                  or directly on the next line — a duplicate binding, a
+//                  fresh binding, a side-effect-only import, import
+//                  attributes, an export naming no declaration, an export
+//                  holding JSX — or the blank line after the block deleted);
+//                  and a statement at a line start (`const x = 1` and its
+//                  kin directly after the declaration, the T14-12 negative,
+//                  or at any drawn line start).
+//
+// The refined classes stage the forms most likely to make a product
+// misjudge the well-formedness boundary (T14-12) — every spelling a fixed
+// constant of at most a few dozen bytes, so no refined draw approaches a
+// tower's growth (S-8) — while the property asserts no parse verdict on any
+// of them: its contract stays the robustness clauses above, and the verdicts
+// themselves are T2.3-3's, T2.7-3's, T2.7-4's, T3-7's, and T14-12's.
 //
 // The command sweep spans the SPEC 12 surface: `build` (both output forms —
-// the human form via the drawn menu), `check`, `ids`, `show`, all five
-// `query` subcommands, `coverage`, `impact --base` (no repository is staged:
-// an unreadable baseline is itself an exit-2 outcome, 6.3/12.0), `review`
-// reads and `review create`, `rename`, and file-form `move`. Mutating
-// commands may legitimately succeed and modify the workspace when the
-// mutations happen to be benign — P-8 constrains their termination, exit
-// class, and JSON form only; the modifies-nothing arm is `build`'s
-// (SPEC 12.1). An implementation-time dry-run over the committed default
-// seeds at the registered 12 runs per seed verified that every menu entry,
-// every mutation kind, and every mutation target occurs — giant MDX section
-// towers (depths 512 and 2048), all three BOM flavors, and a mid-file BOM
-// included — so the CI-pinned trial set (E-5) exercises the full surface
-// deterministically, with staged files bounded (~32 KiB max).
+// the human form via the drawn menu), `check`, `ids`, `show` (a node, with
+// and without `--json`, and a file), all six `query` subcommands (`reachable`
+// over a base dependency path, with and without `--json`), the other query
+// surfaces of 11 — `occurrences` (unfiltered and under `--file`), `view`
+// (with and without `--text`), `at` at an in-range offset of a base file, and
+// `inventory` (with and without `--json`) — `version` (12.6, with and without
+// `--json`), `coverage`, `impact --base` (no repository is staged: an
+// unreadable baseline is itself an exit-2 outcome, 6.3/12.0), `review list`,
+// `create`, and `next`, the review subcommands naming a session or an item —
+// `status`, `show`, `split`, `resolve`, and `export`, each with and without
+// `--json` — as composites (`armSteps`: the session created first, then for
+// an item form a JSON read of it yielding the item the form names, each step
+// under the same assertions), `rename` and file-form `move` (each performed
+// with `--json` and previewed with and without it, 6.6), and section-form
+// `move` (6.5) — a base section into a file the base holds and into one it
+// lacks, which the move creates — performed and previewed, each with and
+// without `--json`; `--test-hold`, a usage error beside `--preview`, never
+// appears. Each JSON-only surface has a form drawn without `--json`, so the
+// by-surface half of 12.0's rule is exercised, and every command runs with
+// JSON output in effect — `build` in the fixed arm. Mutating commands may
+// legitimately succeed and modify the workspace when the mutations happen to
+// be benign — P-8 constrains their termination, exit class, and JSON form
+// only; the modifies-nothing arm is `build`'s (SPEC 12.1). Two facts about
+// the CI-pinned draws are guarded permanently, before any product runs, by
+// the fixed-seed draw guard (test/self/p8-fixed-seed-draws.test.ts), which
+// replays P-8's own draws at its registered `P8_RUNS_PER_SEED` runs per seed:
+// every `COMMAND_MENU` entry is drawn at least once, and an intact MDX
+// section tower at least 2048 levels deep is staged (P-8's giant-nesting
+// floor); the same file pins the shared `jsonOutputInEffect`
+// (helpers/invocation-grammar.ts), the menu's bare form per
+// JSON-only surface and JSON form per command, the review composites'
+// expansion, and the mutating commands' performed, preview, and section
+// forms. Beyond those, a dry-run over the committed default seeds at the
+// registered 12 runs per seed (`drawFixedSeedTrials`, the S-8 replay; re-run
+// when the review composites' 2–6 forms per trial moved the draws)
+// verified that every mutation kind — the three refined classes included —
+// and every mutation target occurs (64 mutations): a giant MDX section
+// tower (depth 2048) and TypeScript towers of depths 512, 2048, and 4096,
+// all three BOM flavors and a mid-file BOM, lone, balanced, and
+// range-wrapping fragments, a spread attribute, empty braces, EOF-unbalanced
+// braces, a non-whitespace-singleton container, a boundary expression
+// replacing a container's content, and seeded and existing declaration
+// lines with comment, terminator, indentation, and statement mutations —
+// so the CI-pinned trial set (E-5) exercises every kind deterministically,
+// with staged files bounded (22 KiB max); the modes it misses (a deleted
+// closer, an ECMAScript-whitespace singleton, a split or joined block, a
+// statement at a drawn line start) are reached under
+// `XSPEC_PROPERTY_SEED=random` runs, not by the pinned set.
 //
 // P-8 is outside every CERTIFICATIONS.md fixture scope (its preamble: "P-8
 // sweeps every command, exceeding any narrow conformer scope"), so this body
 // binds only to the real product surface.
+//
+// Shared machinery: P-11 (availability robustness, section-16-p11.ts) is
+// specified over "P-8's generators" (TEST-SPEC §16 P-11), so the base
+// workspace (`FUZZ_BASE_FILES`) and the mutation menu (`drawFuzzMutation`)
+// are exported and drawn by both properties — one input-space definition,
+// two command surfaces.
 
 import { Buffer } from "node:buffer";
+import {
+  decodeNextReport,
+  decodeSessionStatusReport,
+} from "../../helpers/adapters/index.js";
 import { assertJsonOutputConvention, fail } from "../../helpers/assertions.js";
+import { jsonOutputInEffect } from "../../helpers/invocation-grammar.js";
 import type { Choices, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
-  ProductRunOutputOverflowError,
   ProductRunTimeoutError,
   runProduct,
 } from "../../helpers/subprocess.js";
@@ -96,6 +208,11 @@ import {
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { buildOk } from "./support.js";
 
@@ -153,15 +270,81 @@ const BASE_CODE = [
   "",
 ].join("\n");
 
-/** The mutable surface: exactly the files whose bytes trials fuzz. */
-const BASE_FILES: ReadonlyArray<readonly [string, string]> = [
+/**
+ * The fuzz base workspace: exactly the files whose bytes P-8's trials fuzz
+ * (P-11 mutates the three sources only, never the configuration — see
+ * section-16-p11.ts). SPEC-valid by construction; shared per TEST-SPEC §16
+ * P-11 ("P-8's generators").
+ */
+export const FUZZ_BASE_FILES: ReadonlyArray<readonly [string, string]> = [
   ["xspec.config.ts", BASE_CONFIG],
   ["specs/A.mdx", BASE_SPEC_A],
   ["specs/B.mdx", BASE_SPEC_B],
   ["src/app.ts", BASE_CODE],
 ];
 
-const MUTATION_TARGETS: readonly string[] = BASE_FILES.map(([path]) => path);
+const MUTATION_TARGETS: readonly string[] = FUZZ_BASE_FILES.map(
+  ([path]) => path,
+);
+
+/**
+ * The base workspace's files as staged-source records (S-9's
+ * before-any-product clause and its TypeScript clause): the `.mdx` sources
+ * as MDX records (helpers/staged-mdx.ts), the configuration and the code
+ * source as TypeScript records (helpers/staged-ts.ts), all well-formed. P-8
+ * stages the base workspace afresh per trial and P-11 its unmutated base
+ * files per trial — from the second trial on, after the body's first product
+ * invocation: initial files S-7's sweep never reaches — so the ledger
+ * self-test judges them before any product exists. `FUZZ_BASE_FILES` keeps
+ * the strings: the generators mutate their bytes, and a mutated file is
+ * staged plain, declared `unchecked` (fuzz).
+ */
+export const FUZZ_BASE_RECORDS: ReadonlyMap<string, StagedMdx | StagedTs> =
+  new Map<string, StagedMdx | StagedTs>([
+    [
+      "xspec.config.ts",
+      stagedTs(
+        "P-8/P-11 xspec.config.ts — the fuzz base configuration",
+        BASE_CONFIG,
+      ),
+    ],
+    ["specs/A.mdx", stagedMdx("P-8/P-11 specs/A.mdx", BASE_SPEC_A)],
+    ["specs/B.mdx", stagedMdx("P-8/P-11 specs/B.mdx", BASE_SPEC_B)],
+    [
+      "src/app.ts",
+      stagedTs("P-8/P-11 src/app.ts — the fuzz base code source", BASE_CODE),
+    ],
+  ]);
+
+/**
+ * S-9's fixed TypeScript form-vector set (TEST-SPEC 17 S-9; the §16
+ * preamble): the base workspace's configuration and code source P-8 and
+ * P-11 share, unmutated — the records above, judged as records by
+ * test/self/s9-staged-sources.test.ts too, and here beside every generated
+ * configuration and code source
+ * (test/self/s9-typescript-well-formedness.test.ts). A mutated file is
+ * fuzz, staged `unchecked`: the document does not declare its
+ * well-formedness (16).
+ */
+export const P8_P11_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string | Uint8Array]
+> = FUZZ_BASE_FILES.filter(([path]) => path.endsWith(".ts")).map(
+  ([path, text]): readonly [string, string, string] => [
+    `P-8/P-11 base ${path}`,
+    path,
+    text,
+  ],
+);
+
+/** The base workspace as initial `files`: each entry its record. */
+function fuzzBaseWorkspaceFiles(): Record<string, InitialFileContents> {
+  return Object.fromEntries(
+    FUZZ_BASE_FILES.map(([path, text]) => [
+      path,
+      FUZZ_BASE_RECORDS.get(path) ?? text,
+    ]),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // The command menu (SPEC 12 surface). Every entry is drawn by trials; the
@@ -171,28 +354,249 @@ const MUTATION_TARGETS: readonly string[] = BASE_FILES.map(([path]) => path);
 // or files named in arguments are usage errors). Entries are data, never
 // interpreted by a shell (H-2).
 
-const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
+/**
+ * The byte offset of `anchor`'s first occurrence in a base source, plus
+ * `delta` — a menu argument computed from the constant bytes it names, so it
+ * cannot drift from them.
+ */
+function baseByteOffset(text: string, anchor: string, delta: number): number {
+  const index = text.indexOf(anchor);
+  if (index < 0) {
+    throw new Error(
+      `P-8 harness defect: the base source holds no ${JSON.stringify(anchor)}`,
+    );
+  }
+  return Buffer.byteLength(text.slice(0, index), "utf8") + delta;
+}
+
+/**
+ * `at`'s in-range offset (SPEC 11.5) over the base `specs/A.mdx`: the byte
+ * just inside its braced embedding `{text("a.b")}`, within a reference
+ * occurrence's range (5.7) — so over the base workspace the answer carries
+ * that occurrence and its resolved target beside the innermost section
+ * construct. Spelled in decimal digits, as 11.5 requires. Over a mutated
+ * file the offset can lie past its end: a legitimate usage error, exit 2
+ * (11.5, 12.0).
+ */
+const AT_OFFSET = String(baseByteOffset(BASE_SPEC_A, '{text("a.b")}', 1));
+
+/**
+ * The review session every `review` form of the menu names (a valid session
+ * name, SPEC 10.1): the static `create` and `next` forms name it directly,
+ * the composite forms through {@link SESSION_SLOT}.
+ */
+const REVIEW_SESSION = "r1";
+
+/**
+ * Composite-form slots, spelled after SPEC 10.7's synopsis. A menu form
+ * holding `<session>` is a review composite: its arm first runs `review
+ * create --strategy audit --name r1 --json`, then the form with `r1` in the
+ * slot. A form also holding `<item-id>` names an item: between the two, a
+ * JSON read of the session yields the item that fills the slot
+ * ({@link armSteps}). An independently drawn `show`, `split`, or `resolve`
+ * would only ever meet the no-session usage error; the composite reaches a
+ * session's items whenever the fuzzed workspace admits a session. Neither
+ * token ever reaches the product.
+ */
+export const SESSION_SLOT = "<session>";
+export const ITEM_ID_SLOT = "<item-id>";
+
+/**
+ * The item id a composite names when its read yields none — the create
+ * failed on the fuzzed workspace, the read exited non-zero, or the session
+ * holds no item to name: an id no product-derived item of the session
+ * carries, so the drawn command meets the usage error of an unknown review
+ * item (12.0), or whatever error precedes it (the unknown session, the gate
+ * of 13.3). Should a product ever derive this very id, the command runs on
+ * that item instead — every outcome is within P-8's contract either way.
+ */
+const ABSENT_ITEM_ID = "p8-absent-item";
+
+/**
+ * P-8's command menu. Exported for the fixed-seed draw guard
+ * (test/self/p8-fixed-seed-draws.test.ts), which replays P-8's own draws at
+ * {@link P8_RUNS_PER_SEED} and fails unless every entry is drawn at least
+ * once — so a form added here, or a draw shift, that the fixed CI seeds
+ * (E-5) never reach is caught before any product runs. A pick takes one
+ * PRNG value whatever the menu's length, so the fixed seeds' picks are fixed
+ * values, and which forms they reach depends on the menu's length — their
+ * residues modulo it — not on the forms' order: inserting a form anywhere
+ * can leave one undrawn, wherever it stands.
+ *
+ * Every command runs with JSON output in effect at least once — `build`
+ * through the fixed arm ({@link FIXED_BUILD_ARM}), every other command
+ * through a menu form — and the same guard file pins that, beside the
+ * by-surface forms and the mutating commands' forms.
+ */
+export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["build"],
   ["check", "--json"],
   ["check"],
   ["ids", "--json"],
   ["ids", "--tree"],
   ["show", "specs/A.mdx#a"],
+  // 12.4's human report has its `--json` form too (12.0: every command
+  // supports it), held to the JSON contract.
+  ["show", "specs/A.mdx#a", "--json"],
   ["show", "specs/A.mdx"],
   ["query", "node", "specs/A.mdx#a.b", "--json"],
   ["query", "nodes", "--json"],
   ["query", "edges", "--json"],
   ["query", "subtree", "specs/A.mdx#a", "--json"],
   ["query", "ancestors", "specs/A.mdx#a.b", "--json"],
+  // `b`'s `d` reference to `A.a` joins the two over the base workspace by a
+  // one-edge dependency path (11.1).
+  [
+    "query",
+    "reachable",
+    "--from",
+    "specs/B.mdx#b",
+    "--to",
+    "specs/A.mdx#a",
+    "--json",
+  ],
+  ["query", "reachable", "--from", "specs/B.mdx#b", "--to", "specs/A.mdx#a"],
+  ["occurrences"],
+  ["occurrences", "--file", "specs/B.mdx"],
+  ["view", "specs/A.mdx"],
+  // `B`'s `{text(A.c)}` expansion consults `specs/A.mdx` too (11.4).
+  ["view", "specs/B.mdx", "--text"],
+  ["at", "specs/A.mdx", AT_OFFSET],
+  ["inventory", "--json"],
+  ["inventory"],
   ["coverage", "--json"],
   ["coverage"],
   ["impact", "--base", "HEAD", "--json"],
   ["review", "list", "--json"],
-  ["review", "create", "--strategy", "audit", "--name", "r1", "--json"],
-  ["review", "next", "r1", "--json"],
+  [
+    "review",
+    "create",
+    "--strategy",
+    "audit",
+    "--name",
+    REVIEW_SESSION,
+    "--json",
+  ],
+  ["review", "next", REVIEW_SESSION, "--json"],
+  // The review subcommands naming a session, and an item, as composites
+  // (`armSteps`); `export` is JSON-only (10.7), so its bare form is held to
+  // the JSON contract too.
+  ["review", "status", SESSION_SLOT, "--json"],
+  ["review", "status", SESSION_SLOT],
+  ["review", "show", SESSION_SLOT, ITEM_ID_SLOT, "--json"],
+  ["review", "show", SESSION_SLOT, ITEM_ID_SLOT],
+  ["review", "split", SESSION_SLOT, ITEM_ID_SLOT, "--json"],
+  ["review", "split", SESSION_SLOT, ITEM_ID_SLOT],
+  [
+    "review",
+    "resolve",
+    SESSION_SLOT,
+    ITEM_ID_SLOT,
+    "--status",
+    "no-change",
+    "--json",
+  ],
+  ["review", "resolve", SESSION_SLOT, ITEM_ID_SLOT, "--status", "no-change"],
+  ["review", "export", SESSION_SLOT, "--json"],
+  ["review", "export", SESSION_SLOT],
+  // The mutating commands, performed and previewed. A preview (6.6) plans
+  // the operation over the fuzzed workspace and performs nothing; it
+  // supports `--json` (the preview document of 12.7) and is no JSON-only
+  // surface, so its bare form is held to the exit partition alone.
+  // `--test-hold` never appears: beside `--preview` it is a usage error
+  // (6.6, 12.0), and P-8 drives no seam.
   ["rename", "specs/A.mdx", "c", "c2", "--json"],
+  ["rename", "specs/A.mdx", "c", "c2", "--preview", "--json"],
+  ["rename", "specs/A.mdx", "c", "c2", "--preview"],
   ["move", "specs/B.mdx", "specs/moved.mdx", "--json"],
+  ["move", "specs/B.mdx", "specs/moved.mdx", "--preview", "--json"],
+  ["move", "specs/B.mdx", "specs/moved.mdx", "--preview"],
+  // The section form (6.5) moves the base's `c` out of `specs/A.mdx`: into
+  // `specs/B.mdx`, a file the base holds, its ID kept (a cross-file move
+  // keeping its ID is valid, 6.5) — `b`'s `{text(A.c)}` turns local and
+  // the moved `d` and embedding chains are rooted at B's binding of A — and
+  // into `specs/C.mdx`, which the base lacks, so the move creates it, `c`
+  // re-identified as `e` — C's import of A composed in and an import of C
+  // added to B. Over the base workspace every form here performs or
+  // previews with exit 0; a fuzzed one can refuse it (exit 1) or name an
+  // origin the trial's mutations or an earlier form removed (exit 2).
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c", "--json"],
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c"],
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c", "--preview", "--json"],
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c", "--preview"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e", "--json"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e", "--preview", "--json"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e", "--preview"],
+  ["version", "--json"],
+  ["version"],
 ];
+
+/**
+ * The arm every trial runs first, before its drawn forms: `build --json`,
+ * whose failure must modify nothing (SPEC 12.1) — `build`'s run under JSON
+ * output, the menu holding its bare form.
+ */
+export const FIXED_BUILD_ARM: readonly string[] = ["build", "--json"];
+
+/**
+ * One invocation of a drawn form's arm. A composite's read carries the
+ * session read it is (`yieldsItem`): its JSON answer yields the item that
+ * fills {@link ITEM_ID_SLOT} in the step after it.
+ */
+export interface ArmStep {
+  readonly argv: readonly string[];
+  readonly yieldsItem?: "next" | "status";
+}
+
+/**
+ * The invocations a drawn menu form runs, in order, each under
+ * `runFuzzArm`'s assertions. A static form is its one step. A review
+ * composite ({@link SESSION_SLOT}) runs:
+ *
+ *   1. `review create --strategy audit --name r1 --json`, creating the
+ *      session whenever the fuzzed workspace admits one (an `r1` an earlier
+ *      form of the trial created makes it a refused create, exit 1 — the
+ *      reads below then meet that session);
+ *   2. for a form naming an item, a JSON read of the session (10.7):
+ *      `review status r1 --json` for `split`, taking the first item in item
+ *      order — over the base workspace `specs/A.mdx`'s implicit root, an
+ *      audit scope node with children (10.6: root nodes included), so the
+ *      split performs over a benign draw — and `review next r1 --json` for
+ *      `show` and `resolve`, taking the first item needing review and
+ *      unblocked, so the resolve performs;
+ *   3. the form itself, `r1` in the session slot and the read's item — else
+ *      {@link ABSENT_ITEM_ID} — in the item slot.
+ */
+export function armSteps(form: readonly string[]): readonly ArmStep[] {
+  if (!form.includes(SESSION_SLOT)) return [{ argv: form }];
+  const steps: ArmStep[] = [
+    {
+      argv: [
+        "review",
+        "create",
+        "--strategy",
+        "audit",
+        "--name",
+        REVIEW_SESSION,
+        "--json",
+      ],
+    },
+  ];
+  if (form.includes(ITEM_ID_SLOT)) {
+    const read = form[1] === "split" ? "status" : "next";
+    steps.push({
+      argv: ["review", read, REVIEW_SESSION, "--json"],
+      yieldsItem: read,
+    });
+  }
+  steps.push({
+    argv: form.map((token) =>
+      token === SESSION_SLOT ? REVIEW_SESSION : token,
+    ),
+  });
+  return steps;
+}
 
 // ---------------------------------------------------------------------------
 // Mutations. Each apply function is pure (bytes in, bytes out) and draws all
@@ -256,7 +660,7 @@ const UTF16LE_BOM: readonly number[] = [0xff, 0xfe];
 const UTF16BE_BOM: readonly number[] = [0xfe, 0xff];
 
 /** Line-terminator sequences LF is rewritten to / runs are built from. */
-const TERMINATOR_SEQUENCES: ReadonlyArray<
+export const TERMINATOR_SEQUENCES: ReadonlyArray<
   readonly [string, readonly number[]]
 > = [
   ["CR", [0x0d]],
@@ -269,8 +673,22 @@ const TERMINATOR_SEQUENCES: ReadonlyArray<
 ];
 
 // Every nesting draw is genuinely giant (P-8 "giant nesting"); the smallest
-// entry first so counterexamples shrink toward the shallowest tower.
-const NESTING_DEPTHS: readonly number[] = [512, 2048, 4096];
+// entry first so counterexamples shrink toward the shallowest tower. Exported
+// (with `sectionTowerSource` and `MAX_MUTATIONS_PER_TRIAL`) so S-8's capacity
+// gate derives the suite's staged maxima from the generator itself (H-11).
+export const NESTING_DEPTHS: readonly number[] = [512, 2048, 4096];
+
+/**
+ * The MDX section tower a nesting mutation stages: `depth` nested `<S id="g">`
+ * openers, balanced ones closing around one content line, unclosed ones left
+ * open (an unparseable file). Byte-exact — S-2/S-8 stage and size the same
+ * tower the fuzz draws stage.
+ */
+export function sectionTowerSource(depth: number, balanced: boolean): string {
+  return balanced
+    ? `${'<S id="g">\n'.repeat(depth)}deep.\n${"</S>\n".repeat(depth)}`
+    : '<S id="g">\n'.repeat(depth);
+}
 
 function spliceBytes(
   bytes: Uint8Array,
@@ -292,7 +710,7 @@ function renderBytes(sequence: readonly number[]): string {
 }
 
 /** One mutation: new bytes plus a human-readable description for the log. */
-interface MutationResult {
+export interface MutationResult {
   readonly bytes: Uint8Array;
   readonly description: string;
 }
@@ -387,9 +805,7 @@ function mutateNesting(
   let shape: string;
   if (path.endsWith(".mdx")) {
     shape = balanced ? "balanced section tower" : "unclosed section tower";
-    tower = balanced
-      ? `${'<S id="g">\n'.repeat(depth)}deep.\n${"</S>\n".repeat(depth)}`
-      : '<S id="g">\n'.repeat(depth);
+    tower = sectionTowerSource(depth, balanced);
   } else {
     shape = balanced
       ? "balanced parenthesis tower"
@@ -445,6 +861,534 @@ function mutateGarbage(choices: Choices, bytes: Uint8Array): MutationResult {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The refined mutation classes (module header: fragment, braces, esmBlock).
+// Each edits the evolving bytes at a drawn anchor found by scanning them — a
+// `{…}` container, a `<S ` tag, an `import`/`export` line, a line start — or
+// at a drawn offset, and seeds an anchor when the file holds none, so every
+// mode is meaningful on every target after every earlier mutation of the
+// trial. Byte-level throughout: a container's content is spliced as bytes,
+// never decoded, so ill-formed UTF-8 an earlier mutation staged survives
+// untouched (H-10: the staged bytes are a pure function of the tape).
+
+const LF = 0x0a;
+const CR = 0x0d;
+
+function utf8(text: string): number[] {
+  return [...Buffer.from(text, "utf8")];
+}
+
+/** Non-overlapping offsets of every occurrence of `needle` in `bytes`. */
+function findAll(bytes: Uint8Array, needle: readonly number[]): number[] {
+  const hits: number[] = [];
+  if (needle.length === 0) return hits;
+  for (let i = 0; i + needle.length <= bytes.length; i += 1) {
+    let match = true;
+    for (let j = 0; j < needle.length; j += 1) {
+      if (bytes[i + j] !== needle[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      hits.push(i);
+      i += needle.length - 1;
+    }
+  }
+  return hits;
+}
+
+/** Offsets at which a line begins: 0 and the byte after each LF, CRLF, or lone CR. */
+function lineStarts(bytes: Uint8Array): number[] {
+  const starts = [0];
+  for (let i = 0; i < bytes.length; i += 1) {
+    if (bytes[i] === LF || (bytes[i] === CR && bytes[i + 1] !== LF)) {
+      starts.push(i + 1);
+    }
+  }
+  return starts;
+}
+
+/** The offset of the terminator (or EOF) ending the line that begins at `start`. */
+function lineEnd(bytes: Uint8Array, start: number): number {
+  let i = start;
+  while (i < bytes.length && bytes[i] !== LF && bytes[i] !== CR) i += 1;
+  return i;
+}
+
+/** The length of the terminator at `offset`: 2 for CRLF, 1 for LF or CR, 0 at EOF. */
+function terminatorLength(bytes: Uint8Array, offset: number): number {
+  if (offset >= bytes.length) return 0;
+  if (bytes[offset] === CR && bytes[offset + 1] === LF) return 2;
+  return 1;
+}
+
+/** A half-open byte range [start, end). */
+interface ByteSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Every `{…}` span of the file: an opening brace through the nearest later closing brace. */
+function braceContainers(bytes: Uint8Array): ByteSpan[] {
+  const spans: ByteSpan[] = [];
+  let i = 0;
+  while (i < bytes.length) {
+    if (bytes[i] !== 0x7b) {
+      i += 1;
+      continue;
+    }
+    let j = i + 1;
+    while (j < bytes.length && bytes[j] !== 0x7d) j += 1;
+    if (j >= bytes.length) break;
+    spans.push({ start: i, end: j + 1 });
+    i = j + 1;
+  }
+  return spans;
+}
+
+// Code points spelled by number (never as escape spellings in source):
+const NBSP = String.fromCharCode(0xa0); // U+00A0 — ECMAScript whitespace
+const ZWNBSP = String.fromCharCode(0xfeff); // U+FEFF — ECMAScript whitespace
+const LS = String.fromCharCode(0x2028); // U+2028 — ECMAScript line terminator
+const PS = String.fromCharCode(0x2029); // U+2029 — ECMAScript line terminator
+const NEL = String.fromCharCode(0x85); // U+0085 — neither (14.20)
+const ZWSP = String.fromCharCode(0x200b); // U+200B — neither (14.20)
+const BACKSLASH = String.fromCharCode(0x5c);
+
+// --- fragment ---------------------------------------------------------------
+
+/** Fragment interiors, [name, text]; empty first (the shrink target). */
+const FRAGMENT_INTERIORS: ReadonlyArray<readonly [string, string]> = [
+  ["empty", ""],
+  ["prose", "frag"],
+  ["a section", '<S id="f">frag.</S>'],
+  ["an embedding", '{text("a.b")}'],
+  ["a comment", "{/* c */}"],
+  ["a nested fragment", "<>nested</>"],
+  ["a multi-line interior", "\nfrag line\n"],
+];
+
+function mutateFragment(choices: Choices, bytes: Uint8Array): MutationResult {
+  const mode = choices.pick([
+    "balanced",
+    "openOnly",
+    "closeOnly",
+    "wrapRange",
+  ] as const);
+  const offset = choices.intInclusive(0, bytes.length);
+  if (mode === "balanced") {
+    const [name, interior] = choices.pick(FRAGMENT_INTERIORS);
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(`<>${interior}</>`)),
+      description: `insert a balanced fragment (${name}) at ${String(offset)}`,
+    };
+  }
+  if (mode === "openOnly" || mode === "closeOnly") {
+    const tag = mode === "openOnly" ? "<>" : "</>";
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(tag)),
+      description: `insert a lone fragment tag ${tag} at ${String(offset)}`,
+    };
+  }
+  const close = choices.intInclusive(offset, bytes.length);
+  const opened = spliceBytes(bytes, offset, 0, utf8("<>"));
+  return {
+    bytes: spliceBytes(opened, close + 2, 0, utf8("</>")),
+    description: `wrap bytes [${String(offset)}, ${String(close)}) in a fragment`,
+  };
+}
+
+// --- braces ------------------------------------------------------------------
+
+/**
+ * Content rewrites of a `{…}` container at the comment/expression boundary
+ * (SPEC 2.7, 14.20; T2.3-3, T2.7-4): [name, "wrap", prefix, suffix] keeps the
+ * content bytes between the two spellings; [name, "replace", text] replaces
+ * them. Names describe the form; the forms with U+2028 and the whitespace
+ * singletons carry their code points, so descriptions name rather than
+ * quote them.
+ */
+type ContentRewrite =
+  | readonly [string, "wrap", string, string]
+  | readonly [string, "replace", string];
+
+const CONTENT_REWRITES: readonly ContentRewrite[] = [
+  ["the content wrapped in a block comment", "wrap", "/* ", " */"],
+  ["an expression beside the content", "wrap", "", " 1"],
+  ["a block comment before the content", "wrap", "/* n */ ", ""],
+  ["a block comment after the content", "wrap", "", " /* n */"],
+  ["a line comment ended by U+000A before the content", "wrap", "// n\n", ""],
+  ["a line comment ended by U+000D before the content", "wrap", "// n\r", ""],
+  [
+    "a run-on line comment (a brace on the commented-out line)",
+    "wrap",
+    "// c}\n",
+    "",
+  ],
+  [
+    "a line comment ended by U+2028, then a brace and U+000A",
+    "wrap",
+    `// c${LS}}\n`,
+    "",
+  ],
+  ["empty braces", "replace", ""],
+  ["two block comments", "replace", " /* a */ /* b */ "],
+  ["a line comment reaching the closing brace", "replace", "// c"],
+  ["U+00A0 alone", "replace", NBSP],
+  ["U+FEFF alone", "replace", ZWNBSP],
+  ["U+2028 alone", "replace", LS],
+  ["U+2029 alone", "replace", PS],
+  ["U+0085 alone", "replace", NEL],
+  ["U+200B alone", "replace", ZWSP],
+];
+
+/**
+ * Boundary expressions replacing a container's content (SPEC 14.20's
+ * derivability contract, T14-12; the embedding forms of T2.3-3): well-formed
+ * expressions that are no embedding, early-error forms, two expressions, and
+ * syntax failures.
+ */
+const BOUNDARY_EXPRESSIONS: readonly string[] = [
+  "1",
+  "a, b",
+  "1 = 2",
+  "let",
+  "010",
+  "await x",
+  "function(){}",
+  '(text)("a")',
+  'text?.("a")',
+  'text("a"), 1',
+  `te${BACKSLASH}u0078t("a")`,
+  'text("a") text("b")',
+  "text(",
+  "]",
+  '<S id="q">in braces</S>',
+  "<b/>",
+  "<></>",
+  "/* unclosed",
+];
+
+/** Spread attributes inserted on a `<S ` tag (T2.7-3's grammar pair and neighbours). */
+const SPREAD_ATTRIBUTES: readonly string[] = [
+  " {...(a, b)}",
+  " {...a, b}",
+  " {...a}",
+  " {...}",
+  " {... /* c */ a}",
+  " {...a /* c */}",
+];
+
+/** Empty-brace insertions: [text, anchor] — on a `<S ` tag or at any offset. */
+const EMPTY_BRACE_INSERTIONS: ReadonlyArray<readonly [string, "tag" | "any"]> =
+  [
+    ["{}", "any"],
+    ["{ }", "any"],
+    ["{ /* c */ }", "any"],
+    ["{// c\n}", "any"],
+    [" d={}", "tag"],
+    [" d={ /* c */ }", "tag"],
+    [" coverage={}", "tag"],
+  ];
+
+/** Tails appended at EOF leaving a brace unbalanced (or a stray closer). */
+const EOF_BRACE_TAILS: readonly string[] = [
+  '{text("a")',
+  "{",
+  "{/* c",
+  "{// c}",
+  "{// c\n",
+  "}",
+  '<S id="z" d={',
+  '<S id="z" d={[A.a]',
+];
+
+/** The offset just after a drawn `<S ` tag name, or a drawn offset when the file spells none. */
+function drawTagOffset(choices: Choices, bytes: Uint8Array): number {
+  const tags = findAll(bytes, utf8("<S "));
+  return tags.length > 0
+    ? choices.pick(tags) + 2
+    : choices.intInclusive(0, bytes.length);
+}
+
+function mutateBraces(choices: Choices, bytes: Uint8Array): MutationResult {
+  const mode = choices.pick([
+    "rewriteContent",
+    "boundaryExpression",
+    "spreadAttribute",
+    "emptyBraces",
+    "unbalancedAtEof",
+  ] as const);
+  if (mode === "rewriteContent" || mode === "boundaryExpression") {
+    let staged = bytes;
+    let span: ByteSpan;
+    let seeded = "";
+    const spans = braceContainers(bytes);
+    if (spans.length > 0) {
+      span = choices.pick(spans);
+    } else {
+      const offset = choices.intInclusive(0, bytes.length);
+      const embedding = utf8('{text("a.b")}');
+      staged = spliceBytes(bytes, offset, 0, embedding);
+      span = { start: offset, end: offset + embedding.length };
+      seeded = " (seeded, the file holding no container)";
+    }
+    const content = staged.subarray(span.start + 1, span.end - 1);
+    if (mode === "rewriteContent") {
+      const rewrite = choices.pick(CONTENT_REWRITES);
+      const replaced =
+        rewrite[1] === "wrap"
+          ? [...utf8(rewrite[2]), ...content, ...utf8(rewrite[3])]
+          : utf8(rewrite[2]);
+      return {
+        bytes: spliceBytes(staged, span.start + 1, content.length, replaced),
+        description: `rewrite the container at ${String(span.start)}${seeded}: ${rewrite[0]}`,
+      };
+    }
+    const expression = choices.pick(BOUNDARY_EXPRESSIONS);
+    return {
+      bytes: spliceBytes(
+        staged,
+        span.start + 1,
+        content.length,
+        utf8(expression),
+      ),
+      description:
+        `replace the content of the container at ${String(span.start)}${seeded} ` +
+        `with ${JSON.stringify(expression)}`,
+    };
+  }
+  if (mode === "spreadAttribute") {
+    const attribute = choices.pick(SPREAD_ATTRIBUTES);
+    const offset = drawTagOffset(choices, bytes);
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(attribute)),
+      description: `insert the spread attribute ${JSON.stringify(attribute.trim())} at ${String(offset)}`,
+    };
+  }
+  if (mode === "emptyBraces") {
+    const [text, anchor] = choices.pick(EMPTY_BRACE_INSERTIONS);
+    const offset =
+      anchor === "tag"
+        ? drawTagOffset(choices, bytes)
+        : choices.intInclusive(0, bytes.length);
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(text)),
+      description: `insert empty braces ${JSON.stringify(text.trim())} at ${String(offset)}`,
+    };
+  }
+  const lastCloser = bytes.lastIndexOf(0x7d);
+  if (lastCloser >= 0 && choices.boolean(0.25)) {
+    return {
+      bytes: spliceBytes(bytes, lastCloser, 1, []),
+      description: `delete the file's last closing brace at ${String(lastCloser)}`,
+    };
+  }
+  const tail = choices.pick(EOF_BRACE_TAILS);
+  return {
+    bytes: spliceBytes(bytes, bytes.length, 0, utf8(tail)),
+    description: `append ${JSON.stringify(tail)} at EOF (unbalanced braces)`,
+  };
+}
+
+// --- esmBlock ----------------------------------------------------------------
+
+const ESM_LINE_LEADS: ReadonlyArray<readonly number[]> = [
+  utf8("import "),
+  utf8("export "),
+];
+
+/** Start offsets of the lines beginning with `import ` or `export `. */
+function esmLineStarts(bytes: Uint8Array): number[] {
+  return lineStarts(bytes).filter((start) =>
+    ESM_LINE_LEADS.some((lead) =>
+      lead.every((byte, i) => bytes[start + i] === byte),
+    ),
+  );
+}
+
+const SEEDED_DECLARATION = 'import Z from "./A.xspec"';
+
+/**
+ * Comment insertions around a declaration line, [name, text, anchor]: before
+ * the line (own-line forms), at its start (a comment before the declaration
+ * on its line), at its end (trailing), or on the line after it with no blank
+ * line between (SPEC 14.20's block; T3-7's forms).
+ */
+const ESM_COMMENT_INSERTIONS: ReadonlyArray<
+  readonly [string, string, "before" | "lineStart" | "lineEnd" | "after"]
+> = [
+  ["an own-line line comment before it", "// note\n", "before"],
+  ["an own-line block comment before it", "/* c */\n", "before"],
+  ["a block comment spanning lines before it", "/* a\n b */\n", "before"],
+  [
+    "a block comment before the declaration on its line",
+    "/* c */ ",
+    "lineStart",
+  ],
+  ["a trailing line comment", " // note", "lineEnd"],
+  ["a trailing block comment", " /* c */", "lineEnd"],
+  [
+    "an own-line line comment after it, no blank line between",
+    "// tail\n",
+    "after",
+  ],
+  [
+    "an own-line block comment after it, no blank line between",
+    "/* tail */\n",
+    "after",
+  ],
+];
+
+/** Terminator rewrites of a declaration line, [name, text] replacing its terminator. */
+const ESM_TERMINATOR_REWRITES: ReadonlyArray<readonly [string, string]> = [
+  ["CR", "\r"],
+  ["CRLF", "\r\n"],
+  ["U+2028", LS],
+  ["U+2029", PS],
+  ["a blank line", "\n\n"],
+  ["a space (joining the next line)", " "],
+  ["`;` and LF", ";\n"],
+];
+
+/** Indentation prefixes, [name, text]. */
+const ESM_INDENTS: ReadonlyArray<readonly [string, string]> = [
+  ["one space", " "],
+  ["three spaces", "   "],
+  ["four spaces", "    "],
+  ["a tab", "\t"],
+];
+
+/** Second declarations joining or following a block, [name, text]. */
+const ESM_SECOND_DECLARATIONS: ReadonlyArray<readonly [string, string]> = [
+  ["a duplicate binding", 'import A from "./A.xspec"'],
+  ["a fresh binding", SEEDED_DECLARATION],
+  ["a side-effect-only import", 'import "./A.xspec"'],
+  ["import attributes", 'import A from "./A.xspec" with { type: "json" }'],
+  ["an export naming no declaration", "export { nope }"],
+  ["an export holding JSX", "export const x = <b/>"],
+  ["a default export", "export default 1"],
+];
+
+/** Statements at a line start, [name, text]. */
+const ESM_STATEMENTS: ReadonlyArray<readonly [string, string]> = [
+  ["a declaration statement", "const x = 1"],
+  ["an expression statement", "x;"],
+  ["a bare `let`", "let"],
+  ["an exported declaration", "export const x = 1"],
+  ["a statement holding a spec import", 'const y = import("./A.xspec")'],
+];
+
+function mutateEsmBlock(choices: Choices, bytes: Uint8Array): MutationResult {
+  const mode = choices.pick([
+    "comment",
+    "terminator",
+    "indent",
+    "split",
+    "join",
+    "statement",
+  ] as const);
+  // Anchor: a drawn declaration line, seeded at a drawn line start when the
+  // file holds none.
+  let staged = bytes;
+  let start: number;
+  let seeded = "";
+  const declarations = esmLineStarts(bytes);
+  if (declarations.length > 0) {
+    start = choices.pick(declarations);
+  } else {
+    start = choices.pick(lineStarts(bytes));
+    staged = spliceBytes(bytes, start, 0, utf8(`${SEEDED_DECLARATION}\n\n`));
+    seeded = " (seeded, the file holding no declaration line)";
+  }
+  const end = lineEnd(staged, start);
+  const terminator = terminatorLength(staged, end);
+  const nextLine = end + terminator;
+  const at = `the declaration line at ${String(start)}${seeded}`;
+  if (mode === "comment") {
+    const [name, text, anchor] = choices.pick(ESM_COMMENT_INSERTIONS);
+    const offset =
+      anchor === "before" || anchor === "lineStart"
+        ? start
+        : anchor === "lineEnd"
+          ? end
+          : nextLine;
+    const insert = anchor === "after" && terminator === 0 ? `\n${text}` : text;
+    return {
+      bytes: spliceBytes(staged, offset, 0, utf8(insert)),
+      description: `insert ${name} around ${at}`,
+    };
+  }
+  if (mode === "terminator") {
+    if (choices.boolean(0.3)) {
+      const semicolon = end > start && staged[end - 1] === 0x3b;
+      return {
+        bytes: semicolon
+          ? spliceBytes(staged, end - 1, 1, [])
+          : spliceBytes(staged, end, 0, [0x3b]),
+        description: `${semicolon ? "remove" : "append"} the \`;\` of ${at}`,
+      };
+    }
+    const [name, text] = choices.pick(ESM_TERMINATOR_REWRITES);
+    return {
+      bytes: spliceBytes(staged, end, terminator, utf8(text)),
+      description: `rewrite the terminator of ${at} to ${name}`,
+    };
+  }
+  if (mode === "indent") {
+    const [name, text] = choices.pick(ESM_INDENTS);
+    return {
+      bytes: spliceBytes(staged, start, 0, utf8(text)),
+      description: `indent ${at} by ${name}`,
+    };
+  }
+  if (mode === "split") {
+    const [name, text] = choices.pick(ESM_SECOND_DECLARATIONS);
+    return {
+      bytes: spliceBytes(staged, end, 0, utf8(`\n\n${text}`)),
+      description: `add ${name} in a separate block after ${at}`,
+    };
+  }
+  if (mode === "join") {
+    if (choices.boolean(0.4)) {
+      // Delete the blank line(s) after the block so the following content
+      // joins it.
+      let blankEnd = nextLine;
+      while (blankEnd < staged.length) {
+        const lineTerminator = terminatorLength(staged, blankEnd);
+        if (lineTerminator === 0 || lineEnd(staged, blankEnd) !== blankEnd) {
+          break;
+        }
+        blankEnd += lineTerminator;
+      }
+      if (blankEnd > nextLine) {
+        return {
+          bytes: spliceBytes(staged, nextLine, blankEnd - nextLine, []),
+          description: `delete the blank line(s) after ${at}`,
+        };
+      }
+    }
+    const [name, text] = choices.pick(ESM_SECOND_DECLARATIONS);
+    return {
+      bytes: spliceBytes(staged, end, 0, utf8(`\n${text}`)),
+      description: `add ${name} on the line after ${at} (one block)`,
+    };
+  }
+  const [name, text] = choices.pick(ESM_STATEMENTS);
+  if (choices.boolean(0.6)) {
+    return {
+      bytes: spliceBytes(staged, end, 0, utf8(`\n${text}`)),
+      description: `add ${name} on the line after ${at} (one block)`,
+    };
+  }
+  const lineStart = choices.pick(lineStarts(staged));
+  return {
+    bytes: spliceBytes(staged, lineStart, 0, utf8(`${text}\n`)),
+    description: `insert ${name} at the line start ${String(lineStart)}${seeded}`,
+  };
+}
+
 type Mutator = (
   choices: Choices,
   bytes: Uint8Array,
@@ -461,7 +1405,27 @@ const MUTATION_KINDS: ReadonlyArray<readonly [number, Mutator]> = [
   [2, (c, b) => mutateTruncate(c, b)],
   [2, (c, b) => mutateShuffle(c, b)],
   [2, (c, b) => mutateGarbage(c, b)],
+  [2, (c, b) => mutateFragment(c, b)],
+  [3, (c, b) => mutateBraces(c, b)],
+  [3, (c, b) => mutateEsmBlock(c, b)],
 ];
+
+/**
+ * Draw one mutation from the weighted menu (the module header's full input
+ * classes of P-8) and apply it to the given bytes: one weightedPick for the
+ * kind, then the kind's own parameter draws — all through `choices`, so
+ * identical tapes re-derive identical staged bytes on replay and during
+ * shrinking (H-10). The one mutation-drawing entry point shared with P-11
+ * (TEST-SPEC §16 P-11: "P-8's generators").
+ */
+export function drawFuzzMutation(
+  choices: Choices,
+  bytes: Uint8Array,
+  path: string,
+): MutationResult {
+  const mutate = choices.weightedPick(MUTATION_KINDS);
+  return mutate(choices, bytes, path);
+}
 
 // ---------------------------------------------------------------------------
 // Trial generation
@@ -472,43 +1436,69 @@ export interface FuzzTrial {
   readonly files: ReadonlyArray<readonly [string, Uint8Array]>;
   /** Human-readable description of each applied mutation. */
   readonly mutations: readonly string[];
-  /** Drawn command invocations, run after the fixed `build --json` arm. */
+  /**
+   * Drawn `COMMAND_MENU` forms, run after the fixed `build --json` arm — a
+   * review composite as the invocations of its arm ({@link armSteps}).
+   */
   readonly commands: ReadonlyArray<readonly string[]>;
 }
+
+/** Mutations applied per trial: 1 + a draw in [0, MAX_MUTATIONS_PER_TRIAL - 1]. */
+export const MAX_MUTATIONS_PER_TRIAL = 3;
+
+/**
+ * Menu forms drawn per trial: 2, then up to this many while `listOf`'s
+ * continue draws (0.8 each) hold. Raised from 4 with the review composites
+ * (41 forms), so the fixed seeds draw every form at P8_RUNS_PER_SEED; the
+ * 54 forms since the previews and the section form of `move` are drawn at
+ * it too (162 picks), the count unchanged. Changing it moves every later
+ * trial of a seed, the giant-nesting floor's included (the fixed-seed draw
+ * guard re-checks both), where a menu form added or removed moves no
+ * mutation draw.
+ */
+const MAX_COMMANDS_PER_TRIAL = 6;
 
 /** The P-8 trial generator (see the module header). */
 export const genFuzzTrial: Gen<FuzzTrial> = (choices) => {
   const files = new Map<string, Uint8Array>(
-    BASE_FILES.map(([path, text]) => [
+    FUZZ_BASE_FILES.map(([path, text]) => [
       path,
       Uint8Array.from(Buffer.from(text, "utf8")),
     ]),
   );
   const mutations: string[] = [];
-  const mutationCount = 1 + choices.intInclusive(0, 2);
+  const mutationCount =
+    1 + choices.intInclusive(0, MAX_MUTATIONS_PER_TRIAL - 1);
   for (let i = 0; i < mutationCount; i += 1) {
     const path = choices.pick(MUTATION_TARGETS);
-    const mutate = choices.weightedPick(MUTATION_KINDS);
     const current = files.get(path);
     if (current === undefined) {
       throw new Error(`P-8 harness defect: no staged bytes for ${path}`);
     }
-    const result = mutate(choices, current, path);
+    const result = drawFuzzMutation(choices, current, path);
     files.set(path, result.bytes);
     mutations.push(`${path}: ${result.description}`);
   }
   const commands = listOf((c: Choices) => c.pick(COMMAND_MENU), {
     min: 2,
-    max: 4,
+    max: MAX_COMMANDS_PER_TRIAL,
   })(choices);
   return { files: [...files.entries()], mutations, commands };
 };
 
-/** Counterexample rendering: the mutation log and the drawn commands. */
+/**
+ * Counterexample rendering: the mutation log and the drawn commands, a
+ * review composite as the list of every invocation its arm runs
+ * ({@link armSteps}; `<item-id>` stands for the item its read yields, else
+ * {@link ABSENT_ITEM_ID}).
+ */
 export function renderFuzzTrial(trial: FuzzTrial): string {
   return JSON.stringify({
     mutations: trial.mutations,
-    commands: trial.commands.map((argv) => argv.join(" ")),
+    commands: trial.commands.map((form) => {
+      const steps = armSteps(form).map((step) => step.argv.join(" "));
+      return steps.length === 1 ? steps[0] : steps;
+    }),
   });
 }
 
@@ -518,42 +1508,100 @@ export function renderFuzzTrial(trial: FuzzTrial): string {
 /**
  * Per-invocation hang guard for fuzz runs. Purely the H-8 guard bounding the
  * observation "the command terminates" — never an assertion input beyond
- * that (H-10); generously above any plausible parse time for these staged
- * inputs (≤ ~100 KiB per file), and small enough that a falsified
- * termination clause shrinks within the test budget.
+ * that (H-10) — dimensioned to the staged answer scale (H-11), not to parse
+ * time alone: the menu's answer surfaces emit documents far larger than
+ * their inputs. The largest answer a menu form admits over a P-8 draw is
+ * `view specs/B.mdx --text` over `specs/B.mdx` carrying two appended
+ * depth-4096 balanced section towers (B's own maximum: the LF → U+2028
+ * rewrite that grows P-11's maximum leaves B unparseable, its import line
+ * swallowing the file). Measured against the built product (Phase 10's, at
+ * c62f451) through `runProduct` on a 4-core machine, alone, under the
+ * unprivileged namespace: that invocation emits 25.0 MB and terminates in
+ * 3.8–5.0 s (two runs); every other menu form over the generator maximum
+ * (`specs/A.mdx` or `specs/B.mdx` carrying those towers, with or without
+ * the U+2028 rewrite) — `view` 23.7 MB in at most 2.4 s, every other form
+ * in at most 2.1 s, `inventory` and `version` under 0.4 s — and any form
+ * over an unmutated-scale draw ~0.5 s — the review composites' steps among
+ * them: a session exists only over a valid workspace, which no tower draw
+ * leaves (its nested `g` ids break 1.3), so over the generator maximum
+ * `review create --json` answers the 13.3 gate's report at `check --json`'s
+ * 4.7 MB and every step naming the session exits 2, each in at most 2.1 s
+ * (re-measured with the composites), and the same holds of `rename` and
+ * `move` performed or previewed in either form and of `show --json`: each
+ * refuses or answers the gate's report there (the 4.7 MB JSON form, the
+ * 1.8 MB human one) in at most 2.0 s, and under 0.6 s over a TypeScript
+ * tower (re-measured with the previews and the section form). 60 s is 12×
+ * the `view --text`
+ * maximum: the ≥ 4× margin a conforming product is owed over its measured
+ * answer time, plus headroom for slower CI runners and a slower product,
+ * and still more than twice the 25.4 s of the largest answer any
+ * shared-generator draw admits (P-11's `view --text` over `specs/A.mdx`
+ * under that rewrite, 125.8 MB), which no menu form requests. So a
+ * conforming product is never killed while
+ * still emitting its answer (H-11: an exhausted harness limit is a harness
+ * defect, never a diagnosed product failure), and a genuinely hanging one
+ * costs one guard per diagnosis, reported unshrunk (`runFuzzCommand`).
+ * Re-measure with a temporary self-test staging `FUZZ_BASE_FILES` with
+ * `sectionTowerSource(4096, true)` appended twice to the viewed file (see
+ * AGENTS.md) whenever a generator bound or a menu form's surface moves.
  */
-const FUZZ_COMMAND_TIMEOUT_MS = 10_000;
+const FUZZ_COMMAND_TIMEOUT_MS = 60_000;
 
 /**
- * Run one command over the fuzzed workspace, converting the hang-guard and
- * runaway-output kills — exactly those — into diagnosed assertion failures:
- * P-8's first clause is that every command terminates. Anything else thrown
- * by the driver stays a harness error (H-8).
+ * The two subprocess-driver guards a fuzz command run is held to (P-8's
+ * `runFuzzCommand`, P-11's `runAvailabilityCommand`): the per-invocation
+ * hang guard — by default the property module's `FUZZ_COMMAND_TIMEOUT_MS` —
+ * and the output-capture cap — by default the driver's
+ * `DEFAULT_MAX_OUTPUT_BYTES` (H-11). The registered P-8 and P-11 bodies pass
+ * neither; S-8's self-test (test/self/s8-answer-scale-capacity.test.ts)
+ * lowers both, to pin which kill is a diagnosed failure of the termination
+ * clause and which a harness error.
  */
-async function runFuzzCommand(
+export interface FuzzRunGuards {
+  readonly timeoutMs?: number;
+  readonly maxOutputBytes?: number;
+}
+
+/**
+ * Run one command over the fuzzed workspace, converting the hang-guard kill
+ * — exactly that — into a diagnosed assertion failure: P-8's first clause is
+ * that every command terminates (S-3: hangs are reported as failures). An
+ * exhausted capture limit (`ProductRunOutputOverflowError`) is never
+ * converted: it propagates out of the property body as a harness error that
+ * `checkProperty` reports with the seed — never a falsified property (H-11)
+ * — and so does anything else the driver throws (H-8).
+ */
+export async function runFuzzCommand(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
+  guards: FuzzRunGuards = {},
 ): Promise<RunResult> {
   try {
     return await runProduct(product, {
       cwd: workspace.root,
       argv,
-      timeoutMs: FUZZ_COMMAND_TIMEOUT_MS,
+      timeoutMs: guards.timeoutMs ?? FUZZ_COMMAND_TIMEOUT_MS,
+      maxOutputBytes: guards.maxOutputBytes,
     });
   } catch (error) {
+    // The hang-guard kill is reported unshrunk (`shrinkable: false`), as
+    // P-11's is: a tripped guard ends its test, a property's reported with
+    // its seed, unshrunk (TEST-SPEC S-3) — a shrink candidate could
+    // re-observe it only by waiting out the guard again, one full guard per
+    // candidate. A drawn trial's kill reports the drawn trial —
+    // at most three mutations and, after the staging build, 19 invocations:
+    // the fixed `build --json` and six drawn forms, a review composite three
+    // at most — as the counterexample; a shrink candidate's kill (met while
+    // shrinking another failure) ends the shrink as the reported
+    // counterexample (helpers/property.ts). So a diagnosis waits out at most
+    // one guard, and its seed replays it (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
         `P-8: every command must terminate on fuzzed input (TEST-SPEC §16 P-8; ` +
           `SPEC 12.0), but the invocation was still running when the harness's ` +
           `hang guard killed it — ${error.message}`,
-      );
-    }
-    if (error instanceof ProductRunOutputOverflowError) {
-      fail(
-        `P-8: every command must terminate on fuzzed input with bounded output ` +
-          `(TEST-SPEC §16 P-8; SPEC 12.0), but the invocation emitted unbounded ` +
-          `output until the harness's runaway-output guard killed it — ${error.message}`,
+        { shrinkable: false },
       );
     }
     throw error;
@@ -561,9 +1609,10 @@ async function runFuzzCommand(
 }
 
 /**
- * The 12.0 exit-code partition for a run without `--json`: no signal death,
- * exit code exactly 0, 1, or 2. (`assertJsonOutputConvention` asserts the
- * same partition plus the stdout contract for `--json` runs.)
+ * The 12.0 exit-code partition for a run without JSON output in effect: no
+ * signal death, exit code exactly 0, 1, or 2. (`assertJsonOutputConvention`
+ * asserts the same partition plus the stdout contract for the runs with
+ * JSON output in effect, `jsonOutputInEffect`.)
  */
 function assertExitPartition(result: RunResult, context: string): void {
   if (result.signal !== null) {
@@ -588,25 +1637,31 @@ function describeCommand(argv: readonly string[]): string {
 
 /**
  * Run one command with the P-8 assertions: termination (via
- * `runFuzzCommand`), the 12.0 exit partition, and — when the invocation
- * carries `--json` — the never-a-partial-JSON-document contract. For `build`
- * invocations the modifies-nothing arm rides along: on a non-zero exit the
- * whole workspace tree must be byte-identical around the run (SPEC 12.1).
+ * `runFuzzCommand`), the 12.0 exit partition, and — whenever JSON output is
+ * in effect ({@link jsonOutputInEffect}: `--json` given, or a JSON-only
+ * surface with or without it) — the never-a-partial-JSON-document contract,
+ * the 12.7 error document on exit 2 included. For `build` invocations the
+ * modifies-nothing arm rides along: on a non-zero exit the whole workspace
+ * tree must be byte-identical around the run (SPEC 12.1). Answers the exit
+ * code and, when JSON output is in effect, the parsed document. `step`
+ * places an invocation within a review composite's arm, for the diagnosis.
  */
 async function runFuzzArm(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
   trial: FuzzTrial,
-): Promise<void> {
+  step = "",
+): Promise<FuzzArmOutcome> {
   const context =
-    `P-8 ${describeCommand(argv)} over the fuzzed workspace ` +
+    `P-8 ${describeCommand(argv)}${step} over the fuzzed workspace ` +
     `(mutations: ${JSON.stringify(trial.mutations)})`;
   const isBuild = argv[0] === "build";
   const before = isBuild ? await snapshotDirectory(workspace.root) : undefined;
   const result = await runFuzzCommand(product, workspace, argv);
-  if (argv.includes("--json")) {
-    assertJsonOutputConvention(result, context);
+  let document: unknown;
+  if (jsonOutputInEffect(argv)) {
+    document = assertJsonOutputConvention(result, context);
   } else {
     assertExitPartition(result, context);
   }
@@ -620,6 +1675,67 @@ async function runFuzzArm(
         `byte-for-byte as they were (SPEC 12.1; P-8)`,
     );
   }
+  return { exitCode: result.exitCode, document, context };
+}
+
+/**
+ * What one fuzz arm observed: its exit code, the parsed JSON document when
+ * JSON output is in effect (else `undefined`), and its diagnosis context.
+ */
+interface FuzzArmOutcome {
+  readonly exitCode: number | null;
+  readonly document: unknown;
+  readonly context: string;
+}
+
+/**
+ * The item a composite's read yields (SPEC 10.7), decoded through the review
+ * adapter (H-3: a document that lacks the item's information fails loudly —
+ * a diagnosed failure, never a silent fallback): from `review next --json`,
+ * the item it reports unless the session is fully resolved; from `review
+ * status --json`, the first item in item order. A read that exits non-zero
+ * — no session, a corrupt one, the 13.3 gate over a failing workspace —
+ * yields none, as does an empty or fully-resolved session.
+ */
+function yieldedItemId(
+  read: "next" | "status",
+  outcome: FuzzArmOutcome,
+): string | undefined {
+  if (outcome.exitCode !== 0) return undefined;
+  if (read === "next") {
+    return decodeNextReport(outcome.document, outcome.context).item?.id;
+  }
+  return decodeSessionStatusReport(outcome.document, outcome.context).items[0]
+    ?.id;
+}
+
+/**
+ * Run one drawn menu form: its arm's steps ({@link armSteps}) in order, each
+ * under the P-8 assertions, a composite's read filling the item slot of the
+ * step after it.
+ */
+async function runFuzzForm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  form: readonly string[],
+  trial: FuzzTrial,
+): Promise<void> {
+  const steps = armSteps(form);
+  let itemId = ABSENT_ITEM_ID;
+  for (const [index, step] of steps.entries()) {
+    const argv = step.argv.map((token) =>
+      token === ITEM_ID_SLOT ? itemId : token,
+    );
+    const place =
+      steps.length === 1
+        ? ""
+        : ` (step ${String(index + 1)} of ${String(steps.length)} of the ` +
+          `review composite for the drawn \`${form.join(" ")}\`)`;
+    const outcome = await runFuzzArm(product, workspace, argv, trial, place);
+    if (step.yieldsItem !== undefined) {
+      itemId = yieldedItemId(step.yieldsItem, outcome) ?? ABSENT_ITEM_ID;
+    }
+  }
 }
 
 /** The P-8 property body for one trial (see the module header). */
@@ -627,8 +1743,10 @@ async function runFuzzTrial(
   product: ProductBinding,
   trial: FuzzTrial,
 ): Promise<void> {
+  // S-9: the base files are the harness's constants, staged afresh per
+  // trial — as records from the second trial on too (`FUZZ_BASE_RECORDS`).
   const workspace = await TestWorkspace.create({
-    files: Object.fromEntries(BASE_FILES),
+    files: fuzzBaseWorkspaceFiles(),
   });
   try {
     // Staging: the base workspace is SPEC-valid; a successful build leaves
@@ -640,11 +1758,14 @@ async function runFuzzTrial(
         "state for the modifies-nothing arm, SPEC 12.1)",
     );
     for (const [path, bytes] of trial.files) {
-      await workspace.file(path, bytes);
+      // S-9: a mutated file's well-formedness is undeclared (fuzz) — an
+      // `.mdx` source's derivability and a code source's or the
+      // configuration's TypeScript well-formedness alike.
+      await workspace.file(path, bytes, { mdx: "unchecked", ts: "unchecked" });
     }
-    await runFuzzArm(product, workspace, ["build", "--json"], trial);
-    for (const argv of trial.commands) {
-      await runFuzzArm(product, workspace, argv, trial);
+    await runFuzzArm(product, workspace, FIXED_BUILD_ARM, trial);
+    for (const form of trial.commands) {
+      await runFuzzForm(product, workspace, form, trial);
     }
   } finally {
     await workspace.dispose();
@@ -654,17 +1775,26 @@ async function runFuzzTrial(
 // ---------------------------------------------------------------------------
 // The registered fuzz test
 
+/**
+ * P-8's registered trials per seed of the fixed seed set (E-5; P-8 passes no
+ * `seeds`, so `DEFAULT_PROPERTY_SEEDS` apply). Each seed's trials are one
+ * sequential PRNG stream, so the trials the CI run stages are exactly
+ * `drawFixedSeedTrials(genFuzzTrial, P8_RUNS_PER_SEED)` — which the fixed-seed
+ * draw guard (test/self/p8-fixed-seed-draws.test.ts) replays, asserting that
+ * P-8's own draws stage the giant-nesting floor (TEST-SPEC §16 P-8) and draw
+ * every {@link COMMAND_MENU} form. Lowering this, or a generator or menu
+ * change that moves the draws, must keep that guard green.
+ */
+export const P8_RUNS_PER_SEED = 12;
+
 const P_8 = defineProductTest({
   id: "P-8",
   title:
-    "fuzz: over byte-mutated MDX/TS/config (invalid UTF-8, BOMs, giant nesting, " +
-    "pathological line terminators), every command terminates, never emits a " +
+    "fuzz: over byte-mutated MDX/TS/config (fragments, brace content at the " +
+    "2.7/14.20 boundaries, ESM-block mutations, invalid UTF-8, BOMs, giant " +
+    "nesting, pathological line terminators), every command terminates, never emits a " +
     "partial JSON document under --json, always exits 0, 1, or 2, and failing " +
     "`build`s modify nothing (SPEC 12.0, 12.1; TEST-SPEC §16 P-8)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), one staging
-  // build plus a 3–5 command sweep with per-arm snapshots per trial, plus
-  // the shrink budget on falsification.
-  timeoutMs: 420_000,
   run: async (product) => {
     await checkProperty(
       "P-8 parser robustness",
@@ -672,7 +1802,11 @@ const P_8 = defineProductTest({
       async (trial) => {
         await runFuzzTrial(product, trial);
       },
-      { runs: 12, maxShrinkExecutions: 100, render: renderFuzzTrial },
+      {
+        runs: P8_RUNS_PER_SEED,
+        maxShrinkExecutions: 100,
+        render: renderFuzzTrial,
+      },
     );
   },
 });

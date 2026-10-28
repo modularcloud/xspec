@@ -1,11 +1,13 @@
-// TEST-SPEC §2.4 (static argument rule) — SUITE-08: T2.4-1 … T2.4-4.
+// TEST-SPEC §2.4 (static argument rule) — SUITE-08: T2.4-1 … T2.4-5.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
 // asserts exact exit codes (H-5), decodes output through the H-3 adapters,
 // and rejects a product only via diagnosed assertion failures (H-8). The
 // T2.4-4 type-error arm exercises the generated module under standard
-// TypeScript tooling with no xspec runtime dependency (SPEC 13.1, HARNESS-05).
+// TypeScript tooling with no xspec runtime dependency (SPEC 13.1, HARNESS-05),
+// under each of TEST-SPEC H-2's two fixed configurations, as T2.4-5's
+// clean type check does.
 //
 // SPEC 2.4: the argument to `text(...)` and every reference in `d` MUST be a
 // static string literal (a plain single- or double-quoted string — template
@@ -19,7 +21,12 @@
 // dynamic references and other arities are invalid (14.8). A chain segment is
 // exactly one ID segment, and no segment contains `.` (1.4), so a dotted
 // computed index resolves to nothing (14.5/14.6/14.7 by context), while a
-// local string names a whole dotted path (2.2).
+// local string names a whole dotted path (2.2). The value of a static
+// string literal is the characters between its delimiters exactly as
+// spelled — no escape sequence or character reference interpreted — and a
+// chain segment's identifier is read as spelled likewise, so an
+// escape-spelled segment names no node (2.4; T2.4-5, whose code-source
+// half rides the same standard-tooling channel as T2.4-4's type-error arm).
 //
 // Location assertions: fixtures are pure ASCII and composed as
 // `prefix + construct + suffix` with exactly known parts, so string indices
@@ -28,40 +35,72 @@
 // locations, see support.ts byteWindow); every other staged construct lies
 // outside the widened window.
 
-import type { GraphEdge } from "../../helpers/adapters/index.js";
-import { decodeEdgesReport } from "../../helpers/adapters/index.js";
+import type {
+  DependencyEdgeKind,
+  Finding,
+  GraphEdge,
+  OccurrenceRecord,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
+import {
+  decodeEdgesReport,
+  decodeOccurrencesReport,
+} from "../../helpers/adapters/index.js";
+import { parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
-  assertCompileErrorAt,
-  ConsumerProject,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  forEachConsumerProject,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import type { OccurrenceUnit } from "./section-5.7.js";
+import { expectedUnitMultiset, renderOccurrenceUnit } from "./section-5.7.js";
+import type { UnparseableStaging } from "./support.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
+  assertSameJson,
   buildFindings,
   buildOk,
   byteWindow,
+  expectExit,
+  findingsInSourceOrder,
   runJson,
 } from "./support.js";
 
-// Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): exactly one spec group. A
+// staged-source record (S-9's timing clause): the arm workspaces of T2.4-2,
+// T2.4-3, and T2.4-4 after each body's first are created after its first
+// invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T2.4-2/T2.4-3/T2.4-4 xspec.config.ts — the specs-only configuration of every arm workspace",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus one code group, for T2.4-4's TypeScript marker arm
 // (SPEC 7.2): the marker's file must be a discovered code source for `build`
-// to analyze it (4.5, 14.7).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// to analyze it (4.5, 14.7). A staged-source record (S-9's timing clause):
+// that arm's workspace is created after T2.4-4's first invocation; T2.4-5's
+// first workspace stages it too.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T2.4-4 xspec.config.ts — one spec group and one code group, the marker arm",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -71,12 +110,13 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
-  files: Readonly<Record<string, string>>,
+  config: StagedTs,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -98,7 +138,7 @@ async function withWorkspace<T>(
 async function queryEdgesOfKind(
   product: ProductBinding,
   workspace: TestWorkspace,
-  kind: "depends" | "embeds",
+  kind: DependencyEdgeKind,
   context: string,
 ): Promise<readonly GraphEdge[]> {
   const label = `${context} \`query edges --kinds ${kind}\``;
@@ -121,12 +161,20 @@ async function queryEdgesOfKind(
 // `d` and in `text(...)`: double- and single-quoted string literals, a
 // dot-access chain, computed access via a static string literal (double- and
 // single-quoted index alike — "a plain single- or double-quoted string"), and
-// mixed chains (dot-then-computed and computed-then-dot). The imported module
-// carries non-identifier segments (`login-v2`, `pin-2`, `auth.sub-x`) so the
-// computed arms use the form 2.4 defines them for (1.4).
+// mixed chains (dot-then-computed and computed-then-dot), and dot access
+// naming a reserved word (`BASE.delete`: a non-computed access's name is any
+// identifier name the file's grammar admits there, a reserved word included,
+// SPEC 2.4 — ECMAScript 2024 admits `delete` after `.`, and `delete` is a
+// valid ID segment, 1.4). The imported module carries non-identifier
+// segments (`login-v2`, `pin-2`, `auth.sub-x`) so the computed arms use the
+// form 2.4 defines them for (1.4), and the reserved-word segment `delete`.
 const T2_4_1_BASE = [
   '<S id="login-v2">',
   "Dashed target.",
+  "</S>",
+  "",
+  '<S id="delete">',
+  "Reserved-word target.",
   "</S>",
   "",
   '<S id="pin-2">',
@@ -182,12 +230,17 @@ const T2_4_1_SOURCE = [
   "Mixed dot and computed chains.",
   "</S>",
   "",
+  '<S id="reserved" d={BASE.delete}>',
+  "Dot access naming a reserved word.",
+  "</S>",
+  "",
   '<S id="embed">',
   'Double: {text("alpha")}',
   "Single: {text('beta')}",
   "Dot: {text(BASE.auth.login)}",
   'Computed: {text(BASE["login-v2"])}',
   'Mixed: {text(BASE.auth["sub-x"])}',
+  "Reserved: {text(BASE.delete)}",
   "</S>",
   "",
 ].join("\n");
@@ -195,7 +248,7 @@ const T2_4_1_SOURCE = [
 const T2_4_1 = defineProductTest({
   id: "T2.4-1",
   title:
-    "double- and single-quoted string literals and property chains with dot access, computed access via static string literal, and mixed chains are all accepted in `d` and `text(...)` — the workspace builds and each form records its edge to the right target (SPEC 2.4, 2.2, 2.3)",
+    "double- and single-quoted string literals and property chains with dot access, computed access via static string literal, mixed chains, and dot access naming a reserved word (`BASE.delete`) are all accepted in `d` and `text(...)` — the workspace builds and each form records its edge to the right target (SPEC 2.4, 2.2, 2.3)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -250,6 +303,11 @@ const T2_4_1 = defineProductTest({
               to: "specs/BASE.mdx#auth.login",
               kind: "depends",
             },
+            {
+              from: "specs/A.mdx#reserved",
+              to: "specs/BASE.mdx#delete",
+              kind: "depends",
+            },
           ],
           "T2.4-1 the complete `depends` edge set — one edge per accepted `d` form, " +
             "each resolved to the node its spelling names (SPEC 2.4, 2.2)",
@@ -282,6 +340,11 @@ const T2_4_1 = defineProductTest({
               to: "specs/BASE.mdx#auth.sub-x",
               kind: "embeds",
             },
+            {
+              from: "specs/A.mdx#embed",
+              to: "specs/BASE.mdx#delete",
+              kind: "embeds",
+            },
           ],
           "T2.4-1 the complete `embeds` edge set — one edge per accepted `text(...)` " +
             "form, each resolved to the node its spelling names (SPEC 2.4, 2.3)",
@@ -295,29 +358,122 @@ const T2_4_1 = defineProductTest({
 // T2.4-2
 // ---------------------------------------------------------------------------
 
-// The dynamic forms of SPEC 2.4, each run in `d` and in `text(...)`, in MDX.
-// Every arm's workspace is otherwise valid — `specs/BASE.mdx` provides the
-// `auth` node the chain forms name, and the local `alpha` node exists so a
-// product wrongly treating the template literal as a static string would
-// resolve it and exit 0 (caught by the exit-1 expectation) — making the one
-// dynamic reference the only condition present (the exact count has teeth).
+// The dynamic forms of SPEC 2.4, each run in `d` and in `text(...)`, in MDX,
+// and beside them the TypeScript-only spellings a spec source's grammar does
+// not derive. Every arm's workspace is otherwise valid — `specs/BASE.mdx`
+// provides the `auth` node the chain forms name, and the local `alpha` node
+// exists so a product wrongly treating the template literal as a static
+// string would resolve it and exit 0 (caught by the exit-1 expectation) —
+// making the one offending construct the only condition present (the exact
+// count has teeth).
+//
+// The two index forms a misreading product resolves — a numeric-literal
+// index `BASE[1]` (ECMAScript keys the access `"1"`, so a product reading
+// numeric keys as segments resolves it) and a parenthesized index
+// `BASE[("a")]` (no static string literal, whatever the parentheses
+// enclose, so a product unwrapping them resolves it) — stage BASE's module
+// with the top-level sections `1` (a valid segment, SPEC 1.4) and `a` beside
+// `auth`, and each also records no edge and no occurrence (TEST-SPEC
+// T2.4-2; SPEC 2.4, 5.7): `query edges` refuses to answer on the failing
+// workspace (13.3), so `occurrences --file specs/A.mdx`, which answers there
+// (11.2), is the witness — exit 1, the file's one 14.8 accompanying the
+// answer, no record.
+//
+// Two kinds of arm (SPEC 2.4): a form ECMAScript 2024 derives that makes the
+// reference dynamic is 14.8 — the "another meaning" case `d={BASE.a<X>y}`
+// included: two comparisons, a well-formed container holding no static
+// chain, never 14.20, its finding located at the whole expression (SPEC 14;
+// T14-11) — while TypeScript-only syntax (a non-null assertion `BASE.a!`, a
+// type assertion `BASE.a as X`) is a parse failure of the file, 14.20 alone
+// and never 14.8, with the one zero-length range at the offset SPEC 14's
+// syntax-failure rule fixes: the byte length of the longest whole-character
+// prefix of the file with which some well-formed file begins. Precomputed
+// per form from the fixture's exact bytes: for `BASE.a!` the byte after `!`
+// — the closing brace in `d`, the closing parenthesis in `text(...)` — since
+// `!` may begin `!=`, so the prefix through `!` begins a well-formed file;
+// for `BASE.a as X` the offset of `as`, no well-formed file continuing a
+// member expression with an identifier (the prefix through the space before
+// it does begin one). The stock MDX 3 parser (S-9, `deriveMdx`) rejects each
+// of the four stagings at that offset or one byte before it — its own
+// position, not the rule's — and the workspace builder holds each to its
+// `unparseable` declaration. The TypeScript-source counterparts, where the
+// same spellings are dynamic (14.8), are T4.5-3's and T4.3-2's.
 interface DynamicFormArm {
-  /** Which SPEC 2.4 dynamic form this is (failure diagnostics). */
+  /** Which SPEC 2.4 form this is (failure diagnostics). */
   readonly name: string;
-  /** The offending reference expression, used verbatim in `d` and `text`. */
+  /** The offending expression, used verbatim in `d` and in `text(...)`. */
   readonly expression: string;
+  /**
+   * TypeScript-only syntax (14.20, never 14.8): the syntax failure's offset
+   * relative to the expression's first byte, `expression.length` naming the
+   * byte after it (the closing brace in `d`, the closing parenthesis in
+   * `text(...)`).
+   */
+  readonly unparseableAt?: number;
+  /**
+   * The `d` arm's 14.8 finding is pinned exactly at the whole expression —
+   * first token through last, the braces excluded (SPEC 14; T14-11) — where
+   * the entry fixes that range, rather than within the widened byte window.
+   */
+  readonly exactExpressionRange?: true;
+  /**
+   * An index form a misreading product resolves (TEST-SPEC T2.4-2): the
+   * top-level section of `specs/BASE.mdx` the misread reference names — `1`
+   * for the numeric-literal index, `a` for the parenthesized one — which the
+   * arm's module holds (`DYNAMIC_ARM_INDEX_BASE_RECORDS`); the arm then
+   * asserts no edge and no occurrence beside its 14.8
+   * (`assertIndexArmRecordsNoOccurrence`).
+   */
+  readonly misreadTarget?: string;
 }
 
 const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
   { name: "a template literal argument", expression: "`alpha`" },
   { name: "an identifier as index", expression: "BASE[key]" },
   { name: "a call as index", expression: "BASE[getKey()]" },
+  {
+    // ECMAScript keys the access `"1"`: a product reading numeric keys as
+    // segments resolves it to BASE's section `1`, yet an index other than a
+    // static string literal makes the reference dynamic (SPEC 2.4).
+    name: "a numeric-literal index",
+    expression: "BASE[1]",
+    misreadTarget: "1",
+  },
   { name: "optional chaining", expression: "BASE?.auth" },
-  { name: "a non-null assertion", expression: "BASE!.auth" },
   { name: "a parenthesized chain", expression: "(BASE.auth)" },
+  {
+    // The index is no static string literal, whatever the parentheses
+    // enclose (SPEC 2.4): a product unwrapping them resolves the reference
+    // to BASE's `a`.
+    name: "a parenthesized index",
+    expression: 'BASE[("a")]',
+    misreadTarget: "a",
+  },
   {
     name: "a conditional expression",
     expression: "true ? BASE.auth : BASE.auth",
+  },
+  {
+    // ECMAScript reads `BASE.auth<X>y` as two comparisons, `(BASE.auth < X)
+    // > y`: a well-formed container holding no static chain (SPEC 2.4).
+    name: 'the "another meaning" case, two comparisons',
+    expression: "BASE.auth<X>y",
+    exactExpressionRange: true,
+  },
+  {
+    // `!` may begin `!=`: the prefix through `!` begins a well-formed file,
+    // the one through the next byte (`}` or `)`) does not.
+    name: "a non-null assertion (TypeScript-only)",
+    expression: "BASE.auth!",
+    unparseableAt: "BASE.auth!".length,
+  },
+  {
+    // No well-formed file continues a member expression with an identifier:
+    // the prefix through the space before `as` begins one, the one through
+    // its `a` does not.
+    name: "a type assertion (TypeScript-only)",
+    expression: "BASE.auth as X",
+    unparseableAt: "BASE.auth ".length,
   },
 ];
 
@@ -328,31 +484,383 @@ const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
 const DYNAMIC_ARM_PREAMBLE =
   'import BASE from "./BASE.xspec"\n\n<S id="alpha">\nAlpha behavior.\n</S>\n\n';
 
-const DYNAMIC_ARM_BASE_FILES = {
-  "specs/BASE.mdx": '<S id="auth">\nAuth behavior.\n</S>\n',
+// The module every arm stages beside `specs/A.mdx`, as a staged-source
+// record: every arm workspace after the body's first is created after its
+// first invocation, and T14-11 re-stages the TypeScript-only forms'
+// workspaces after its own (S-9's timing clause).
+const DYNAMIC_ARM_BASE_RECORDS = {
+  "specs/BASE.mdx": stagedMdx(
+    "T2.4-2/T12.0-15/T14-11 specs/BASE.mdx",
+    '<S id="auth">\nAuth behavior.\n</S>\n',
+  ),
+} as const;
+
+// The index arms' module (an arm with a `misreadTarget`): the shared module's
+// `auth` beside the top-level sections `1` (a valid segment, SPEC 1.4) and
+// `a` — the nodes a product misreading the numeric-literal or the
+// parenthesized index resolves the reference to. A staged-source record, as
+// the shared module is (S-9's timing clause); the shared module itself stays
+// as T14-11 re-stages it beside the TypeScript-only forms.
+const DYNAMIC_ARM_INDEX_BASE_SOURCE =
+  '<S id="auth">\nAuth behavior.\n</S>\n\n' +
+  '<S id="1">\nSection one behavior.\n</S>\n\n' +
+  '<S id="a">\nSection a behavior.\n</S>\n';
+const DYNAMIC_ARM_INDEX_BASE_RECORDS = {
+  "specs/BASE.mdx": stagedMdx(
+    "T2.4-2 specs/BASE.mdx — the index arms' module, `1` and `a` beside `auth`",
+    DYNAMIC_ARM_INDEX_BASE_SOURCE,
+  ),
 } as const;
 
 /**
- * Run one rejected-form arm: `build --json` exits 1 with exactly one finding,
- * condition 14.8, located within the offending construct's own byte window in
- * `specs/A.mdx` (SPEC 14: errors identify file and location).
+ * An arm's `specs/BASE.mdx`: the index arms' module where the arm names a
+ * misread target — a harness defect (never a product failure) unless that
+ * module spells the target's section tag — and the shared one otherwise.
  */
-async function runRejectedFormArm(
+function dynamicArmBaseRecords(
+  arm: DynamicFormArm,
+): Readonly<Record<string, StagedMdx>> {
+  const { misreadTarget } = arm;
+  if (misreadTarget === undefined) {
+    return DYNAMIC_ARM_BASE_RECORDS;
+  }
+  if (!DYNAMIC_ARM_INDEX_BASE_SOURCE.includes(`<S id="${misreadTarget}">`)) {
+    throw new Error(
+      `T2.4-2 fixture broke: the index arms' module must hold the section ` +
+        `${JSON.stringify(misreadTarget)} (${arm.name}) — fix ` +
+        `DYNAMIC_ARM_INDEX_BASE_SOURCE in section-2.4.ts`,
+    );
+  }
+  return DYNAMIC_ARM_INDEX_BASE_RECORDS;
+}
+
+/** The byte range of `expression` when it follows `prefix` in the file. */
+function expressionRange(
+  prefix: string,
+  expression: string,
+): { readonly start: number; readonly end: number } {
+  const start = Buffer.byteLength(prefix, "utf8");
+  return { start, end: start + Buffer.byteLength(expression, "utf8") };
+}
+
+/**
+ * Assert a located finding's concern exactly (SPEC 14, 12.7): `path` null,
+ * and exactly one location — in specs/A.mdx, at exactly `range`.
+ */
+function assertT242FindingRange(
+  finding: Finding,
+  range: { readonly start: number; readonly end: number },
+  context: string,
+): void {
+  assertSameJson(
+    finding.path,
+    null,
+    `${context} — a located condition's concerned path is null (SPEC 12.7)`,
+  );
+  assertSameJson(
+    finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    [{ file: "specs/A.mdx", range: { start: range.start, end: range.end } }],
+    `${context} (message: ${JSON.stringify(finding.message)})`,
+  );
+}
+
+/** One arm's staged `specs/A.mdx` and where its offending bytes stand. */
+interface RejectedFormStaging {
+  /** The whole staged source. */
+  readonly source: string;
+  /**
+   * The offending construct's byte window — the opening tag carrying the
+   * braced `d` value, or the embedding container (end-widened by one byte,
+   * `byteWindow`).
+   */
+  readonly window: { readonly start: number; readonly end: number };
+  /** The expression's own byte range, first token through last. */
+  readonly expression: { readonly start: number; readonly end: number };
+}
+
+/**
+ * One form's two stagings of `specs/A.mdx` (SPEC 2.4: each form is run in
+ * `d` and in `text(...)`): in `d`, the offending construct is the opening
+ * tag carrying the braced reference (2.7: a braced `d` value that is not a
+ * static reference or array literal of them is a dynamic argument, 14.8),
+ * its expression starting right after `d={`; in `text(...)`, the embedding
+ * container on its own line inside an otherwise valid section, its
+ * expression starting right after `{text(`.
+ */
+function stageDynamicForm(arm: DynamicFormArm): {
+  readonly d: RejectedFormStaging;
+  readonly text: RejectedFormStaging;
+} {
+  const dTagPrefix = '<S id="bad" d={';
+  const dConstruct = `${dTagPrefix}${arm.expression}}>`;
+  const textPrefix = DYNAMIC_ARM_PREAMBLE + '<S id="bad">\n';
+  const callPrefix = "{text(";
+  const textConstruct = `${callPrefix}${arm.expression})}`;
+  return {
+    d: {
+      source: DYNAMIC_ARM_PREAMBLE + dConstruct + "\nBad reference.\n</S>\n",
+      window: byteWindow(DYNAMIC_ARM_PREAMBLE, dConstruct),
+      expression: expressionRange(
+        DYNAMIC_ARM_PREAMBLE + dTagPrefix,
+        arm.expression,
+      ),
+    },
+    text: {
+      source: textPrefix + textConstruct + "\n</S>\n",
+      window: byteWindow(textPrefix, textConstruct),
+      expression: expressionRange(textPrefix + callPrefix, arm.expression),
+    },
+  };
+}
+
+/**
+ * A TypeScript-only form's syntax-failure offset: `unparseableAt` bytes past
+ * its expression's start (SPEC 14's rule, precomputed per form above).
+ */
+function syntaxFailureOffset(
+  staging: RejectedFormStaging,
+  unparseableAt: number,
+): number {
+  return staging.expression.start + unparseableAt;
+}
+
+/**
+ * One arm's two stagings (`stageDynamicForm`) with their staged-source
+ * records, evaluated once at module load: every arm workspace after the
+ * body's first is created after its first product invocation (S-9's timing
+ * clause), and the table converts uniformly. A TypeScript-only form's two
+ * records are declared unparseable (14.20) — the very records the exported
+ * `T2_4_2_UNPARSEABLE_STAGINGS` carries, which T14-11 re-stages after its own
+ * invocations. Each entry carries the arm's `specs/BASE.mdx`
+ * (`dynamicArmBaseRecords`, its index-module check made here, at load).
+ */
+interface DynamicFormStagings {
+  readonly arm: DynamicFormArm;
+  readonly d: RejectedFormStaging;
+  readonly text: RejectedFormStaging;
+  /** `d.source` and `text.source` as staged-source records. */
+  readonly records: { readonly d: StagedMdx; readonly text: StagedMdx };
+  /** The arm's `specs/BASE.mdx`, staged beside either record. */
+  readonly base: Readonly<Record<string, StagedMdx>>;
+}
+
+const DYNAMIC_FORM_STAGINGS: readonly DynamicFormStagings[] =
+  DYNAMIC_FORM_ARMS.map((arm): DynamicFormStagings => {
+    const { d, text } = stageDynamicForm(arm);
+    const [ids, mdx] =
+      arm.unparseableAt === undefined
+        ? (["T2.4-2", "well-formed"] as const)
+        : (["T2.4-2/T12.0-15/T14-11", "unparseable"] as const);
+    return {
+      arm,
+      d,
+      text,
+      records: {
+        d: stagedMdx(`${ids} ${arm.name} in \`d\` specs/A.mdx`, d.source, mdx),
+        text: stagedMdx(
+          `${ids} ${arm.name} in \`text(...)\` specs/A.mdx`,
+          text.source,
+          mdx,
+        ),
+      },
+      base: dynamicArmBaseRecords(arm),
+    };
+  });
+
+/**
+ * The TypeScript-only forms' stagings — the very records the arms below
+ * drive, `specs/A.mdx` beside `specs/BASE.mdx`, in `d` and in `text(...)` —
+ * each with its syntax failure's offset, exported for T14-11's re-assertion
+ * of the offsets the same way (TEST-SPEC T14-11's closing clause); each
+ * `specs/A.mdx` record is declared unparseable (S-9).
+ */
+export const T2_4_2_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
+  DYNAMIC_FORM_STAGINGS.flatMap(({ arm, d, text, records }) => {
+    const { unparseableAt } = arm;
+    if (unparseableAt === undefined) {
+      return [];
+    }
+    return (
+      [
+        ["`d`", d, records.d],
+        ["`text(...)`", text, records.text],
+      ] as const
+    ).map(([position, staging, record]): UnparseableStaging => ({
+      name: `${arm.name} in ${position}: \`${arm.expression}\` (T2.4-2)`,
+      kind: "spec-source",
+      file: "specs/A.mdx",
+      files: { ...DYNAMIC_ARM_BASE_RECORDS, "specs/A.mdx": record },
+      offset: syntaxFailureOffset(staging, unparseableAt),
+    }));
+  });
+
+/**
+ * Assert a dynamic-form arm's one 14.8 finding located as the module's arms
+ * assert it: within the offending construct's own byte window in
+ * `specs/A.mdx` (SPEC 14: errors identify file and location) — or, where
+ * `exactRange` is given, exactly at that range (SPEC 14; T14-11).
+ */
+function assertDynamicFindingLocated(
+  finding: Finding,
+  staging: RejectedFormStaging,
+  exactRange: { readonly start: number; readonly end: number } | undefined,
+  context: string,
+): void {
+  if (exactRange === undefined) {
+    assertFindingLocated(
+      finding,
+      { file: "specs/A.mdx", window: staging.window },
+      `${context}: the 14.8 finding`,
+    );
+  } else {
+    assertT242FindingRange(
+      finding,
+      exactRange,
+      `${context}: the 14.8 finding, located at the whole expression ` +
+        `its braces enclose — first token through last, the braces ` +
+        `excluded (SPEC 14; T14-11)`,
+    );
+  }
+}
+
+/**
+ * An index arm's "no edge and no occurrence" on its failing workspace
+ * (TEST-SPEC T2.4-2). `query edges` refuses to answer there (SPEC 13.3), so
+ * the occurrence record is the edge's witness (5.7, 11.2): `occurrences
+ * --file specs/A.mdx` answers from the current sources, so it exits 1 with
+ * its full answer emitted, the file's one finding — the 14.8 `build`
+ * reported, located as `build`'s is — accompanying it, and lists no record,
+ * though `specs/BASE.mdx` holds the section `misreadTarget` a product
+ * misreading the index resolves the reference to (SPEC 2.4, 5.7, 11.2,
+ * 11.3).
+ */
+async function assertIndexArmRecordsNoOccurrence(
   product: ProductBinding,
-  source: string,
-  window: { readonly start: number; readonly end: number },
+  workspace: TestWorkspace,
+  staging: RejectedFormStaging,
+  exactRange: { readonly start: number; readonly end: number } | undefined,
+  misreadTarget: string,
+  context: string,
+): Promise<void> {
+  const result = await expectExit(
+    product,
+    workspace,
+    ["occurrences", "--file", "specs/A.mdx"],
+    1,
+    `${context} — the answer carries the file's finding, so exit 1 with the ` +
+      `full answer document (SPEC 11.2, 11.3)`,
+  );
+  const report = decodeOccurrencesReport(
+    parseJsonStdout(
+      result,
+      `${context} — a single JSON document is the only output form (SPEC 11)`,
+    ),
+    context,
+  );
+  assertConditionCounts(
+    report.findings,
+    { "14.8": 1 },
+    `${context}: the file's one finding accompanies the answer, none beside ` +
+      `it (SPEC 11.2, 11.3)`,
+  );
+  assertDynamicFindingLocated(
+    report.findings[0]!,
+    staging,
+    exactRange,
+    `${context}: the accompanying finding, located as \`build\`'s is (SPEC ` +
+      `11.2)`,
+  );
+  assertSameJson(
+    report.occurrences,
+    [],
+    `${context}: no record — the dynamic spelling records no edge and no ` +
+      `occurrence, its position reported by its finding's range alone, ` +
+      `though specs/BASE.mdx holds the section \`${misreadTarget}\` a ` +
+      `product misreading the index resolves it to (SPEC 2.4, 5.7, 11.2; ` +
+      `TEST-SPEC T2.4-2)`,
+  );
+}
+
+/**
+ * Run one dynamic-form arm in one position — the entry's staging there, as
+ * its staged-source record, beside the arm's `specs/BASE.mdx`: `build
+ * --json` exits 1 with exactly one finding, condition 14.8, located within
+ * the offending construct's own byte window — or exactly at `exactRange`,
+ * where given (`assertDynamicFindingLocated`). An index arm (a
+ * `misreadTarget`) then asserts no edge and no occurrence on the same
+ * failing workspace (`assertIndexArmRecordsNoOccurrence`).
+ */
+async function runDynamicFormArm(
+  product: ProductBinding,
+  entry: DynamicFormStagings,
+  position: "d" | "text",
+  exactRange: { readonly start: number; readonly end: number } | undefined,
+  context: string,
+): Promise<void> {
+  const staging = entry[position];
+  const { name, misreadTarget } = entry.arm;
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { ...entry.base, "specs/A.mdx": entry.records[position] },
+    async (workspace) => {
+      const findings = await buildFindings(product, workspace, context);
+      assertConditionCounts(
+        findings,
+        { "14.8": 1 },
+        `${context} — a form ECMAScript 2024 derives that makes the ` +
+          `reference dynamic: 14.8, never 14.20 (SPEC 2.4)`,
+      );
+      assertDynamicFindingLocated(findings[0]!, staging, exactRange, context);
+      if (misreadTarget !== undefined) {
+        const where = position === "d" ? "`d`" : "`text(...)`";
+        await assertIndexArmRecordsNoOccurrence(
+          product,
+          workspace,
+          staging,
+          exactRange,
+          misreadTarget,
+          `T2.4-2 \`occurrences --file specs/A.mdx\` with ${name} in ${where}`,
+        );
+      }
+    },
+  );
+}
+
+/**
+ * Run one TypeScript-only arm: the file is not well-formed MDX (SPEC 2.4,
+ * 14.20), so `build --json` exits 1 with exactly one finding, 14.20 — the
+ * masked file reports nothing else, never 14.8 — carrying the one
+ * zero-length range at `offset`, the syntax failure's offset under SPEC 14's
+ * rule. S-9: `source` is the staging's record, declared unparseable.
+ */
+async function runUnparseableFormArm(
+  product: ProductBinding,
+  source: StagedMdx,
+  offset: number,
   context: string,
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
-    { ...DYNAMIC_ARM_BASE_FILES, "specs/A.mdx": source },
+    { ...DYNAMIC_ARM_BASE_RECORDS, "specs/A.mdx": source },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
-      assertConditionCounts(findings, { "14.8": 1 }, context);
-      assertFindingLocated(
+      assertConditionCounts(
+        findings,
+        { "14.20": 1 },
+        `${context} — TypeScript-only syntax in a spec source is a parse ` +
+          `failure of the file: 14.20 alone, never a dynamic reference ` +
+          `(SPEC 2.4, 14.20)`,
+      );
+      assertT242FindingRange(
         findings[0]!,
-        { file: "specs/A.mdx", window },
-        `${context}: the 14.8 finding`,
+        { start: offset, end: offset },
+        `${context} — the one zero-length range at the offset SPEC 14's ` +
+          `syntax-failure rule fixes: the byte length of the longest ` +
+          `whole-character prefix with which some well-formed file begins ` +
+          `(SPEC 14; T14-11)`,
       );
     },
   );
@@ -361,30 +869,47 @@ async function runRejectedFormArm(
 const T2_4_2 = defineProductTest({
   id: "T2.4-2",
   title:
-    "each dynamic form — template literal argument; identifier or call as index; optional chaining; non-null assertion; parenthesized chain; conditional expression — fails with 14.8, in `d` and in `text(...)`, in MDX (SPEC 2.4, 14.8)",
+    'each dynamic form — template literal argument; identifier or call as index; a numeric-literal index `BASE[1]`, BASE\'s module holding the section `1`; optional chaining; parenthesized chain; a parenthesized index `BASE[("a")]`, BASE\'s module holding `a`; conditional expression; the "another meaning" case `BASE.a<X>y`, two comparisons, its `d` finding at the whole expression — fails with 14.8, in `d` and in `text(...)`, in MDX, the two index forms recording no edge and no occurrence (`occurrences --file` on the failing workspace carrying the 14.8 and listing no record), while TypeScript-only syntax — a non-null assertion, a type assertion — is 14.20 alone at the offset SPEC 14\'s syntax-failure rule fixes (SPEC 2.4, 5.7, 11.2, 11.3, 14.8, 14.20)',
   run: async (product) => {
-    for (const arm of DYNAMIC_FORM_ARMS) {
-      // In `d`: the offending construct is the opening tag carrying the
-      // braced reference (SPEC 2.7: a braced `d` value that is not a static
-      // reference or array literal of them is a dynamic argument, 14.8).
-      const dConstruct = `<S id="bad" d={${arm.expression}}>`;
-      await runRejectedFormArm(
-        product,
-        DYNAMIC_ARM_PREAMBLE + dConstruct + "\nBad reference.\n</S>\n",
-        byteWindow(DYNAMIC_ARM_PREAMBLE, dConstruct),
-        `T2.4-2 \`build --json\` with ${arm.name} in \`d\``,
-      );
+    for (const entry of DYNAMIC_FORM_STAGINGS) {
+      // The form in `d` and in `text(...)` (`stageDynamicForm`), each staged
+      // as its record beside the arm's `specs/BASE.mdx` (`entry.base`): the
+      // TypeScript-only forms' records are the ones the exported
+      // `T2_4_2_UNPARSEABLE_STAGINGS` carries, and an index form's
+      // no-occurrence check rides each position's `build` workspace.
+      const { arm, d: dStaging, text: textStaging, records } = entry;
+      const { unparseableAt } = arm;
+      const dContext = `T2.4-2 \`build --json\` with ${arm.name} in \`d\``;
+      if (unparseableAt === undefined) {
+        await runDynamicFormArm(
+          product,
+          entry,
+          "d",
+          arm.exactExpressionRange === true ? dStaging.expression : undefined,
+          dContext,
+        );
+      } else {
+        await runUnparseableFormArm(
+          product,
+          records.d,
+          syntaxFailureOffset(dStaging, unparseableAt),
+          dContext,
+        );
+      }
 
-      // In `text(...)`: the offending construct is the embedding expression
-      // on its own line inside an otherwise valid section.
-      const textConstruct = `{text(${arm.expression})}`;
-      const textPrefix = DYNAMIC_ARM_PREAMBLE + '<S id="bad">\n';
-      await runRejectedFormArm(
-        product,
-        textPrefix + textConstruct + "\n</S>\n",
-        byteWindow(textPrefix, textConstruct),
-        `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``,
-      );
+      const textContext = `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``;
+      if (unparseableAt === undefined) {
+        // An embedding's 14.8 is located by its full braced container (SPEC
+        // 14), asserted within the construct's window as the sibling arms are.
+        await runDynamicFormArm(product, entry, "text", undefined, textContext);
+      } else {
+        await runUnparseableFormArm(
+          product,
+          records.text,
+          syntaxFailureOffset(textStaging, unparseableAt),
+          textContext,
+        );
+      }
     }
   },
 });
@@ -402,9 +927,33 @@ const T2_4_2 = defineProductTest({
 const ARITY_PREAMBLE =
   '<S id="alpha">\nAlpha behavior.\n</S>\n\n<S id="beta">\nBeta behavior.\n</S>\n\n<S id="bad">\n';
 
-const ARITY_ARMS: readonly { name: string; construct: string }[] = [
-  { name: "zero arguments", construct: "{text()}" },
-  { name: "two arguments", construct: '{text("alpha", "beta")}' },
+/** One arity arm: the call, and the file it stands in as a record. */
+interface ArityArm {
+  readonly name: string;
+  readonly construct: string;
+  /** The preamble, the call, and the section's close, as `specs/A.mdx`. */
+  readonly source: StagedMdx;
+}
+
+/**
+ * Compose an arm's file into its staged-source record — the second arm's
+ * workspace is created after the body's first invocation (S-9's timing
+ * clause), and the table converts uniformly.
+ */
+function arityArm(name: string, construct: string): ArityArm {
+  return {
+    name,
+    construct,
+    source: stagedMdx(
+      `T2.4-3 text called with ${name} specs/A.mdx`,
+      ARITY_PREAMBLE + construct + "\n</S>\n",
+    ),
+  };
+}
+
+const ARITY_ARMS: readonly ArityArm[] = [
+  arityArm("zero arguments", "{text()}"),
+  arityArm("two arguments", '{text("alpha", "beta")}'),
 ];
 
 const T2_4_3 = defineProductTest({
@@ -416,7 +965,7 @@ const T2_4_3 = defineProductTest({
       const context = `T2.4-3 \`build --json\` with \`text\` called with ${arm.name}`;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": ARITY_PREAMBLE + arm.construct + "\n</S>\n" },
+        { "specs/A.mdx": arm.source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
           assertConditionCounts(findings, { "14.8": 1 }, context);
@@ -444,8 +993,13 @@ const T2_4_3 = defineProductTest({
 // resolves to nothing — its single segment `a.b` can name no node — while
 // `BASE["a"]["b"]` and `BASE.a.b` resolve to node `a.b` and the same-file
 // local string `d={"a.b"}` names the whole dotted *path* (SPEC 2.2).
-const SEGMENT_EXACT_BASE =
-  '<S id="a">\nA text.\n\n<S id="a.b">\nB text.\n</S>\n</S>\n';
+// Staged in all four arms' workspaces, the three after the first created
+// after the body's first invocation — a staged-source record (S-9's
+// timing clause).
+const SEGMENT_EXACT_BASE = stagedMdx(
+  "T2.4-4 specs/BASE.mdx",
+  '<S id="a">\nA text.\n\n<S id="a.b">\nB text.\n</S>\n</S>\n',
+);
 
 // 14.5 arm: the dotted computed index in `d`.
 const T2_4_4_D_PREFIX = 'import BASE from "./BASE.xspec"\n\n';
@@ -456,8 +1010,11 @@ const T2_4_4_D_SOURCE =
 // 14.6 arm: the same chain as the `text(...)` argument.
 const T2_4_4_TEXT_PREFIX = 'import BASE from "./BASE.xspec"\n\n<S id="bad">\n';
 const T2_4_4_TEXT_CONSTRUCT = '{text(BASE["a.b"])}';
-const T2_4_4_TEXT_SOURCE =
-  T2_4_4_TEXT_PREFIX + T2_4_4_TEXT_CONSTRUCT + "\n</S>\n";
+// The 14.6 arm's workspace follows the 14.5 arm's invocation: a record.
+const T2_4_4_TEXT_SOURCE = stagedMdx(
+  "T2.4-4 text arm specs/A.mdx",
+  T2_4_4_TEXT_PREFIX + T2_4_4_TEXT_CONSTRUCT + "\n</S>\n",
+);
 
 // 14.7 arm: the same chain as a TypeScript dependency marker (SPEC 4.5). The
 // file is staged valid first — `BASE.a` is a resolving marker — so the
@@ -466,12 +1023,18 @@ const T2_4_4_TEXT_SOURCE =
 // generates the spec module (13.1), and the failing second build modifies
 // nothing (12.1), leaving the generated module in place for the type-error
 // arm compiled under standard TypeScript tooling (HARNESS-05, SPEC 13.1).
-const T2_4_4_VALID_CONSUMER =
-  'import BASE from "../specs/BASE.xspec";\n\nBASE.a;\n';
+// The arm's workspace is created after the body's first invocation, so both
+// consumers are staged-source records (S-9's timing clause).
+const T2_4_4_VALID_CONSUMER = stagedTs(
+  "T2.4-4 marker arm src/app.ts — the resolving marker `BASE.a`",
+  'import BASE from "../specs/BASE.xspec";\n\nBASE.a;\n',
+);
 const T2_4_4_MARKER_PREFIX = 'import BASE from "../specs/BASE.xspec";\n\n';
 const T2_4_4_MARKER_CONSTRUCT = 'BASE["a.b"];';
-const T2_4_4_MARKER_CONSUMER =
-  T2_4_4_MARKER_PREFIX + T2_4_4_MARKER_CONSTRUCT + "\n";
+const T2_4_4_MARKER_CONSUMER = stagedTs(
+  "T2.4-4 marker arm src/app.ts — the dotted computed index, staged after `build`",
+  T2_4_4_MARKER_PREFIX + T2_4_4_MARKER_CONSTRUCT + "\n",
+);
 
 // Positive arms: segment-per-index computed chain and dot chain resolve to
 // node `a.b`; the local string names the dotted path within the declaring
@@ -479,35 +1042,39 @@ const T2_4_4_MARKER_CONSUMER =
 // same-named nodes are the decoys — a product resolving the local string in
 // the imported file records `to: specs/BASE.mdx#a.b` and fails the exact
 // edge-set comparison.
-const T2_4_4_POSITIVE_SOURCE = [
-  'import BASE from "./BASE.xspec"',
-  "",
-  '<S id="a">',
-  "Local a text.",
-  "",
-  '<S id="a.b">',
-  "Local b text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="viaBrackets" d={BASE["a"]["b"]}>',
-  "Segment-per-index computed chain.",
-  "</S>",
-  "",
-  '<S id="viaDots" d={BASE.a.b}>',
-  "Dot chain.",
-  "</S>",
-  "",
-  '<S id="viaLocal" d={"a.b"}>',
-  "Local string naming the two-segment path.",
-  "</S>",
-  "",
-].join("\n");
+// The positive arms' workspace is the body's last: a record.
+const T2_4_4_POSITIVE_SOURCE = stagedMdx(
+  "T2.4-4 positive arms specs/A.mdx",
+  [
+    'import BASE from "./BASE.xspec"',
+    "",
+    '<S id="a">',
+    "Local a text.",
+    "",
+    '<S id="a.b">',
+    "Local b text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="viaBrackets" d={BASE["a"]["b"]}>',
+    "Segment-per-index computed chain.",
+    "</S>",
+    "",
+    '<S id="viaDots" d={BASE.a.b}>',
+    "Dot chain.",
+    "</S>",
+    "",
+    '<S id="viaLocal" d={"a.b"}>',
+    "Local string naming the two-segment path.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T2_4_4 = defineProductTest({
   id: "T2.4-4",
   title:
-    'computed access is segment-exact: `BASE["a.b"]` fails with 14.5 in `d`, 14.6 in `text(...)`, and 14.7 as a TypeScript marker (also a type error against the generated module), while `BASE["a"]["b"]`, `BASE.a.b`, and the local string `d={"a.b"}` resolve to node `a.b` (SPEC 2.4, 1.4, 2.2, 4.5, 14.5–14.7)',
+    'computed access is segment-exact: `BASE["a.b"]` fails with 14.5 in `d`, 14.6 in `text(...)`, and 14.7 as a TypeScript marker (also a type error against the generated module under both of H-2\'s configurations, its diagnostics at the dotted index alone), while `BASE["a"]["b"]`, `BASE.a.b`, and the local string `d={"a.b"}` resolve to node `a.b` (SPEC 2.4, 1.4, 2.2, 4.5, 14.5–14.7)',
   run: async (product) => {
     // 14.5: unresolved `d` reference — the segment `a.b` names no node even
     // though the node `a.b` exists (its path is two segments, `a` then `b`).
@@ -584,21 +1151,28 @@ const T2_4_4 = defineProductTest({
 
         // The failing build modified nothing (SPEC 12.1), so the module
         // generated by the passing build is still in place: under standard
-        // TypeScript tooling the marker must be a type error (14.7 "this is
-        // also a type error against the generated module") — located at the
-        // dotted index, which lies within the reported span whether the
-        // compiler blames the whole element access or the index expression.
-        const consumer = await ConsumerProject.load({
-          rootDir: workspace.root,
-          rootFiles: ["src/app.ts"],
-        });
-        assertCompileErrorAt(
-          consumer,
-          consumer.locate("src/app.ts", '["a.b"]', { charOffset: 2 }),
-          {},
-          'T2.4-4 the marker `BASE["a.b"]` against the generated module — no segment ' +
-            "contains `.`, so no property `a.b` exists on the root node (SPEC 2.4, " +
-            "1.4, 4.1, 14.7)",
+        // TypeScript tooling, in each of H-2's configurations, the marker
+        // must be a type error (14.7 "this is also a type error against the
+        // generated module") — the program's diagnostics at the dotted index
+        // alone (H-2's type-error assertion), which lies within the reported
+        // span whether the compiler blames the whole element access or the
+        // index expression.
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["src/app.ts"] },
+          (consumer) =>
+            assertTypeErrorsAt(
+              consumer,
+              [
+                {
+                  at: consumer.locate("src/app.ts", '["a.b"]', {
+                    charOffset: 2,
+                  }),
+                },
+              ],
+              'T2.4-4 the marker `BASE["a.b"]` against the generated module — no segment ' +
+                "contains `.`, so no property `a.b` exists on the root node (SPEC 2.4, " +
+                "1.4, 4.1, 14.7)",
+            ),
         );
       },
     );
@@ -651,10 +1225,624 @@ const T2_4_4 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T2.4-5
+// ---------------------------------------------------------------------------
+
+// Verbatim literals (SPEC 2.4): the value of a static string literal is the
+// characters between its delimiters exactly as spelled — no escape sequence
+// or character reference interpreted — so a spelling whose interpreted value
+// would name a node names nothing: a local value containing `\` or `&` names
+// no valid identity (1.4) and a computed key spelled with an escape is a
+// segment no node has. Every negative arm is staged beside the node its
+// interpreted value would name — the local `login` and local path `a.b` in
+// the declaring file, and `a.b` and `login` in the imported BASE — so a
+// product interpreting the spelling resolves it, reports nothing for it,
+// and fails the exact condition counts. (The escape-spelled computed key
+// `BASE["a\u002Eb"]` is 14.5 for a verbatim reader and for an interpreting
+// one alike — its interpreted key `a.b` is a single segment naming nothing,
+// T2.4-4 — while `text(BASE["\u0061"]["b"])` discriminates: interpreted,
+// its keys would resolve to `a.b`.)
+//
+// The code-source half: the marker `BASE.lo\u0067in` — a chain segment
+// carrying a Unicode escape spells a name containing `\`, which no segment
+// contains (2.4) — is 14.7, records no edge and no occurrence (5.7), while
+// the escape-free control `BASE.login` beside it records its edge, witnessed
+// through `occurrences` (11.3), which answers on the failing workspace
+// (11.2) — `query edges` does not (13.3), so the edge behind the control's
+// occurrence record is the witness, and a second record for the escaped
+// spelling (its tuple identical to the control's) is a phantom the exact
+// multiset rejects. The discriminating half rides H-2's standard-tooling
+// channel: the consumer file type-checks clean against the prior valid
+// generation under each of H-2's two configurations, its whole program —
+// the generated module and the companions it reaches — included
+// (TypeScript reads the escaped identifier as `login`, which the
+// generated module exports), so a product deriving resolution from the
+// interpreted name — no finding, an edge, a record — fails this arm, and
+// 14.7's type-error clause is not what makes the finding (SPEC 14.7: it
+// holds only for a spelling free of escape sequences).
+//
+// The MDX half of the segment rule, in the same failing workspace: the
+// same segment escape in a spec source — `d={BASE.lo\u0067in}` and
+// `{text(BASE.lo\u0067in)}`, BASE's module holding `login` — is 14.5 and
+// 14.6 respectively and records no edge and no occurrence, though ECMAScript
+// decodes the escape to `login`: a spec source reaches its expressions
+// through ECMAScript 2024's grammar (14.20), never TypeScript's, so the
+// code-source arm cannot stand in for it, and a product resolving through
+// the decoded name records both edges (and their occurrences) and drops
+// both findings. The escape-free control `d={BASE.login}` beside them
+// records its edge, witnessed by its occurrence record, as the code-source
+// control's is.
+//
+// The escaped root, in a second workspace that is valid: which binding roots
+// a chain is the language's scoping question, never a spelling one (2.4,
+// 2.1, 4.5). `d={B\u0041SE.login}` and `{text(B\u0041SE.login)}` in MDX
+// and the marker `B\u0041SE.login` in a code source, each segment
+// escape-free, are rooted at the `BASE` import binding (ECMAScript and
+// TypeScript alike read the escaped identifier reference as `BASE`), so the
+// workspace builds with no finding and each spelling records its edge
+// (`query edges` answers there) and its occurrence — failing a product that
+// reads the root as spelled too, finds no binding named `B\u0041SE`, and
+// reports the reference (14.5, 14.6) or passes the marker over. Each staged
+// MDX file derives (S-9), and each code file is text TypeScript 5.9.3
+// accepts both as module code and as script code (14.20) — the builder's
+// staging-time judges hold every one of them to that.
+//
+// The escape spellings are composed from the backslash's code point (the
+// Task 18 pattern) so they stand in the staged files as their six-character
+// sequences, never decoded on the way in; the character reference `&#46;` is
+// plain ASCII. Fixtures stay pure ASCII, so string indices are byte offsets.
+const BACKSLASH = String.fromCodePoint(0x5c);
+/** The ten characters `lo\u0067in` as spelled; interpreted they read `login`. */
+const ESCAPED_LOGIN = `lo${BACKSLASH}u0067in`;
+/** The eight characters `a\u002Eb` as spelled; interpreted they read `a.b`. */
+const ESCAPED_DOTTED_KEY = `a${BACKSLASH}u002Eb`;
+/** The six characters `\u0061` as spelled; interpreted they read `a`. */
+const ESCAPED_A_KEY = `${BACKSLASH}u0061`;
+/**
+ * The nine characters `B\u0041SE` as spelled: an escaped identifier
+ * reference, which ECMAScript and TypeScript alike read as `BASE`.
+ */
+const ESCAPED_ROOT = `B${BACKSLASH}u0041SE`;
+/** The character-reference spelling whose interpreted value reads `a.b`. */
+const REFERENCE_DOTTED_PATH = "a&#46;b";
+
+// The imported module: `login` (what the escaped marker's interpreted name,
+// and TypeScript's reading of it, would name) and `a` with child `a.b` (what
+// the interpreted computed keys would name).
+const T2_4_5_BASE = [
+  '<S id="login">',
+  "The node an interpreted escape spelling would name.",
+  "</S>",
+  "",
+  '<S id="a">',
+  "A text.",
+  "",
+  '<S id="a.b">',
+  "B text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// The declaring file's valid head — the initial state (its import unused,
+// SPEC 2.1) — holding the local `login` and the local path `a.b` the
+// interpreted local spellings would name.
+const T2_4_5_HEAD = [
+  'import BASE from "./BASE.xspec"',
+  "",
+  '<S id="login">',
+  "The local node an interpreted escape spelling would name.",
+  "</S>",
+  "",
+  '<S id="a">',
+  "Local a text.",
+  "",
+  '<S id="a.b">',
+  "Local b text.",
+  "</S>",
+  "</S>",
+  "",
+  "",
+].join("\n");
+
+/** One verbatim-literal spelling and the condition it must report. */
+interface VerbatimArm {
+  /** The spelling as it stands in the source (failure diagnostics). */
+  readonly name: string;
+  readonly condition: "14.5" | "14.6";
+  /** The offending construct: the opening tag for `d`, the container for `text`. */
+  readonly construct: string;
+}
+
+// The escape-free control `d={BASE.login}` beside the MDX segment-escape
+// arms: its tag's head and its one reference — the span its occurrence
+// record covers (SPEC 5.7: a `d` reference occurrence spans that one
+// reference's own expression).
+const T2_4_5_MDX_CONTROL_HEAD = '<S id="ctl" d={';
+const T2_4_5_MDX_CONTROL_CHAIN = "BASE.login";
+
+// specs/A.mdx after the edit, as an exact sequence of parts: the head, then
+// each arm's construct with its surrounding text, so every construct's byte
+// window follows from the parts before it. Arm order within a condition is
+// source order — the order `findingsInSourceOrder` selects. The last two
+// arms are the MDX segment escapes, the escape-free control after them.
+const T2_4_5_MDX_PARTS: readonly (string | VerbatimArm)[] = [
+  T2_4_5_HEAD,
+  {
+    name: `d={"${ESCAPED_LOGIN}"}`,
+    condition: "14.5",
+    construct: `<S id="e1" d={"${ESCAPED_LOGIN}"}>`,
+  },
+  "\nEscape-spelled local dependency.\n</S>\n\n",
+  '<S id="e2">\n',
+  {
+    name: `{text("${ESCAPED_LOGIN}")}`,
+    condition: "14.6",
+    construct: `{text("${ESCAPED_LOGIN}")}`,
+  },
+  "\n</S>\n\n",
+  {
+    name: `d={"${REFERENCE_DOTTED_PATH}"}`,
+    condition: "14.5",
+    construct: `<S id="e3" d={"${REFERENCE_DOTTED_PATH}"}>`,
+  },
+  "\nReference-spelled local dependency.\n</S>\n\n",
+  {
+    name: `d={BASE["${ESCAPED_DOTTED_KEY}"]}`,
+    condition: "14.5",
+    construct: `<S id="e4" d={BASE["${ESCAPED_DOTTED_KEY}"]}>`,
+  },
+  "\nEscape-spelled computed key.\n</S>\n\n",
+  '<S id="e5">\n',
+  {
+    name: `{text(BASE["${ESCAPED_A_KEY}"]["b"])}`,
+    condition: "14.6",
+    construct: `{text(BASE["${ESCAPED_A_KEY}"]["b"])}`,
+  },
+  "\n</S>\n\n",
+  {
+    name: `d={BASE.${ESCAPED_LOGIN}}`,
+    condition: "14.5",
+    construct: `<S id="e6" d={BASE.${ESCAPED_LOGIN}}>`,
+  },
+  "\nEscape-spelled chain segment.\n</S>\n\n",
+  '<S id="e7">\n',
+  {
+    name: `{text(BASE.${ESCAPED_LOGIN})}`,
+    condition: "14.6",
+    construct: `{text(BASE.${ESCAPED_LOGIN})}`,
+  },
+  "\n</S>\n\n",
+  T2_4_5_MDX_CONTROL_HEAD,
+  T2_4_5_MDX_CONTROL_CHAIN,
+  "}>\nThe escape-free control beside the escape-spelled segments.\n</S>\n",
+];
+
+/** The edited specs/A.mdx: the parts in order. */
+const T2_4_5_MDX_TEXT = T2_4_5_MDX_PARTS.map((part) =>
+  typeof part === "string" ? part : part.construct,
+).join("");
+
+// Staged into specs/A.mdx after the valid initial build — a staged-source
+// record, judged before any product exists (S-9,
+// test/self/s9-staged-sources.test.ts).
+const T2_4_5_MDX_SOURCE = stagedMdx(
+  "T2.4-5 specs/A.mdx with the eight verbatim spellings and the escape-free control",
+  T2_4_5_MDX_TEXT,
+);
+
+/** The staged arms of one condition in source order, each with its byte window. */
+function verbatimArmsOf(
+  condition: VerbatimArm["condition"],
+): readonly { arm: VerbatimArm; window: { start: number; end: number } }[] {
+  const arms: { arm: VerbatimArm; window: { start: number; end: number } }[] =
+    [];
+  let prefix = "";
+  for (const part of T2_4_5_MDX_PARTS) {
+    if (typeof part === "string") {
+      prefix += part;
+      continue;
+    }
+    if (part.condition === condition) {
+      arms.push({ arm: part, window: byteWindow(prefix, part.construct) });
+    }
+    prefix += part.construct;
+  }
+  return arms;
+}
+
+// src/app.ts: the escape-free control marker at the top level (the initial
+// state, valid), then — the edit — the escape-spelled marker beside it, a
+// staged-source record (S-9's timing clause: staged after the initial
+// `build`).
+const T2_4_5_APP_PREFIX = 'import BASE from "../specs/BASE.xspec";\n\n';
+const T2_4_5_APP_CONTROL_CHAIN = "BASE.login";
+const T2_4_5_APP_INITIAL = `${T2_4_5_APP_PREFIX}${T2_4_5_APP_CONTROL_CHAIN};\n`;
+const T2_4_5_APP_ESCAPED_MARKER = `BASE.${ESCAPED_LOGIN};`;
+const T2_4_5_APP_EDITED = stagedTs(
+  "T2.4-5 src/app.ts — the escape-spelled marker beside the control, staged after `build`",
+  `${T2_4_5_APP_INITIAL}${T2_4_5_APP_ESCAPED_MARKER}\n`,
+);
+
+// The control's occurrence: from the whole file (no named unit encloses it,
+// SPEC 4.6) to BASE's `login`, spanning the bare chain alone, exclusive of
+// the statement terminator (5.7).
+const T2_4_5_CONTROL_UNIT: OccurrenceUnit = {
+  what: "the escape-free control marker `BASE.login` at the top level of src/app.ts",
+  file: "src/app.ts",
+  kind: "references",
+  source: "src/app.ts",
+  target: "specs/BASE.mdx#login",
+  count: 1,
+};
+/** The exact byte range (SPEC 1.7) of `spelling` staged right after `prefix`. */
+function rangeAfter(prefix: string, spelling: string): SourceRange {
+  const start = Buffer.byteLength(prefix, "utf8");
+  return { start, end: start + Buffer.byteLength(spelling, "utf8") };
+}
+const T2_4_5_CONTROL_RANGE = rangeAfter(
+  T2_4_5_APP_PREFIX,
+  T2_4_5_APP_CONTROL_CHAIN,
+);
+
+// The MDX control's occurrence: from its section `ctl` to BASE's `login`,
+// spanning the one reference's own expression `BASE.login`, the braces
+// excluded (SPEC 5.7).
+const T2_4_5_MDX_CONTROL_UNIT: OccurrenceUnit = {
+  what: "the escape-free control `d={BASE.login}` in specs/A.mdx",
+  file: "specs/A.mdx",
+  kind: "depends",
+  source: "specs/A.mdx#ctl",
+  target: "specs/BASE.mdx#login",
+  count: 1,
+};
+const T2_4_5_MDX_CONTROL_RANGE = rangeAfter(
+  T2_4_5_MDX_TEXT.slice(
+    0,
+    T2_4_5_MDX_TEXT.indexOf(T2_4_5_MDX_CONTROL_HEAD) +
+      T2_4_5_MDX_CONTROL_HEAD.length,
+  ),
+  T2_4_5_MDX_CONTROL_CHAIN,
+);
+
+/** One expected occurrence record: its unit, and the span its spelling occupies. */
+interface ExpectedOccurrence {
+  readonly unit: OccurrenceUnit;
+  readonly spelling: string;
+  readonly range: SourceRange;
+}
+
+/** The failing workspace's two records: both escape-free controls. */
+const T2_4_5_CONTROL_OCCURRENCES: readonly ExpectedOccurrence[] = [
+  {
+    unit: T2_4_5_MDX_CONTROL_UNIT,
+    spelling: T2_4_5_MDX_CONTROL_CHAIN,
+    range: T2_4_5_MDX_CONTROL_RANGE,
+  },
+  {
+    unit: T2_4_5_CONTROL_UNIT,
+    spelling: T2_4_5_APP_CONTROL_CHAIN,
+    range: T2_4_5_CONTROL_RANGE,
+  },
+];
+
+// The escaped-root workspace (valid): specs/A.mdx holds
+// `d={B\u0041SE.login}` in section `r1` and `{text(B\u0041SE.login)}` in
+// section `r2`, src/app.ts the marker `B\u0041SE.login` at its top level,
+// and BASE's module holds `login`. The workspace is created after the body's
+// first product invocation, so each staged source is a record (S-9's timing
+// clause), the configuration included (SPEC_AND_CODE_CONFIG).
+const T2_4_5_ROOT_CHAIN = `${ESCAPED_ROOT}.login`;
+const T2_4_5_ROOT_D_PREFIX =
+  'import BASE from "./BASE.xspec"\n\n<S id="r1" d={';
+const T2_4_5_ROOT_EMBED = `{text(${T2_4_5_ROOT_CHAIN})}`;
+const T2_4_5_ROOT_EMBED_PREFIX =
+  `${T2_4_5_ROOT_D_PREFIX}${T2_4_5_ROOT_CHAIN}}>\n` +
+  "Escaped-root dependency.\n</S>\n\n" +
+  '<S id="r2">\n';
+const T2_4_5_ROOT_BASE = stagedMdx(
+  "T2.4-5 specs/BASE.mdx — the escaped-root workspace's imported module",
+  T2_4_5_BASE,
+);
+const T2_4_5_ROOT_MDX = stagedMdx(
+  "T2.4-5 specs/A.mdx — the escaped-root `d` and `text(...)` arms",
+  `${T2_4_5_ROOT_EMBED_PREFIX}${T2_4_5_ROOT_EMBED}\n</S>\n`,
+);
+const T2_4_5_ROOT_APP = stagedTs(
+  "T2.4-5 src/app.ts — the escaped-root marker at the top level",
+  `${T2_4_5_APP_PREFIX}${T2_4_5_ROOT_CHAIN};\n`,
+);
+
+// Each escaped-root spelling's record, from the node that holds it to BASE's
+// `login` (SPEC 5.7): the `d` reference spans its own expression, the
+// embedding its whole `{text(...)}` container, and the marker its bare chain
+// (no named unit encloses it, so its source is the whole file, 4.6).
+const T2_4_5_ROOT_OCCURRENCES: readonly ExpectedOccurrence[] = [
+  {
+    unit: {
+      what: "the escaped-root `d` reference in section `r1` of specs/A.mdx",
+      file: "specs/A.mdx",
+      kind: "depends",
+      source: "specs/A.mdx#r1",
+      target: "specs/BASE.mdx#login",
+      count: 1,
+    },
+    spelling: T2_4_5_ROOT_CHAIN,
+    range: rangeAfter(T2_4_5_ROOT_D_PREFIX, T2_4_5_ROOT_CHAIN),
+  },
+  {
+    unit: {
+      what: "the escaped-root embedding in section `r2` of specs/A.mdx",
+      file: "specs/A.mdx",
+      kind: "embeds",
+      source: "specs/A.mdx#r2",
+      target: "specs/BASE.mdx#login",
+      count: 1,
+    },
+    spelling: T2_4_5_ROOT_EMBED,
+    range: rangeAfter(T2_4_5_ROOT_EMBED_PREFIX, T2_4_5_ROOT_EMBED),
+  },
+  {
+    unit: {
+      what: "the escaped-root marker at the top level of src/app.ts",
+      file: "src/app.ts",
+      kind: "references",
+      source: "src/app.ts",
+      target: "specs/BASE.mdx#login",
+      count: 1,
+    },
+    spelling: T2_4_5_ROOT_CHAIN,
+    range: rangeAfter(T2_4_5_APP_PREFIX, T2_4_5_ROOT_CHAIN),
+  },
+];
+
+/**
+ * The complete occurrence answer is exactly the expected records: the
+ * (file, kind, source, target) multiset first, then each record's exact span
+ * (SPEC 5.7), found by its tuple — which the multiset has pinned to occur
+ * exactly once — so a record at another spelling's span fails by name.
+ */
+function assertOccurrencesExactly(
+  records: readonly OccurrenceRecord[],
+  expected: readonly ExpectedOccurrence[],
+  context: string,
+): void {
+  assertSameJson(
+    records.map(renderOccurrenceUnit).sort(),
+    expectedUnitMultiset(expected.map(({ unit }) => unit)),
+    `${context}: the complete (file, [kind], source -> target) record ` +
+      `multiset is exactly ${expected.map(({ unit }) => unit.what).join("; ")}`,
+  );
+  for (const { unit, spelling, range } of expected) {
+    const [tuple] = expectedUnitMultiset([{ ...unit, count: 1 }]);
+    assertSameJson(
+      records
+        .filter((record) => renderOccurrenceUnit(record) === tuple)
+        .map((record) => record.range),
+      [range],
+      `${context}: the record for ${unit.what} spans \`${spelling}\` ` +
+        `exactly (SPEC 5.7)`,
+    );
+  }
+}
+
+/**
+ * The eight staged spellings and nothing else: exactly four 14.5, three
+ * 14.6, one 14.7 (SPEC 14: every condition reported, and nothing for the two
+ * escape-free controls or the nodes beside the arms), each located within
+ * its own construct's byte window.
+ */
+function assertVerbatimFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.5": 4, "14.6": 3, "14.7": 1 },
+    `${context}: exactly the eight verbatim spellings are reported — the ` +
+      `escape-spelled local \`d\` literal, the reference-spelled local \`d\` ` +
+      `literal, the escape-spelled computed key, and the escape-spelled ` +
+      `chain segment in \`d\` are 14.5; the escape-spelled local \`text\` ` +
+      `literal, the escape-spelled computed keys in \`text\`, and the ` +
+      `escape-spelled chain segment in \`text\` are 14.6; the escape-spelled ` +
+      `marker is 14.7 — and nothing for the escape-free controls ` +
+      `\`d={BASE.login}\` and \`BASE.login\` (SPEC 2.4, 1.4, 14.5–14.7): a ` +
+      `product interpreting a spelling resolves it to the node staged beside ` +
+      `it and drops its finding`,
+  );
+  for (const condition of ["14.5", "14.6"] as const) {
+    const reported = findingsInSourceOrder(findings, condition);
+    const staged = verbatimArmsOf(condition);
+    staged.forEach(({ arm, window }, index) => {
+      assertFindingLocated(
+        reported[index]!,
+        { file: "specs/A.mdx", window },
+        `${context}: the ${condition} finding for \`${arm.name}\` locates ` +
+          `that spelling's own construct (SPEC 14, 2.4)`,
+      );
+    });
+  }
+  assertFindingLocated(
+    findingsInSourceOrder(findings, "14.7")[0]!,
+    {
+      file: "src/app.ts",
+      window: byteWindow(T2_4_5_APP_INITIAL, T2_4_5_APP_ESCAPED_MARKER),
+    },
+    `${context}: the 14.7 finding locates the escape-spelled marker ` +
+      `\`${T2_4_5_APP_ESCAPED_MARKER}\` — a segment carrying a Unicode ` +
+      `escape spells a name containing \`\\\`, which no segment contains, so ` +
+      `the reference resolves nowhere (SPEC 2.4, 1.4, 4.5, 14.7) — never ` +
+      `the control beside it`,
+  );
+}
+
+const T2_4_5 = defineProductTest({
+  id: "T2.4-5",
+  title: `verbatim literals: every static string literal is read exactly as spelled, no escape sequence or character reference interpreted, so a spelling whose interpreted value would name a node names nothing — beside the local \`login\` and \`a.b\` and BASE's \`a.b\` and \`login\`, \`d={"${ESCAPED_LOGIN}"}\` and \`{text("${ESCAPED_LOGIN}")}\` are 14.5 and 14.6, \`d={"${REFERENCE_DOTTED_PATH}"}\` 14.5, \`d={BASE["${ESCAPED_DOTTED_KEY}"]}\` and \`{text(BASE["${ESCAPED_A_KEY}"]["b"])}\` 14.5 and 14.6, and the MDX segment escapes \`d={BASE.${ESCAPED_LOGIN}}\` and \`{text(BASE.${ESCAPED_LOGIN})}\` 14.5 and 14.6 though ECMAScript decodes the escape to \`login\`, each at its own construct; the TypeScript marker \`BASE.${ESCAPED_LOGIN}\` is 14.7 — the escaped spellings record no edge and no occurrence, \`occurrences\` listing exactly the escape-free controls \`d={BASE.login}\` and \`BASE.login\` beside them, each at its exact span — while the consumer file type-checks clean against the prior valid generation under both of H-2's configurations (TypeScript reads the escaped identifier as \`login\`, which exists), so a product resolving the interpreted name fails; the root is a scoping question, never a spelling one — \`d={${ESCAPED_ROOT}.login}\`, \`{text(${ESCAPED_ROOT}.login)}\`, and the marker \`${ESCAPED_ROOT}.login\` are rooted at the \`BASE\` binding, the workspace builds with no finding, and each records its edge and its occurrence (SPEC 2.4, 1.4, 2.1, 4.5, 5.7, 11.3, 14.5–14.7)`,
+  run: async (product) => {
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        "specs/BASE.mdx": T2_4_5_BASE,
+        "specs/A.mdx": T2_4_5_HEAD,
+        "src/app.ts": T2_4_5_APP_INITIAL,
+      },
+      async (workspace) => {
+        // Staging: the initial state is valid, so the workspace shape (the
+        // configuration, both import forms, the control marker) is proven
+        // accepted before the verbatim spellings become the only defects,
+        // and the build generates the spec modules (SPEC 13.1) — the prior
+        // valid generation the type-check arm compiles against, which the
+        // failing build below leaves in place (12.1).
+        await buildOk(
+          product,
+          workspace,
+          "T2.4-5 initial `build` (staging: the valid head with the " +
+            "escape-free control marker; generates specs/BASE.xspec.ts, " +
+            "SPEC 13.1)",
+        );
+
+        await workspace.file("specs/A.mdx", T2_4_5_MDX_SOURCE);
+        await workspace.file("src/app.ts", T2_4_5_APP_EDITED);
+
+        const buildContext =
+          "T2.4-5 `build --json` over the eight verbatim spellings and the two escape-free controls";
+        assertVerbatimFindings(
+          await buildFindings(product, workspace, buildContext),
+          buildContext,
+        );
+
+        // The discriminating half (H-2's standard-tooling channel): against
+        // the prior valid generation, the consumer file — the control and
+        // the escape-spelled marker — type-checks clean under each of H-2's
+        // configurations, the whole program included, since TypeScript
+        // reads `BASE.lo\u0067in` as `BASE.login`, which the generated
+        // module exports (SPEC 4.1). So the 14.7 finding above is owed to
+        // the verbatim reading alone (SPEC 2.4), not to a missing property:
+        // 14.7's type-error clause holds only for a spelling free of escape
+        // sequences (14.7).
+        await forEachConsumerProject(
+          { rootDir: workspace.root, rootFiles: ["src/app.ts"] },
+          (consumer) =>
+            assertTypeChecksClean(
+              consumer,
+              `T2.4-5 the consumer file holding the control \`BASE.login\` and ` +
+                `the escape-spelled marker \`${T2_4_5_APP_ESCAPED_MARKER}\` must ` +
+                `type-check clean against the prior valid generation — ` +
+                `TypeScript reads the escaped identifier as \`login\`, which the ` +
+                `generated module exports (SPEC 14.7, 2.4, 4.1)`,
+            ),
+        );
+
+        // No edge, no occurrence for the escaped marker or the two MDX
+        // segment escapes; each control records its edge. `occurrences`
+        // answers on the failing workspace, the domain's findings
+        // accompanying (SPEC 11.2, 11.3; exit 1), and the complete record
+        // multiset is exactly the two controls' records — each one's (file,
+        // kind, source, target) tuple and its exact span — so a record for
+        // an escaped spelling (a tuple identical to its control's, at
+        // another span) is caught by count, and a record at the escaped span
+        // in place of the control's by the span.
+        const occContext = "T2.4-5 `occurrences` over the failing workspace";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["occurrences"],
+          1,
+          `${occContext} — an answer carrying any finding exits 1, the full ` +
+            `answer document still emitted (SPEC 11.2, 11.3)`,
+        );
+        const report = decodeOccurrencesReport(
+          parseJsonStdout(result, occContext),
+          occContext,
+        );
+        assertVerbatimFindings(report.findings, occContext);
+        assertOccurrencesExactly(
+          report.occurrences,
+          T2_4_5_CONTROL_OCCURRENCES,
+          `${occContext} — the escape-spelled marker and the two escape-` +
+            `spelled MDX segments resolve nowhere, so they record no edge and ` +
+            `no occurrence, while each escape-free control records its own ` +
+            `(SPEC 2.4, 5.7, 4.5, 11.3)`,
+        );
+      },
+    );
+
+    // The escaped root, in a second workspace that is valid: the root is
+    // the language's scoping question, never a spelling one (SPEC 2.4,
+    // 2.1, 4.5), so `B\u0041SE` roots each chain at the `BASE` import
+    // binding. The build exits 0 — no finding anywhere — and the exact edge
+    // sets of each kind and the exact occurrence answer pin every escaped-
+    // root spelling to its own edge and record: a product reading the root
+    // as spelled reports the MDX references unresolved (14.5, 14.6), failing
+    // the build, and passes the marker over, failing its edge and record.
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        "specs/BASE.mdx": T2_4_5_ROOT_BASE,
+        "specs/A.mdx": T2_4_5_ROOT_MDX,
+        "src/app.ts": T2_4_5_ROOT_APP,
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          `T2.4-5 \`build\` over the escaped-root arms \`d={${T2_4_5_ROOT_CHAIN}}\`, ` +
+            `\`${T2_4_5_ROOT_EMBED}\`, and the marker \`${T2_4_5_ROOT_CHAIN}\` — ` +
+            `each rooted at the \`BASE\` import binding, so the workspace is ` +
+            `valid and reports no finding (SPEC 2.4, 2.1, 4.5)`,
+        );
+        for (const kind of ["depends", "embeds", "references"] as const) {
+          assertEdgeSetEqual(
+            await queryEdgesOfKind(
+              product,
+              workspace,
+              kind,
+              "T2.4-5 escaped root",
+            ),
+            T2_4_5_ROOT_OCCURRENCES.filter(
+              ({ unit }) => unit.kind === kind,
+            ).map(({ unit }) => ({ from: unit.source, to: unit.target, kind })),
+            `T2.4-5 the escaped-root workspace's complete \`${kind}\` edge ` +
+              `set — the escaped-root spelling of that kind records its edge ` +
+              `to \`specs/BASE.mdx#login\`, rooted at the \`BASE\` import ` +
+              `binding (SPEC 2.4, 2.1, 4.5, 5.2)`,
+          );
+        }
+        const occContext =
+          "T2.4-5 `occurrences` over the escaped-root workspace";
+        const report = decodeOccurrencesReport(
+          await runJson(
+            product,
+            workspace,
+            ["occurrences"],
+            `${occContext} — a finding-free answer exits 0 (SPEC 11.3)`,
+          ),
+          occContext,
+        );
+        assertConditionCounts(
+          report.findings,
+          {},
+          `${occContext}: no finding accompanies the answer — each ` +
+            `escaped-root spelling resolves (SPEC 2.4, 11.2)`,
+        );
+        assertOccurrencesExactly(
+          report.occurrences,
+          T2_4_5_ROOT_OCCURRENCES,
+          `${occContext} — each escaped-root spelling records its occurrence ` +
+            `(SPEC 2.4, 5.7, 11.3)`,
+        );
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §2.4, in canonical ID order (SUITE-08). */
 export const section24Tests: readonly ProductTestEntry[] = [
   T2_4_1,
   T2_4_2,
   T2_4_3,
   T2_4_4,
+  T2_4_5,
 ];

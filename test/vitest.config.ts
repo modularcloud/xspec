@@ -27,15 +27,60 @@ import { defineConfig } from "vitest/config";
 // test/helpers/. Certification fixture products (CERTIFICATIONS.md) and
 // consumer fixture projects belong in test/fixtures/.
 //
+// Harness-only dependencies are the devDependencies of package.json (the
+// product's runtime dependencies are its `dependencies`): the stock MDX 3
+// parser S-9 judges fixture well-formedness with — `micromark` with
+// `micromark-extension-mdxjs`, `mdast-util-from-markdown` with
+// `mdast-util-mdx` (JSX tag matching lives in that mdast layer, not in the
+// tokenizer) — is declared there in its own right so the check stays
+// independent of the product's `remark-mdx` (TEST-SPEC S-9). Likewise the
+// harness's TypeScript: `typescript-5.9.3`, an npm alias of
+// `typescript@5.9.3` pinned exactly — the release SPEC.md 14.20 fixes — is the
+// parser S-9 checks TypeScript fixtures and draws with and the standard
+// tooling of section 4 (H-2; T1.4-5: never a later release). npm cannot
+// declare one package name in both dependency sets, so the alias is what
+// keeps that dependency the harness's own, independent of the product's
+// `typescript`; harness code imports `typescript-5.9.3`, never `typescript`.
+//
+// Hang guards (TEST-SPEC S-3; test/helpers/hang-guards.ts): no test carries a
+// framework timeout of its own — every project's `testTimeout` is 0, under
+// which Vitest arms no timer — since a test is a span over the invocations
+// and harness steps it runs, bounded by their own guards, and a fixed
+// per-test timeout would be a span guard fixed apart from what it spans.
+//
 // Paths below are relative to the repository root: the npm scripts are the
 // canonical entry points and always run from the package root.
 export default defineConfig({
   test: {
     projects: [
-      { test: { name: "suite", include: ["test/suite/**/*.test.ts"] } },
-      { test: { name: "self", include: ["test/self/**/*.test.ts"] } },
-      { test: { name: "windows", include: ["test/windows/**/*.test.ts"] } },
-      { test: { name: "local", include: ["test/local/**/*.test.ts"] } },
+      {
+        test: {
+          name: "suite",
+          include: ["test/suite/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
+      {
+        test: {
+          name: "self",
+          include: ["test/self/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
+      {
+        test: {
+          name: "windows",
+          include: ["test/windows/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
+      {
+        test: {
+          name: "local",
+          include: ["test/local/**/*.test.ts"],
+          testTimeout: 0,
+        },
+      },
     ],
   },
 });

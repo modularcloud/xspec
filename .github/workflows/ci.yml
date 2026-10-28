@@ -4,17 +4,38 @@
 #
 #   harness-self   Linux. Harness self-tests and certification only (TEST-SPEC
 #                  17, C-1: certification results are part of the harness's CI
-#                  output). This is the signal that must be green before the
-#                  product exists (red-green): product-facing tests may still
-#                  fail while this job passes.
+#                  output), run through the same wrapper as suite-linux, with
+#                  no product installed: the job builds nothing and confirms
+#                  dist/ absent before they run, so a self-test or
+#                  certification that needs the built product fails here
+#                  (H-8: they must pass before the product exists). This is
+#                  the signal that must be green before the product exists
+#                  (red-green): product-facing tests may still fail while this
+#                  job passes. suite-linux runs the self project again, within
+#                  its full suite, with the product built.
 #
 #   suite-linux    Linux. The full suite — sections 1–17, certification
-#                  included (E-1) — run with network access disabled after
-#                  dependency installation, so product invocations run with
-#                  network denied. Expected red until the product conforms to
-#                  SPEC.md; green is required from then on.
+#                  included (E-1) — run through
+#                  .github/scripts/run-without-network.sh: with network access
+#                  disabled after dependency installation, so product
+#                  invocations run with network denied; as the runner's own
+#                  unprivileged identity, so the permission-based stagings of
+#                  environment refusals (T13.5-7, T13.5-10(d), T14-9, T14-10)
+#                  take effect, the harness verifying each on itself and
+#                  reporting a privileged runner as a harness error; and with
+#                  the job's administrative access (passwordless sudo) kept
+#                  for the harness, which makes 13.5's machine-wide stagings
+#                  with it — T13.5-9's second user and second mount,
+#                  T13.5-10(e)-(g)'s fresh process-identifier namespaces —
+#                  outside every product invocation (E-1, H-2). Workspaces
+#                  land in /tmp on the image's ext4 root filesystem (TMPDIR
+#                  stays unset), whose name-hash listing order T13.5-10(c)'s
+#                  bracketing arm needs. Expected red until the product
+#                  conforms to SPEC.md; green is required from then on.
 #
-#   suite-windows  Windows. The E-6 platform-sensitive subset. The E-6
+#   suite-windows  Windows. The E-6 platform-sensitive subset, the
+#                  representative fixture's exclusion probe (13.5's busy
+#                  refusal, dead-run takeover, and release) among it. The E-6
 #                  byte-identity comparison reads the Linux leg's
 #                  representative-fixture outputs from the e6-linux-outputs
 #                  artifact, exchanged through XSPEC_E6_EXCHANGE_DIR (written
@@ -27,6 +48,14 @@ name: CI
 
 on:
   pull_request:
+  # GitHub creates no pull_request-event runs while a PR is unmergeable. A
+  # process branch whose PR is conflicted with main gets its CI signal from
+  # push-event runs on its head instead — same workflow, same tree; checks
+  # attach to the head commit and surface on the PR — by being listed under
+  # push: until its PR is mergeable again or its patch completes
+  # (specs/DEVOPS.md, release flow). sdg/initial-build is kept for history;
+  # claude/xspec-ui-apis-4df8fa (patch 0001, PR #7) used this channel until
+  # its release.
   push:
     branches: [main, sdg/initial-build]
   workflow_dispatch:
@@ -49,15 +78,26 @@ jobs:
       - run: npm ci
       - name: Typecheck both programs (product and harness)
         run: npm run typecheck
-      - name: Build the product
-        run: npm run build
-      - name: Run harness self-tests and certification (network disabled)
+      - name: Confirm no product is installed (H-8; self-tests and certification run before the product exists)
+        run: |
+          if [ -e dist ]; then
+            echo "::error::dist/ exists, but this job runs the harness self-tests and certification with no product installed (TEST-SPEC H-8)"
+            exit 1
+          fi
+      - name: Run harness self-tests and certification (network disabled, unprivileged, administrative access kept)
         run: bash .github/scripts/run-without-network.sh npm run test:self
 
   suite-linux:
     name: Full suite (Linux, E-1)
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # A limit of the CI service, not a harness guard (TEST-SPEC S-3). The
+    # suite's Vitest run took 1099.5 s at 3bb3df8 on one hosted-runner class
+    # and 1951.3-2015.5 s at 80b83aa and f22cc77 on another (transform and
+    # import times scaling alike; the job up to 34 minutes), before the
+    # refined TEST-SPEC's twenty new tests, P-16, and the new arms of
+    # existing tests (T13.3-5(a)'s seeded tampering trials among them) are
+    # implemented; 90 minutes leaves room for both classes.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -67,17 +107,28 @@ jobs:
       - run: npm ci
       - name: Build the product
         run: npm run build
-      - name: Run the full suite (network disabled after setup, E-1)
+      - name: Run the full suite (network disabled after setup, unprivileged, administrative access kept; E-1)
         run: bash .github/scripts/run-without-network.sh npm test
         env:
           XSPEC_E6_EXCHANGE_DIR: ${{ github.workspace }}/.e6-exchange
       - name: Upload E-6 exchange outputs for the Windows leg
-        # No files exist until the harness writes the representative fixture's
-        # outputs into XSPEC_E6_EXCHANGE_DIR on this leg. The exchange lives
-        # in a dot-directory, which upload-artifact v4 excludes by default
-        # (include-hidden-files: false since v4.4) — without the override the
-        # written exchange uploads as nothing and the Windows comparison
-        # fails loudly on a missing manifest (E-6, H-9).
+        # Runs regardless of the suite step's verdict (a step without `if:` is
+        # skipped once an earlier step fails), so an exchange written by the
+        # passing E-6 writer test (test/suite/e6-exchange-writer.test.ts)
+        # always reaches the Windows leg even while unrelated Linux product
+        # tests are red — the Phase 9 red-green period included. `!cancelled()`
+        # rather than `always()`: a cancelled job uploads nothing. The Windows
+        # byte-identity test still fails loudly (H-9) exactly when no exchange
+        # was written — never because some other Linux test failed. No files
+        # exist until the harness writes the representative fixture's outputs
+        # into XSPEC_E6_EXCHANGE_DIR on this leg; `if-no-files-found: ignore`
+        # keeps this step harmless when the suite step never ran or the writer
+        # test wrote nothing. The exchange lives in a dot-directory, which
+        # upload-artifact v4 excludes by default (include-hidden-files: false
+        # since v4.4) — without the override the written exchange uploads as
+        # nothing and the Windows comparison fails loudly on a missing
+        # manifest (E-6, H-9).
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: e6-linux-outputs
@@ -103,9 +154,12 @@ jobs:
       - name: Build the product
         run: npm run build
       - name: Download E-6 exchange outputs from the Linux leg
-        # The artifact does not exist until the Linux leg produces outputs; the
-        # harness's E-6 comparison must itself fail loudly when the exchange
-        # directory is missing while the product exists.
+        # The artifact is absent only when the Linux job produced no exchange
+        # (it died before its suite step, or the E-6 writer test itself did not
+        # complete) — its upload step runs whenever that job is not cancelled,
+        # red product tests notwithstanding. The harness's E-6 comparison must
+        # itself fail loudly when the exchange directory is missing while the
+        # product exists.
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:

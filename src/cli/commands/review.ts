@@ -4,46 +4,82 @@
 //
 // Outcome precedence, per subcommand:
 //
-// `create` (mutating, SPEC 13.5) — under workspace exclusivity with the
-// `--test-hold` seam:
-//   1. session-name validity (SPEC 10.1 → 12.0, exit 2);
-//   2. `--coverage`: the named profile must be configured (SPEC 10.7 →
-//      12.0 "unknown profiles named in arguments", exit 2) — a
-//      configuration-level check preceding source analysis;
-//   3. `--base`: baseline resolution (SPEC 6.3 → 12.0, exit 2) — precedes
-//      source validation;
-//   4. refresh-on-read (SPEC 13.3): invalid sources report the validation
-//      errors, exit 1, nothing created;
-//   5. an existing session name — matched ignoring ASCII case (SPEC 10.1)
-//      — is refused, exit 1, nothing created (SPEC 10.7); an exact-name
-//      corrupt occupant reports the corruption instead (SPEC 10.1, 14.21);
-//   6. derive the items (SPEC 10.5–10.7), validate the write path
-//      (SPEC 14.22), and write the session file (SPEC 10.1, 13.4).
+// `create` (mutating, SPEC 13.5) — its session name's form (SPEC 10.1),
+// its exactly-one-of rule (SPEC 10.7), and its `--strategy` vocabulary are
+// the parser's, judged before the configuration is loaded (12.0's syntax
+// class); then the configuration search and the discovery of 7, which
+// precede every error consulting them (SPEC 12.0) and exclusivity's
+// acquisition (SPEC 13.5; ./mutation.ts): a configuration error, a
+// discovery-level one included, exits 2 (14.14), and a discovery read the
+// environment refuses stops the command (14.25, exit 2); then, under
+// workspace exclusivity with the `--test-hold` seam:
+//   0. the analysis of the current workspace over that discovery — the
+//      sources' content and the journal read, once;
+//   1. `--coverage`: the named profile must be configured (SPEC 10.7 →
+//      12.0 "unknown profiles named in arguments", exit 2) — an argument
+//      check judged against the configuration, preceding the gate;
+//   2. `--base`: resolve the given baseline whole — first the current
+//      journal as the analysis loaded it, a journal error there (14.13)
+//      failing the resolution before any other cause as the usage error
+//      carrying its stable code and concerned path (SPEC 6.3, 12.7), then
+//      ref resolution, the journal prefix/replay, and the baseline
+//      content's parse and validation as a workspace (SPEC 6.3 → 12.0,
+//      exit 2) — preceding source validation: exit 2, nothing created,
+//      even when the current workspace also fails `build`'s validations;
+//   3. the SPEC 13.3 gate, assessment only: invalid sources report the
+//      validation errors, exit 1, nothing created;
+//   4. the examination of the session directory (SPEC 10.7), each outcome
+//      ending the command with nothing modified — stale graph data stays
+//      stale (13.5): the name names every existing session it matches,
+//      exactly or ignoring ASCII case (SPEC 10.1), and each is read; when
+//      any is corrupt, the corruption is reported in the refusal's place —
+//      one finding per corrupt session matched, no refusal beside them
+//      (SPEC 10.7, 14.21) — exit 1; otherwise, when any matched, the one
+//      existing-name refusal, exit 1 (SPEC 10.7); and an obstructed
+//      session-file write path is refused, exit 1 (SPEC 14.22);
+//   5. derive the items (SPEC 10.5–10.7); then the writes, only past every
+//      outcome above: the refresh write of 13.3 (a no-op when the store
+//      already matches), then the session file, once, last (SPEC 10.7,
+//      13.5, 10.1, 13.4).
 //
-// `list` (read) — refresh-on-read, then every session in byte order of
-// name with its name, strategy, and item counts by stored status (no
-// read-time invalidation, SPEC 10.7); corrupt sessions by name as corrupt
-// in place of those fields; exit 1 iff any is corrupt.
+// `list` (read) — in SPEC 10.7's order: the analysis (configuration errors
+// first, 14.14), then the gate of 13.3, assessment only (a failing
+// workspace's report replaces the listing whole, exit 1, no session read);
+// past it the listing of the session directory and the read of every
+// session in it — a listing or read the environment refuses stopping the
+// command there (14.25, exit 2), nothing written, stale graph data still
+// stale — each corruption met there part of the answer, ending nothing;
+// then the refresh write of 13.3 (a refused write: 14.24, exit 2, the
+// error document alone); and only then the answer: every session in byte
+// order of name with its name, strategy, and item counts by stored status
+// (no read-time invalidation, SPEC 10.7); corrupt sessions by name as
+// corrupt in place of those fields, each also reported as its 14.21
+// finding under `findings` (SPEC 14, 12.7); exit 1 iff any is corrupt.
 //
 // `status`, `next`, `show`, `export` (reads) — the shared open flow of
-// review-session.ts (name validity, load, recorded-baseline resolution,
-// refresh), then the read-time view (SPEC 10.4: invalidation applied,
-// never persisted). `next` returns the first item in item order that needs
-// review and is unblocked, or reports the session fully resolved (exit 0,
-// the JSON payload with no item). `export` emits the entire session as a
-// single JSON document — its only output form, with or without `--json`
-// (SPEC 10.7).
+// review-session.ts, in SPEC 10.7's order (the name's form being the
+// parser's): session existence, the gate, the session read meeting any
+// corruption, `show`'s item ID, the recorded baseline, then the read-time
+// view (SPEC 10.4: invalidation applied, never persisted) and, past every
+// outcome, the refresh write of 13.3, the read answering only then — so
+// each outcome leaves stale graph data stale. `next` returns the first
+// item in item order that needs review and is unblocked, or reports the
+// session fully resolved (exit 0, the JSON payload with no item). `export`
+// emits the entire session as a single JSON document — its only output
+// form, with or without `--json` (SPEC 10.7).
 
 import type { JsonObject } from "../../core/canonical-json.js";
-import type { ExitCode } from "../../core/findings.js";
+import { JsonDeferredArray } from "../../core/canonical-json.js";
+import type { SourceClassification } from "../../core/discovery.js";
+import type { ExitCode, Finding } from "../../core/findings.js";
+import { orderFindings } from "../../core/findings.js";
 import type { ReviewSession, SessionParameters } from "../../core/review.js";
 import {
   countsByStoredStatus,
-  existingNameIgnoringAsciiCase,
   parametersToJson,
   recordCoverageProfile,
   sessionFilePath,
-  sessionNameProblem,
+  sessionNamesMatchingIgnoringAsciiCase,
   sessionStrategy,
   statusNeedsReview,
 } from "../../core/review.js";
@@ -54,20 +90,31 @@ import {
 import { spellingOfReference } from "../../core/review-state.js";
 import type { ResolvedBaseline } from "../../workspace/baseline.js";
 import { resolveBaseline } from "../../workspace/baseline.js";
-import { withMutationExclusivity } from "../../workspace/lock.js";
+import { assessWorkspaceRead } from "../../workspace/refresh.js";
 import {
   listSessionNames,
   loadAllSessions,
   loadSession,
   writeSession,
 } from "../../workspace/reviews.js";
-import { symlinkWritePathFindings } from "../../workspace/writes.js";
+import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
-import { prepareGraphForRead } from "../prepare.js";
-import { emitFindingsReport } from "../report.js";
-import { emitDocument, testHoldSpecOf, usageError } from "./common.js";
+import { analyzeGraphForRead } from "../prepare.js";
+import {
+  emitFindingsReport,
+  findingToJson,
+  renderFindingsHuman,
+} from "../report.js";
+import {
+  emitDocument,
+  emitDocumentStreamed,
+  emitTextStreamed,
+  reportBaselineFailure,
+  usageError,
+} from "./common.js";
+import { runMutatingCommand } from "./mutation.js";
 import {
   countsJson,
   effectiveTotals,
@@ -83,18 +130,67 @@ import {
 // `review create` (SPEC 10.7)
 // ---------------------------------------------------------------------------
 
-/** The `create` operation, run under workspace exclusivity (SPEC 13.5). */
+/**
+ * The existing-name refusal's message (SPEC 10.1, 10.7): `existing` holds
+ * the readable sessions the requested name matches, exactly or ignoring
+ * ASCII case, in byte order. The wording is informational (12.7).
+ */
+function existingNameRefusalMessage(
+  name: string,
+  existing: readonly string[],
+): string {
+  const others = existing.filter((match) => match !== name);
+  const exact = others.length < existing.length;
+  if (others.length === 0) {
+    return (
+      `a session named '${name}' already exists — \`review create\` with ` +
+      `the name of an existing session is refused (SPEC 10.1, 10.7)`
+    );
+  }
+  const opening = exact
+    ? `a session named '${name}' already exists, and the name`
+    : `the name '${name}'`;
+  const listed = others.map((other) => `'${other}'`).join(", ");
+  const treated =
+    exact || others.length > 1
+      ? "each existing session it matches"
+      : "an existing session";
+  return (
+    `${opening} matches the existing ` +
+    `session${others.length === 1 ? "" : "s"} ${listed} ignoring ASCII ` +
+    `case, so it is treated as the name of ${treated} and refused ` +
+    `(SPEC 10.1, 10.7)`
+  );
+}
+
+/**
+ * The `create` operation, run under workspace exclusivity (SPEC 13.5) over
+ * the classification its second discovery made holding it (./mutation.ts).
+ */
 async function runCreate(
   invocation: Invocation,
   context: CommandContext,
   name: string,
+  discovered: SourceClassification,
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
 
-  // SPEC 10.1 → 12.0: an invalid session name is a usage error.
-  const nameProblem = sessionNameProblem(name);
-  if (nameProblem !== null) {
-    return usageError(stderr, invocation.command, nameProblem);
+  // The name's form (SPEC 10.1) was judged by the parser (cli/args.ts), a
+  // syntax-class usage error reported before the configuration is loaded
+  // and exclusivity acquired (SPEC 12.0, 13.5).
+
+  // SPEC 12.0, 14.14, 14.25, 13.5: the configuration search and the
+  // discovery of 7 precede every error consulting them and exclusivity's
+  // acquisition, and the second discovery, made holding exclusivity,
+  // precedes every later check and read, so a configuration error (a
+  // discovery-level one included; exit 2) and a discovery read the
+  // environment refuses (exit 2, thrown from the walk) were met before
+  // this point (./mutation.ts). Analyze the current workspace over the
+  // second discovery first — the creation parameters are judged past it.
+  // Nothing is reported past this until the gate below.
+  const analyzed = await analyzeGraphForRead(invocation, context, discovered);
+  if (!analyzed.ok) {
+    return analyzed.exit;
   }
 
   // SPEC 10.7: exactly one of `--base`, `--strategy audit`, `--coverage`
@@ -108,15 +204,15 @@ async function runCreate(
   let baseline: ResolvedBaseline | undefined;
   if (profileName !== undefined) {
     // SPEC 10.7 → 12.0: an unknown profile named in arguments is a usage
-    // error — a configuration-level check preceding source analysis, as
-    // for `coverage <name>` (SPEC 8.2, 14.14).
+    // error — an argument check judged against the configuration, as for
+    // `coverage <name>` (SPEC 8.2), preceding the gate of 13.3.
     const profile = workspace.configuration.coverage.find(
       (candidate) => candidate.name === profileName,
     );
     if (profile === undefined) {
       return usageError(
-        stderr,
-        invocation.command,
+        invocation,
+        context,
         `unknown profile '${profileName}' — no configured coverage profile ` +
           `has that name (SPEC 10.7, 7.4, 12.0)`,
       );
@@ -126,12 +222,21 @@ async function runCreate(
       profile: recordCoverageProfile(workspace.configuration, profile),
     };
   } else if (baseRef !== undefined) {
-    // SPEC 6.3 → 12.0: baseline resolution precedes source validation — an
-    // unresolvable baseline is a usage error (exit 2), nothing modified,
-    // even when the current sources also fail build validation.
-    const resolution = await resolveBaseline(workspace, baseRef);
+    // SPEC 6.3 → 12.0, 10.7: the given baseline's resolution — the current
+    // journal first, then ref resolution, the journal prefix/replay, and
+    // the baseline content's parse and validation as a workspace —
+    // precedes source validation: a journal error in the current journal
+    // (the coded usage error of 6.3 and 12.7), an unresolvable ref, a
+    // replay failure, or baseline content that cannot be parsed and
+    // validated is a usage error (exit 2), nothing modified, even when the
+    // current sources also fail build validation.
+    const resolution = await resolveBaseline(
+      workspace,
+      baseRef,
+      analyzed.analysis.journal,
+    );
     if (!resolution.ok) {
-      return usageError(stderr, invocation.command, resolution.message);
+      return reportBaselineFailure(invocation, context, resolution);
     }
     baseline = resolution.baseline;
     // SPEC 10.7: a baseline session records the commit identity `--base`
@@ -145,63 +250,95 @@ async function runCreate(
     parameters = { strategy: "audit" };
   }
 
-  // SPEC 13.3: refresh-on-read — with invalid sources, report the
-  // validation errors, exit 1, nothing created (a `review` subcommand like
-  // any other).
-  const prepared = await prepareGraphForRead(invocation, context);
-  if (!prepared.ok) {
-    return prepared.exit;
-  }
-  const { analysis } = prepared;
-
-  // SPEC 10.1/10.7: `create` with the name of an existing session is
-  // refused (exit 1, nothing created); a name matching an existing
-  // session's ignoring ASCII case is treated as the name of an existing
-  // session. An exact-name corrupt occupant is a session `create` names,
-  // so the corruption is reported (SPEC 10.1, 14.21).
-  const occupant = await loadSession(workspace.root, name);
-  if (occupant.state === "corrupt") {
-    emitFindingsReport(invocation.json, stdout, [occupant.finding]);
+  // SPEC 13.3: the gate — with invalid sources, report the validation
+  // errors, exit 1, nothing created (a `review` subcommand like any other).
+  // The assessment alone: its refresh write is committed only past the
+  // examination of the session directory below (SPEC 10.7, 13.5).
+  const { analysis } = analyzed;
+  const assessed = await assessWorkspaceRead(workspace, analysis);
+  if (assessed.kind === "findings") {
+    emitFindingsReport(invocation.json, stdout, assessed.findings);
     return 1;
   }
-  if (occupant.state === "ok") {
-    return emitReviewRefusal(
-      invocation.json,
-      stdout,
-      invocation.command,
-      `a session named '${name}' already exists — \`review create\` with ` +
-        `the name of an existing session is refused (SPEC 10.1, 10.7)`,
-    );
-  }
-  const collision = existingNameIgnoringAsciiCase(
+
+  // SPEC 10.7: past the gate, `create` examines the session directory —
+  // meeting the existing-name refusal, the corruption reported in its
+  // place, or the obstruction of the session file's write path (14.22) —
+  // and each of these outcomes ends it there, modifying nothing (13.5):
+  // stale graph data stays stale, the refresh of 13.3 waiting until every
+  // one has passed.
+
+  // SPEC 10.1/10.7: the name `create` is given names every existing
+  // session it matches — exactly, or ignoring ASCII case, which `create`
+  // treats as naming that existing session: "of each, where several
+  // sessions so match" (10.1; only a case-sensitive filesystem holds
+  // several). Every match is read, the session directory's byte-ordered
+  // listing deciding which entries match (SPEC 10.1, 12.0). A listed entry
+  // gone by its read no longer exists and matches nothing.
+  const matched = sessionNamesMatchingIgnoringAsciiCase(
     await listSessionNames(workspace.root),
     name,
   );
-  if (collision !== null) {
+  const corruptions: Finding[] = [];
+  const existing: string[] = [];
+  for (const match of matched) {
+    const loaded = await loadSession(workspace.root, match);
+    if (loaded.state === "corrupt") {
+      corruptions.push(loaded.finding);
+    } else if (loaded.state === "ok") {
+      existing.push(match);
+    }
+  }
+  if (corruptions.length > 0) {
+    // SPEC 10.7, 14.21, 13.5: a matched session that is corrupt has its
+    // corruption reported in the refusal's place — one finding per corrupt
+    // session the name matches, each concerning its own session file, in
+    // the 12.7 order (the shared findings renderer's), the refusal not
+    // reported beside them even where the name also matches a valid
+    // session — exit 1, nothing created.
+    emitFindingsReport(invocation.json, stdout, corruptions);
+    return 1;
+  }
+  if (existing.length > 0) {
+    // SPEC 10.1/10.7/14: `create` with the name of an existing session is
+    // refused — one code-less finding however many sessions the name
+    // matches (each refusal one finding), exit 1, nothing created; the
+    // identities name the requested name and the existing sessions it
+    // matches ignoring ASCII case (informational, 12.7).
     return emitReviewRefusal(
       invocation.json,
       stdout,
-      invocation.command,
-      `the name '${name}' matches the existing session '${collision}' ` +
-        `ignoring ASCII case, so it is treated as the name of an existing ` +
-        `session and refused (SPEC 10.1, 10.7)`,
+      existingNameRefusalMessage(name, existing),
+      [name, ...existing.filter((match) => match !== name)],
     );
+  }
+
+  // SPEC 14.22, 10.1, 10.7: a workspace-relative directory component of
+  // the session file's write path occupied by anything other than a
+  // directory — the session directory a plain file or a symbolic link,
+  // which then holds no sessions (10.1) — refuses the write, reported at
+  // the examination of the session directory, before any write.
+  const writeFindings = await obstructedWritePathFindings(workspace.root, [
+    sessionFilePath(name),
+  ]);
+  if (writeFindings.length > 0) {
+    emitFindingsReport(invocation.json, stdout, writeFindings);
+    return 1;
   }
 
   // Derive the session's items with the creation-time generator run
   // (SPEC 10.5–10.7; `create` merges into an empty session, so every
-  // generated item enters with current state and a fresh id).
+  // generated item enters with current state and an id derived from its
+  // kind and scope node — core/review.ts "Item ids").
   const generation = runSessionGenerators(parameters, analysis, baseline);
   const expanded = expandDecompositions(
     generation.items,
     [],
-    analysis.graph,
-    analysis.journal.journal,
     generation.contentSource,
   );
   const derived = deriveSessionItems({
     existing: [],
-    nextItemId: 1,
+    decompositions: [],
     generated: expanded,
     current: {
       graph: analysis.graph,
@@ -219,19 +356,14 @@ async function runCreate(
     // policy): record the journal's entry count as the write-moment bound
     // every stored canonical position stays within.
     journalLength: analysis.journal.journal.entries.length,
-    nextItemId: derived.nextItemId,
     items: derived.items,
   };
 
-  // SPEC 14.22: a symbolic link at a workspace-relative directory component
-  // of the write path refuses the write, reported before modifying anything.
-  const writeFindings = await symlinkWritePathFindings(workspace.root, [
-    sessionFilePath(name),
-  ]);
-  if (writeFindings.length > 0) {
-    emitFindingsReport(invocation.json, stdout, writeFindings);
-    return 1;
-  }
+  // SPEC 10.7, 13.3, 13.5: only past all of its outcomes does `create`
+  // write — the refresh of 13.3, where graph data is stale (a no-op when
+  // the store already matches), then the session file, once, last. A
+  // write the environment refuses stops the command there (14.24).
+  await assessed.commit();
   await writeSession(workspace.root, name, session);
 
   if (invocation.json) {
@@ -262,19 +394,13 @@ export async function reviewCreateCommand(
     // Unreachable: the parser enforces the required flag (SPEC 10.7, 12.0).
     throw new Error("xspec internal error: review create without --name");
   }
-  // SPEC 13.5: `create` is a mutating subcommand — workspace exclusivity
-  // around the whole operation, with the `--test-hold` seam immediately
-  // after acquisition; a held workspace fails promptly as a usage error,
-  // modifying nothing.
-  const outcome = await withMutationExclusivity(
-    context.workspace.root,
-    testHoldSpecOf(invocation, context.cwd),
-    () => runCreate(invocation, context, name),
+  // SPEC 13.5: `create` is a mutating subcommand — discovery, then
+  // workspace exclusivity around every later check and read, with the
+  // `--test-hold` seam immediately after acquisition; a held workspace
+  // fails promptly as a usage error, modifying nothing (./mutation.ts).
+  return runMutatingCommand(invocation, context, true, (discovered) =>
+    runCreate(invocation, context, name, discovered),
   );
-  if (!outcome.ok) {
-    return usageError(context.stderr, invocation.command, outcome.usageMessage);
-  }
-  return outcome.value;
 }
 
 // ---------------------------------------------------------------------------
@@ -286,22 +412,50 @@ export async function reviewListCommand(
   invocation: Invocation,
   context: CommandContext,
 ): Promise<ExitCode> {
-  // SPEC 13.3: refresh-on-read binds every `review` subcommand.
-  const prepared = await prepareGraphForRead(invocation, context);
-  if (!prepared.ok) {
-    return prepared.exit;
+  // SPEC 13.3, 14.14, 12.0: refresh-on-read binds every `review`
+  // subcommand. Analyze the current workspace first — a pure read, a
+  // configuration error reported there with its exit-2 precedence.
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return analyzed.exit;
   }
 
-  // SPEC 10.7: every session in byte order of session name; item counts by
-  // stored status — no read-time invalidation — and each corrupt session
-  // (14.21) by name as corrupt in place of those fields.
+  // SPEC 13.3, 10.7: the gate — on a workspace failing `build`'s
+  // validations its report replaces the listing whole, exit 1, no session
+  // read and nothing modified. The assessment decides without writing: its
+  // one refresh write commits only past the session reads below (SPEC
+  // 10.7: "Only past all of them does a subcommand write").
+  const assessed = await assessWorkspaceRead(
+    context.workspace,
+    analyzed.analysis,
+  );
+  if (assessed.kind === "findings") {
+    emitFindingsReport(invocation.json, context.stdout, assessed.findings);
+    return 1;
+  }
+
+  // SPEC 10.7: past the gate, the listing of the session directory and the
+  // read of every session in it, each corruption met there part of the
+  // answer — ending nothing. A listing or kind read the environment
+  // refuses is the read failure of 14.25, thrown by the workspace layer:
+  // the command stops there, exit 2, before any write, so stale graph data
+  // stays stale.
+  //
+  // The answer: every session in byte order of session name; item counts
+  // by stored status — no read-time invalidation — and each corrupt
+  // session (14.21) by name as corrupt in place of those fields. SPEC
+  // 14.21, 14, 12.7: `list` reports each corrupt session as its
+  // condition-21 finding too — the stable code, the session file as the
+  // concerned path — in the document's `findings` member (`[]` when none
+  // is corrupt), and the human form names the code, presenting the same
+  // information (12.0).
   const loaded = await loadAllSessions(context.workspace.root);
-  let anyCorrupt = false;
+  const corruptions: Finding[] = [];
   const entries: JsonObject[] = [];
   let human = "";
   for (const entry of loaded) {
     if (entry.state === "corrupt") {
-      anyCorrupt = true;
+      corruptions.push(entry.finding);
       entries.push({ corrupt: true, name: entry.name });
       human += `${entry.name} corrupt\n`;
       continue;
@@ -317,13 +471,30 @@ export async function reviewListCommand(
       `${entry.name} ${sessionStrategy(entry.session)} ` +
       `${renderCountsHuman(counts)}\n`;
   }
+  // SPEC 12.7: findings in the pinned order, identical findings collapsed —
+  // each corrupt session's finding concerns its own session file, so none
+  // collapses.
+  const findings = orderFindings(corruptions);
+
+  // SPEC 10.7, 13.3, 14.24, 12.0: only past every session read comes the
+  // refresh write of 13.3 (a no-op when the store already matches), and
+  // `list` answers only then. A write the environment refuses stops the
+  // command at that write — exit 2, the error document alone, nothing of
+  // the answer emitted — the corruptions above ending nothing.
+  await assessed.commit();
+
   if (invocation.json) {
-    emitDocument(context.stdout, { sessions: entries });
+    emitDocument(context.stdout, {
+      findings: findings.map(findingToJson),
+      sessions: entries,
+    });
   } else {
-    context.stdout.write(human);
+    context.stdout.write(
+      findings.length > 0 ? human + renderFindingsHuman(findings) : human,
+    );
   }
-  // SPEC 10.7: `list` exits 1 when any session is corrupt, else 0.
-  return anyCorrupt ? 1 : 0;
+  // SPEC 10.7, 14.21: `list` exits 1 when any session is corrupt, else 0.
+  return findings.length > 0 ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -422,13 +593,16 @@ export async function reviewNextCommand(
   }
   if (invocation.json) {
     // SPEC 10.7: the self-contained payload — review-session.ts fixes it
-    // once, so `next --json`, `show`, and `export` can never disagree.
-    emitDocument(context.stdout, {
+    // once, so `next --json`, `show`, and `export` can never disagree —
+    // streamed in either form, as `export` is: a payload's texts can pass
+    // V8's cap on a string's length once escaped or indented (a long
+    // embedding chain's root subtree text; SPEC 3, 5.3 bound no chain).
+    await emitDocumentStreamed(context.stdout, {
       fullyResolved: false,
       item: itemDocument(view, next),
     });
   } else {
-    context.stdout.write(renderItemHuman(view, next));
+    await emitTextStreamed(context.stdout, renderItemHuman(view, next));
   }
   return 0;
 }
@@ -447,28 +621,27 @@ export async function reviewShowCommand(
     // Unreachable: the parser enforces the positionals (SPEC 10.7).
     throw new Error("xspec internal error: review show without its arguments");
   }
-  const opened = await openSessionForRead(name, invocation, context);
+  // SPEC 10.7 → 12.0: an unknown item ID in any `review` command's
+  // arguments is a usage error, judged by the open flow past the session
+  // read and before the recorded baseline and the refresh write — so it
+  // reads no git data and leaves stale graph data stale (review-session.ts).
+  const opened = await openSessionForRead(name, invocation, context, itemId);
   if (!opened.ok) {
     return opened.exit;
   }
   const view = opened.view;
-  const item = view.session.items.find((candidate) => candidate.id === itemId);
+  const item = opened.item;
   if (item === undefined) {
-    // SPEC 10.7 → 12.0: an unknown item ID in any `review` command's
-    // arguments is a usage error.
-    return usageError(
-      context.stderr,
-      invocation.command,
-      `unknown item '${itemId}' in session '${name}' — no item of the ` +
-        `session has that id (SPEC 10.7, 12.0)`,
-    );
+    // Unreachable: the open flow judged the item ID (SPEC 10.7, 12.0).
+    throw new Error("xspec internal error: review show without its item");
   }
   if (invocation.json) {
     // SPEC 10.7: the full item — every field of 10.2 plus the same
-    // self-contained text payload as `next --json`.
-    emitDocument(context.stdout, itemDocument(view, item));
+    // self-contained text payload as `next --json` — streamed in either
+    // form, as `next` is.
+    await emitDocumentStreamed(context.stdout, itemDocument(view, item));
   } else {
-    context.stdout.write(renderItemHuman(view, item));
+    await emitTextStreamed(context.stdout, renderItemHuman(view, item));
   }
   return 0;
 }
@@ -487,7 +660,15 @@ export async function reviewExportCommand(
     // Unreachable: the parser enforces the positional (SPEC 10.7).
     throw new Error("xspec internal error: review export without <name>");
   }
-  const opened = await openSessionForRead(name, invocation, context);
+  // SPEC 10.7/12.0: `export` is a JSON-only surface — a single JSON
+  // document is its only output form, with or without `--json`, the
+  // findings report of a failed gate or a corrupt session included — so
+  // every report path runs with JSON output forced on (as `query` does).
+  const opened = await openSessionForRead(
+    name,
+    { ...invocation, json: true },
+    context,
+  );
   if (!opened.ok) {
     return opened.exit;
   }
@@ -496,8 +677,12 @@ export async function reviewExportCommand(
   // output form, with or without `--json`: name, strategy, recorded
   // creation parameters and decompositions, every item in item order with
   // every 10.2 field, blocked state, and the payload, read-time
-  // invalidation applied (10.4).
-  emitDocument(context.stdout, {
+  // invalidation applied (10.4). The items render one at a time, each
+  // document built only as the emission reaches it: the whole answer can
+  // outgrow memory and any one string (an n-deep section chain's export
+  // presents O(n²) scope nodes, each under an O(n)-long identity).
+  const ordered = view.ordered;
+  await emitDocumentStreamed(context.stdout, {
     creationParameters: parametersToJson(view.session.parameters),
     decompositions: view.session.decompositions.map(
       (decomposition): JsonObject => ({
@@ -510,7 +695,9 @@ export async function reviewExportCommand(
         ),
       }),
     ),
-    items: view.ordered.map((item) => itemDocument(view, item)),
+    items: new JsonDeferredArray(ordered.length, (index) =>
+      itemDocument(view, ordered[index]),
+    ),
     name,
     strategy: sessionStrategy(view.session),
   });

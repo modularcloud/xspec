@@ -7,30 +7,78 @@
 // Scope implemented (see CERTIFICATIONS.md §CONF-MD):
 // - Spec-group workspaces of `.mdx` sources with imports (SPEC 2.1, valid
 //   forms as staged), same-file and cross-file `text(...)` embeddings (2.3),
-//   MDX comments, mixed line terminators, and sections carrying the full prop
-//   set of 2.7 — `id`, `d` (local or external form, resolving as staged),
-//   `coverage`, and `tags`; `markdown` absent, `{ emit: false }`, and
-//   `{ emit: true }` with default emission next to each source (13.2); no
-//   code groups, no `coverage` or `policy` configuration keys, no git.
+//   MDX comments, mixed line terminators, fenced code blocks and inline code
+//   spans carrying construct-like bytes (T3-1's grammar boundary), and
+//   sections carrying the full prop set of 2.7 — `id`, `d` (local or
+//   external form, resolving as staged), `coverage`, and `tags`; `markdown`
+//   absent, `{ emit: false }`, and `{ emit: true }` with default emission
+//   next to each source (13.2); no code groups, no `coverage` or `policy`
+//   configuration keys, no git.
 // - `build` with byte-exact Markdown output per SPEC 3, and `query node`
-//   reporting own and subtree text (SPEC 1.6, defined through the rules of 3).
+//   reporting identity, source range (SPEC 1.7), own and subtree text (1.6,
+//   defined through the rules of 3), and its `contains` edges (5.2): the
+//   outgoing ones naming its children in document order (a root's naming its
+//   top-level sections), the incoming one from its parent (none for a root).
+//   Hashes, tags, the coverage attribute, and dependency edges are consulted
+//   by no in-scope test and are not reported (their content is out of scope).
+// - For T3-1's grammar-boundary arm: `check` exiting 0, and
+//   `query nodes`/`query edges` reporting no node and no edge for the
+//   construct-like bytes inside fences and code spans (constructs exist only
+//   where the MDX parse yields them) — implemented as the honest whole
+//   reports: every requirement node with its identity (roots as bare paths,
+//   SPEC 1.5) and every `contains`/`depends`/`embeds` edge of the parsed
+//   workspace, so an exact-set assertion observes the absence.
 // - Contracts under certification: SPEC 3 in full — removal, replacement, the
-//   line-drop rule, line terminators — and the emission scope of 7.3.
+//   line-drop rule, line terminators, the parse-not-pattern grammar boundary
+//   — and the emission scope of 7.3.
 //
 // Key mechanisms:
 // - Sources are scanned by a hand-rolled MDX-lite lexer recognizing exactly
-//   the scope's constructs: spec module imports at line start, `<S>`/`<Spec>`
+//   the scope's constructs: spec module imports at a Markdown line start (the
+//   MDX ESM position) or continuing an open ESM block after ECMAScript
+//   whitespace and line terminators alone — U+2028/U+2029 beside LF/CR, the
+//   block deriving under 14.20 by ECMAScript's own line model, as T3-3's
+//   ESM-block arm spells two imports on one physical line separated by
+//   U+2028 — the separator staying content, since SPEC 3 removes a
+//   declaration's own characters alone; `<S>`/`<Spec>`
 //   opening/closing/self-closing tags with the 2.7 prop set (quoted `id`,
-//   `coverage`, `tags`; quote-aware braced `d`), MDX comments (single- and
-//   multi-line), and `{text(...)}` embeddings with local (string) or external
-//   (property chain) arguments. Deliberately no stock MDX parser: the
-//   committed SUITE-11 fixtures stage shapes remark-mdx cannot parse — an
-//   import line directly followed by a non-blank line (T3-3), and an opening
-//   tag with trailing same-line content whose closing tag sits on a later
-//   line (T3-1's `gamma`) — and the line-drop fixtures depend on exact exotic
-//   bytes (boundary code points, lone-CR terminators) that tooling silently
-//   normalizes. That mis-staging hazard is exactly what §CONF-MD certifies
-//   against.
+//   `coverage`, `tags`; quote-aware braced `d`), and expression containers
+//   judged as 14.20's accepting side fixes them for the scope's forms: once
+//   ECMAScript's whitespace, line terminators, and comments are deleted — a
+//   brace on a commented-out line closing nothing, so the run-on `{// c}`
+//   form runs on to a later `}` — nothing left is an MDX comment (`{/* … */}`
+//   single- and multi-line, `{}`, block-comment sequences, line-comment
+//   containers ended by U+000A or U+000D, ECMAScript-only whitespace between
+//   the braces; T2.7-4's positive forms) and exactly one `text(...)` call
+//   with local (string) or external (property chain) argument is an
+//   embedding whatever whitespace and comments stand beside the call
+//   (T2.3-3's positive forms), replaced whole; and JavaScript comments beside
+//   an import in its ESM block are content (T3-7). Deliberately no stock MDX
+//   parser: a committed
+//   SUITE-11 fixture once staged a shape remark-mdx cannot parse — an opening
+//   tag with trailing same-line content whose closing tag sat alone on a
+//   later line (T3-1's `gamma`, since restaged under S-9 to close within its
+//   paragraph; T3-3's import line directly followed by a non-blank line was
+//   restaged with a blank line ending its block) — and the line-drop
+//   fixtures depend on exact exotic bytes (boundary code points, lone-CR
+//   terminators) that tooling silently normalizes. That mis-staging hazard
+//   is exactly what §CONF-MD certifies against.
+// - Grammar boundary (T3-1): before the lexer runs, `markdownLiteralRegions`
+//   marks fenced code blocks and inline code spans; the lexer treats every
+//   byte inside a marked region as plain content — no import, tag, comment,
+//   or embedding is recognized there — so construct-like bytes inside them
+//   yield no node, no edge, no finding, and are preserved byte-for-byte.
+//   Region scanning models exactly the staged shapes (a CommonMark-ish
+//   subset): fences open on a line holding up to three spaces of indent then
+//   a run of >= 3 backticks (info string without backticks) or >= 3 tildes,
+//   close on a same-character run at least as long with only blanks after,
+//   and run to end of file when unclosed; inline code spans open at a
+//   backtick run outside a fence and close at the next run of exactly equal
+//   length on the same line (spans never cross line terminators — single-line
+//   spans are the staged scope). The scan uses the plain Markdown line
+//   structure (LF, CRLF, lone CR), deliberately independent of the CERT-13
+//   deviation hook: each violator carries exactly one deviation, in the
+//   compile's line model alone.
 // - Compilation is a port of the harness oracle's line model
 //   (test/helpers/oracles/markdown.ts, S-6-vetted; the "may share HARNESS-08's
 //   compilation logic" of the CERT-11 plan entry) extended with node
@@ -52,6 +100,18 @@
 //   compiles its file first (memoized recursion; an import/embedding cycle
 //   surfaces as a finding instead of recursing forever). Chains (A embeds B
 //   embeds C) therefore expand fully, bottom-up.
+// - Invocation (SPEC 12.0, CERTIFICATIONS.md preamble): the arguments are
+//   read under 12.0's grammar — flag tokens anywhere, arity fixed by name
+//   across commands (`--test-hold` value-taking everywhere, an unknown flag
+//   of the non-mutating `build`, `check`, and `query`), `--` ending flag
+//   reading, the remaining tokens matching the synopsis exactly — and every
+//   usage or configuration error (exit 2) is delivered in the 12.7 error
+//   document whenever JSON output is in effect: a `--json` read as a flag,
+//   or `query`, JSON-only (11). The syntax class is decided before
+//   configuration is loaded; only then are invocations outside the scope —
+//   another product command or `query` subcommand, a `query nodes` or
+//   `query edges` filter, a configuration key SPEC 7 defines but the scope
+//   excludes — refused loudly (exit 70, `fixture scope error`).
 // - `build` writes nothing but the emitted Markdown (with `markdown.emit`
 //   true; nothing at all otherwise — SPEC 7.3): the scope observes compiled
 //   output and the query surface only, and every query recomputes from
@@ -76,7 +136,10 @@
 //     so a lone U+000D is an ordinary in-line character while CRLF and lone
 //     U+000A remain terminators.
 // Both points feed the single attributed compile, so a deviation applied
-// there is consistent across output and text values by construction.
+// there is consistent across output and text values by construction. The
+// `contains` edges `query node` reports come from the parse's section tree,
+// which neither switch touches, so every violator reports the conformer's
+// edges unchanged.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -85,8 +148,35 @@ import * as path from "node:path";
 // Outcome carriers
 // ---------------------------------------------------------------------------
 
-/** Usage or configuration error (SPEC 12.0 exit 2): message on stderr. */
-class UsageError extends Error {}
+/**
+ * Usage or configuration error (SPEC 12.0 exit 2): the message is stderr
+ * content; with JSON output in effect the 12.7 error document is the
+ * entire stdout. `code`/`path` are the error finding's stable code and
+ * concerned path — set for configuration errors (14.14:
+ * `configuration-error` plus the concerned path, SPEC 14), `null` for plain
+ * usage errors (SPEC 12.7, 14).
+ */
+class UsageError extends Error {
+  /** @param {string} message
+   *  @param {{ code?: string | null, path?: string | null }} [finding] */
+  constructor(message, { code = null, path = null } = {}) {
+    super(message);
+    this.code = code;
+    this.path = path;
+  }
+}
+
+/**
+ * An invocation outside this fixture's scope (CERTIFICATIONS.md §CONF-MD)
+ * that a conforming product would answer — another product command,
+ * another `query` subcommand, a `query nodes` or `query edges` filter no
+ * in-scope observation uses, or a configuration key SPEC 7 defines but the
+ * scope excludes. Refused loudly with an exit code outside the 12.0
+ * partition (as a crash is, below), so a test reaching it fails on its
+ * exit-code assertion with the cause on stderr — never on a fabricated
+ * answer or a false usage or configuration error.
+ */
+class ScopeError extends Error {}
 
 /** Findings (SPEC 12.0 exit 1): a findings report on stdout. */
 class FindingsError extends Error {
@@ -144,12 +234,37 @@ async function pathOccupied(absPath) {
 
 const CONFIG_NAME = "xspec.config.ts";
 
+/**
+ * A located configuration file's concerned path in the anchoring form of
+ * SPEC 11.6, as SPEC 14 reports a configuration error's: identified
+ * relative to the invocation working directory, the working directory and
+ * the workspace root (the file's directory, 7) entering as physical paths
+ * with every symbolic link among their components resolved, the file as its
+ * own name under the root so spelled — the segments ascending to the
+ * nearest common ancestor spelled `..`, then the descending segments,
+ * `/`-joined; the platform's absolute form only where no relative path
+ * exists (11.6).
+ */
+async function anchoringPath(cwd, configPath) {
+  const physicalCwd = await fsp.realpath(cwd);
+  const physicalRoot = await fsp.realpath(path.dirname(configPath));
+  const relative = path.relative(physicalCwd, physicalRoot);
+  const name = path.basename(configPath);
+  if (relative === "") return name;
+  if (path.isAbsolute(relative)) return path.join(relative, name);
+  return [...relative.split(path.sep), name].join("/");
+}
+
 async function findConfigPath(cwd, configFlag) {
   if (configFlag !== undefined) {
     const abs = path.resolve(cwd, configFlag);
     if (!(await pathOccupied(abs))) {
       throw new UsageError(
         `configuration file not found: --config ${configFlag}`,
+        // A `--config` path nothing occupies — the one concerned path no
+        // physical resolution can spell — is reported as the argument value
+        // exactly as given (SPEC 14, 12.0).
+        { code: "configuration-error", path: configFlag },
       );
     }
     return abs;
@@ -162,6 +277,9 @@ async function findConfigPath(cwd, configFlag) {
     if (parent === dir) {
       throw new UsageError(
         `configuration error: no ${CONFIG_NAME} found by upward search from the working directory`,
+        // Missing configuration with no `--config`: the concerned path is
+        // the directory the failed search started from, spelled "." (14).
+        { code: "configuration-error", path: "." },
       );
     }
     dir = parent;
@@ -343,15 +461,41 @@ class LiteralParser {
 }
 
 /**
+ * The configuration keys SPEC 7 defines that §CONF-MD's scope excludes — no
+ * code groups, no `coverage` or `policy` keys, default emission
+ * destinations alone (no `markdown.outDir`, 7.3) — refused loudly as scope
+ * errors: a conforming product accepts them, so refusing one as a
+ * configuration error would fabricate a verdict. Any other key is unknown,
+ * a configuration error (SPEC 7, 14.14).
+ */
+const OUT_OF_SCOPE_KEYS = new Set(["code", "coverage", "policy"]);
+const OUT_OF_SCOPE_MARKDOWN_KEYS = new Set(["outDir"]);
+
+/**
  * Load and validate the configuration; returns the workspace root, the spec
  * groups, and the emission switch. The in-scope shape (CERTIFICATIONS.md
  * §CONF-MD) is spec groups of glob strings plus an optional
- * `markdown: { emit: boolean }` with default destinations — no `outDir`, no
- * `code`, `coverage`, or `policy` keys; anything else is refused loudly as a
- * configuration error rather than half-implemented (SPEC 7, 14.14).
+ * `markdown: { emit: boolean }` with default destinations.
  */
 async function loadConfig(cwd, configFlag) {
   const configPath = await findConfigPath(cwd, configFlag);
+  try {
+    return await parseAndValidateConfig(configPath);
+  } catch (error) {
+    // Every defect found while reading, parsing, or validating the located
+    // configuration is a configuration error (SPEC 14.14): its error finding
+    // carries the stable code and the concerned configuration file in the
+    // anchoring form (SPEC 14, 12.7).
+    if (error instanceof UsageError && error.code === null) {
+      error.code = "configuration-error";
+      error.path = await anchoringPath(cwd, configPath);
+    }
+    throw error;
+  }
+}
+
+/** The post-location half of {@link loadConfig}: read, parse, validate. */
+async function parseAndValidateConfig(configPath) {
   let text;
   try {
     text = await fsp.readFile(configPath, "utf8");
@@ -362,9 +506,16 @@ async function loadConfig(cwd, configFlag) {
   }
   const data = parseConfigSource(text);
   for (const key of Object.keys(data)) {
-    if (key !== "specs" && key !== "markdown") {
+    if (key !== "specs" && key !== "markdown" && !OUT_OF_SCOPE_KEYS.has(key)) {
       throw new UsageError(
-        `configuration error: the key ${JSON.stringify(key)} is unknown or outside this fixture's scope (CERTIFICATIONS.md §CONF-MD; SPEC 7, 14.14)`,
+        `configuration error: the key ${JSON.stringify(key)} is unknown (SPEC 7, 14.14)`,
+      );
+    }
+  }
+  for (const key of Object.keys(data)) {
+    if (OUT_OF_SCOPE_KEYS.has(key)) {
+      throw new ScopeError(
+        `the configuration key ${key} is outside this fixture's scope (CERTIFICATIONS.md §CONF-MD: no code groups, no coverage or policy configuration keys)`,
       );
     }
   }
@@ -409,9 +560,16 @@ async function loadConfig(cwd, configFlag) {
       );
     }
     for (const key of Object.keys(markdown)) {
-      if (key !== "emit") {
+      if (key !== "emit" && !OUT_OF_SCOPE_MARKDOWN_KEYS.has(key)) {
         throw new UsageError(
-          `configuration error: markdown.${key} is unknown or outside this fixture's scope (CERTIFICATIONS.md §CONF-MD: default emission destinations only; SPEC 7.3, 14.14)`,
+          `configuration error: markdown.${key} is unknown (SPEC 7.3, 14.14)`,
+        );
+      }
+    }
+    for (const key of Object.keys(markdown)) {
+      if (OUT_OF_SCOPE_MARKDOWN_KEYS.has(key)) {
+        throw new ScopeError(
+          `markdown.${key} is outside this fixture's scope (CERTIFICATIONS.md §CONF-MD: default emission destinations only, 13.2)`,
         );
       }
     }
@@ -539,7 +697,11 @@ async function discoverSources(root, groups) {
  *     CRLF and lone U+000A remain terminators.
  * Both points feed the single attributed compile, so any deviation there is
  * automatically consistent in Markdown output and, through SPEC 1.6, in own
- * and subtree text.
+ * and subtree text. Neither switch reads the arguments: the invocation is
+ * read under SPEC 12.0's grammar (`readInvocation`, `checkSynopsis`) and its
+ * one argument check judging 1.4's classes (`checkTagValue`) uses the exact
+ * classes, never `isDropWhitespaceCode`, so every violator reads its
+ * invocation exactly as the conformer does.
  */
 let deviations = {};
 
@@ -657,7 +819,135 @@ const TAG_WHITESPACE = new Set(["\t", "\n", "\v", "\f", "\r", " "]);
 const IMPORT_RE =
   /^import[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \t]+from[ \t]+(?:"([^"\r\n]*)"|'([^'\r\n]*)');?/;
 
-const EMBED_OPEN_RE = /^\{[ \t]*text[ \t]*\(/;
+/**
+ * ECMAScript's LineTerminator code points — U+000A, U+000D, U+2028, U+2029 —
+ * the line model of an ESM block's own grammar (SPEC 14.20), under which two
+ * imports separated by U+2028 on one physical line derive (T3-3's ESM-block
+ * arm). Distinct from SPEC 3's line model, where U+2028 and U+2029 are
+ * ordinary characters (1.4): the compile never consults this set.
+ */
+const ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS = new Set([
+  0x000a, 0x000d, 0x2028, 0x2029,
+]);
+
+/** ECMAScript's WhiteSpace — U+0009, U+000B, U+000C, U+FEFF, and every
+ * Space_Separator (U+0020 and U+00A0 among them) — again the ESM block's own
+ * class (14.20), never SPEC 1.4's. */
+const SPACE_SEPARATOR_RE = /\p{Zs}/u;
+function isEcmascriptWhitespaceCode(code) {
+  return (
+    code === 0x0009 ||
+    code === 0x000b ||
+    code === 0x000c ||
+    code === 0xfeff ||
+    SPACE_SEPARATOR_RE.test(String.fromCharCode(code))
+  );
+}
+
+/**
+ * The Markdown literal regions of a source — fenced code blocks and inline
+ * code spans — as sorted, disjoint `{ start, end }` string-index ranges
+ * (T3-1's grammar boundary; see the module header for the modeled subset).
+ * The lexer treats every byte inside a region as plain content: constructs
+ * exist only where the MDX parse yields them, and fences/code spans are
+ * literal text.
+ *
+ * Line structure here is the plain Markdown one (LF, CRLF, lone CR) — never
+ * the deviation-switchable compile line model: each violator's single
+ * deviation is defined on the compile's line model alone (CERTIFICATIONS.md),
+ * so construct recognition — fence and span regions included, the P-2
+ * generator staging fences over mixed terminators — is identical across the
+ * whole fixture family, and only compiled bytes (with own/subtree text
+ * through SPEC 1.6) diverge under a deviation.
+ */
+function markdownLiteralRegions(text) {
+  /** @type {{ start: number, end: number }[]} */
+  const regions = [];
+  /** @type {{ start: number, end: number }[]} */
+  const outsideLines = [];
+  /** @type {{ char: string, len: number, start: number } | null} */
+  let fence = null;
+  let lineStart = 0;
+  while (lineStart < text.length) {
+    let lineEnd = lineStart;
+    while (lineEnd < text.length) {
+      const code = text.charCodeAt(lineEnd);
+      if (code === 0x000a || code === 0x000d) break;
+      lineEnd += 1;
+    }
+    const nextStart =
+      lineEnd >= text.length
+        ? text.length
+        : text.charCodeAt(lineEnd) === 0x000d &&
+            text.charCodeAt(lineEnd + 1) === 0x000a
+          ? lineEnd + 2
+          : lineEnd + 1;
+    const line = text.slice(lineStart, lineEnd);
+    if (fence === null) {
+      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (
+        open !== null &&
+        !(open[1][0] === "`" && open[2].includes("`")) // backtick info strings hold no backtick
+      ) {
+        fence = { char: open[1][0], len: open[1].length, start: lineStart };
+      } else {
+        outsideLines.push({ start: lineStart, end: lineEnd });
+      }
+    } else {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (
+        close !== null &&
+        close[1][0] === fence.char &&
+        close[1].length >= fence.len
+      ) {
+        regions.push({ start: fence.start, end: lineEnd });
+        fence = null;
+      }
+    }
+    lineStart = nextStart;
+  }
+  if (fence !== null) {
+    regions.push({ start: fence.start, end: text.length }); // unclosed: to EOF
+  }
+  // Inline code spans on the lines outside fences: a backtick run opens a
+  // span closed by the next run of exactly equal length on the same line; a
+  // run with no equal-length closer is ordinary text.
+  for (const { start, end } of outsideLines) {
+    let i = start;
+    while (i < end) {
+      if (text[i] !== "`") {
+        i += 1;
+        continue;
+      }
+      let runEnd = i;
+      while (runEnd < end && text[runEnd] === "`") runEnd += 1;
+      const runLength = runEnd - i;
+      let closeEnd = -1;
+      let scan = runEnd;
+      while (scan < end) {
+        if (text[scan] !== "`") {
+          scan += 1;
+          continue;
+        }
+        let scanEnd = scan;
+        while (scanEnd < end && text[scanEnd] === "`") scanEnd += 1;
+        if (scanEnd - scan === runLength) {
+          closeEnd = scanEnd;
+          break;
+        }
+        scan = scanEnd;
+      }
+      if (closeEnd === -1) {
+        i = runEnd;
+        continue;
+      }
+      regions.push({ start: i, end: closeEnd });
+      i = closeEnd;
+    }
+  }
+  regions.sort((a, b) => a.start - b.start);
+  return regions;
+}
 
 /**
  * Parse one source file into document-ordered pieces plus the section tree.
@@ -673,6 +963,144 @@ const EMBED_OPEN_RE = /^\{[ \t]*text[ \t]*\(/;
  * pieces, failure } where `failure` is null or { at, message } (an
  * unparseable source, SPEC 14.20 — masking the conditions inside).
  */
+/**
+ * ECMAScript's trivia between braces and within an ESM block — WhiteSpace,
+ * LineTerminator, and comments, the characters 14.20's judgement deletes:
+ * skip from `from` and report where the next token would begin, whether a
+ * LineTerminator lay among the skipped characters (outside a comment, or a
+ * block comment spanning one — ECMAScript's syntactic grammar treats such a
+ * comment as a LineTerminator, automatic semicolon insertion included), and,
+ * when a block comment lacks its `*` `/` or a line comment runs to the end
+ * of the text, the unterminated comment's start. A line comment runs through
+ * the first U+000A or U+000D — the deletion judgement of 14.20 — U+2028 and
+ * U+2029 notwithstanding: no form staged in scope spells either inside a
+ * line comment (T2.7-4's negative arms lie outside §CONF-MD), so the lexical
+ * grammar's own brace-token check on the undeleted content stays dormant.
+ */
+function skipEcmascriptTrivia(text, from) {
+  let j = from;
+  let sawTerminator = false;
+  while (j < text.length) {
+    const code = text.charCodeAt(j);
+    if (ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS.has(code)) {
+      sawTerminator = true;
+      j += 1;
+      continue;
+    }
+    if (isEcmascriptWhitespaceCode(code)) {
+      j += 1;
+      continue;
+    }
+    if (text.startsWith("/*", j)) {
+      const end = text.indexOf("*/", j + 2);
+      if (end === -1) {
+        return { at: j, sawTerminator, unterminated: "block comment" };
+      }
+      for (let k = j + 2; k < end; k += 1) {
+        if (ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS.has(text.charCodeAt(k))) {
+          sawTerminator = true;
+          break;
+        }
+      }
+      j = end + 2;
+      continue;
+    }
+    if (text.startsWith("//", j)) {
+      let k = j + 2;
+      while (
+        k < text.length &&
+        text.charCodeAt(k) !== 0x000a &&
+        text.charCodeAt(k) !== 0x000d
+      ) {
+        k += 1;
+      }
+      if (k >= text.length) {
+        return { at: j, sawTerminator, unterminated: "line comment" };
+      }
+      j = k; // the terminator itself is skipped on the next round
+      continue;
+    }
+    break;
+  }
+  return { at: j, sawTerminator, unterminated: null };
+}
+
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+
+/**
+ * The expression container opening at `i` (`text[i] === "{"`), judged as
+ * 14.20's accepting side fixes it for the forms in scope (2.7, 2.3): once
+ * ECMAScript's whitespace, line terminators, and comments are deleted from
+ * the content between the braces — a brace on a commented-out line closing
+ * nothing, so the run-on `{// c}` form runs on to a later `}` — what remains
+ * is either nothing (an MDX comment: the usual block-comment form, `{}`, a
+ * block-comment sequence, a line-comment container, ECMAScript-only
+ * whitespace between the braces) or exactly one `text(...)` call with
+ * whitespace and comments
+ * alone beside it (an embedding, replaced whole). Returns the container's
+ * end and kind (the embedding's parsed reference with it), a failure for an
+ * unterminated comment or a line comment reaching the end of the text (the
+ * container never closes: 14.20), or null when the content is anything else
+ * — outside the fixture's scope, left as content exactly as a stray brace
+ * is.
+ */
+function scanExpressionContainer(text, i) {
+  const failure = (trivia) => ({
+    failure: {
+      at: trivia.at,
+      message: `unterminated ${trivia.unterminated} in an expression container`,
+    },
+  });
+  const lead = skipEcmascriptTrivia(text, i + 1);
+  if (lead.unterminated !== null) return failure(lead);
+  let j = lead.at;
+  if (text[j] === "}") return { kind: "comment", end: j + 1 };
+  if (!text.startsWith("text", j)) return null;
+  j = skipEcmascriptTrivia(text, j + 4).at;
+  if (text[j] !== "(") return null;
+  j = skipEcmascriptTrivia(text, j + 1).at;
+  let ref;
+  const q = text[j];
+  if (q === '"' || q === "'") {
+    const end = text.indexOf(q, j + 1);
+    if (end === -1) return null;
+    ref = { form: "local", id: text.slice(j + 1, end) };
+    j = end + 1;
+  } else {
+    const ident = IDENTIFIER_RE.exec(text.slice(j));
+    if (!ident) return null;
+    const binding = ident[0];
+    j += binding.length;
+    const segments = [];
+    for (;;) {
+      if (text[j] === ".") {
+        const seg = IDENTIFIER_RE.exec(text.slice(j + 1));
+        if (!seg) return null;
+        segments.push(seg[0]);
+        j += 1 + seg[0].length;
+        continue;
+      }
+      if (text[j] === "[") {
+        const qq = text[j + 1];
+        if (qq !== '"' && qq !== "'") return null;
+        const end = text.indexOf(qq, j + 2);
+        if (end === -1 || text[end + 1] !== "]") return null;
+        segments.push(text.slice(j + 2, end));
+        j = end + 2;
+        continue;
+      }
+      break;
+    }
+    ref = { form: "external", binding, segments };
+  }
+  j = skipEcmascriptTrivia(text, j).at;
+  if (text[j] !== ")") return null;
+  const trail = skipEcmascriptTrivia(text, j + 1);
+  if (trail.unterminated !== null) return failure(trail);
+  if (text[trail.at] !== "}") return null;
+  return { kind: "embed", end: trail.at + 1, ref };
+}
+
 function parseMdx(text) {
   const root = {
     isRoot: true,
@@ -693,6 +1121,34 @@ function parseMdx(text) {
   let failure = null;
   let i = 0;
   let contentStart = 0;
+  // Fenced code blocks and inline code spans are literal text (T3-1's
+  // grammar boundary): the lexer skips whole regions, leaving their bytes in
+  // the pending content run — no construct is recognized inside them.
+  const literalRegions = markdownLiteralRegions(text);
+  let regionIndex = 0;
+  // The open ESM block (SPEC 14.20): the end of its last import declaration,
+  // or -1 when none is open. A block runs on through ECMAScript's trivia
+  // alone — WhiteSpace and LineTerminator code points (U+2028 and U+2029
+  // beside LF and CR) and JavaScript comments beside the declarations, `//`
+  // and `/* */` alike (T3-7) — and ECMAScript admits the next
+  // ImportDeclaration there when a LineTerminator lies between (automatic
+  // semicolon insertion) or the previous declaration spelled its `;`; any
+  // other character closes the block for good, so the scan costs each closed
+  // block once. The trivia stays content: SPEC 3 removes a declaration's own
+  // characters alone (T3-3's ESM-block arm: the line left holding U+2028;
+  // T3-7: `// note` after an import, an own-line `// note` between two
+  // imports, a block comment before one).
+  let lastImportEnd = -1;
+  const continuesEsmBlock = (at) => {
+    if (lastImportEnd === -1) return false;
+    const trivia = skipEcmascriptTrivia(text, lastImportEnd);
+    if (trivia.unterminated !== null || trivia.at < at) {
+      lastImportEnd = -1; // a token (or a broken comment) closed the block
+      return false;
+    }
+    if (trivia.at > at) return false; // `at` lies inside a comment
+    return trivia.sawTerminator || text[lastImportEnd - 1] === ";";
+  };
 
   const flushContent = (end) => {
     if (end > contentStart) {
@@ -709,12 +1165,31 @@ function parseMdx(text) {
   };
 
   while (i < text.length) {
+    while (
+      regionIndex < literalRegions.length &&
+      literalRegions[regionIndex].end <= i
+    ) {
+      regionIndex += 1;
+    }
+    if (
+      regionIndex < literalRegions.length &&
+      i >= literalRegions[regionIndex].start
+    ) {
+      i = literalRegions[regionIndex].end; // literal bytes stay plain content
+      continue;
+    }
     const ch = text[i];
     if (
       ch === "i" &&
-      (i === 0 || text[i - 1] === "\n" || text[i - 1] === "\r")
+      (i === 0 ||
+        text[i - 1] === "\n" ||
+        text[i - 1] === "\r" ||
+        continuesEsmBlock(i))
     ) {
-      // A spec module import (SPEC 2.1) at line start — the MDX ESM position.
+      // A spec module import (SPEC 2.1) at a Markdown line start — the MDX
+      // ESM position — or continuing the open ESM block after ECMAScript
+      // whitespace and line terminators alone (two imports on one physical
+      // line separated by U+2028: T3-3's ESM-block arm).
       const m = IMPORT_RE.exec(text.slice(i));
       if (m) {
         flushContent(i);
@@ -727,6 +1202,7 @@ function parseMdx(text) {
         pieces.push({ kind: "removal", text: m[0] });
         i += m[0].length;
         contentStart = i;
+        lastImportEnd = i;
         continue;
       }
       i += 1;
@@ -862,100 +1338,30 @@ function parseMdx(text) {
       continue;
     }
     if (ch === "{") {
-      if (text.startsWith("{/*", i)) {
-        const end = text.indexOf("*/}", i + 3);
-        if (end === -1) {
-          fail20(i, "unterminated MDX comment");
-          return result();
-        }
-        flushContent(i);
-        pieces.push({ kind: "removal", text: text.slice(i, end + 3) });
-        i = end + 3;
-        contentStart = i;
+      const container = scanExpressionContainer(text, i);
+      if (container === null) {
+        i += 1; // a stray `{` is ordinary content in this scope
         continue;
       }
-      const embedMatch = EMBED_OPEN_RE.exec(text.slice(i));
-      if (embedMatch) {
-        let j = i + embedMatch[0].length;
-        const skipWs = () => {
-          while (j < text.length && TAG_WHITESPACE.has(text[j])) j += 1;
-        };
-        skipWs();
-        let ref;
-        const q = text[j];
-        if (q === '"' || q === "'") {
-          const end = text.indexOf(q, j + 1);
-          if (end === -1) {
-            fail20(j, "unterminated text(...) string argument");
-            return result();
-          }
-          ref = { form: "local", id: text.slice(j + 1, end) };
-          j = end + 1;
-        } else {
-          const ident = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(text.slice(j));
-          if (!ident) {
-            fail20(j, "malformed text(...) argument");
-            return result();
-          }
-          const binding = ident[0];
-          j += binding.length;
-          const segments = [];
-          for (;;) {
-            if (text[j] === ".") {
-              const seg = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(text.slice(j + 1));
-              if (!seg) {
-                fail20(j, "malformed property chain in text(...)");
-                return result();
-              }
-              segments.push(seg[0]);
-              j += 1 + seg[0].length;
-              continue;
-            }
-            if (text[j] === "[") {
-              const qq = text[j + 1];
-              if (qq !== '"' && qq !== "'") {
-                fail20(j, "malformed computed access in text(...)");
-                return result();
-              }
-              const end = text.indexOf(qq, j + 2);
-              if (end === -1 || text[end + 1] !== "]") {
-                fail20(j, "malformed computed access in text(...)");
-                return result();
-              }
-              segments.push(text.slice(j + 2, end));
-              j = end + 2;
-              continue;
-            }
-            break;
-          }
-          ref = { form: "external", binding, segments };
-        }
-        skipWs();
-        if (text[j] !== ")") {
-          fail20(j, "text(...) takes exactly one argument");
-          return result();
-        }
-        j += 1;
-        skipWs();
-        if (text[j] !== "}") {
-          fail20(j, "unterminated text(...) expression container");
-          return result();
-        }
-        j += 1;
-        flushContent(i);
+      if (container.failure !== undefined) {
+        fail20(container.failure.at, container.failure.message);
+        return result();
+      }
+      flushContent(i);
+      if (container.kind === "comment") {
+        pieces.push({ kind: "removal", text: text.slice(i, container.end) });
+      } else {
         pieces.push({
           kind: "embed",
-          text: text.slice(i, j),
+          text: text.slice(i, container.end),
           owner: stack[stack.length - 1],
-          ref,
+          ref: container.ref,
           start: i,
           target: null,
         });
-        i = j;
-        contentStart = i;
-        continue;
       }
-      i += 1; // a stray `{` is ordinary content in this scope
+      i = container.end;
+      contentStart = i;
       continue;
     }
     i += 1;
@@ -1445,14 +1851,95 @@ function compileWorkspace(ws) {
 // Commands (SPEC 12.0 conventions; the §CONF-MD surface)
 // ---------------------------------------------------------------------------
 
+// SPEC 14's stable code tokens by condition ordinal ("14.N" → token). The
+// JSON report carries the token string alone (SPEC 12.7, 14); the ordinal
+// orders findings and is no part of the value. Only the conditions this
+// conformer's scope reports appear.
+const CODE_TOKENS = {
+  14.1: "missing-id",
+  14.5: "unknown-dependency",
+  14.6: "unknown-text-target",
+  14.8: "invalid-argument",
+  14.9: "cycle",
+  14.15: "invalid-import",
+  "14.20": "unparseable-source",
+};
+
+/** A condition's ordinal (the `N` of `14.N`), ordering findings (SPEC 12.7). */
+function conditionOrdinal(condition) {
+  return Number(condition.slice(3));
+}
+
+/**
+ * The pinned findings order (SPEC 12.7): by code (numbered conditions in
+ * numeric order), then locations element-wise (file path bytes, range start,
+ * range end; a proper prefix first), then concerned path (null first), then
+ * identities, then message — over this conformer's all-located findings the
+ * live dimensions are ordinal, single location, and message.
+ */
+function compareFindingDocs(a, b) {
+  const byOrdinal =
+    conditionOrdinal(a.internalCondition) -
+    conditionOrdinal(b.internalCondition);
+  if (byOrdinal !== 0) return byOrdinal;
+  const shared = Math.min(a.locations.length, b.locations.length);
+  for (let i = 0; i < shared; i += 1) {
+    const byFile = Buffer.compare(
+      Buffer.from(a.locations[i].file, "utf8"),
+      Buffer.from(b.locations[i].file, "utf8"),
+    );
+    if (byFile !== 0) return byFile;
+    if (a.locations[i].range.start !== b.locations[i].range.start) {
+      return a.locations[i].range.start - b.locations[i].range.start;
+    }
+    if (a.locations[i].range.end !== b.locations[i].range.end) {
+      return a.locations[i].range.end - b.locations[i].range.end;
+    }
+  }
+  if (a.locations.length !== b.locations.length) {
+    return a.locations.length - b.locations.length;
+  }
+  return Buffer.compare(
+    Buffer.from(a.message, "utf8"),
+    Buffer.from(b.message, "utf8"),
+  );
+}
+
+/**
+ * The findings report in the 12.7 form: one `{"code", "message",
+ * "locations", "path", "identities"}` per finding — every condition this
+ * scope reports locates in source, so `locations` carries the offending
+ * construct and `path` is null — in the pinned findings order, findings
+ * identical in every member collapsed to one (SPEC 12.7).
+ */
 function findingsDoc(findings) {
+  const docs = findings.map((finding) => ({
+    code: CODE_TOKENS[finding.condition],
+    message: finding.message,
+    locations: [{ file: finding.file, range: finding.location }],
+    path: null,
+    identities: [],
+    internalCondition: finding.condition,
+  }));
+  docs.sort(compareFindingDocs);
+  const collapsed = [];
+  for (const doc of docs) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous !== undefined && compareFindingDocs(previous, doc) === 0) {
+      continue;
+    }
+    collapsed.push(doc);
+  }
   return {
-    findings: findings.map((finding) => ({
-      condition: finding.condition,
-      message: finding.message,
-      file: finding.file,
-      location: finding.location,
-    })),
+    findings: collapsed.map(
+      ({ code, message, locations, path, identities }) => ({
+        code,
+        message,
+        locations,
+        path,
+        identities,
+      }),
+    ),
   };
 }
 
@@ -1471,57 +1958,419 @@ function emitFindings(io, json, findings) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Invocation grammar (SPEC 12.0)
+// ---------------------------------------------------------------------------
+
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
 /**
- * Parse flags per command. `flagSpec` maps flag names to "bool" | "value";
- * unknown and repeated flags are usage errors (SPEC 12.0).
+ * Every flag of every command with its arity, fixed by name (SPEC 12.0): 1
+ * for a flag taking the whole next token as its value, 0 for one taking
+ * none — the flags the synopses and defining sections name (6, 8, 9, 10.7,
+ * 11, 12, 13.5). A `--` token naming no flag of any command takes no value.
  */
-function parseArgs(argv, flagSpec, positionalRange) {
-  const flags = {};
-  const positionals = [];
-  for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
-    if (arg.startsWith("--")) {
-      const kind = flagSpec[arg];
-      if (kind === undefined)
-        throw new UsageError(`unknown flag ${arg} (SPEC 12.0)`);
-      if (Object.hasOwn(flags, arg)) {
-        throw new UsageError(
-          `repeated flag ${arg}: a flag may be given at most once (SPEC 12.0)`,
-        );
-      }
-      if (kind === "bool") {
-        flags[arg] = true;
-      } else {
-        const value = argv[i + 1];
-        if (value === undefined)
-          throw new UsageError(`missing value for ${arg} (SPEC 12.0)`);
-        flags[arg] = value;
-        i += 1;
-      }
-    } else {
-      positionals.push(arg);
-    }
-  }
-  const [min, max] = positionalRange;
-  if (positionals.length < min || positionals.length > max) {
-    throw new UsageError(
-      `expected ${min === max ? String(min) : `${String(min)}-${String(max)}`} argument(s), got ${String(positionals.length)} (SPEC 12.0)`,
-    );
-  }
-  return { flags, positionals };
+const FLAG_ARITY = new Map([
+  ["--json", 0],
+  ["--preview", 0],
+  ["--tree", 0],
+  ["--text", 0],
+  ["--check", 0],
+  ["--unreferenced", 0],
+  ["--config", 1],
+  ["--test-hold", 1],
+  ["--file", 1],
+  ["--to", 1],
+  ["--from", 1],
+  ["--kinds", 1],
+  ["--group", 1],
+  ["--tag", 1],
+  ["--coverage", 1],
+  ["--base", 1],
+  ["--strategy", 1],
+  ["--name", 1],
+  ["--status", 1],
+  ["--note", 1],
+]);
+
+/** Every command of the product (12). */
+const PRODUCT_COMMANDS = new Set([
+  "build",
+  "check",
+  "ids",
+  "show",
+  "coverage",
+  "impact",
+  "review",
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "rename",
+  "move",
+  "version",
+]);
+
+/**
+ * The commands whose every surface is JSON-only (SPEC 12.0: 11's `query`,
+ * `occurrences`, `view`, `at`, and `inventory`; 12.6's `version`) — beside
+ * 10.7's `review export`, a subcommand's surface.
+ */
+const JSON_ONLY_COMMANDS = new Set([
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "version",
+]);
+
+/**
+ * Whether the invoked surface — the command word and, for `review`, its
+ * subcommand, both among the non-flag tokens (12.0) — is JSON-only, a single
+ * JSON document its only output form with or without `--json` (12.0).
+ */
+function isJsonOnlySurface(words) {
+  const [command, subcommand] = words;
+  return (
+    JSON_ONLY_COMMANDS.has(command) ||
+    (command === "review" && subcommand === "export")
+  );
 }
 
-const READ_FLAGS = { "--json": "bool", "--config": "value" };
+/**
+ * The synopses this fixture judges (SPEC 12.1, 12.2, 11.1): `build`'s,
+ * `check`'s, and each `query` subcommand's — the flags the synopsis names
+ * beside the globals `--json` and `--config` (12.0), the flags it requires,
+ * its operand count, whether this fixture serves it, and the named flags it
+ * does not serve (§CONF-MD's scope serves `query nodes` and `query edges`
+ * in their unfiltered forms alone). Every syntax-class check (12.0) runs
+ * before any scope refusal, so an unserved subcommand or flag is refused
+ * loudly (ScopeError, exit 70) only once the arguments match its synopsis
+ * and the value spellings 11.1 fixes for its flags have passed — a usage
+ * error is never masked by a scope refusal. Every other product command is
+ * refused once the checks the arguments alone decide for every command have
+ * passed.
+ * @typedef {{ flags: readonly string[], required?: readonly string[],
+ *             operands: number, served: boolean,
+ *             unservedFlags?: readonly string[] }} Synopsis
+ * @type {Map<string, Synopsis>}
+ */
+const SYNOPSES = new Map([
+  ["build", { flags: [], operands: 0, served: true }],
+  ["check", { flags: [], operands: 0, served: true }],
+]);
+
+/** @type {Map<string, Synopsis>} */
+const QUERY_SYNOPSES = new Map([
+  ["node", { flags: [], operands: 1, served: true }],
+  [
+    "nodes",
+    {
+      flags: ["--group", "--file", "--tag", "--coverage"],
+      operands: 0,
+      served: true,
+      unservedFlags: ["--group", "--file", "--tag", "--coverage"],
+    },
+  ],
+  [
+    "edges",
+    {
+      flags: ["--from", "--to", "--kinds"],
+      operands: 0,
+      served: true,
+      unservedFlags: ["--from", "--to", "--kinds"],
+    },
+  ],
+  ["subtree", { flags: [], operands: 1, served: false }],
+  ["ancestors", { flags: [], operands: 1, served: false }],
+  [
+    "reachable",
+    {
+      flags: ["--from", "--to", "--kinds"],
+      required: ["--from", "--to"],
+      operands: 0,
+      served: false,
+    },
+  ],
+]);
+
+/**
+ * An argument value is malformed when it is not valid UTF-8 or contains
+ * U+FFFD (SPEC 12.0); Node decodes argv lossily, an ill-formed byte arriving
+ * as U+FFFD, so the one test covers both.
+ */
+function isMalformedValue(value) {
+  return value.includes(REPLACEMENT_CHARACTER);
+}
+
+/**
+ * Read the arguments under the grammar of SPEC 12.0: flag tokens anywhere —
+ * before the command word, between it and its operands, or after them — a
+ * value-taking flag taking the whole next token, whatever it looks like, and
+ * `--` ending flag reading (dropped; every later token a non-flag token).
+ * Returns the flags (name to value, `true` for a flag taking none), the
+ * remaining non-flag tokens in order — the command, `query`'s subcommand,
+ * then the operands — whether a `--json` token was read as a flag (never as
+ * another flag's value), and the first syntax-class error met that the
+ * arguments decide for every command alike, if any.
+ */
+function readInvocation(argv) {
+  const flags = new Map();
+  const words = [];
+  let json = false;
+  let error = null;
+  const note = (message) => {
+    if (error === null) error = message;
+  };
+  let flagsEnded = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i];
+    if (!flagsEnded && token === "--") {
+      flagsEnded = true;
+      continue;
+    }
+    if (!flagsEnded && token.startsWith("--")) {
+      if (token === "--json") json = true;
+      if (flags.has(token)) {
+        note(
+          `repeated flag ${token}: a flag may be given at most once (SPEC 12.0)`,
+        );
+      }
+      if (FLAG_ARITY.get(token) === 1) {
+        if (i + 1 >= argv.length) {
+          note(`flag ${token} lacks its value (SPEC 12.0)`);
+          flags.set(token, true);
+        } else {
+          i += 1;
+          const value = argv[i];
+          if (isMalformedValue(value)) {
+            note(
+              `malformed value for ${token}: not valid UTF-8, or containing U+FFFD (SPEC 12.0)`,
+            );
+          }
+          flags.set(token, value);
+        }
+      } else {
+        if (!FLAG_ARITY.has(token)) note(`unknown flag ${token} (SPEC 12.0)`);
+        flags.set(token, true);
+      }
+      continue;
+    }
+    if (isMalformedValue(token)) {
+      note(
+        "malformed argument: not valid UTF-8, or containing U+FFFD (SPEC 12.0)",
+      );
+    }
+    words.push(token);
+  }
+  return { flags, words, json, error };
+}
+
+/**
+ * The synopsis checks of SPEC 12.0's syntax class for `build`, `check`, or
+ * one `query` subcommand (`spelled`): every flag given is one it accepts —
+ * its synopsis's, or the global `--json` and `--config` (`--test-hold`
+ * belongs to the mutating commands alone, 13.5) — the operands match its
+ * synopsis in number, and its required flags are given.
+ */
+function checkSynopsis(spelled, synopsis, flags, operands) {
+  for (const name of flags.keys()) {
+    if (
+      name !== "--json" &&
+      name !== "--config" &&
+      !synopsis.flags.includes(name)
+    ) {
+      throw new UsageError(`unknown flag ${name} for ${spelled} (SPEC 12.0)`);
+    }
+  }
+  if (operands.length < synopsis.operands) {
+    throw new UsageError(`${spelled}: missing operand (SPEC 12.0)`);
+  }
+  if (operands.length > synopsis.operands) {
+    throw new UsageError(
+      `surplus operand ${operands[synopsis.operands]}: ${spelled} takes ${String(synopsis.operands)} operand(s) (SPEC 12.0)`,
+    );
+  }
+  for (const name of synopsis.required ?? []) {
+    if (!flags.has(name)) {
+      throw new UsageError(
+        `${spelled}: missing required flag ${name} (SPEC 11.1, 12.0)`,
+      );
+    }
+  }
+}
+
+/** The forbidden segment names of SPEC 1.4, all five (exact strings). */
+const FORBIDDEN_NAMES = new Set([
+  "$",
+  "__proto__",
+  "prototype",
+  "constructor",
+  "then",
+]);
+
+/**
+ * The code points SPEC 1.4 bars from every segment and tag beside its
+ * whitespace and control classes: `"`, `#`, `&`, `'`, `\`, U+2028, U+2029,
+ * and U+FFFD — spelled as code points, never as escapes.
+ */
+const BARRED_TAG_CODE_POINTS = new Set([
+  0x22, 0x23, 0x26, 0x27, 0x5c, 0x2028, 0x2029, 0xfffd,
+]);
+
+function codePointName(codePoint) {
+  return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+/**
+ * `query nodes --tag`'s acceptance (SPEC 11.1): syntactic, whatever the
+ * workspace contains — a spelling no tag can have under 1.4 (a tag follows
+ * the rules of an ID segment, except that it MAY contain `.`) is a
+ * malformed value, a usage error of the syntax class (12.0): empty, a
+ * forbidden name, or containing a whitespace or control character (1.4's
+ * classes exactly: U+0009–U+000D and U+0020; U+0000–U+001F and U+007F) or a
+ * barred code point. Judged by 1.4's exact classes alone — never through
+ * the line-drop rule's whitespace class (`isDropWhitespaceCode`), which
+ * §VIOL-MD-CLASS widens: every violator reads its arguments exactly as the
+ * conformer does.
+ */
+function checkTagValue(value) {
+  let violation = null;
+  if (value.length === 0) {
+    violation = "it is empty";
+  } else if (FORBIDDEN_NAMES.has(value)) {
+    violation = `it is the forbidden name ${JSON.stringify(value)}`;
+  } else {
+    for (const character of value) {
+      const codePoint = character.codePointAt(0);
+      if (codePoint <= 0x20 || codePoint === 0x7f) {
+        violation = `it contains the whitespace or control character ${codePointName(codePoint)}`;
+        break;
+      }
+      if (BARRED_TAG_CODE_POINTS.has(codePoint)) {
+        violation = `it contains the barred character ${codePointName(codePoint)}`;
+        break;
+      }
+    }
+  }
+  if (violation !== null) {
+    throw new UsageError(
+      `query nodes: malformed --tag value ${JSON.stringify(value)}: ${violation}, so no tag is so spelled (SPEC 1.4, 11.1, 12.0)`,
+    );
+  }
+}
+
+/** `query nodes --coverage`'s vocabulary (SPEC 11.1). */
+const COVERAGE_VALUES = new Set(["required", "none"]);
+
+/**
+ * A `--coverage` value outside its fixed vocabulary is an invalid flag
+ * value of the syntax class (SPEC 11.1, 12.0).
+ */
+function checkCoverageValue(value) {
+  if (!COVERAGE_VALUES.has(value)) {
+    throw new UsageError(
+      `query nodes: invalid --coverage value ${JSON.stringify(value)}: expected required or none (SPEC 11.1, 12.0)`,
+    );
+  }
+}
+
+/**
+ * A `--file` pattern's outside-root rule (SPEC 7, 11.1), decided by its
+ * spelling alone — an invalid flag value of 12.0's syntax class: reading
+ * its `/`-separated segments from a depth of zero, a `..` segment lowers
+ * the depth, a `.`, empty, or `**` segment leaves it, and every other
+ * segment raises it; a leading `/` or a depth falling below zero lies
+ * outside the root.
+ */
+function checkFileGlob(flag, value) {
+  let depth = 0;
+  let outside = value.startsWith("/");
+  for (const segment of value.split("/")) {
+    if (outside) break;
+    if (segment === "..") {
+      depth -= 1;
+      outside = depth < 0;
+    } else if (segment !== "." && segment !== "" && segment !== "**") {
+      depth += 1;
+    }
+  }
+  if (outside) {
+    throw new UsageError(
+      `invalid ${flag} value ${JSON.stringify(value)}: the pattern lies outside the workspace root (SPEC 7, 11.1, 12.0)`,
+    );
+  }
+}
+
+/**
+ * A `<node>` or `<graph-node>` spelling's syntax (SPEC 1.5, 12.0): at most
+ * one `#` is well-formed — no identity contains one in path, id, or unit —
+ * so a spelling with more is a malformed value, judged from the argument
+ * alone, before configuration is loaded. Returns the path and the part
+ * after the `#` (`null` without one).
+ */
+function identitySpelling(spelled, value) {
+  const parts = value.split("#");
+  if (parts.length > 2) {
+    throw new UsageError(
+      `${spelled}: malformed identity ${JSON.stringify(value)}: more than one "#" (SPEC 1.5, 12.0)`,
+    );
+  }
+  return { path: parts[0], id: parts.length === 2 ? parts[1] : null };
+}
+
+/** The four edge kinds (SPEC 5): `query edges --kinds`' vocabulary (11.1). */
+const EDGE_KINDS = new Set(["contains", "depends", "embeds", "references"]);
+
+/**
+ * `query edges --kinds`' list (SPEC 11.1, 12.0): comma-separated elements
+ * drawn from the four edge kinds; an empty element — a leading, trailing,
+ * or doubled comma — or one outside the vocabulary is an invalid flag value
+ * of the syntax class.
+ */
+function checkEdgeKinds(value) {
+  for (const element of value.split(",")) {
+    if (!EDGE_KINDS.has(element)) {
+      throw new UsageError(
+        `query edges: invalid --kinds value ${JSON.stringify(value)}: ${element === "" ? "an empty element" : `${JSON.stringify(element)} is no edge kind`} (SPEC 11.1, 12.0)`,
+      );
+    }
+  }
+}
+
+/**
+ * Refuse the flags a served `query` subcommand's synopsis names but this
+ * fixture does not serve (§CONF-MD: `query nodes` and `query edges` in
+ * their unfiltered forms alone) — called only once their value spellings
+ * have passed the syntax class (12.0).
+ */
+function refuseUnservedFlags(spelled, flags) {
+  const subcommand = spelled.slice("query ".length);
+  for (const flag of QUERY_SYNOPSES.get(subcommand).unservedFlags ?? []) {
+    if (flags.has(flag)) {
+      throw new ScopeError(
+        `${spelled} ${flag} is outside this fixture's scope (CERTIFICATIONS.md §CONF-MD: ${spelled} in its unfiltered form alone)`,
+      );
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The served surface (CERTIFICATIONS.md §CONF-MD)
+// ---------------------------------------------------------------------------
 
 /**
  * `xspec build` (SPEC 12.1, scoped): validate, compile, and — exactly when
  * `markdown: { emit: true }` — emit `NAME.md` next to each discovered source
  * (SPEC 7.3, 13.2). With `markdown` absent or `emit: false`, nothing is
- * written. A failing build (findings) writes nothing.
+ * written. A failing build (findings) writes nothing. `json`: whether JSON
+ * output is in effect (12.0) — the finding-free report then the entire
+ * stdout.
  */
-async function commandBuild(io, cwd, argv) {
-  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
-  const ws = await loadWorkspace(cwd, flags["--config"]);
+async function commandBuild(io, cwd, flags, json) {
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
   if (ws.findings.length > 0) {
     throw new FindingsError(ws.findings);
   }
@@ -1536,51 +2385,207 @@ async function commandBuild(io, cwd, argv) {
       );
     }
   }
-  if (flags["--json"]) {
+  if (json) {
     io.stdout(canonicalJson(findingsDoc([])) + "\n");
   }
   return 0;
 }
 
 /**
- * `xspec query node <node>` (SPEC 11, scoped): a single JSON document — with
- * or without `--json` — reporting the node's own and subtree text (SPEC 1.6,
- * the §CONF-MD query surface); identity and source range ride along in the
- * natural SPEC 11 shape. `<node>` is `path#id`, or a bare `path` for a file's
- * root node (SPEC 1.5).
+ * `xspec check` (SPEC 12.2, scoped): validate without writing anything.
+ * Findings are the exit-1 report exactly as `build` reports them; a valid
+ * workspace exits 0 — T3-1's grammar-boundary arm asserts exactly that over
+ * fenced/code-span construct-like bytes. (This scope records no graph data,
+ * so there is no staleness to check beyond validation.)
  */
-async function commandQuery(io, cwd, argv) {
-  const sub = argv[0];
-  if (sub !== "node") {
+async function commandCheck(io, cwd, flags, json) {
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings);
+  }
+  compileWorkspace(ws); // surfaces an in-scope cycle exactly as `build` does
+  if (json) {
+    io.stdout(canonicalJson(findingsDoc([])) + "\n");
+  }
+  return 0;
+}
+
+/** A requirement node's identity (SPEC 1.5): bare path for a root. */
+function nodeIdentity(rel, node) {
+  return node.isRoot ? rel : `${rel}#${node.id}`;
+}
+
+/**
+ * `xspec query nodes` (SPEC 11.1, scoped to T3-1's grammar-boundary arm and
+ * P-3's enumeration): `query` is JSON-only (12.0, 11), so a single JSON
+ * document is its only output form, listing every requirement node of the
+ * valid workspace, files in byte order of workspace-relative path, the root
+ * then sections in document order per file. Each row carries the node's
+ * identity (SPEC 1.5) with its construct byte range riding along; the
+ * scoped observation is that no node arises from construct-like bytes
+ * inside fences or code spans. The value spellings 11.1 fixes for its
+ * filters — `--tag`'s well-formedness, `--coverage`'s vocabulary, `--file`'s
+ * outside-root rule — are of the syntax class (12.0), decided before
+ * configuration is loaded and before this fixture refuses the filters,
+ * none of which it serves.
+ */
+async function commandQueryNodes(io, cwd, flags) {
+  if (flags.has("--tag")) checkTagValue(flags.get("--tag"));
+  if (flags.has("--coverage")) checkCoverageValue(flags.get("--coverage"));
+  if (flags.has("--file")) checkFileGlob("--file", flags.get("--file"));
+  refuseUnservedFlags("query nodes", flags);
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings); // SPEC 13.3: reads gate on validity
+  }
+  compileWorkspace(ws); // an in-scope cycle refuses here too, never answers
+  const rows = [];
+  for (const record of ws.files.values()) {
+    rows.push({
+      identity: record.rel,
+      sourceRange: { start: 0, end: record.byteOf(record.text.length) },
+    });
+    for (const section of record.sections) {
+      rows.push({
+        identity: nodeIdentity(record.rel, section),
+        sourceRange: {
+          start: record.byteOf(section.openStart),
+          end: record.byteOf(section.closeEnd),
+        },
+      });
+    }
+  }
+  io.stdout(canonicalJson({ nodes: rows }) + "\n");
+  return 0;
+}
+
+/**
+ * `xspec query edges` (SPEC 11.1, scoped to T3-1's grammar-boundary arm):
+ * JSON-only (12.0, 11), a single JSON document listing every edge of the
+ * valid workspace's graph (SPEC 5.2): `contains` from each parent to each
+ * child section (the file root parenting top-level sections), `depends`
+ * from `d` props, `embeds` from `{text(...)}` embeddings; `references` never
+ * (no code groups in scope). Edges of each kind form a set — duplicates
+ * collapse — ordered deterministically by kind, source, then target (byte
+ * order). The scoped observation is that no edge arises from construct-like
+ * bytes inside fences or code spans. The `--from` and `--to` spellings
+ * (12.0: at most one `#`) and `--kinds`' vocabulary are of the syntax class,
+ * decided before configuration is loaded and before this fixture refuses
+ * the filters, none of which it serves.
+ */
+async function commandQueryEdges(io, cwd, flags) {
+  if (flags.has("--from")) {
+    identitySpelling("query edges --from", flags.get("--from"));
+  }
+  if (flags.has("--to")) {
+    identitySpelling("query edges --to", flags.get("--to"));
+  }
+  if (flags.has("--kinds")) checkEdgeKinds(flags.get("--kinds"));
+  refuseUnservedFlags("query edges", flags);
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings); // SPEC 13.3: reads gate on validity
+  }
+  compileWorkspace(ws); // an in-scope cycle refuses here too, never answers
+  const edges = [];
+  const seen = new Set();
+  const push = (kind, from, to) => {
+    const key = `${kind}\u0000${from}\u0000${to}`;
+    if (seen.has(key)) return; // edges of each kind form a set (SPEC 5.2)
+    seen.add(key);
+    edges.push({ from, kind, to });
+  };
+  for (const record of ws.files.values()) {
+    for (const section of record.sections) {
+      push(
+        "contains",
+        nodeIdentity(record.rel, section.parent),
+        nodeIdentity(record.rel, section),
+      );
+    }
+    for (const section of record.sections) {
+      if (section.dRaw === undefined) continue;
+      const refs = parseDReferences(section.dRaw);
+      if (refs === null) continue; // unreachable: gated as 14.8 above
+      for (const ref of refs) {
+        const resolved = resolveRef(ws.files, record, ref);
+        if (resolved === null) continue; // unreachable: gated as 14.5 above
+        push(
+          "depends",
+          nodeIdentity(record.rel, section),
+          nodeIdentity(resolved.rel, resolved.node),
+        );
+      }
+    }
+    for (const piece of record.pieces) {
+      if (piece.kind !== "embed") continue;
+      if (piece.target === null) continue; // unreachable: gated as 14.6 above
+      push(
+        "embeds",
+        nodeIdentity(record.rel, piece.owner),
+        nodeIdentity(piece.target.rel, piece.target.node),
+      );
+    }
+  }
+  const byBytes = (a, b) =>
+    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+  edges.sort(
+    (a, b) =>
+      byBytes(a.kind, b.kind) || byBytes(a.from, b.from) || byBytes(a.to, b.to),
+  );
+  io.stdout(canonicalJson({ edges }) + "\n");
+  return 0;
+}
+
+/**
+ * `xspec query node <node>` (SPEC 11.1, scoped): JSON-only (12.0, 11), a
+ * single JSON document reporting the §CONF-MD query surface in the natural
+ * SPEC 11 shape: the node's identity, source range (SPEC 1.7), own and
+ * subtree text (1.6), and its `contains` edges (5.2) as
+ * `"edges": {"incoming": [Edge], "outgoing": [Edge]}`, Edge
+ * `{"from", "kind", "to"}` — outgoing, one edge to each child in document
+ * order (a root's to each top-level section); incoming, the one edge from
+ * its parent (none for a root). Hashes, tags, the coverage attribute, and
+ * dependency edges are consulted by no in-scope test and are left out.
+ * `<node>` is `path#id`, or a bare `path` for a file's root node (SPEC 1.5);
+ * a spelling with more than one `#` is malformed, judged before
+ * configuration is loaded (12.0). The identity is then judged parse-local
+ * against the named file, identically on valid and failing workspaces
+ * (12.0): its path a discovered source (every discovered file is a spec
+ * source in scope), its `id` among the file's spelled identities (11.2) —
+ * an unparseable named file masking the check (14.20) — and an unknown
+ * identity is a usage error, exit 2, whatever findings the workspace
+ * carries. Only then does a workspace failing `build`'s validations report
+ * exactly those findings and exit 1 without answering (13.3).
+ */
+async function commandQueryNode(io, cwd, flags, spelling) {
+  const { path: rel, id } = identitySpelling("query node", spelling);
+  const ws = await loadWorkspace(cwd, flags.get("--config"));
+  const record = ws.files.get(rel);
+  const named =
+    record !== undefined &&
+    (record.failure !== null || id === null || record.idMap.has(id));
+  if (!named) {
     throw new UsageError(
-      `unknown query subcommand ${String(sub)} (SPEC 11, 12.0; this fixture's scope is \`query node\`, CERTIFICATIONS.md §CONF-MD)`,
+      `query node: unknown node identity ${JSON.stringify(spelling)}: no discovered spec source spells it (SPEC 11.1, 11.2, 12.0)`,
     );
   }
-  const { flags, positionals } = parseArgs(argv.slice(1), READ_FLAGS, [1, 1]);
-  const ws = await loadWorkspace(cwd, flags["--config"]);
   if (ws.findings.length > 0) {
     // SPEC 13.3: when the current sources fail build validation, reads report
     // the validation errors and exit 1 without answering.
     throw new FindingsError(ws.findings);
   }
   const compiled = compileWorkspace(ws);
-  const identity = positionals[0];
-  const hash = identity.indexOf("#");
-  const rel = hash === -1 ? identity : identity.slice(0, hash);
-  const id = hash === -1 ? null : identity.slice(hash + 1);
-  const record = ws.files.get(rel);
-  const node =
-    record === undefined
-      ? undefined
-      : id === null
-        ? record.root
-        : record.idMap.get(id);
-  if (record === undefined || node === undefined) {
-    throw new UsageError(
-      `unknown node identity ${JSON.stringify(identity)} (SPEC 12.0)`,
-    );
-  }
+  const identity = spelling;
+  const node = id === null ? record.root : record.idMap.get(id);
   const atoms = compiled.get(rel);
+  // SPEC 5.2: `contains` runs parent → child; `children` holds a node's
+  // child sections in document order (pushed as each opening tag parses).
+  const contains = (parent, child) => ({
+    from: nodeIdentity(rel, parent),
+    kind: "contains",
+    to: nodeIdentity(rel, child),
+  });
   io.stdout(
     canonicalJson({
       identity,
@@ -1590,6 +2595,10 @@ async function commandQuery(io, cwd, argv) {
       },
       ownText: textOfOwnAtoms(atoms, node),
       subtreeText: textOfSubtreeAtoms(atoms, node),
+      edges: {
+        incoming: node.parent === null ? [] : [contains(node.parent, node)],
+        outgoing: node.children.map((child) => contains(node, child)),
+      },
     }) + "\n",
   );
   return 0;
@@ -1614,29 +2623,112 @@ export async function runXspec(argv, cwd, options = {}) {
   return await dispatchCommand(io, cwd, argv);
 }
 
-/** Dispatch one parsed invocation and map its outcome to SPEC 12.0's codes. */
+/**
+ * Read one invocation under the grammar of SPEC 12.0, dispatch it, and map
+ * its outcome to 12.0's codes. Every syntax-class error is decided from the
+ * arguments alone, before configuration is loaded and before any of this
+ * fixture's scope refusals (12.0): first the checks the arguments decide for
+ * every command alike — unknown, repeated, or valueless flags and malformed
+ * values (`readInvocation`) — then the command and `query`'s subcommand,
+ * then the synopsis (`checkSynopsis`) and the served subcommands' value
+ * spellings.
+ */
 async function dispatchCommand(io, cwd, argv) {
-  const wantsJson = argv.includes("--json");
+  const invocation = readInvocation(argv);
+  const [command, ...operands] = invocation.words;
+  // JSON output is in effect when a `--json` token is read as a flag — not
+  // as another flag's value — or when the invoked surface is JSON-only
+  // (SPEC 12.0): `query` among the served ones (11), so its every answer,
+  // gated report, and usage error is JSON, with or without `--json`. It
+  // governs error delivery even when the arguments are the error.
+  const jsonInEffect = invocation.json || isJsonOnlySurface(invocation.words);
   try {
-    const command = argv[0];
-    const rest = argv.slice(1);
-    switch (command) {
+    if (invocation.error !== null) throw new UsageError(invocation.error);
+    if (command === undefined) {
+      throw new UsageError("expected a command (SPEC 12.0)");
+    }
+    if (!PRODUCT_COMMANDS.has(command)) {
+      throw new UsageError(
+        `unknown command ${command} (SPEC 12.0; this fixture's surface is build, check, and query node, query nodes, and query edges, CERTIFICATIONS.md §CONF-MD)`,
+      );
+    }
+    let spelled = command;
+    let synopsis = SYNOPSES.get(command);
+    let rest = operands;
+    if (command === "query") {
+      const [subcommand, ...subcommandOperands] = operands;
+      if (subcommand === undefined) {
+        throw new UsageError("query: missing subcommand (SPEC 11.1, 12.0)");
+      }
+      synopsis = QUERY_SYNOPSES.get(subcommand);
+      if (synopsis === undefined) {
+        throw new UsageError(
+          `query: unknown subcommand ${subcommand} (SPEC 11.1, 12.0)`,
+        );
+      }
+      spelled = `query ${subcommand}`;
+      rest = subcommandOperands;
+    } else if (synopsis === undefined) {
+      throw new ScopeError(
+        `the ${command} command is outside this fixture's surface: build, check, and query node, query nodes, and query edges alone (CERTIFICATIONS.md §CONF-MD)`,
+      );
+    }
+    checkSynopsis(spelled, synopsis, invocation.flags, rest);
+    if (!synopsis.served) {
+      throw new ScopeError(
+        `${spelled} is outside this fixture's scope (CERTIFICATIONS.md §CONF-MD: query node, query nodes, and query edges alone)`,
+      );
+    }
+    const { flags } = invocation;
+    switch (spelled) {
       case "build":
-        return await commandBuild(io, cwd, rest);
-      case "query":
-        return await commandQuery(io, cwd, rest);
+        return await commandBuild(io, cwd, flags, jsonInEffect);
+      case "check":
+        return await commandCheck(io, cwd, flags, jsonInEffect);
+      case "query node":
+        return await commandQueryNode(io, cwd, flags, rest[0]);
+      case "query nodes":
+        return await commandQueryNodes(io, cwd, flags);
+      case "query edges":
+        return await commandQueryEdges(io, cwd, flags);
       default:
-        throw new UsageError(`unknown command ${String(command)} (SPEC 12.0)`);
+        throw new Error(`no handler for the served surface ${spelled}`);
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      // Usage/configuration errors: stderr content, empty stdout (SPEC 12.0).
+      // Usage/configuration errors (SPEC 12.0): the message is stderr
+      // content in both output forms. With JSON output in effect the single
+      // 12.7 error document — {"error": …} holding one finding form, its
+      // stable code and concerned path for a configuration error, null/null
+      // for a plain usage error — is the entire stdout; without it, stdout
+      // stays empty. The output form never changes the exit code or the
+      // standard-error content.
+      if (jsonInEffect) {
+        io.stdout(
+          canonicalJson({
+            error: {
+              code: error.code,
+              message: error.message,
+              locations: [],
+              path: error.path,
+              identities: [],
+            },
+          }) + "\n",
+        );
+      }
       io.stderr(`xspec: ${error.message}\n`);
       return 2;
     }
     if (error instanceof FindingsError) {
-      emitFindings(io, wantsJson, error.findings);
+      emitFindings(io, jsonInEffect, error.findings);
       return 1;
+    }
+    if (error instanceof ScopeError) {
+      // Outside this fixture's scope (CERTIFICATIONS.md §CONF-MD): refused
+      // loudly, outside the 12.0 partition — never answered, never
+      // misreported as a usage or configuration error.
+      io.stderr(`xspec: fixture scope error: ${error.message}\n`);
+      return 70;
     }
     // A crash is a fixture bug: exit outside the 12.0 partition so every
     // exit-code assertion fails loudly and the diagnosis carries the stack.

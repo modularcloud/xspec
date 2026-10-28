@@ -44,12 +44,63 @@
 // Every falsification message names the failing seed and the replay
 // environment variable (H-10: the seed is reported on failure). A property
 // body that throws anything other than `HarnessAssertionError`, and a
-// generator that throws at all, is a harness defect: `checkProperty`
-// rethrows it as a plain `Error` (never a diagnosed assertion failure) with
-// the seed attached for reproduction, matching the certification runner's
-// and the S-7 sweep's outcome taxonomy (H-8).
+// generator that throws at all — generating a trial or replaying a shrink
+// candidate's choices alike — is a harness defect: `checkProperty` rethrows
+// it as a plain `Error` (never a diagnosed assertion failure) with the seed
+// attached for reproduction, matching the certification runner's and the
+// S-7 sweep's outcome taxonomy (H-8) — a harness step's tripped guard
+// (`HarnessStepTimeoutError`, helpers/step-guards.ts; TEST-SPEC S-3) among
+// them: drawing a trial, its S-9 check, and replaying a shrink candidate are
+// steps under guards of their own. The one exception is the subprocess
+// driver's hang-guard kill (`ProductRunTimeoutError`) a body lets through:
+// a product invocation that did not terminate within its own guard, which
+// ends its test, a property's reported with its seed, unshrunk (TEST-SPEC
+// S-3) — rethrown as a plain `Error` naming the hang, the seed, and the
+// input, the kill its `cause`, so the certification runner records the
+// test's hang (helpers/hang-guards.ts `isHangGuardKill`).
+//
+// A failure may decline shrinking (`fail(message, { shrinkable: false })`,
+// helpers/assertions.ts). A drawn trial's declining failure is reported as
+// drawn, with its seed: no shrink runs. A shrink candidate's declining
+// failure — met while shrinking another, shrinkable failure — is accepted
+// like any other (a genuine falsification on a strictly smaller tape) and
+// ends the shrink at once as the reported counterexample, the report saying
+// so: no further candidate is replayed or executed. So a shrink re-observes
+// such a failure at most once. The shrink budget is counted in property
+// executions — a count bounding work, never a time guard: no guard of its
+// own bounds a shrink phase, which is bounded by its executions' own guards
+// (TEST-SPEC S-3, helpers/hang-guards.ts) — so it bounds wall clock only
+// while an execution is cheap; a failure whose every re-observation costs a
+// full hang guard — an invocation the subprocess driver killed (P-8's and
+// P-11's termination clauses) — would otherwise turn a bounded shrink into
+// hours. The driver's missing-product failure declines too
+// (helpers/subprocess.ts, `missingFilesFailDiagnosed`; H-8): no draw can
+// change it, so a shrink would only report an arbitrary counterexample.
+//
+// S-9's per-draw check (TEST-SPEC 16 preamble, 17 S-9): a property whose
+// generator composes sources names the files a draw stages through
+// `drawSources`. Before the body — and so the product — sees a draw, the
+// initial trial and every shrunk candidate alike, each `.mdx` source is
+// judged by `deriveMdx` (helpers/mdx-derivability.ts, the check the S-9
+// vectors and the workspace builder use), and each code source and
+// configuration file — a name `TS_DEFAULT_SUFFIXES` reaches, or an entry
+// marked `"code-source"` (a code group globs any name) — by the TypeScript
+// check (`judgeTsDeclaration` under the `per-draw` declaration,
+// helpers/workspace.ts and helpers/ts-derivability.ts: TypeScript 5.9.3's
+// parser at ESNext, accepted both as module code and as script code). A
+// source that does not derive, or is not well-formed TypeScript, is a
+// harness error carrying the seed (H-10): never a diagnosed failure, never
+// a draw to skip — a generator composing an ill-formed form is a harness
+// defect. The workspace builder's own staging-time check is the second
+// line: a `HarnessStagingError` it throws while the body runs is rethrown
+// as a harness error naming the seed and the refused staging.
 
 import { HarnessAssertionError } from "./assertions.js";
+import { isHangGuardKill } from "./hang-guards.js";
+import { deriveMdx } from "./mdx-derivability.js";
+import { HarnessStagingError } from "./permissions.js";
+import { guardSyncStep } from "./step-guards.js";
+import { TS_DEFAULT_SUFFIXES, judgeTsDeclaration } from "./workspace.js";
 
 /** Environment variable selecting the seed mode (E-5); see the module header. */
 export const PROPERTY_SEED_ENV = "XSPEC_PROPERTY_SEED";
@@ -186,8 +237,9 @@ export interface PropertyOptions<T> {
   readonly seeds?: readonly number[];
   /**
    * Cap on property executions spent shrinking (default
-   * {@link DEFAULT_MAX_SHRINK_EXECUTIONS}). Product-driving properties
-   * should size this against their test's time budget.
+   * {@link DEFAULT_MAX_SHRINK_EXECUTIONS}): a count bounding work, never a
+   * time guard (TEST-SPEC S-3). Product-driving properties should size it
+   * against what one execution costs.
    */
   readonly maxShrinkExecutions?: number;
   /** Counterexample renderer (default JSON; output truncated for messages). */
@@ -202,7 +254,45 @@ export interface PropertyOptions<T> {
    * other mode (H-10).
    */
   readonly entropy?: () => number;
+  /**
+   * S-9's per-draw check (TEST-SPEC 16 preamble; module header): the files
+   * a draw stages, each as `[path, contents]` with an optional label (e.g.
+   * which edit of the trial stages it) and an optional role. Before the
+   * property body runs on the draw — the initial trial and each shrunk
+   * candidate alike — every entry whose path ends in `.mdx` is judged for
+   * derivability under the grammar 14.20 fixes, and every code source and
+   * configuration file — an entry whose path ends in one of
+   * `TS_DEFAULT_SUFFIXES`, or one whose role is `"code-source"` — is judged
+   * well-formed TypeScript under 14.20 (TypeScript 5.9.3 at ESNext, TSX or
+   * plain as the path selects, accepted both as module code and as script
+   * code); other entries are ignored, so a generator may hand over its
+   * whole staged file map. A failing source is a harness error naming the
+   * path, the parser's reason, and the seed (H-10) — never a diagnosed
+   * failure, never a skipped draw. Generated sources carry no S-9
+   * allowance: the generators compose valid workspaces by construction
+   * (16), and no draw is declared unparseable.
+   */
+  readonly drawSources?: (value: T) => Iterable<DrawSource>;
 }
+
+/**
+ * One file a draw stages, for {@link PropertyOptions.drawSources}: its
+ * workspace-relative path, its bytes, an optional label distinguishing
+ * several stagings of one path within a trial, and an optional role:
+ * `"code-source"` marks a code source a code group discovers at a name
+ * `TS_DEFAULT_SUFFIXES` does not reach (P-7's capture sources), judged as
+ * TypeScript all the same (S-9; SPEC 14.20 selects plain TypeScript for
+ * any name but `.tsx`).
+ */
+export type DrawSource = readonly [
+  path: string,
+  contents: string | Uint8Array,
+  label?: string,
+  role?: DrawSourceRole,
+];
+
+/** The role a {@link DrawSource} may declare beyond what its name implies. */
+export type DrawSourceRole = "code-source";
 
 /** How the effective seed set was chosen; see the module header. */
 export type SeedMode = "fixed" | "env" | "randomized";
@@ -235,6 +325,19 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
   readonly shrinkSteps: number;
   /** Property executions spent shrinking. */
   readonly shrinkExecutions: number;
+  /**
+   * True when the drawn trial's failure declined shrinking
+   * (`HarnessAssertionError.shrinkable`): no shrink ran, and the
+   * counterexample is the drawn value.
+   */
+  readonly shrinkDeclined: boolean;
+  /**
+   * True when shrinking stopped at the reported counterexample because its
+   * failure — an accepted shrink candidate's — declines shrinking
+   * (`HarnessAssertionError.shrinkable`): no further candidate was replayed
+   * or executed (see the module header).
+   */
+  readonly shrinkStopped: boolean;
 
   constructor(details: {
     readonly propertyName: string;
@@ -248,11 +351,17 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
     readonly assertionMessage: string;
     readonly shrinkSteps: number;
     readonly shrinkExecutions: number;
+    readonly shrinkDeclined: boolean;
+    readonly shrinkStopped: boolean;
   }) {
-    const shrinkNote =
-      details.shrinkSteps > 0
-        ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${String(details.shrinkSteps)} accepted shrink steps, ${String(details.shrinkExecutions)} property executions)`
-        : "\n  (already minimal: no shrink candidate was accepted)";
+    const shrinkTally = `${String(details.shrinkSteps)} accepted shrink steps, ${String(details.shrinkExecutions)} property executions`;
+    const shrinkNote = details.shrinkDeclined
+      ? "\n  (reported as drawn: this failure declines shrinking — re-observing it would cost a full hang guard, or no draw could change it)"
+      : details.shrinkStopped
+        ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${shrinkTally}; shrinking stopped at this counterexample because its failure declines shrinking: re-observing it would cost a full hang guard, or no draw could change it)`
+        : details.shrinkSteps > 0
+          ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${shrinkTally})`
+          : "\n  (already minimal: no shrink candidate was accepted)";
     super(
       `property ${JSON.stringify(details.propertyName)}: falsified with seed ${String(details.seed)} ` +
         `(trial ${String(details.trial)} of ${String(details.runs)})\n` +
@@ -269,6 +378,8 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
     this.assertionMessage = details.assertionMessage;
     this.shrinkSteps = details.shrinkSteps;
     this.shrinkExecutions = details.shrinkExecutions;
+    this.shrinkDeclined = details.shrinkDeclined;
+    this.shrinkStopped = details.shrinkStopped;
   }
 }
 
@@ -393,25 +504,52 @@ export async function checkProperty<T>(
         });
       }
       try {
+        checkDrawSources(generated.value, options.drawSources);
+      } catch (error) {
+        throw harnessError({
+          name,
+          seed,
+          phase: `checking trial ${String(trial)} of ${String(runs)} (S-9: every MDX source a draw stages derives, and every code source and configuration file it stages is well-formed TypeScript)`,
+          cause: error,
+          renderedInput: renderValue(generated.value, options.render),
+        });
+      }
+      try {
         await property(generated.value);
         continue;
       } catch (error) {
         if (!(error instanceof HarnessAssertionError)) {
-          throw harnessError({
-            name,
-            seed,
-            phase: `running trial ${String(trial)} of ${String(runs)}`,
-            cause: error,
-            renderedInput: renderValue(generated.value, options.render),
-          });
+          const phase = `running trial ${String(trial)} of ${String(runs)}`;
+          const renderedInput = renderValue(generated.value, options.render);
+          throw isHangGuardKill(error)
+            ? hangReport({ name, seed, phase, cause: error, renderedInput })
+            : harnessError({
+                name,
+                seed,
+                phase: nonAssertionPhase(phase, error),
+                cause: error,
+                renderedInput,
+              });
         }
-        const shrunk = await shrinkFalsification(
-          generator,
-          property,
-          { trial: generated, error },
-          maxShrinkExecutions,
-          { name, seed, render: options.render },
-        );
+        const shrunk: ShrinkResult<T> = error.shrinkable
+          ? await shrinkFalsification(
+              generator,
+              property,
+              { trial: generated, error },
+              maxShrinkExecutions,
+              {
+                name,
+                seed,
+                render: options.render,
+                drawSources: options.drawSources,
+              },
+            )
+          : {
+              final: { trial: generated, error },
+              steps: 0,
+              executions: 0,
+              stoppedAtDeclined: false,
+            };
         throw new PropertyFalsifiedError({
           propertyName: name,
           seed,
@@ -424,10 +562,40 @@ export async function checkProperty<T>(
           assertionMessage: shrunk.final.error.message,
           shrinkSteps: shrunk.steps,
           shrinkExecutions: shrunk.executions,
+          shrinkDeclined: !error.shrinkable,
+          shrinkStopped: shrunk.stoppedAtDeclined,
         });
       }
     }
   }
+}
+
+/**
+ * Draw a generator's trials exactly as {@link checkProperty} draws them under
+ * the fixed seed plan (E-5: the CI seed set) — per seed a fresh PRNG and
+ * `runs` sequential trials — without running any property body. S-8 replays
+ * the suite's generators through this to measure the scales the fixed seed
+ * set actually stages against the harness's derived capacity bounds (H-11).
+ */
+export function drawFixedSeedTrials<T>(
+  generator: Gen<T>,
+  runs: number,
+  seeds: readonly number[] = DEFAULT_PROPERTY_SEEDS,
+): T[] {
+  if (!Number.isInteger(runs) || runs <= 0) {
+    throw new Error(
+      `drawFixedSeedTrials: runs must be a positive integer, got ${String(runs)}`,
+    );
+  }
+  validateSeeds("drawFixedSeedTrials", seeds);
+  const values: T[] = [];
+  for (const seed of seeds) {
+    const rng = new Mulberry32(seed);
+    for (let trial = 1; trial <= runs; trial += 1) {
+      values.push(generateTrial(generator, rng).value);
+    }
+  }
+  return values;
 }
 
 // ---------------------------------------------------------------------------
@@ -630,16 +798,24 @@ class ChoiceSource implements Choices {
   }
 }
 
+/**
+ * Draw one trial — a harness step under its own guard (TEST-SPEC S-3,
+ * helpers/step-guards.ts): synchronous, bounded by the generator's own
+ * bounds, measured.
+ */
 function generateTrial<T>(generator: Gen<T>, rng: Mulberry32): Trial<T> {
-  const source = ChoiceSource.recording(rng);
-  const value = generator(source);
-  return { tape: source.finish(), value };
+  return guardSyncStep("a property's generation of a trial", () => {
+    const source = ChoiceSource.recording(rng);
+    const value = generator(source);
+    return { tape: source.finish(), value };
+  });
 }
 
 /**
  * Replay the generator on a candidate tape; null when the candidate is
  * unsatisfiable. The returned tape is the consumed prefix (unread tail
- * dropped), so accepted candidates stay canonical.
+ * dropped), so accepted candidates stay canonical. The replay is a harness
+ * step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts).
  */
 function replayTrial<T>(
   generator: Gen<T>,
@@ -648,7 +824,9 @@ function replayTrial<T>(
   const source = ChoiceSource.replaying(tape);
   let value: T;
   try {
-    value = generator(source);
+    value = guardSyncStep("a property's replay of a shrink candidate", () =>
+      generator(source),
+    );
   } catch (error) {
     if (error instanceof ReplayUnsatisfiable) return null;
     throw error;
@@ -668,14 +846,32 @@ interface ShrinkResult<T> {
   readonly final: Falsification<T>;
   readonly steps: number;
   readonly executions: number;
+  /**
+   * True when the shrink ended at `final` because that accepted candidate's
+   * failure declines shrinking (`HarnessAssertionError.shrinkable` false):
+   * no further candidate was replayed or executed.
+   */
+  readonly stoppedAtDeclined: boolean;
 }
 
 /**
  * Shrink a falsification: sweep block deletion, block zeroing, and per-entry
  * binary-search minimization over the tape until a full sweep accepts
- * nothing or the budget runs out. A candidate is accepted iff it replays to
- * a strictly shortlex-smaller tape (termination) and the property rejects
- * its value with a `HarnessAssertionError` again. Fully deterministic for a
+ * nothing, the budget runs out, or an accepted candidate's failure declines
+ * shrinking. A candidate is accepted iff it replays to a strictly
+ * shortlex-smaller tape (termination) and the property rejects its value
+ * with a `HarnessAssertionError` again — one that declines shrinking
+ * (`shrinkable` false: P-8's and P-11's hang-guard kills, the driver's
+ * missing-product failure) included, since it is a genuine falsification on
+ * a strictly smaller tape. Such a candidate ends the shrink at once
+ * (`stoppedAtDeclined`): re-observing it, or anything after it, could cost
+ * a full hang guard per candidate, so no further candidate is replayed or
+ * executed. A candidate the generator
+ * cannot replay (its tape runs out, or an entry exceeds its draw's bound) is
+ * discarded; anything else the generator throws on a candidate, an S-9
+ * refusal of a candidate's staged sources, and anything but a
+ * `HarnessAssertionError` from the body are harness errors carrying the
+ * seed (H-10, H-8), never a rejected candidate. Fully deterministic for a
  * deterministic property (E-5).
  */
 async function shrinkFalsification<T>(
@@ -687,23 +883,68 @@ async function shrinkFalsification<T>(
     readonly name: string;
     readonly seed: number;
     readonly render: ((value: T) => string) | undefined;
+    readonly drawSources: ((value: T) => Iterable<DrawSource>) | undefined;
   },
 ): Promise<ShrinkResult<T>> {
   let current = initial;
   let steps = 0;
   let executions = 0;
   let replays = 0;
+  let stoppedAtDeclined = false;
 
-  const exhausted = (): boolean =>
-    executions >= maxExecutions || replays >= REPLAY_LIMIT;
+  // The shrink is over once its budget runs out or once it has accepted a
+  // candidate whose failure declines shrinking; every sweep below checks
+  // this, and `attempt` replays nothing after it.
+  const ended = (): boolean =>
+    stoppedAtDeclined || executions >= maxExecutions || replays >= REPLAY_LIMIT;
 
-  /** Try one candidate tape; true iff accepted (current updated). */
+  /**
+   * Try one candidate tape; true iff accepted (current updated). Once the
+   * shrink has ended, no candidate is replayed or executed.
+   */
   const attempt = async (candidate: readonly number[]): Promise<boolean> => {
-    if (exhausted()) return false;
+    if (ended()) return false;
     replays += 1;
-    const replayed = replayTrial(generator, candidate);
+    // A candidate tape the generator cannot replay (it runs out, or an entry
+    // exceeds its draw's bound) is discarded: `replayTrial` turns that
+    // internal signal into null. Anything else the generator throws on a
+    // candidate's choices is a harness defect, as a throw while generating
+    // a trial is — always surfaced with the seed (H-10, H-8), never
+    // "candidate rejected", and never escaping as the generator's raw error.
+    // No input is rendered: the generator composed none.
+    let replayed: Trial<T> | null;
+    try {
+      replayed = replayTrial(generator, candidate);
+    } catch (error) {
+      throw harnessError({
+        name: context.name,
+        seed: context.seed,
+        phase:
+          "shrinking (the generator threw while replaying a shrink " +
+          "candidate's choices)",
+        cause: error,
+      });
+    }
     if (replayed === null) return false;
     if (!shortlexLess(replayed.tape, current.trial.tape)) return false;
+    // A shrunk candidate is a draw like any other: its staged sources are
+    // checked before the body sees them (S-9), and an ill-formed one is a
+    // harness defect — never "candidate rejected" (a generator composing it
+    // on any tape is the defect).
+    try {
+      checkDrawSources(replayed.value, context.drawSources);
+    } catch (error) {
+      throw harnessError({
+        name: context.name,
+        seed: context.seed,
+        phase:
+          "shrinking (S-9: an MDX source a shrunk input stages does not " +
+          "derive, or a code source or configuration file it stages is not " +
+          "well-formed TypeScript)",
+        cause: error,
+        renderedInput: renderValue(replayed.value, context.render),
+      });
+    }
     executions += 1;
     try {
       await property(replayed.value);
@@ -711,24 +952,43 @@ async function shrinkFalsification<T>(
     } catch (error) {
       if (!(error instanceof HarnessAssertionError)) {
         // The body crashed on a shrunk input: a harness defect (H-8) — always
-        // surfaced, never swallowed into "candidate rejected".
-        throw harnessError({
-          name: context.name,
-          seed: context.seed,
-          phase:
-            "shrinking (the property threw a non-assertion error on a shrunk input)",
-          cause: error,
-          renderedInput: renderValue(replayed.value, context.render),
-        });
+        // surfaced, never swallowed into "candidate rejected" — or a product
+        // invocation outlasted its own hang guard on it, which ends the
+        // test where it is (TEST-SPEC S-3).
+        const renderedInput = renderValue(replayed.value, context.render);
+        throw isHangGuardKill(error)
+          ? hangReport({
+              name: context.name,
+              seed: context.seed,
+              phase: "shrinking (on a shrunk input)",
+              cause: error,
+              renderedInput,
+            })
+          : harnessError({
+              name: context.name,
+              seed: context.seed,
+              phase: nonAssertionPhase(
+                "shrinking (the property threw a non-assertion error on a shrunk input)",
+                error,
+              ),
+              cause: error,
+              renderedInput,
+            });
       }
+      // Accepted: a strictly smaller falsification. One that declines
+      // shrinking (a hang-guard kill, or the product missing) is accepted
+      // too — it is genuine — but ends the shrink here: each further
+      // candidate could cost another full hang guard, or fail no
+      // differently, so it is the reported counterexample.
       current = { trial: replayed, error };
       steps += 1;
+      if (!error.shrinkable) stoppedAtDeclined = true;
       return true;
     }
   };
 
   let improved = true;
-  while (improved && !exhausted()) {
+  while (improved && !ended()) {
     improved = false;
 
     // Pass 1: delete blocks (largest first), scanning from the tail.
@@ -741,7 +1001,7 @@ async function shrinkFalsification<T>(
         const tape = current.trial.tape;
         const candidate = [...tape.slice(0, i), ...tape.slice(i + block)];
         if (await attempt(candidate)) improved = true;
-        if (exhausted()) break;
+        if (ended()) break;
       }
     }
 
@@ -757,14 +1017,14 @@ async function shrinkFalsification<T>(
         const candidate = [...tape];
         candidate.fill(0, i, i + block);
         if (await attempt(candidate)) improved = true;
-        if (exhausted()) break;
+        if (ended()) break;
       }
     }
 
     // Pass 3: binary-search each entry toward 0. Acceptance rewrites the
     // current tape (possibly shorter via replay trimming), so bounds re-read
     // it every step.
-    for (let i = 0; i < current.trial.tape.length && !exhausted(); i += 1) {
+    for (let i = 0; i < current.trial.tape.length && !ended(); i += 1) {
       const tryEntry = async (value: number): Promise<boolean> => {
         const tape = current.trial.tape;
         if (i >= tape.length || value >= tape[i]) return false;
@@ -781,7 +1041,7 @@ async function shrinkFalsification<T>(
       while (
         i < current.trial.tape.length &&
         current.trial.tape[i] - low > 1 &&
-        !exhausted()
+        !ended()
       ) {
         const mid = low + Math.floor((current.trial.tape[i] - low) / 2);
         if (await tryEntry(mid)) {
@@ -793,7 +1053,7 @@ async function shrinkFalsification<T>(
     }
   }
 
-  return { final: current, steps, executions };
+  return { final: current, steps, executions, stoppedAtDeclined };
 }
 
 /** Strict shortlex order: shorter first, then lexicographic. */
@@ -840,6 +1100,103 @@ function harnessError(details: {
       `  reproduce with ${PROPERTY_SEED_ENV}=${String(details.seed)}`,
     { cause: details.cause },
   );
+}
+
+/**
+ * The report of a hang-guard kill a property body let through (module
+ * header; TEST-SPEC S-3): a product invocation did not terminate within its
+ * own guard, which ends the test — the property reported with its seed and
+ * the input, unshrunk, the kill its `cause` (helpers/hang-guards.ts
+ * `isHangGuardKill`). Never a diagnosed assertion failure.
+ */
+function hangReport(details: {
+  readonly name: string;
+  readonly seed: number;
+  readonly phase: string;
+  readonly cause: unknown;
+  readonly renderedInput: string;
+}): Error {
+  return new Error(
+    `property ${JSON.stringify(details.name)}: a product invocation did not terminate within its own hang guard while ${details.phase} with seed ${String(details.seed)} — ` +
+      `a hang, which ends the property, reported unshrunk (TEST-SPEC S-3; H-10): ${describeCause(details.cause)}\n  input: ${details.renderedInput}\n` +
+      `  reproduce with ${PROPERTY_SEED_ENV}=${String(details.seed)}`,
+    { cause: details.cause },
+  );
+}
+
+const UTF8 = new TextEncoder();
+
+/**
+ * S-9's per-draw check (module header): judge every source the draw stages.
+ * The first `.mdx` source that does not derive throws a
+ * `HarnessStagingError` of mode `mdx-derivability`, spelled as the workspace
+ * builder spells its own refusal, so both lines of the check report alike;
+ * the first code source or configuration file that is not well-formed
+ * TypeScript throws the builder's own `ts-derivability` refusal of a
+ * `per-draw` staging (`judgeTsDeclaration`, one code path), which names the
+ * generator as the defect. The check is a harness step under its own guard
+ * (TEST-SPEC S-3, helpers/step-guards.ts).
+ */
+function checkDrawSources<T>(
+  value: T,
+  drawSources: ((value: T) => Iterable<DrawSource>) | undefined,
+): void {
+  if (drawSources === undefined) return;
+  guardSyncStep("a draw's S-9 check of the sources it stages", () => {
+    judgeDrawSources(value, drawSources);
+  });
+}
+
+/** {@link checkDrawSources}' judgement, under its guard. */
+function judgeDrawSources<T>(
+  value: T,
+  drawSources: (value: T) => Iterable<DrawSource>,
+): void {
+  for (const [path, contents, label, role] of drawSources(value)) {
+    const where = label === undefined ? path : `${path} (${label})`;
+    if (path.endsWith(".mdx")) checkDrawMdx(where, contents);
+    if (role === "code-source" || hasTsDefaultSuffix(path)) {
+      const bytes =
+        typeof contents === "string" ? UTF8.encode(contents) : contents;
+      // The staged path selects the grammar (TSX for a `.tsx` name, plain
+      // TypeScript for any other, SPEC 14.20); the label only names it.
+      judgeTsDeclaration(where, bytes, "per-draw", path);
+    }
+  }
+}
+
+/** Whether S-9's TypeScript default reaches a draw's staged path by name. */
+function hasTsDefaultSuffix(path: string): boolean {
+  return TS_DEFAULT_SUFFIXES.some((suffix) => path.endsWith(suffix));
+}
+
+/** One `.mdx` source of a draw, judged by `deriveMdx` (S-9). */
+function checkDrawMdx(where: string, contents: string | Uint8Array): void {
+  const verdict = deriveMdx(contents);
+  if (verdict.derives) return;
+  const at =
+    verdict.position === undefined
+      ? ""
+      : ` at line ${String(verdict.position.line)}, column ${String(verdict.position.column)} (offset ${String(verdict.position.offset)})`;
+  throw new HarnessStagingError(
+    "mdx-derivability",
+    where,
+    "composed by the generator as well-formed (TEST-SPEC 16: generated " +
+      "workspaces are valid by construction) but the stock MDX 3 parser " +
+      `rejects it${at}: ${verdict.reason} — a generator defect (S-9), ` +
+      "not a product failure",
+  );
+}
+
+/**
+ * The phase a non-assertion error is attributed to: a workspace-builder
+ * refusal (`HarnessStagingError`, e.g. the S-9 staging-time check) names the
+ * refused staging; anything else keeps the base phase.
+ */
+function nonAssertionPhase(base: string, error: unknown): string {
+  return error instanceof HarnessStagingError
+    ? `${base} (the workspace builder refused the ${error.mode} staging of ${error.path})`
+    : base;
 }
 
 function describeCause(cause: unknown): string {

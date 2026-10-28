@@ -4,26 +4,35 @@
 // the product itself wrote and is corrupted here — the one place aware of the
 // stored session's concrete shape. The transformations are shape-aware and
 // value-blind: they locate structure (the item list, an item's id, status,
-// blockedBy, the recorded creation parameters), never inspect what the values
-// are, and fail loudly (diagnosed test error, file untouched) when the shape
-// does not match. The harness never writes a session file from an assumed
-// layout — shape-independent corrupt states (unparseable bytes, truncation, a
-// directory or symlink at the path) are staged directly by the tests, not
-// here.
+// kind, blockedBy, the recorded creation parameters and decompositions),
+// never inspect what the values are, and fail loudly (diagnosed test error,
+// file untouched) when the shape does not match. The harness never writes a
+// session file from an assumed layout — shape-independent corrupt states
+// (unparseable bytes, truncation, a directory or symlink at the path) are
+// staged directly by the tests, not here. One transformation reads a second
+// product-written file: the re-insertion copies an item entry from an
+// earlier file the product wrote for the same session, whole and unchanged.
 //
 // ASSUMED STORED-SESSION SHAPE (adjustable per H-3, values never):
-//   { ..., "creationParameters": <recorded>, ...,
-//     "items": [ { "id": string, "status": string, "blockedBy": [id...],
-//                  ...per-item fields... }, ... ], ... }
+//   { ..., "creationParameters": <recorded>, "decompositions": <recorded>,
+//     ...,
+//     "items": [ { "id": string, "status": string, "kind": string,
+//                  "blockedBy": [id...], ...per-item fields... }, ... ],
+//     ... }
 //
 // Every transformation validates the shape it needs before mutating anything,
 // rewrites the parsed document, and writes it back as a single well-formed
 // JSON document — each staged state stays parseable, so the product observes
 // exactly the one injected corruption (unparseable bytes are a separate,
-// shape-independent state).
+// shape-independent state). The rewrite keeps every member in the order the
+// product wrote it (`JSON.parse` keeps a document's key order for every key
+// that is not an array index), so a file written with sorted keys (SPEC
+// 13.4) stays so, a re-inserted entry's members included.
 
 import * as fsp from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import { fail } from "../assertions.js";
+import { guardStep } from "../step-guards.js";
 import { describeJsonValue } from "./decode.js";
 
 /** The stored-session shape knowledge, in one adjustable place. */
@@ -31,8 +40,10 @@ const SESSION_SHAPE = {
   itemsKey: "items",
   idKey: "id",
   statusKey: "status",
+  kindKey: "kind",
   blockedByKey: "blockedBy",
   creationParametersKey: "creationParameters",
+  decompositionsKey: "decompositions",
 } as const;
 
 interface LoadedSession {
@@ -63,28 +74,36 @@ async function loadSession(absPath: string): Promise<LoadedSession> {
       `expected a readable session file the product wrote, but reading it failed: ${(error as Error).message}`,
     );
   }
+  return parseSession(absPath, bytes);
+}
+
+/**
+ * Shape-check a product-written session file's bytes (nothing modified);
+ * `label` names the file in a diagnosis.
+ */
+function parseSession(label: string, bytes: Uint8Array): LoadedSession {
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
-    return shapeFail(absPath, "the session file is not valid UTF-8");
+    return shapeFail(label, "the session file is not valid UTF-8");
   }
   let doc: unknown;
   try {
     doc = JSON.parse(text) as unknown;
   } catch (error) {
     return shapeFail(
-      absPath,
+      label,
       `the session file is not one JSON document: ${(error as Error).message}`,
     );
   }
   if (typeof doc !== "object" || doc === null || Array.isArray(doc)) {
-    return shapeFail(absPath, "expected a JSON object at the top level", doc);
+    return shapeFail(label, "expected a JSON object at the top level", doc);
   }
   const obj = doc as Record<string, unknown>;
   if (!Object.hasOwn(obj, SESSION_SHAPE.itemsKey)) {
     return shapeFail(
-      absPath,
+      label,
       `expected an "${SESSION_SHAPE.itemsKey}" member holding the item list`,
       undefined,
     );
@@ -92,7 +111,7 @@ async function loadSession(absPath: string): Promise<LoadedSession> {
   const itemsValue = obj[SESSION_SHAPE.itemsKey];
   if (!Array.isArray(itemsValue)) {
     return shapeFail(
-      absPath,
+      label,
       `expected "${SESSION_SHAPE.itemsKey}" to be an array`,
       itemsValue,
     );
@@ -104,7 +123,7 @@ async function loadSession(absPath: string): Promise<LoadedSession> {
       Array.isArray(element)
     ) {
       return shapeFail(
-        absPath,
+        label,
         `expected ${SESSION_SHAPE.itemsKey}[${String(index)}] to be a JSON object`,
         element,
       );
@@ -279,9 +298,12 @@ export async function stageBlockedByAbsentItem(absPath: string): Promise<void> {
 }
 
 /**
- * T10.1-4 "missing 10.2 field": delete a named field from an item entry.
+ * T10.1-4 "a missing 10.2 field": delete a named field from an item entry.
  * The field must exist in the product-written file — deleting an already
- * absent field would stage nothing, so that is a shape mismatch.
+ * absent field would stage nothing, so that is a shape mismatch. The
+ * fields every item carries (SPEC 10.2) are staged through
+ * {@link stageDeleteItemStatus} and {@link stageDeleteItemKind}, which name
+ * them by the assumed shape.
  */
 export async function stageDeleteItemField(
   absPath: string,
@@ -296,23 +318,111 @@ export async function stageDeleteItemField(
 }
 
 /**
- * T10.1-4 "malformed recorded creation parameters": garble the recorded
- * creation parameters by replacing them with a value of a different JSON
- * structural type (value-blind: only the stored value's type is examined, so
- * the replacement is malformed whatever the recorded content was — a garbage
- * *string* where a string is stored could still parse as merely unresolvable,
- * which is a different, exit-2 state, T10.7-3).
+ * T10.1-4 "a missing 10.2 field — an item's `status`": delete the stored
+ * status of an item entry (see {@link stageDeleteItemField}).
  */
-export async function stageGarbleCreationParameters(
+export async function stageDeleteItemStatus(absPath: string): Promise<void> {
+  await stageDeleteItemField(absPath, SESSION_SHAPE.statusKey);
+}
+
+/**
+ * T10.1-4 "a missing 10.2 field — … and separately its `kind`": delete the
+ * stored kind of an item entry (see {@link stageDeleteItemField}).
+ */
+export async function stageDeleteItemKind(absPath: string): Promise<void> {
+  await stageDeleteItemField(absPath, SESSION_SHAPE.kindKey);
+}
+
+/**
+ * T10.1-4 "an item whose kind and scope node are recorded as decomposed":
+ * re-insert into the later session file at `absPath` an item entry copied
+ * from an earlier file the product wrote for the same session — after a
+ * `split`, the original item's entry from the pre-`split` file, which the
+ * post-`split` file no longer holds (SPEC 10.7: the original is removed and
+ * its `id` never reused). `earlier` is the earlier file's bytes, saved by
+ * the caller before the product's later write; `id` names the entry by the
+ * item id the product reported for it. The entry is copied whole — every
+ * member as the product wrote it, in its written key order, its values
+ * never examined — and appended to the later file's item list, every other
+ * member of the later file kept as written. Fails loudly, the file
+ * untouched, unless both files are session documents of the assumed shape
+ * whose recorded creation parameters are equal, compared whole (the same
+ * session: they are fixed at `create`, SPEC 10.7), the earlier file holds
+ * exactly one entry bearing `id`, and the later file none (an entry there
+ * bearing it would make the re-insertion stage duplicate ids, another
+ * state). A harness step over two whole files, so it runs under its own
+ * guard (TEST-SPEC S-3).
+ */
+export async function stageReinsertItemEntry(
   absPath: string,
+  earlier: Uint8Array,
+  id: string,
+): Promise<void> {
+  await guardStep(
+    `re-inserting the item entry ${JSON.stringify(id)} into ${absPath} (stageReinsertItemEntry)`,
+    async () => {
+      const earlierLabel = `${absPath}'s earlier product-written file (the re-inserted entry's source)`;
+      const source = parseSession(earlierLabel, earlier);
+      const target = await loadSession(absPath);
+      const recorded = (label: string, loaded: LoadedSession): unknown => {
+        if (!Object.hasOwn(loaded.doc, SESSION_SHAPE.creationParametersKey)) {
+          shapeFail(
+            label,
+            `expected a "${SESSION_SHAPE.creationParametersKey}" member holding the recorded creation parameters`,
+          );
+        }
+        return loaded.doc[SESSION_SHAPE.creationParametersKey];
+      };
+      if (
+        !isDeepStrictEqual(
+          recorded(earlierLabel, source),
+          recorded(absPath, target),
+        )
+      ) {
+        shapeFail(
+          absPath,
+          `the earlier file records other creation parameters, so it is no earlier file of this session (SPEC 10.7: a session's recorded creation parameters are fixed at \`create\`)`,
+        );
+      }
+      const matches = source.items.filter(
+        (item, index) => itemId(earlierLabel, item, index) === id,
+      );
+      if (matches.length !== 1) {
+        shapeFail(
+          earlierLabel,
+          `expected exactly one item entry bearing the id ${JSON.stringify(id)} to re-insert, found ${String(matches.length)}`,
+        );
+      }
+      const present = target.items.map((item, index) =>
+        itemId(absPath, item, index),
+      );
+      if (present.includes(id)) {
+        shapeFail(
+          absPath,
+          `an item entry here already bears the id ${JSON.stringify(id)}, so re-inserting the earlier entry would stage duplicate item ids, another state — re-insert an entry this file no longer holds`,
+        );
+      }
+      target.items.push(structuredClone(matches[0]));
+      await writeSession(absPath, target.doc);
+    },
+  );
+}
+
+/**
+ * Garble a recorded top-level session member by replacing it with a value of
+ * a different JSON structural type (value-blind: only the stored value's type
+ * is examined, so the replacement is malformed whatever the recorded content
+ * was — a garbage *string* where a string is stored could still parse as
+ * merely unresolvable, which is a different, exit-2 state, T10.7-3).
+ */
+async function garbleRecordedMember(
+  absPath: string,
+  key: string,
+  what: string,
 ): Promise<void> {
   const loaded = await loadSession(absPath);
-  const key = SESSION_SHAPE.creationParametersKey;
   if (!Object.hasOwn(loaded.doc, key)) {
-    shapeFail(
-      absPath,
-      `expected a "${key}" member holding the recorded creation parameters`,
-    );
+    shapeFail(absPath, `expected a "${key}" member holding the ${what}`);
   }
   const stored = loaded.doc[key];
   loaded.doc[key] =
@@ -320,4 +430,38 @@ export async function stageGarbleCreationParameters(
       ? " xspec-harness-garbled "
       : { "xspec-harness-garbled": true };
   await writeSession(absPath, loaded.doc);
+}
+
+/**
+ * T10.1-4 "malformed recorded creation parameters": garble the recorded
+ * creation parameters by structural type flip (see
+ * {@link garbleRecordedMember}).
+ */
+export async function stageGarbleCreationParameters(
+  absPath: string,
+): Promise<void> {
+  await garbleRecordedMember(
+    absPath,
+    SESSION_SHAPE.creationParametersKey,
+    "recorded creation parameters",
+  );
+}
+
+/**
+ * T10.1-4 "malformed recorded decompositions": garble the recorded
+ * decompositions (SPEC 10.7: a `split`'s decomposition — the original's kind
+ * and scope node — is recorded durably in the session and governs
+ * re-derivation) by structural type flip (see {@link garbleRecordedMember}).
+ * Staged over a session in which the product itself performed a `split`, so
+ * a decomposition is genuinely recorded (T10.1-4's staging discipline: the
+ * corrupted file starts as one the product wrote).
+ */
+export async function stageGarbleDecompositions(
+  absPath: string,
+): Promise<void> {
+  await garbleRecordedMember(
+    absPath,
+    SESSION_SHAPE.decompositionsKey,
+    "recorded decompositions",
+  );
 }

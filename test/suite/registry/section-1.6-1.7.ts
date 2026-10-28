@@ -1,5 +1,6 @@
 // TEST-SPEC §1.6 (own text, subtree text, and own content) and §1.7 (source
-// ranges) — SUITE-05: T1.6-1, T1.6-2, T1.6-3, T1.6-4, T1.6-5, T1.7-1.
+// ranges) — SUITE-05: T1.6-1, T1.6-2, T1.6-3, T1.6-4, T1.6-5, T1.7-1,
+// T1.7-2.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -10,15 +11,32 @@
 // H-3 adapters, and rejects a product only via diagnosed assertion failures
 // (H-8). The `text(node)` runtime arm of T1.6-3 compiles and runs a consumer
 // program under standard TypeScript tooling with no xspec runtime dependency
-// (SPEC 13.1) through helpers/tooling.ts, following the CommonJS-mode
-// arrangement described in section-1.1-1.2.ts.
+// (SPEC 13.1) through helpers/tooling.ts, in TEST-SPEC H-2's fixed
+// configurations as section-1.1-1.2.ts's runtime arm does: type-checked
+// clean under each of the two, the whole program included, then compiled
+// under the CommonJS configuration alone to CommonJS JavaScript written
+// outside the workspace and run there under plain Node.
 
 import { Buffer } from "node:buffer";
-import type { Finding, NodeReport } from "../../helpers/adapters/index.js";
+import type {
+  Finding,
+  GraphEdge,
+  NodeReport,
+  OccurrenceRecord,
+  OccurrenceSourceNode,
+  ReviewItem,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
+  assertBareEdgeEndpoints,
+  assertNodeEdgeListsBare,
+  decodeEdgesReport,
   decodeImpactReport,
+  decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
+  decodeOccurrencesReport,
+  decodeReachableReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -26,19 +44,24 @@ import {
   assertExitCode,
   assertFileBytes,
   fail,
+  HarnessAssertionError,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  COMMONJS_CONFIGURATION,
   ConsumerProject,
-  formatConsumerDiagnostic,
-  runConsumer,
+  forEachConsumerProject,
+  withCompiledConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertEdgeSetEqual,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -49,18 +72,26 @@ import {
 // Minimal declarative configuration (SPEC 7): one spec group. The spec-group
 // globs match only `.mdx` files, so no glob matches a Markdown emit
 // destination (`specs/*.md`, SPEC 7.3) — the discovered set is identical
-// under every `markdown` variant, as T1.6-1's parity arm requires.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// under every `markdown` variant, as T1.6-1's parity arm requires. This
+// configuration and the two `markdown` variants below are staged-source
+// records (S-9's timing clause): the parity arm stages each into its second
+// workspace after the body's first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T1.6-1 xspec.config.ts — `markdown` absent (the parity arm's first variant)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // As above with `markdown: { emit: false }` (SPEC 7.3).
-const EMIT_FALSE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_FALSE_CONFIG = stagedTs(
+  "T1.6-1 xspec.config.ts — `markdown: { emit: false }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -68,11 +99,14 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
+`,
+);
 
 // As above with emission enabled (default destination: next to each source
 // file, `specs/A.mdx` → `specs/A.md`; SPEC 7.3, 13.2).
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_TRUE_CONFIG = stagedTs(
+  "T1.6-1 xspec.config.ts — `markdown: { emit: true }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -80,7 +114,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /**
  * `query node <identity>` decoded through the H-3 adapter, with the resolved
@@ -167,16 +202,22 @@ const EMBEDDING_SECTION = [
   "</S>",
 ].join("\n");
 
-const EXTENDED_SOURCE = [
-  "Root prose.",
-  "",
-  INTERLEAVED_BODY,
-  "",
-  EMBEDDING_SECTION,
-  "",
-  "Root outro.",
-  "",
-].join("\n");
+// The extended workspace is created after the base arm's invocations, so
+// its source is a staged-source record, judged by the S-9 self-test before
+// any product exists (S-9's timing clause).
+const EXTENDED_SOURCE = stagedMdx(
+  "T1.6-1 extended specs/A.mdx",
+  [
+    "Root prose.",
+    "",
+    INTERLEAVED_BODY,
+    "",
+    EMBEDDING_SECTION,
+    "",
+    "Root outro.",
+    "",
+  ].join("\n"),
+);
 
 // Expected values, derived by hand from SPEC 3: every tag-only line is
 // emptied purely by removals and dropped with its terminator; all other lines
@@ -476,6 +517,8 @@ const MID_TEXT = "Mid: Leaf text.\n\n";
 // line before the child adds one more "\n" to the first own-text run.
 const SUMMARY_OWN = "Top: Mid: Leaf text.\n\n\n\n";
 const SUMMARY_SUBTREE = "Top: Mid: Leaf text.\n\n\n\nExtra prose.\n";
+// The child `summary.extra` is a leaf: its subtree text is its own text.
+const EXTRA_SUBTREE = "Extra prose.\n";
 // The top file root's own text: the import line drops with its terminator;
 // the heading prose stays; the summary construct's lines drop.
 const TOP_ROOT_OWN = "\n# Alpha file\n\n";
@@ -485,18 +528,58 @@ const EXTRA_ID = "specs/A.mdx#summary.extra";
 const REVIEW_SESSION = "expansion";
 
 // `text(node)` at runtime (SPEC 4.3): the compiled consumer prints the
-// expanded subtree text — requirement text reaches it only through `text`.
-const EXPANSION_CONSUMER = [
-  'import SPEC, { text } from "./specs/A.xspec";',
-  "",
-  "process.stdout.write(text(SPEC.summary));",
-  "",
-].join("\n");
+// expanded subtree text exactly, no terminator added — requirement text
+// reaches it only through `text` — through Node.js's `process.stdout`, whose
+// one member it uses it declares itself, H-2's configurations supplying no
+// `@types/node` (module-scoped, the file holding an import), so the program
+// is valid under both.
+const EXPANSION_CONSUMER = stagedTs(
+  "T1.6-3 main.ts — `text` of the expanded summary, staged after `build`",
+  [
+    'import SPEC, { text } from "./specs/A.xspec";',
+    "",
+    "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
+    "",
+    "process.stdout.write(text(SPEC.summary));",
+    "",
+  ].join("\n"),
+);
+
+/**
+ * Byte-assert the text of a review payload's context entry for `node`: the
+ * entry occurs exactly once (SPEC 10.7: every context node enters the
+ * payload), is present, and carries text — a present node's text is read
+ * from the current graph, the expanded value of SPEC 1.6.
+ */
+function assertContextEntryText(
+  item: ReviewItem,
+  node: string,
+  expected: string,
+  context: string,
+): void {
+  const matches = item.context.filter((entry) => entry.node === node);
+  if (matches.length !== 1) {
+    fail(
+      `${context}: expected exactly one context entry for ${node} (SPEC 10.7); ` +
+        `found ${String(matches.length)} among ` +
+        JSON.stringify(item.context.map((entry) => entry.node)),
+    );
+  }
+  const entry = matches[0]!;
+  if (!entry.present || entry.text === undefined) {
+    fail(
+      `${context}: the payload must carry the present context node's text — own text ` +
+        `for an ancestor-chain context (SPEC 10.7); got present ` +
+        `${String(entry.present)}, text ${entry.text === undefined ? "absent" : "present"}`,
+    );
+  }
+  assertBytesEqual(entry.text, expected, context);
+}
 
 const T1_6_3 = defineProductTest({
   id: "T1.6-3",
   title:
-    "with `{text(...)}` embeddings present, own and subtree text via `query`, `show`, and review payloads carry the embedded text fully expanded, and `text(node)` returns expanded subtree text at runtime (SPEC 1.6, 4.3, 10.2, 10.7)",
+    "with `{text(...)}` embeddings present, own and subtree text via `query`, `show`, and review payloads carry the embedded text fully expanded, and `text(node)` returns expanded subtree text at runtime — a consumer type-checking clean under both of H-2's configurations and run compiled under its CommonJS configuration (SPEC 1.6, 4.3, 10.2, 10.7)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -538,12 +621,14 @@ const T1_6_3 = defineProductTest({
         showLabel,
       );
 
-      // Review payload (SPEC 10.2, 10.7): an audit session's
-      // `subtree-coherence` item for `summary` carries the scope root's
-      // subtree text and the ancestor chain's own text — every text value the
-      // expanded value of 1.6. The summary's item is blocked by its child's
-      // (SPEC 10.6), so the child item is resolved first via `status`
-      // lookup + `resolve`.
+      // Review payloads (SPEC 10.2, 10.7): an audit session's
+      // `subtree-coherence` items carry the scope root's subtree text and the
+      // ancestor chain's own text — every text value the expanded value of
+      // 1.6. The child's item (found via `status`) is read first through
+      // `review show`: its context, the file root and `summary`, carries
+      // `summary`'s own text, which holds the two-level embedding. The
+      // summary's item is blocked by its child's (SPEC 10.6), so the child
+      // item is then resolved and the summary's item read via `next`.
       await expectExit(
         product,
         workspace,
@@ -569,6 +654,61 @@ const T1_6_3 = defineProductTest({
             JSON.stringify(status.items.map((row) => row.scope)),
         );
       }
+      // The child's payload, read before its resolution (a read never
+      // writes the session, SPEC 10.4). Context membership is compared as a
+      // sorted identity set: SPEC 10.6 fixes the ancestor chain's members,
+      // not a payload order (as in T10.6-1).
+      const extraLabel = `T1.6-3 \`review show ${REVIEW_SESSION} ${extraRow.id} --json\``;
+      const extraItem = decodeItemReport(
+        await runJson(
+          product,
+          workspace,
+          ["review", "show", REVIEW_SESSION, extraRow.id, "--json"],
+          extraLabel,
+        ),
+        extraLabel,
+      );
+      if (
+        extraItem.kind !== "subtree-coherence" ||
+        extraItem.scope.node !== EXTRA_ID
+      ) {
+        fail(
+          `${extraLabel}: expected the subtree-coherence item scoped to ${EXTRA_ID} — the ` +
+            `item \`review status\` lists under that id (SPEC 10.6, 10.7); got kind ` +
+            `${JSON.stringify(extraItem.kind)}, scope ${JSON.stringify(extraItem.scope.node)}`,
+        );
+      }
+      if (!extraItem.scope.present || extraItem.scope.text === undefined) {
+        fail(
+          `${extraLabel}: the payload must carry the present scope node's text — the scope ` +
+            `root's subtree text for subtree-coherence (SPEC 10.7); got present ` +
+            `${String(extraItem.scope.present)}, text ${extraItem.scope.text === undefined ? "absent" : "present"}`,
+        );
+      }
+      assertBytesEqual(
+        extraItem.scope.text,
+        EXTRA_SUBTREE,
+        `${extraLabel}: scope text — the scope root's subtree text (SPEC 1.6, 10.7)`,
+      );
+      assertSameJson(
+        extraItem.context.map((entry) => entry.node).sort(),
+        ["specs/A.mdx", SUMMARY_ID],
+        `${extraLabel}: context — the scope node's ancestor chain, the file root and ` +
+          `${SUMMARY_ID} (SPEC 10.6; compared as a sorted identity set)`,
+      );
+      assertContextEntryText(
+        extraItem,
+        "specs/A.mdx",
+        TOP_ROOT_OWN,
+        `${extraLabel}: context text of specs/A.mdx — the root ancestor's own text (SPEC 1.6, 10.7)`,
+      );
+      assertContextEntryText(
+        extraItem,
+        SUMMARY_ID,
+        SUMMARY_OWN,
+        `${extraLabel}: context text of ${SUMMARY_ID} — its own text, the embedded ` +
+          `text fully expanded through two levels (SPEC 1.6, 10.7)`,
+      );
       await expectExit(
         product,
         workspace,
@@ -639,33 +779,32 @@ const T1_6_3 = defineProductTest({
         `${nextLabel}: context text — the root ancestor's own text (SPEC 1.6, 10.7)`,
       );
 
-      // `text(node)` at runtime (SPEC 4.3, 13.1): expanded subtree text.
+      // `text(node)` at runtime (SPEC 4.3, 13.1): expanded subtree text. The
+      // consumer type-checks clean under each of H-2's configurations — the
+      // whole program, the generated module and its companions included —
+      // and runs under the CommonJS configuration alone: compiled to
+      // CommonJS JavaScript written outside the workspace and run there
+      // under plain Node, no package named `xspec` resolvable (H-2).
       await workspace.file("main.ts", EXPANSION_CONSUMER);
-      const project = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["main.ts"],
-      });
-      assertNoCompileErrors(
-        project,
-        "T1.6-3 consumer passing `SPEC.summary` to `text()`",
+      const sources = { rootDir: workspace.root, rootFiles: ["main.ts"] };
+      const consumerContext =
+        "T1.6-3 consumer passing `SPEC.summary` to `text()`";
+      await forEachConsumerProject(sources, (project) =>
+        assertTypeChecksClean(project, consumerContext),
       );
-      const emitted = project.emit();
-      if (emitted.emitSkipped) {
-        fail(
-          "T1.6-3: consumer emit was skipped; diagnostics:\n" +
-            emitted.diagnostics
-              .map((diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`)
-              .join("\n"),
-        );
-      }
-      const run = await runConsumer({
-        dir: workspace.root,
-        entry: "main.js",
-      });
+      const run = await withCompiledConsumer(
+        await ConsumerProject.load({
+          ...sources,
+          configuration: COMMONJS_CONFIGURATION,
+        }),
+        consumerContext,
+        async (compiled) => await compiled.run("main.ts"),
+      );
       assertExitCode(
         run,
         0,
-        "T1.6-3 compiled consumer under plain Node (SPEC 13.1)",
+        "T1.6-3 compiled consumer under plain Node, compiled under H-2's " +
+          "CommonJS configuration outside the workspace (SPEC 13.1)",
       );
       assertBytesEqual(
         run.stdoutBytes,
@@ -689,12 +828,13 @@ const EMBED_TARGET_BEFORE = [
   "",
 ].join("\n");
 
-const EMBED_TARGET_AFTER = [
-  '<S id="target">',
-  "Edited target text.",
-  "</S>",
-  "",
-].join("\n");
+// Staged into specs/BASE.mdx after the pre-edit queries — a staged-source
+// record, judged before any product exists (S-9,
+// test/self/s9-staged-sources.test.ts).
+const EMBED_TARGET_AFTER = stagedMdx(
+  "T1.6-4 specs/BASE.mdx with the embedded target's text edited",
+  ['<S id="target">', "Edited target text.", "</S>", ""].join("\n"),
+);
 
 const EMBEDDER_SOURCE = [
   'import BASE from "./BASE.xspec"',
@@ -927,8 +1067,12 @@ const T1_6_4 = defineProductTest({
 // T1.6-5
 // ---------------------------------------------------------------------------
 
-// One spec group plus one code group, for the code-source arms (SPEC 7.2).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// One spec group plus one code group, for the code-source arms (SPEC 7.2) —
+// T1.6-5's code arm and T1.7-1's endpoints workspace, each created after
+// its body's first invocation: a staged-source record (S-9's timing clause).
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T1.6-5/T1.7-1 xspec.config.ts — one spec group and one code group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -938,10 +1082,13 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // 0xFF can occur in no valid UTF-8 sequence; everything else in the file is
-// valid, so 14.20 is the file's only condition.
+// valid, so 14.20 is the file's only condition. The prefix is the file's
+// longest well-formed UTF-8 prefix, so its byte length is the finding's offset
+// (SPEC 14: the first byte of the first ill-formed sequence; T14-11).
 function withInvalidUtf8Byte(prefix: string, suffix: string): Uint8Array {
   return Buffer.concat([
     Buffer.from(prefix, "utf8"),
@@ -950,25 +1097,76 @@ function withInvalidUtf8Byte(prefix: string, suffix: string): Uint8Array {
   ]);
 }
 
+// The invalid-UTF-8 fixtures, one spec source and one code source, with the
+// offset each finding must carry precomputed from the staged bytes — never
+// from product output. Each prefix holds a multibyte character (é: one code
+// point, two bytes), so a product counting code points, or reporting the
+// byte at which its decoder notices the failure, misses the pinned offset.
+const BAD_UTF8_SPEC_PREFIX = '<S id="a">\nBad café ';
+const BAD_UTF8_SPEC_SOURCE = withInvalidUtf8Byte(
+  BAD_UTF8_SPEC_PREFIX,
+  "byte.\n</S>\n",
+);
+const BAD_UTF8_SPEC_OFFSET = Buffer.byteLength(BAD_UTF8_SPEC_PREFIX, "utf8");
+const BAD_UTF8_CODE_PREFIX = "export const a = 1; // café ";
+const BAD_UTF8_CODE_SOURCE = withInvalidUtf8Byte(
+  BAD_UTF8_CODE_PREFIX,
+  "byte\n",
+);
+const BAD_UTF8_CODE_OFFSET = Buffer.byteLength(BAD_UTF8_CODE_PREFIX, "utf8");
+
+// A byte-order mark's finding locates offset 0 (SPEC 14; T14-11), whatever
+// the mark's own byte length (three bytes in UTF-8).
+const BOM_OFFSET = 0;
+
 // A UTF-8 byte-order mark followed by otherwise-valid content: the fixture
 // isolates the BOM rule from the invalid-UTF-8 rule (SPEC 1.6: a source that
 // begins with a BOM is unparseable, 14.20). U+FEFF encodes to EF BB BF; the
 // workspace builder writes string contents with BOMs kept (S-2).
 const BOM = "\u{FEFF}";
 
-const VALID_SECTION_SOURCE = '<S id="ok">\nValid content.\n</S>\n';
+// The code arm's two code sources, 14.20's declared-unparseable encodings:
+// that workspace is created after the spec arm's invocation, so each is a
+// staged-source record carrying its declaration (S-9's timing clause).
+const BAD_UTF8_CODE_RECORD = stagedTs(
+  "T1.6-5 code arm src/bad-utf8.ts",
+  BAD_UTF8_CODE_SOURCE,
+  "unparseable",
+);
+const BOM_CODE_RECORD = stagedTs(
+  "T1.6-5 code arm src/bom.ts",
+  BOM + "export const b = 2;\n",
+  "unparseable",
+);
+
+// The code arm's spec source: that workspace is created after the spec
+// arm's invocation, so a staged-source record (S-9's timing clause).
+const VALID_SECTION_SOURCE = stagedMdx(
+  "T1.6-5 code arm specs/OK.mdx",
+  '<S id="ok">\nValid content.\n</S>\n',
+);
 
 /**
- * Exactly one finding names the file, and it carries condition 14.20 (SPEC
- * 14: errors identify the file; 14.20 is a whole-file condition, so no
- * in-file location is demanded of it).
+ * Exactly one finding names the file — locating in it, or carrying it as
+ * the concerned path — it carries condition 14.20, and it locates exactly
+ * one zero-length range in the file at `offset`: the byte length of the
+ * longest well-formed UTF-8 prefix for an encoding failure, 0 for a
+ * byte-order mark (SPEC 14's offset rule for an unparseable source; T14-11).
+ * A range at the byte where a decoder notices the failure, a code-point
+ * count, a non-empty range, or a finding carrying the file as a path instead
+ * of locating in it each fails here.
  */
 function assertUnparseableFinding(
   findings: readonly Finding[],
   file: string,
+  offset: number,
   context: string,
 ): void {
-  const matching = findings.filter((finding) => finding.file === file);
+  const matching = findings.filter(
+    (finding) =>
+      finding.locations.some((location) => location.file === file) ||
+      finding.path === file,
+  );
   if (matching.length !== 1) {
     fail(
       `${context}: expected exactly one finding naming ${JSON.stringify(file)} ` +
@@ -976,56 +1174,76 @@ function assertUnparseableFinding(
         JSON.stringify(
           findings.map((finding) => ({
             condition: finding.condition,
-            file: finding.file ?? null,
+            locations: finding.locations,
+            path: finding.path,
           })),
         ),
     );
   }
-  if (matching[0]!.condition !== "14.20") {
+  const finding = matching[0]!;
+  if (finding.condition !== "14.20") {
     fail(
       `${context}: the finding for ${JSON.stringify(file)} must carry condition 14.20 ` +
         `(unparseable source: invalid UTF-8 or leading BOM, SPEC 1.6); got ` +
-        `${JSON.stringify(matching[0]!.condition)} (message: ${JSON.stringify(matching[0]!.message)})`,
+        `${JSON.stringify(finding.condition)} (message: ${JSON.stringify(finding.message)})`,
     );
   }
+  assertSameJson(
+    finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    [{ file, range: { start: offset, end: offset } }],
+    `${context}: the 14.20 finding for ${JSON.stringify(file)} locates exactly ` +
+      `one zero-length range at byte offset ${String(offset)} — the byte ` +
+      `length of the longest well-formed UTF-8 prefix for an encoding failure ` +
+      `(the first byte of the first ill-formed sequence), 0 for a byte-order ` +
+      `mark (SPEC 14, 1.7; T14-11), \`{"start", "end"}\` as zero-based byte ` +
+      `offsets, end-exclusive (message: ${JSON.stringify(finding.message)})`,
+  );
 }
 
 const T1_6_5 = defineProductTest({
   id: "T1.6-5",
   title:
-    "a spec or code source that is invalid UTF-8, or begins with a BOM, fails `build` with 14.20 (SPEC 1.6, 14.20)",
+    "a spec or code source that is invalid UTF-8, or begins with a BOM, fails `build` with 14.20 at the failure's offset (SPEC 1.6, 14.20, 14)",
   run: async (product) => {
-    // Spec-source arms: one invalid-UTF-8 file, one BOM file.
+    // Spec-source arms: one invalid-UTF-8 file, one BOM file, each finding at
+    // the offset SPEC 14 fixes, precomputed from the staged bytes (T14-11).
     const specArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/bad-utf8.mdx": withInvalidUtf8Byte(
-          '<S id="a">\nBad ',
-          " byte.\n</S>\n",
-        ),
+        "specs/bad-utf8.mdx": BAD_UTF8_SPEC_SOURCE,
         "specs/bom.mdx": BOM + '<S id="b">\nBom content.\n</S>\n',
       },
+      // S-9: both spec sources are forms 14.20 declares unparseable.
+      mdx: { unparseable: ["specs/bad-utf8.mdx", "specs/bom.mdx"] },
     });
     try {
       const context =
         "T1.6-5 `build --json` over the two unparseable spec sources";
       const findings = await buildFindings(product, specArm, context);
       assertConditionCounts(findings, { "14.20": 2 }, context);
-      assertUnparseableFinding(findings, "specs/bad-utf8.mdx", context);
-      assertUnparseableFinding(findings, "specs/bom.mdx", context);
+      assertUnparseableFinding(
+        findings,
+        "specs/bad-utf8.mdx",
+        BAD_UTF8_SPEC_OFFSET,
+        context,
+      );
+      assertUnparseableFinding(findings, "specs/bom.mdx", BOM_OFFSET, context);
     } finally {
       await specArm.dispose();
     }
 
     // Code-source arms: 14.20 covers discovered code sources too (SPEC 1.6
     // names spec and code sources alike); the spec source beside them is
-    // valid, so the two conditions are the code files'.
+    // valid, so the two conditions are the code files', each at its offset.
     const codeArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
         "specs/OK.mdx": VALID_SECTION_SOURCE,
-        "src/bad-utf8.ts": withInvalidUtf8Byte("export const a = 1; // ", "\n"),
-        "src/bom.ts": BOM + "export const b = 2;\n",
+        "src/bad-utf8.ts": BAD_UTF8_CODE_RECORD,
+        "src/bom.ts": BOM_CODE_RECORD,
       },
     });
     try {
@@ -1033,8 +1251,13 @@ const T1_6_5 = defineProductTest({
         "T1.6-5 `build --json` over the two unparseable code sources";
       const findings = await buildFindings(product, codeArm, context);
       assertConditionCounts(findings, { "14.20": 2 }, context);
-      assertUnparseableFinding(findings, "src/bad-utf8.ts", context);
-      assertUnparseableFinding(findings, "src/bom.ts", context);
+      assertUnparseableFinding(
+        findings,
+        "src/bad-utf8.ts",
+        BAD_UTF8_CODE_OFFSET,
+        context,
+      );
+      assertUnparseableFinding(findings, "src/bom.ts", BOM_OFFSET, context);
     } finally {
       await codeArm.dispose();
     }
@@ -1086,10 +1309,63 @@ const EMPTY_RANGE = {
 };
 const ROOT_RANGE = { start: 0, end: utf8Length(RANGE_SOURCE) };
 
+// Bare-endpoint fixture (SPEC 1.7's second half): a dependency chain entering
+// the graph at code locations — `src/app.ts#entry` --references--> `alpha`
+// --depends--> `omega`, and `src/app.ts#writer` --embeds--> `omega` — so
+// `edges` rows, a `reachable` witness path, and `query node`'s incoming and
+// outgoing edge lists each traverse a code location.
+// The endpoints workspace is created after the range workspace's
+// invocations, so its spec source is a staged-source record (S-9).
+const ENDPOINT_SPEC_SOURCE = stagedMdx(
+  "T1.7-1 endpoints specs/E.mdx",
+  [
+    '<S id="alpha" d={"omega"}>',
+    "Alpha text.",
+    "</S>",
+    "",
+    '<S id="omega">',
+    "Omega text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const ENDPOINT_CODE_SOURCE = stagedTs(
+  "T1.7-1 endpoints src/app.ts",
+  [
+    'import SPEC, { text } from "../specs/E.xspec";',
+    "",
+    "export function entry(): void {",
+    "  SPEC.alpha;",
+    "}",
+    "",
+    "export function writer(): string {",
+    "  return text(SPEC.omega);",
+    "}",
+    "",
+  ].join("\n"),
+);
+
+const ENDPOINT_FILE = "specs/E.mdx";
+const ALPHA_ID = "specs/E.mdx#alpha";
+const OMEGA_ID = "specs/E.mdx#omega";
+const ENTRY_LOCATION = "src/app.ts#entry";
+const WRITER_LOCATION = "src/app.ts#writer";
+
+// The endpoint workspace's complete edge set (SPEC 5.2), endpoints spelled as
+// the bare identities 1.7 demands on every edge surface.
+const ENDPOINT_ALL_EDGES: readonly GraphEdge[] = [
+  { from: ENDPOINT_FILE, to: ALPHA_ID, kind: "contains" },
+  { from: ENDPOINT_FILE, to: OMEGA_ID, kind: "contains" },
+  { from: ALPHA_ID, to: OMEGA_ID, kind: "depends" },
+  { from: ENTRY_LOCATION, to: ALPHA_ID, kind: "references" },
+  { from: WRITER_LOCATION, to: OMEGA_ID, kind: "embeds" },
+];
+
 const T1_7_1 = defineProductTest({
   id: "T1.7-1",
   title:
-    "source ranges are zero-based byte offsets, start-inclusive end-exclusive: opening through closing tag for a section, exactly the self-closing tag, the entire file for the root — equal via `query node` and `show` (SPEC 1.7, 11, 12.4)",
+    "source ranges are zero-based byte offsets, start-inclusive end-exclusive: opening through closing tag for a section, exactly the self-closing tag, the entire file for the root — equal via `query node` and `show`; everywhere a graph node appears as an edge endpoint — `edges` rows, a `reachable` witness path, `query node` edge lists, each traversing a code location — it is a bare identity, no range datum accompanying it (SPEC 1.7, 11, 12.4)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -1155,6 +1431,1380 @@ const T1_7_1 = defineProductTest({
     } finally {
       await workspace.dispose();
     }
+
+    // Bare edge endpoints (SPEC 1.7): a code location is presented with its
+    // source range in exactly two outputs — occurrence records and review
+    // payloads — and everywhere a graph node appears as an edge endpoint it
+    // is a bare identity, requirement node and code location alike. Each arm
+    // asserts the endpoint values through the H-3 decoders (endpoints decode
+    // as identity strings and equal the staged identities) and the absence of
+    // any accompanying range datum through the adapter layer's 1.7 walk over
+    // the raw document.
+    const endpoints = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/E.mdx": ENDPOINT_SPEC_SOURCE,
+        "src/app.ts": ENDPOINT_CODE_SOURCE,
+      },
+    });
+    try {
+      await buildOk(
+        product,
+        endpoints,
+        "T1.7-1 `build` of the bare-endpoint fixture",
+      );
+
+      // (a) `edges` rows: the complete edge set, the code-location-sourced
+      // `references` and `embeds` rows included — endpoints identities alone.
+      const edgesContext = "T1.7-1 `query edges` (bare endpoints)";
+      const edgesDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "edges"],
+        edgesContext,
+      );
+      assertEdgeSetEqual(
+        decodeEdgesReport(edgesDoc, edgesContext),
+        ENDPOINT_ALL_EDGES,
+        `${edgesContext}: the complete edge set, with the code locations ` +
+          `entering the \`references\` and \`embeds\` rows as identities ` +
+          `(SPEC 1.7, 5.2, 11)`,
+      );
+      assertBareEdgeEndpoints(edgesDoc, edgesContext);
+
+      // (b) a `reachable` witness path traversing the code location: the
+      // path is a node-identity sequence, identities alone.
+      const reachableContext = `T1.7-1 \`query reachable --from ${ENTRY_LOCATION} --to ${OMEGA_ID}\``;
+      const reachableDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "reachable", "--from", ENTRY_LOCATION, "--to", OMEGA_ID],
+        reachableContext,
+      );
+      const reachable = decodeReachableReport(reachableDoc, reachableContext);
+      if (!reachable.reachable) {
+        fail(
+          `${reachableContext}: a dependency path entry -> alpha -> omega ` +
+            `exists (\`references\`, then \`depends\`, both in the default ` +
+            `kinds), so the report must state one does (SPEC 11)`,
+        );
+      }
+      assertSameJson(
+        reachable.path,
+        [ENTRY_LOCATION, ALPHA_ID, OMEGA_ID],
+        `${reachableContext}: the shortest witness path traverses the code ` +
+          `location as a bare identity in a node-identity sequence (SPEC 1.7, 11)`,
+      );
+      assertBareEdgeEndpoints(reachableDoc, reachableContext);
+
+      // (c) `query node`'s incoming and outgoing edge lists, both traversing
+      // code locations (`references` into alpha, `embeds` into omega). The
+      // node report's own `sourceRange` is contract (SPEC 11, T11-1); the
+      // walk is scoped to the edge lists, where no range datum may appear.
+      const alphaContext = `T1.7-1 \`query node ${ALPHA_ID}\` (bare edge-list endpoints)`;
+      const alphaDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "node", ALPHA_ID],
+        alphaContext,
+      );
+      const alpha = decodeNodeReport(alphaDoc, alphaContext);
+      if (alpha.identity !== ALPHA_ID) {
+        fail(
+          `${alphaContext}: expected the report to be about ${JSON.stringify(ALPHA_ID)} ` +
+            `(SPEC 1.5), got identity ${JSON.stringify(alpha.identity)}`,
+        );
+      }
+      assertEdgeSetEqual(
+        alpha.incomingEdges,
+        [
+          { from: ENDPOINT_FILE, to: ALPHA_ID, kind: "contains" },
+          { from: ENTRY_LOCATION, to: ALPHA_ID, kind: "references" },
+        ],
+        `${alphaContext}: incoming edges — the referencing code location ` +
+          `enters as a bare identity (SPEC 1.7, 11)`,
+      );
+      assertEdgeSetEqual(
+        alpha.outgoingEdges,
+        [{ from: ALPHA_ID, to: OMEGA_ID, kind: "depends" }],
+        `${alphaContext}: outgoing edges (SPEC 11)`,
+      );
+      assertNodeEdgeListsBare(alphaDoc, alphaContext);
+
+      const omegaContext = `T1.7-1 \`query node ${OMEGA_ID}\` (bare edge-list endpoints)`;
+      const omegaDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "node", OMEGA_ID],
+        omegaContext,
+      );
+      const omega = decodeNodeReport(omegaDoc, omegaContext);
+      if (omega.identity !== OMEGA_ID) {
+        fail(
+          `${omegaContext}: expected the report to be about ${JSON.stringify(OMEGA_ID)} ` +
+            `(SPEC 1.5), got identity ${JSON.stringify(omega.identity)}`,
+        );
+      }
+      assertEdgeSetEqual(
+        omega.incomingEdges,
+        [
+          { from: ENDPOINT_FILE, to: OMEGA_ID, kind: "contains" },
+          { from: ALPHA_ID, to: OMEGA_ID, kind: "depends" },
+          { from: WRITER_LOCATION, to: OMEGA_ID, kind: "embeds" },
+        ],
+        `${omegaContext}: incoming edges — the embedding code location ` +
+          `enters as a bare identity (SPEC 1.7, 11)`,
+      );
+      assertEdgeSetEqual(
+        omega.outgoingEdges,
+        [],
+        `${omegaContext}: outgoing edges — none; no edge kind targets a ` +
+          `code location and omega declares no dependency (SPEC 5.2)`,
+      );
+      assertNodeEdgeListsBare(omegaDoc, omegaContext);
+    } finally {
+      await endpoints.dispose();
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T1.7-2
+// ---------------------------------------------------------------------------
+
+// Occurrence records (SPEC 5.7, 11.3) are one of the two outputs presenting
+// a code location with its source range (SPEC 1.7; review payloads, 10.7,
+// the other — T10.7-12's): each fixture file below stages one sanctioned
+// TypeScript reference (`deco.ts` two, one per decorated unit; `using.ts`
+// two, one per `using` and `await using` unit of T4.6-1) — a dependency
+// marker (4.5) or a `text(...)` call (4.3) — inside one named-code-unit
+// shape of SPEC 4.6 (TEST-SPEC T1.7-2's further forms included: the
+// constructor, a decorated class and member, the modifier-bearing units
+// spanning from their first modifier (`async function f`, `export async
+// function g`, `abstract class C`, and `D`'s `static` method), the property
+// members — one spelling its `;`, its twin spelling none, a decorated one —
+// and their control, a method followed by a stray `;`, the export
+// exclusion, the `default` unit's spellings, a legacy `module`, and a
+// declaration file),
+// and the test asserts the complete `occurrences` document, a form-exact 12.7
+// surface (H-3: no adapter in the path, and a JSON-only surface, so no
+// `--json` flag is passed), against precomputed byte offsets. Every file
+// opens with a multi-byte UTF-8 comment (é: 1 code point, 2 bytes; 🦄: 1 code
+// point / 2 UTF-16 units / 4 bytes) before its constructs, so byte offsets
+// diverge from code-point and UTF-16 offsets and a product counting either
+// fails. Expected ranges are composed from the same string parts the files
+// are — never measured from product output — and a fixture self-check slices
+// every claimed range back out of the staged bytes before the product is
+// invoked, so a staging-arithmetic error fails as a harness-side diagnosis,
+// never as a wrong-but-satisfiable expectation.
+
+const OCC_MARKER = "SPEC.req";
+const OCC_REQ_ID = "specs/R.mdx#req";
+const OCC_ALT_ID = "specs/R.mdx#alt";
+const OCC_A_ID = "specs/R.mdx#a";
+const OCC_B_ID = "specs/R.mdx#b";
+
+// The referenced spec source: `req` and `alt`, so the marker target and the
+// `text(...)` target are distinct nodes, plus `a` and `b`, the targets the
+// `using` and `await using` arms spell exactly as TEST-SPEC T1.7-2 does
+// (`SPEC.a`, `SPEC.b`).
+const OCC_TARGET_SOURCE = [
+  '<S id="req">',
+  "Req text.",
+  "</S>",
+  "",
+  '<S id="alt">',
+  "Alt text.",
+  "</S>",
+  "",
+  '<S id="a">',
+  "A text.",
+  "</S>",
+  "",
+  '<S id="b">',
+  "B text.",
+  "</S>",
+  "",
+].join("\n");
+
+/** Byte range of `span` where it follows exactly `prefix` in a file. */
+function rangeAfter(prefix: string, span: string): SourceRange {
+  const start = utf8Length(prefix);
+  return { start, end: start + utf8Length(span) };
+}
+
+// src/anon.ts — a default export of an ANONYMOUS construct: unit `default`,
+// whose range is the WHOLE export declaration, `export` through the closing
+// `}` — the declaration spells no terminator, so the range ends at that
+// brace (SPEC 1.7, 4.6; contrast `arrow.ts`).
+const OCC_ANON_HEAD =
+  '// prélude 🦄 anon\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ANON_DECL_PRE = "export default function () {\n  ";
+const OCC_ANON_DECL = OCC_ANON_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_ANON_SOURCE = OCC_ANON_HEAD + OCC_ANON_DECL + "\n";
+
+// src/arrow.ts — a default export of an ANONYMOUS arrow function spelled
+// with a statement terminator: unit `default` spans the WHOLE export
+// declaration, `export` through the `;` the declaration spells (SPEC 1.7:
+// "`export default () => {};` spans through its `;`").
+const OCC_ARROW_HEAD =
+  '// prélude 🦄 arrow\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ARROW_DECL_PRE = "export default () => {\n  ";
+const OCC_ARROW_DECL = OCC_ARROW_DECL_PRE + OCC_MARKER + ";\n};";
+const OCC_ARROW_SOURCE = OCC_ARROW_HEAD + OCC_ARROW_DECL + "\n";
+
+// src/cls.ts — a class declaration: the property initializer is a `text(...)`
+// call (a call expression, so `greeting` is no named unit, SPEC 4.6), and the
+// innermost enclosing named unit of the embed is the class itself — the
+// construct binding the name, `class` through the closing `}`.
+const OCC_CLS_HEAD =
+  '// prélude 🦄 class\nimport SPEC, { text } from "../specs/R.xspec";\n\n';
+const OCC_CLS_CALL = "text(SPEC.alt)";
+const OCC_CLS_DECL_PRE = "class Cls {\n  greeting = ";
+const OCC_CLS_DECL = OCC_CLS_DECL_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_CLS_SOURCE = OCC_CLS_HEAD + OCC_CLS_DECL + "\n";
+
+// src/ctor.ts — a constructor: a class member unit named `constructor`
+// (`Ctor.constructor`, SPEC 4.6) whose range spans the constructor member
+// itself, `constructor` through its closing `}` — not the class.
+const OCC_CTOR_HEAD =
+  '// prélude 🦄 ctor\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_CTOR_CLASS_PRE = "class Ctor {\n  ";
+const OCC_CTOR_MEMBER_PRE = "constructor() {\n    ";
+const OCC_CTOR_MEMBER = OCC_CTOR_MEMBER_PRE + OCC_MARKER + ";\n  }";
+const OCC_CTOR_SOURCE =
+  OCC_CTOR_HEAD + OCC_CTOR_CLASS_PRE + OCC_CTOR_MEMBER + "\n}\n";
+
+// The decorator every decorated staging applies: an ambient declaration,
+// which binds no unit of its own (SPEC 4.6) and sources no occurrence.
+const OCC_DEC_DECL = "declare function dec(...args: unknown[]): void;\n\n";
+
+// src/decdef.ts — `@dec export default class {}`: the anonymous exported
+// construct derives unit `default`, whose range is the whole export
+// declaration INCLUDING the decorator list preceding its `export` — from
+// the `@` through the closing `}` (SPEC 1.7). The class's range is pinned
+// through the `text(...)` embed in its non-unit property initializer,
+// attributed to the bare class (SPEC 4.6), as `cls.ts` does.
+const OCC_DECDEF_HEAD =
+  '// prélude 🦄 decdef\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_DECDEF_DECL_PRE = "@dec export default class {\n  greeting = ";
+const OCC_DECDEF_DECL = OCC_DECDEF_DECL_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_DECDEF_SOURCE = OCC_DECDEF_HEAD + OCC_DECDEF_DECL + "\n";
+
+// src/decexp.ts — `@dec export class DecExp {}`: the decorator list leads,
+// so nothing is excluded — the unit spans whole from its `@`, the `export`
+// inside (SPEC 1.7).
+const OCC_DECEXP_HEAD =
+  '// prélude 🦄 decexp\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_DECEXP_DECL_PRE = "@dec export class DecExp {\n  greeting = ";
+const OCC_DECEXP_DECL = OCC_DECEXP_DECL_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_DECEXP_SOURCE = OCC_DECEXP_HEAD + OCC_DECEXP_DECL + "\n";
+
+// src/deco.ts — a decorated class holding a decorated member, each under
+// TWO decorators: the class unit `Deco` spans from the class's FIRST `@`
+// through its closing `}`, and the member unit `Deco.m` from the member's
+// first `@` through the method's closing `}` (SPEC 1.7: a decorator list
+// is part of the class declaration or member it decorates, whose own
+// characters begin at its first decorator). The class's range is pinned
+// through the `text(...)` embed in its non-unit property initializer
+// (attributed to the bare class, SPEC 4.6), the member's through the
+// marker in its body.
+const OCC_DECO_HEAD =
+  '// prélude 🦄 deco\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_DECO_CLASS_PRE = "@dec @dec class Deco {\n  greeting = ";
+const OCC_DECO_CLASS_MID = ";\n  ";
+const OCC_DECO_MEMBER_PRE = "@dec\n  @dec\n  m() {\n    ";
+const OCC_DECO_MEMBER = OCC_DECO_MEMBER_PRE + OCC_MARKER + ";\n  }";
+const OCC_DECO_CLASS =
+  OCC_DECO_CLASS_PRE +
+  OCC_CLS_CALL +
+  OCC_DECO_CLASS_MID +
+  OCC_DECO_MEMBER +
+  "\n}";
+const OCC_DECO_SOURCE = OCC_DECO_HEAD + OCC_DECO_CLASS + "\n";
+
+// src/expdec.ts — `export @dec class ExpDec {}`: only what LEADS is
+// excluded, so the unit spans `@dec class ExpDec {…}` — the `export `
+// prefix out, the decorator in (SPEC 1.7).
+const OCC_EXPDEC_HEAD =
+  '// prélude 🦄 expdec\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_EXPDEC_EXPORT_PRE = "export ";
+const OCC_EXPDEC_CONSTRUCT_PRE = "@dec class ExpDec {\n  greeting = ";
+const OCC_EXPDEC_CONSTRUCT = OCC_EXPDEC_CONSTRUCT_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_EXPDEC_SOURCE =
+  OCC_EXPDEC_HEAD + OCC_EXPDEC_EXPORT_PRE + OCC_EXPDEC_CONSTRUCT + "\n";
+
+// src/fn.ts — a function declaration: the construct binding the name.
+const OCC_FN_HEAD =
+  '// prélude 🦄 fn\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_FN_DECL_PRE = "function fn() {\n  ";
+const OCC_FN_DECL = OCC_FN_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_FN_SOURCE = OCC_FN_HEAD + OCC_FN_DECL + "\n";
+
+// src/mod.ts — a legacy-keyword dotted namespace (`module Legacy.Inner`):
+// the same declaration as `namespace Legacy.Inner` (SPEC 4.6), so its
+// nested units share the SINGLE declaration's range, pinned as `ns.ts`
+// pins `Outer.Inner` — through the reachable unit `Legacy.Inner`, from
+// `module` through the closing `}` (SPEC 1.7).
+const OCC_MOD_HEAD =
+  '// prélude 🦄 mod\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_MOD_DECL_PRE = "module Legacy.Inner {\n  ";
+const OCC_MOD_DECL = OCC_MOD_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_MOD_SOURCE = OCC_MOD_HEAD + OCC_MOD_DECL + "\n";
+
+// src/multi.ts — a function-valued variable declaration inside a
+// multi-declaration statement (`const one = 1, handler = () => {…};`): unit
+// `handler` spans its own name through its initializer — NOT the enclosing
+// statement, so `const one = 1, ` and the trailing `;` lie outside the range.
+const OCC_MULTI_HEAD =
+  '// prélude 🦄 multi\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_MULTI_STMT_PRE = "const one = 1, ";
+const OCC_MULTI_UNIT_PRE = "handler = () => {\n  ";
+const OCC_MULTI_UNIT = OCC_MULTI_UNIT_PRE + OCC_MARKER + ";\n}";
+const OCC_MULTI_SOURCE =
+  OCC_MULTI_HEAD + OCC_MULTI_STMT_PRE + OCC_MULTI_UNIT + ";\n";
+
+// src/named.ts — a default export of a NAMED construct: the unit takes that
+// construct's OWN range — `function` through the closing `}`, the
+// `export default ` prefix excluded (SPEC 1.7's contrast with the anonymous
+// case, where the whole export declaration is the range).
+const OCC_NAMED_HEAD =
+  '// prélude 🦄 named\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_NAMED_EXPORT_PRE = "export default ";
+const OCC_NAMED_CONSTRUCT_PRE = "function named() {\n  ";
+const OCC_NAMED_CONSTRUCT = OCC_NAMED_CONSTRUCT_PRE + OCC_MARKER + ";\n}";
+const OCC_NAMED_SOURCE =
+  OCC_NAMED_HEAD + OCC_NAMED_EXPORT_PRE + OCC_NAMED_CONSTRUCT + "\n";
+
+// src/ns.ts — a dotted namespace (`namespace Outer.Inner`): one named unit
+// per dot-separated name, all sharing the SINGLE namespace declaration's
+// range — the one construct binding them all (SPEC 1.7, 4.6). An occurrence
+// record presents a unit's range only as its occurrence's source (1.7,
+// 5.7), and every position in the dotted declaration's body lies within
+// `Inner`, so the shared construct range is pinned through the reachable
+// unit `Outer.Inner` (`Outer`, deriving from the same declaration, shares
+// this same range by 1.7 but encloses no position outside `Inner` and so
+// sources no occurrence of its own): a product ranging the unit at
+// anything narrower than the whole `namespace Outer.Inner { … }`
+// declaration fails the byte assertion.
+const OCC_NS_HEAD =
+  '// prélude 🦄 ns\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_NS_DECL_PRE = "namespace Outer.Inner {\n  ";
+const OCC_NS_DECL = OCC_NS_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_NS_SOURCE = OCC_NS_HEAD + OCC_NS_DECL + "\n";
+
+// src/pair.ts — a getter/setter pair: the same unit chain `Pair.value`
+// occurs twice in document order, so the getter is `Pair.value` and the
+// setter the disambiguated `Pair.value@2` (SPEC 4.6), each carrying the
+// range of its OWN occurrence's construct (SPEC 1.7).
+const OCC_PAIR_HEAD =
+  '// prélude 🦄 pair\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_PAIR_CLASS_PRE = "class Pair {\n  ";
+const OCC_PAIR_GET_PRE = "get value(): number {\n    ";
+const OCC_PAIR_GET = OCC_PAIR_GET_PRE + OCC_MARKER + ";\n    return 1;\n  }";
+const OCC_PAIR_BETWEEN = "\n  ";
+const OCC_PAIR_SET_PRE = "set value(next: number) {\n    ";
+const OCC_PAIR_SET = OCC_PAIR_SET_PRE + OCC_MARKER + ";\n  }";
+const OCC_PAIR_SOURCE =
+  OCC_PAIR_HEAD +
+  OCC_PAIR_CLASS_PRE +
+  OCC_PAIR_GET +
+  OCC_PAIR_BETWEEN +
+  OCC_PAIR_SET +
+  "\n}\n";
+
+// The member stagings — `prop.ts`, `propbare.ts`, `propdec.ts`, and
+// `stray.ts` — each spell one of TEST-SPEC T1.7-2's one-line classes `C`
+// exactly, in a file of its own, their marker `SPEC.a` (target `a`) in the
+// body of `C`'s one member `m`: a property whose initializer is an arrow
+// function, or a method — either a named unit (SPEC 4.6), `path#C.m`.
+const OCC_MEMBER_CLASS_PRE = "class C { ";
+const OCC_MEMBER_MARKER = "SPEC.a";
+const OCC_PROPERTY_PRE = "m = () => { ";
+/** The property member through its arrow body's closing brace. */
+const OCC_PROPERTY_BODY = OCC_PROPERTY_PRE + OCC_MEMBER_MARKER + " }";
+
+// src/prop.ts — `class C { m = () => { SPEC.a }; }`: a property member's
+// own characters run through the `;` ending it, where it spells one (SPEC
+// 1.7), so `C.m` spans `m = () => { SPEC.a };` — a product ending the
+// property at its initializer fails.
+const OCC_PROP_HEAD =
+  '// prélude 🦄 prop\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_PROP_UNIT = OCC_PROPERTY_BODY + ";";
+const OCC_PROP_SOURCE =
+  OCC_PROP_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROP_UNIT + " }\n";
+
+// src/propbare.ts — the twin spelling no `;`,
+// `class C { m = () => { SPEC.a } }`: nothing extends the property, so
+// `C.m` ends at its arrow body's closing brace, spanning
+// `m = () => { SPEC.a }` (SPEC 1.7).
+const OCC_PROPBARE_HEAD =
+  '// prélude 🦄 propbare\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_PROPBARE_UNIT = OCC_PROPERTY_BODY;
+const OCC_PROPBARE_SOURCE =
+  OCC_PROPBARE_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPBARE_UNIT + " }\n";
+
+// src/propdec.ts — a decorated property,
+// `class C { @dec m = () => { SPEC.a }; }`: its decorator list is part of
+// the member, whose own characters begin at its first decorator and, a
+// property's, run through its `;` (SPEC 1.7), so `C.m` spans
+// `@dec m = () => { SPEC.a };`, from its `@` through its `;`.
+const OCC_PROPDEC_HEAD =
+  '// prélude 🦄 propdec\nimport SPEC from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_PROPDEC_DECORATOR = "@dec ";
+const OCC_PROPDEC_UNIT = OCC_PROPDEC_DECORATOR + OCC_PROPERTY_BODY + ";";
+const OCC_PROPDEC_SOURCE =
+  OCC_PROPDEC_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPDEC_UNIT + " }\n";
+
+// src/spaced.ts — `export   function spaced() {}` (three spaces): the
+// leading `export` and whatever separates it from the construct's first
+// token are excluded, so the unit spans from `function` (SPEC 1.7).
+const OCC_SPACED_HEAD =
+  '// prélude 🦄 spaced\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_SPACED_EXPORT_PRE = "export   ";
+const OCC_SPACED_CONSTRUCT_PRE = "function spaced() {\n  ";
+const OCC_SPACED_CONSTRUCT = OCC_SPACED_CONSTRUCT_PRE + OCC_MARKER + ";\n}";
+const OCC_SPACED_SOURCE =
+  OCC_SPACED_HEAD + OCC_SPACED_EXPORT_PRE + OCC_SPACED_CONSTRUCT + "\n";
+
+// src/stray.ts — the control, a METHOD followed by a stray `;`,
+// `class C { m() { SPEC.a }; }`: the `;` is a class element of its own,
+// which 1.7's extension — a property member's alone — never reaches, so
+// `C.m` spans `m() { SPEC.a }`, ending at its closing brace (SPEC 1.7) — a
+// product extending every member through a following `;` fails.
+const OCC_STRAY_HEAD =
+  '// prélude 🦄 stray\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_STRAY_UNIT_PRE = "m() { ";
+const OCC_STRAY_UNIT = OCC_STRAY_UNIT_PRE + OCC_MEMBER_MARKER + " }";
+const OCC_STRAY_SOURCE =
+  OCC_STRAY_HEAD + OCC_MEMBER_CLASS_PRE + OCC_STRAY_UNIT + "; }\n";
+
+// src/top.ts — a top-level marker: no named unit encloses it, so it
+// attributes to the file (SPEC 4.6) and the source node is the whole-file
+// location — identity the path alone, range the entire file, start 0, end
+// the file's byte length (SPEC 1.7).
+const OCC_TOP_HEAD =
+  '// prélude 🦄 top\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_TOP_SOURCE = OCC_TOP_HEAD + OCC_MARKER + ";\n";
+
+// src/types.d.ts — a declaration file, ambient by kind (SPEC 4.6: `.d.` in
+// its last path segment), matched by the code group's `src/**/*.ts` glob and
+// well-formed (14.20: TypeScript's ambient-context checks are post-parse):
+// its body-bearing `function f` binds no unit (T4.6-3), so the marker
+// inside it attributes to the whole file, and the source is the whole-file
+// location — identity the path alone, range the entire file (SPEC 1.7).
+const OCC_DTS_HEAD =
+  '// prélude 🦄 decl\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_DTS_FN_PRE = "function f(): void {\n  ";
+const OCC_DTS_SOURCE = OCC_DTS_HEAD + OCC_DTS_FN_PRE + OCC_MARKER + ";\n}\n";
+
+// src/using.ts — the `using` and `await using` units of T4.6-1, spelled as
+// TEST-SPEC T1.7-2 spells them: SPEC 4.6 counts both as variable
+// declarations, so `using f = () => { SPEC.a }` at top level derives unit
+// `f`, and `await using h = () => { SPEC.b }` inside the async function `g`
+// derives `g.h`. Each unit spans its own name through its initializer —
+// `f = () => { SPEC.a }` and `h = () => { SPEC.b }` — neither from `using`
+// nor from `await` (SPEC 1.7), and no terminator is spelled, so each range
+// ends at the arrow body's closing brace. The file is accepted by TypeScript
+// 5.9.3 both as module code and as script code (14.20), as the workspace
+// builder's staging-time judge confirms (S-9).
+const OCC_USING_HEAD =
+  '// prélude 🦄 using\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_USING_KEYWORD = "using ";
+const OCC_USING_UNIT_PRE = "f = () => { ";
+const OCC_USING_MARKER = "SPEC.a";
+const OCC_USING_UNIT = OCC_USING_UNIT_PRE + OCC_USING_MARKER + " }";
+const OCC_AWAIT_USING_PRE = "\n\nasync function g() {\n  await using ";
+const OCC_AWAIT_USING_UNIT_PRE = "h = () => { ";
+const OCC_AWAIT_USING_MARKER = "SPEC.b";
+const OCC_AWAIT_USING_UNIT =
+  OCC_AWAIT_USING_UNIT_PRE + OCC_AWAIT_USING_MARKER + " }";
+const OCC_USING_BEFORE_AWAIT =
+  OCC_USING_HEAD + OCC_USING_KEYWORD + OCC_USING_UNIT + OCC_AWAIT_USING_PRE;
+const OCC_USING_SOURCE =
+  OCC_USING_BEFORE_AWAIT + OCC_AWAIT_USING_UNIT + "\n}\n";
+
+// The modifier stagings — `abstract.ts`, `async.ts`, `expasync.ts`, and
+// `static.ts` — each spell one of TEST-SPEC T1.7-2's modifier-bearing forms
+// exactly, in a file of its own, its marker `SPEC.a` or `SPEC.b` (target `a`
+// or `b`) as TEST-SPEC spells it. A construct carrying a modifier other than
+// a leading `export` spans from its first decorator or modifier, a modifier
+// being of the construct's own characters as a decorator is (SPEC 1.7
+// excludes only a leading `export` or `export default` and what separates
+// it), so each unit's range starts at its modifier — `async`, `async`,
+// `abstract`, or `static` — and, no terminator spelled, ends at the
+// construct's closing brace: a product starting a unit's range at its
+// keyword or name (`function`, `class`, or `m`) fails the record (the
+// unit-range counterpart of T4.5-8's and T14-11's modifier arms).
+const OCC_MODIFIER_MARKER_A = "SPEC.a";
+const OCC_MODIFIER_MARKER_B = "SPEC.b";
+
+// src/abstract.ts — `abstract class C { static { SPEC.a } }`: a class static
+// block is no named unit (SPEC 4.6), so its marker attributes to the
+// innermost enclosing one, the class `C` (T4.6-1), whose range runs from its
+// `abstract` modifier through its closing `}`.
+const OCC_ABSTRACT_HEAD =
+  '// prélude 🦄 abstract\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ABSTRACT_UNIT_PRE = "abstract class C { static { ";
+const OCC_ABSTRACT_UNIT =
+  OCC_ABSTRACT_UNIT_PRE + OCC_MODIFIER_MARKER_A + " } }";
+const OCC_ABSTRACT_SOURCE = OCC_ABSTRACT_HEAD + OCC_ABSTRACT_UNIT + "\n";
+
+// src/async.ts — `async function f() { SPEC.a }`: unit `f` spans from
+// `async`, never from `function`.
+const OCC_ASYNC_HEAD =
+  '// prélude 🦄 async\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ASYNC_UNIT_PRE = "async function f() { ";
+const OCC_ASYNC_UNIT = OCC_ASYNC_UNIT_PRE + OCC_MODIFIER_MARKER_A + " }";
+const OCC_ASYNC_SOURCE = OCC_ASYNC_HEAD + OCC_ASYNC_UNIT + "\n";
+
+// src/expasync.ts — `export async function g() { SPEC.b }`: the leading
+// `export` and the space separating it from the construct are excluded,
+// the `async` modifier kept — unit `g` spans `async function g() { SPEC.b }`.
+const OCC_EXPASYNC_HEAD =
+  '// prélude 🦄 expasync\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_EXPASYNC_EXPORT_PRE = "export ";
+const OCC_EXPASYNC_UNIT_PRE = "async function g() { ";
+const OCC_EXPASYNC_UNIT = OCC_EXPASYNC_UNIT_PRE + OCC_MODIFIER_MARKER_B + " }";
+const OCC_EXPASYNC_SOURCE =
+  OCC_EXPASYNC_HEAD + OCC_EXPASYNC_EXPORT_PRE + OCC_EXPASYNC_UNIT + "\n";
+
+// src/static.ts — `class D { static m() { SPEC.b } }`: the static method is
+// the member unit `D.m` (SPEC 4.6), spanning `static m() { SPEC.b }`, from
+// its `static` modifier through the method's closing `}`, never from `m`.
+const OCC_STATIC_HEAD =
+  '// prélude 🦄 static\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_STATIC_CLASS_PRE = "class D { ";
+const OCC_STATIC_UNIT_PRE = "static m() { ";
+const OCC_STATIC_UNIT = OCC_STATIC_UNIT_PRE + OCC_MODIFIER_MARKER_B + " }";
+const OCC_STATIC_SOURCE =
+  OCC_STATIC_HEAD + OCC_STATIC_CLASS_PRE + OCC_STATIC_UNIT + " }\n";
+
+/** One staged occurrence: its expected record plus fixture-self-check data. */
+interface OccurrenceArm {
+  readonly what: string;
+  /** The staged file's full content (self-check ground). */
+  readonly fileSource: string;
+  /** The exact characters the occurrence's own range must slice to. */
+  readonly occurrenceSpan: string;
+  /** The exact characters the source unit's range must slice to. */
+  readonly unitSpan: string;
+  readonly record: OccurrenceRecord & {
+    readonly source: OccurrenceSourceNode;
+  };
+}
+
+// The complete expected enumeration, in occurrence order (SPEC 5.7: by
+// referencing file path bytes — abstract < anon < arrow < async < cls < ctor
+// < decdef < decexp < deco < expasync < expdec < fn < mod < multi < named
+// < ns < pair < prop < propbare < propdec < spaced < static < stray < top
+// < types.d.ts < using, `prop.ts` first of its three for `.` < `b` — then by
+// range start, which places `deco.ts`'s property embed before the marker in
+// its decorated member, and `using.ts`'s `f` before `g.h`): the spec source
+// stages no `d` prop, no MDX embedding, and no import, and import
+// declarations record no occurrence (5.7), so the twenty-nine staged
+// references are the workspace's only occurrences.
+const OCC_EXPECTED: readonly OccurrenceArm[] = [
+  {
+    what:
+      "`abstract class C { static { SPEC.a } }` — the static block's marker " +
+      "attributes to its class (SPEC 4.6; T4.6-1), whose unit `C` spans " +
+      "from its `abstract` modifier through its closing brace, never from " +
+      "`class` (SPEC 1.7)",
+    fileSource: OCC_ABSTRACT_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_A,
+    unitSpan: OCC_ABSTRACT_UNIT,
+    record: {
+      file: "src/abstract.ts",
+      range: rangeAfter(
+        OCC_ABSTRACT_HEAD + OCC_ABSTRACT_UNIT_PRE,
+        OCC_MODIFIER_MARKER_A,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/abstract.ts#C",
+        range: rangeAfter(OCC_ABSTRACT_HEAD, OCC_ABSTRACT_UNIT),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "anonymous default export spelling no terminator — unit `default` " +
+      "carries the WHOLE export declaration's range, ending at the closing " +
+      "brace (SPEC 1.7, 4.6)",
+    fileSource: OCC_ANON_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_ANON_DECL,
+    record: {
+      file: "src/anon.ts",
+      range: rangeAfter(OCC_ANON_HEAD + OCC_ANON_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/anon.ts#default",
+        range: rangeAfter(OCC_ANON_HEAD, OCC_ANON_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "anonymous default arrow function spelled with a terminator — unit " +
+      "`default` spans the WHOLE export declaration through its `;` (SPEC " +
+      "1.7)",
+    fileSource: OCC_ARROW_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_ARROW_DECL,
+    record: {
+      file: "src/arrow.ts",
+      range: rangeAfter(OCC_ARROW_HEAD + OCC_ARROW_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/arrow.ts#default",
+        range: rangeAfter(OCC_ARROW_HEAD, OCC_ARROW_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`async function f() { SPEC.a }` — unit `f` spans from its `async` " +
+      "modifier through its closing brace, never from `function` (SPEC 1.7)",
+    fileSource: OCC_ASYNC_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_A,
+    unitSpan: OCC_ASYNC_UNIT,
+    record: {
+      file: "src/async.ts",
+      range: rangeAfter(
+        OCC_ASYNC_HEAD + OCC_ASYNC_UNIT_PRE,
+        OCC_MODIFIER_MARKER_A,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/async.ts#f",
+        range: rangeAfter(OCC_ASYNC_HEAD, OCC_ASYNC_UNIT),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "class declaration — the `text(...)` embed in a non-unit property " +
+      "initializer attributes to the class, the construct binding the name; " +
+      "the occurrence spans the call expression, callee through closing " +
+      "parenthesis (SPEC 1.7, 4.6, 5.7)",
+    fileSource: OCC_CLS_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_CLS_DECL,
+    record: {
+      file: "src/cls.ts",
+      range: rangeAfter(OCC_CLS_HEAD + OCC_CLS_DECL_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/cls.ts#Cls",
+        range: rangeAfter(OCC_CLS_HEAD, OCC_CLS_DECL),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what:
+      "constructor — the member unit `Ctor.constructor` (SPEC 4.6) spans " +
+      "the constructor member, `constructor` through its closing `}`, not " +
+      "the class (SPEC 1.7)",
+    fileSource: OCC_CTOR_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_CTOR_MEMBER,
+    record: {
+      file: "src/ctor.ts",
+      range: rangeAfter(
+        OCC_CTOR_HEAD + OCC_CTOR_CLASS_PRE + OCC_CTOR_MEMBER_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/ctor.ts#Ctor.constructor",
+        range: rangeAfter(OCC_CTOR_HEAD + OCC_CTOR_CLASS_PRE, OCC_CTOR_MEMBER),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`@dec export default class {}` — unit `default` spans the whole " +
+      "export declaration from its `@`, the decorator list preceding " +
+      "`export` included (SPEC 1.7)",
+    fileSource: OCC_DECDEF_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_DECDEF_DECL,
+    record: {
+      file: "src/decdef.ts",
+      range: rangeAfter(OCC_DECDEF_HEAD + OCC_DECDEF_DECL_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/decdef.ts#default",
+        range: rangeAfter(OCC_DECDEF_HEAD, OCC_DECDEF_DECL),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what:
+      "`@dec export class DecExp {}` — spans whole from its `@`, the " +
+      "`export` inside (SPEC 1.7)",
+    fileSource: OCC_DECEXP_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_DECEXP_DECL,
+    record: {
+      file: "src/decexp.ts",
+      range: rangeAfter(OCC_DECEXP_HEAD + OCC_DECEXP_DECL_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/decexp.ts#DecExp",
+        range: rangeAfter(OCC_DECEXP_HEAD, OCC_DECEXP_DECL),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what:
+      "decorated class under two decorators — unit `Deco` spans from the " +
+      "class's FIRST `@` through its closing `}` (SPEC 1.7, 4.6)",
+    fileSource: OCC_DECO_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_DECO_CLASS,
+    record: {
+      file: "src/deco.ts",
+      range: rangeAfter(OCC_DECO_HEAD + OCC_DECO_CLASS_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/deco.ts#Deco",
+        range: rangeAfter(OCC_DECO_HEAD, OCC_DECO_CLASS),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what:
+      "decorated member under two decorators — unit `Deco.m` spans from " +
+      "the member's FIRST `@` through the method's closing `}` (SPEC 1.7, " +
+      "4.6)",
+    fileSource: OCC_DECO_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_DECO_MEMBER,
+    record: {
+      file: "src/deco.ts",
+      range: rangeAfter(
+        OCC_DECO_HEAD +
+          OCC_DECO_CLASS_PRE +
+          OCC_CLS_CALL +
+          OCC_DECO_CLASS_MID +
+          OCC_DECO_MEMBER_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/deco.ts#Deco.m",
+        range: rangeAfter(
+          OCC_DECO_HEAD +
+            OCC_DECO_CLASS_PRE +
+            OCC_CLS_CALL +
+            OCC_DECO_CLASS_MID,
+          OCC_DECO_MEMBER,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`export async function g() { SPEC.b }` — the leading `export` and " +
+      "what separates it excluded, the `async` modifier kept: unit `g` " +
+      "spans `async function g() { SPEC.b }`, never from `function` (SPEC " +
+      "1.7)",
+    fileSource: OCC_EXPASYNC_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_B,
+    unitSpan: OCC_EXPASYNC_UNIT,
+    record: {
+      file: "src/expasync.ts",
+      range: rangeAfter(
+        OCC_EXPASYNC_HEAD + OCC_EXPASYNC_EXPORT_PRE + OCC_EXPASYNC_UNIT_PRE,
+        OCC_MODIFIER_MARKER_B,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/expasync.ts#g",
+        range: rangeAfter(
+          OCC_EXPASYNC_HEAD + OCC_EXPASYNC_EXPORT_PRE,
+          OCC_EXPASYNC_UNIT,
+        ),
+      },
+      target: OCC_B_ID,
+    },
+  },
+  {
+    what:
+      "`export @dec class ExpDec {}` — only what leads is excluded: the " +
+      "unit spans `@dec class ExpDec {…}`, the `export ` prefix out and " +
+      "the decorator in (SPEC 1.7)",
+    fileSource: OCC_EXPDEC_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_EXPDEC_CONSTRUCT,
+    record: {
+      file: "src/expdec.ts",
+      range: rangeAfter(
+        OCC_EXPDEC_HEAD + OCC_EXPDEC_EXPORT_PRE + OCC_EXPDEC_CONSTRUCT_PRE,
+        OCC_CLS_CALL,
+      ),
+      kind: "embeds",
+      source: {
+        identity: "src/expdec.ts#ExpDec",
+        range: rangeAfter(
+          OCC_EXPDEC_HEAD + OCC_EXPDEC_EXPORT_PRE,
+          OCC_EXPDEC_CONSTRUCT,
+        ),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what: "function declaration — the construct binding the name (SPEC 1.7, 4.6)",
+    fileSource: OCC_FN_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_FN_DECL,
+    record: {
+      file: "src/fn.ts",
+      range: rangeAfter(OCC_FN_HEAD + OCC_FN_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/fn.ts#fn",
+        range: rangeAfter(OCC_FN_HEAD, OCC_FN_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "legacy `module Legacy.Inner` — the same declaration as a dotted " +
+      "`namespace`: its nested units share the SINGLE declaration's range, " +
+      "pinned through the reachable unit `Legacy.Inner` (SPEC 1.7, 4.6)",
+    fileSource: OCC_MOD_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_MOD_DECL,
+    record: {
+      file: "src/mod.ts",
+      range: rangeAfter(OCC_MOD_HEAD + OCC_MOD_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/mod.ts#Legacy.Inner",
+        range: rangeAfter(OCC_MOD_HEAD, OCC_MOD_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "function-valued variable in a multi-declaration statement — the " +
+      "unit's own name through its initializer, NOT the enclosing " +
+      "statement (SPEC 1.7)",
+    fileSource: OCC_MULTI_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_MULTI_UNIT,
+    record: {
+      file: "src/multi.ts",
+      range: rangeAfter(
+        OCC_MULTI_HEAD + OCC_MULTI_STMT_PRE + OCC_MULTI_UNIT_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/multi.ts#handler",
+        range: rangeAfter(OCC_MULTI_HEAD + OCC_MULTI_STMT_PRE, OCC_MULTI_UNIT),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "default export of a NAMED construct — that construct's OWN range, " +
+      "the `export default ` prefix excluded (SPEC 1.7)",
+    fileSource: OCC_NAMED_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_NAMED_CONSTRUCT,
+    record: {
+      file: "src/named.ts",
+      range: rangeAfter(
+        OCC_NAMED_HEAD + OCC_NAMED_EXPORT_PRE + OCC_NAMED_CONSTRUCT_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/named.ts#named",
+        range: rangeAfter(
+          OCC_NAMED_HEAD + OCC_NAMED_EXPORT_PRE,
+          OCC_NAMED_CONSTRUCT,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "dotted namespace — the nested units share the SINGLE namespace " +
+      "declaration's range, pinned through the reachable unit `Outer.Inner` " +
+      "(SPEC 1.7, 4.6)",
+    fileSource: OCC_NS_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_NS_DECL,
+    record: {
+      file: "src/ns.ts",
+      range: rangeAfter(OCC_NS_HEAD + OCC_NS_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/ns.ts#Outer.Inner",
+        range: rangeAfter(OCC_NS_HEAD, OCC_NS_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "getter — the FIRST occurrence of chain `Pair.value` stays " +
+      "unsuffixed and carries its own construct's range (SPEC 1.7, 4.6)",
+    fileSource: OCC_PAIR_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_PAIR_GET,
+    record: {
+      file: "src/pair.ts",
+      range: rangeAfter(
+        OCC_PAIR_HEAD + OCC_PAIR_CLASS_PRE + OCC_PAIR_GET_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/pair.ts#Pair.value",
+        range: rangeAfter(OCC_PAIR_HEAD + OCC_PAIR_CLASS_PRE, OCC_PAIR_GET),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "setter — the document-order-disambiguated `Pair.value@2` carries " +
+      "the range of its OWN — second — occurrence's construct (SPEC 1.7, " +
+      "4.6)",
+    fileSource: OCC_PAIR_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_PAIR_SET,
+    record: {
+      file: "src/pair.ts",
+      range: rangeAfter(
+        OCC_PAIR_HEAD +
+          OCC_PAIR_CLASS_PRE +
+          OCC_PAIR_GET +
+          OCC_PAIR_BETWEEN +
+          OCC_PAIR_SET_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/pair.ts#Pair.value@2",
+        range: rangeAfter(
+          OCC_PAIR_HEAD + OCC_PAIR_CLASS_PRE + OCC_PAIR_GET + OCC_PAIR_BETWEEN,
+          OCC_PAIR_SET,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "property member spelling its `;` — unit `C.m` (an arrow-function " +
+      "initializer, SPEC 4.6) runs through the `;` ending it, spanning " +
+      "`m = () => { SPEC.a };` (SPEC 1.7)",
+    fileSource: OCC_PROP_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_PROP_UNIT,
+    record: {
+      file: "src/prop.ts",
+      range: rangeAfter(
+        OCC_PROP_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPERTY_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/prop.ts#C.m",
+        range: rangeAfter(OCC_PROP_HEAD + OCC_MEMBER_CLASS_PRE, OCC_PROP_UNIT),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "property member spelling no `;` — unit `C.m` ends at its arrow " +
+      "body's closing brace, spanning `m = () => { SPEC.a }` (SPEC 1.7)",
+    fileSource: OCC_PROPBARE_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_PROPBARE_UNIT,
+    record: {
+      file: "src/propbare.ts",
+      range: rangeAfter(
+        OCC_PROPBARE_HEAD + OCC_MEMBER_CLASS_PRE + OCC_PROPERTY_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/propbare.ts#C.m",
+        range: rangeAfter(
+          OCC_PROPBARE_HEAD + OCC_MEMBER_CLASS_PRE,
+          OCC_PROPBARE_UNIT,
+        ),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "decorated property member — unit `C.m` spans " +
+      "`@dec m = () => { SPEC.a };`, from its `@` through its `;` (SPEC 1.7)",
+    fileSource: OCC_PROPDEC_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_PROPDEC_UNIT,
+    record: {
+      file: "src/propdec.ts",
+      range: rangeAfter(
+        OCC_PROPDEC_HEAD +
+          OCC_MEMBER_CLASS_PRE +
+          OCC_PROPDEC_DECORATOR +
+          OCC_PROPERTY_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/propdec.ts#C.m",
+        range: rangeAfter(
+          OCC_PROPDEC_HEAD + OCC_MEMBER_CLASS_PRE,
+          OCC_PROPDEC_UNIT,
+        ),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "`export   function spaced() {}` (several spaces) — the leading " +
+      "`export` and whatever separates it from the construct are excluded: " +
+      "the unit spans from `function` (SPEC 1.7)",
+    fileSource: OCC_SPACED_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_SPACED_CONSTRUCT,
+    record: {
+      file: "src/spaced.ts",
+      range: rangeAfter(
+        OCC_SPACED_HEAD + OCC_SPACED_EXPORT_PRE + OCC_SPACED_CONSTRUCT_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/spaced.ts#spaced",
+        range: rangeAfter(
+          OCC_SPACED_HEAD + OCC_SPACED_EXPORT_PRE,
+          OCC_SPACED_CONSTRUCT,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`class D { static m() { SPEC.b } }` — the static method's member " +
+      "unit `D.m` spans `static m() { SPEC.b }`, from its `static` modifier " +
+      "through the method's closing brace, never from `m` (SPEC 1.7, 4.6)",
+    fileSource: OCC_STATIC_SOURCE,
+    occurrenceSpan: OCC_MODIFIER_MARKER_B,
+    unitSpan: OCC_STATIC_UNIT,
+    record: {
+      file: "src/static.ts",
+      range: rangeAfter(
+        OCC_STATIC_HEAD + OCC_STATIC_CLASS_PRE + OCC_STATIC_UNIT_PRE,
+        OCC_MODIFIER_MARKER_B,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/static.ts#D.m",
+        range: rangeAfter(
+          OCC_STATIC_HEAD + OCC_STATIC_CLASS_PRE,
+          OCC_STATIC_UNIT,
+        ),
+      },
+      target: OCC_B_ID,
+    },
+  },
+  {
+    what:
+      "the control: a METHOD followed by a stray `;` — the `;` a class " +
+      "element of its own, which 1.7's extension, a property member's " +
+      "alone, never reaches, so unit `C.m` spans `m() { SPEC.a }`, ending " +
+      "at its closing brace (SPEC 1.7)",
+    fileSource: OCC_STRAY_SOURCE,
+    occurrenceSpan: OCC_MEMBER_MARKER,
+    unitSpan: OCC_STRAY_UNIT,
+    record: {
+      file: "src/stray.ts",
+      range: rangeAfter(
+        OCC_STRAY_HEAD + OCC_MEMBER_CLASS_PRE + OCC_STRAY_UNIT_PRE,
+        OCC_MEMBER_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/stray.ts#C.m",
+        range: rangeAfter(
+          OCC_STRAY_HEAD + OCC_MEMBER_CLASS_PRE,
+          OCC_STRAY_UNIT,
+        ),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "top-level marker — a whole-file location: identity the path alone, " +
+      "range the entire file, start 0, end the file's byte length (SPEC " +
+      "1.7, 4.6)",
+    fileSource: OCC_TOP_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_TOP_SOURCE,
+    record: {
+      file: "src/top.ts",
+      range: rangeAfter(OCC_TOP_HEAD, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/top.ts",
+        range: { start: 0, end: utf8Length(OCC_TOP_SOURCE) },
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "marker inside a body-bearing function of a declaration file " +
+      "(`src/types.d.ts`, ambient by kind) — `f` is no unit (SPEC 4.6; " +
+      "T4.6-3), so the source is the whole-file location: identity the " +
+      "path alone, range the entire file (SPEC 1.7)",
+    fileSource: OCC_DTS_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_DTS_SOURCE,
+    record: {
+      file: "src/types.d.ts",
+      range: rangeAfter(OCC_DTS_HEAD + OCC_DTS_FN_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/types.d.ts",
+        range: { start: 0, end: utf8Length(OCC_DTS_SOURCE) },
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`using f = () => { SPEC.a }` at top level — a variable declaration " +
+      "(SPEC 4.6), so unit `f` spans its own name through its initializer, " +
+      "`f = () => { SPEC.a }`, never from `using` (SPEC 1.7)",
+    fileSource: OCC_USING_SOURCE,
+    occurrenceSpan: OCC_USING_MARKER,
+    unitSpan: OCC_USING_UNIT,
+    record: {
+      file: "src/using.ts",
+      range: rangeAfter(
+        OCC_USING_HEAD + OCC_USING_KEYWORD + OCC_USING_UNIT_PRE,
+        OCC_USING_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/using.ts#f",
+        range: rangeAfter(OCC_USING_HEAD + OCC_USING_KEYWORD, OCC_USING_UNIT),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "`await using h = () => { SPEC.b }` inside the async function `g` — a " +
+      "variable declaration (SPEC 4.6), so unit `g.h` spans its own name " +
+      "through its initializer, `h = () => { SPEC.b }`, neither from " +
+      "`await` nor from `using` (SPEC 1.7)",
+    fileSource: OCC_USING_SOURCE,
+    occurrenceSpan: OCC_AWAIT_USING_MARKER,
+    unitSpan: OCC_AWAIT_USING_UNIT,
+    record: {
+      file: "src/using.ts",
+      range: rangeAfter(
+        OCC_USING_BEFORE_AWAIT + OCC_AWAIT_USING_UNIT_PRE,
+        OCC_AWAIT_USING_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/using.ts#g.h",
+        range: rangeAfter(OCC_USING_BEFORE_AWAIT, OCC_AWAIT_USING_UNIT),
+      },
+      target: OCC_B_ID,
+    },
+  },
+];
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed range must slice the staged file's bytes to exactly the span
+ * it claims. A failure here is a staging-arithmetic defect of this test,
+ * never a product failure.
+ */
+function assertStagedSpan(
+  fileSource: string,
+  range: SourceRange,
+  span: string,
+  what: string,
+): void {
+  const actual = Buffer.from(fileSource, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (actual !== span) {
+    fail(
+      `T1.7-2 fixture self-check — ${what}: the precomputed byte range ` +
+        `[${String(range.start)}, ${String(range.end)}) slices the staged bytes to ` +
+        `${JSON.stringify(actual)}, expected ${JSON.stringify(span)} (a harness-side ` +
+        `staging error, not a product failure)`,
+    );
+  }
+}
+
+const T1_7_2 = defineProductTest({
+  id: "T1.7-2",
+  title:
+    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement, and for the `using` and `await using` units (`using f = () => { SPEC.a }` spans `f = () => { SPEC.a }`, `await using h = () => { SPEC.b }` in an async `g` spans `h = () => { SPEC.b }`, neither from `using` nor from `await`); the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, a construct carrying a modifier other than a leading `export` from its first modifier (`async function f() { SPEC.a }`'s `f` and `export async function g() { SPEC.b }`'s `g` from `async`, `abstract class C { static { SPEC.a } }`'s `C` — its static block's marker attributed to the class — from `abstract`, and `class D { static m() { SPEC.b } }`'s `D.m` from `static`, never from the keyword or name), a property member through the `;` ending it where it spells one (`m = () => { SPEC.a };`; its twin spelling none ending at its closing brace; a decorated property from its `@` through its `;`), a method followed by a stray `;` ending at its closing brace (`m() { SPEC.a }`), the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
+  run: async (product) => {
+    for (const arm of OCC_EXPECTED) {
+      assertStagedSpan(
+        arm.fileSource,
+        arm.record.range,
+        arm.occurrenceSpan,
+        `${arm.what} — the occurrence's own span`,
+      );
+      assertStagedSpan(
+        arm.fileSource,
+        arm.record.source.range,
+        arm.unitSpan,
+        `${arm.what} — the source unit's construct range`,
+      );
+    }
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/R.mdx": OCC_TARGET_SOURCE,
+        "src/abstract.ts": OCC_ABSTRACT_SOURCE,
+        "src/anon.ts": OCC_ANON_SOURCE,
+        "src/arrow.ts": OCC_ARROW_SOURCE,
+        "src/async.ts": OCC_ASYNC_SOURCE,
+        "src/cls.ts": OCC_CLS_SOURCE,
+        "src/ctor.ts": OCC_CTOR_SOURCE,
+        "src/decdef.ts": OCC_DECDEF_SOURCE,
+        "src/decexp.ts": OCC_DECEXP_SOURCE,
+        "src/deco.ts": OCC_DECO_SOURCE,
+        "src/expasync.ts": OCC_EXPASYNC_SOURCE,
+        "src/expdec.ts": OCC_EXPDEC_SOURCE,
+        "src/fn.ts": OCC_FN_SOURCE,
+        "src/mod.ts": OCC_MOD_SOURCE,
+        "src/multi.ts": OCC_MULTI_SOURCE,
+        "src/named.ts": OCC_NAMED_SOURCE,
+        "src/ns.ts": OCC_NS_SOURCE,
+        "src/pair.ts": OCC_PAIR_SOURCE,
+        "src/prop.ts": OCC_PROP_SOURCE,
+        "src/propbare.ts": OCC_PROPBARE_SOURCE,
+        "src/propdec.ts": OCC_PROPDEC_SOURCE,
+        "src/spaced.ts": OCC_SPACED_SOURCE,
+        "src/static.ts": OCC_STATIC_SOURCE,
+        "src/stray.ts": OCC_STRAY_SOURCE,
+        "src/top.ts": OCC_TOP_SOURCE,
+        "src/types.d.ts": OCC_DTS_SOURCE,
+        "src/using.ts": OCC_USING_SOURCE,
+      },
+    });
+    try {
+      // Premise: the workspace is valid — every staged reference is a
+      // sanctioned use (4.5) that resolves, so the enumeration below is
+      // complete and finding-free (11.2). A product disputing any staging
+      // judgment (the property-initializer `text(...)`, the namespace-body
+      // marker, the static-block marker) fails loudly here.
+      await buildOk(
+        product,
+        workspace,
+        "T1.7-2 `build` (premise: every staged reference is sanctioned and resolves)",
+      );
+
+      const context = "T1.7-2 `occurrences`";
+      const report = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], context),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: a complete, finding-free answer — the consulted domain ` +
+          `(the entire discovered set, no \`--file\`) carries no finding ` +
+          `(SPEC 11.2, 11.3)`,
+      );
+      if (report.occurrences.length !== OCC_EXPECTED.length) {
+        fail(
+          `${context}: expected exactly ${String(OCC_EXPECTED.length)} occurrence ` +
+            `records — one per staged reference; import declarations record ` +
+            `none (SPEC 5.7) — got ${String(report.occurrences.length)}: ` +
+            JSON.stringify(
+              report.occurrences.map((record) => ({
+                file: record.file,
+                range: record.range,
+                source:
+                  "unavailable" in record.source
+                    ? "unavailable"
+                    : record.source.identity,
+              })),
+            ),
+        );
+      }
+      // Per-index equality over the length-checked enumeration pins the
+      // occurrence order of 5.7 along with every record member. Every
+      // record is compared before the verdict, so one run diagnoses each
+      // deviating form at once rather than only the first in file order.
+      const mismatches: string[] = [];
+      OCC_EXPECTED.forEach((arm, index) => {
+        try {
+          assertSameJson(
+            report.occurrences[index],
+            arm.record,
+            `${context} record [${String(index)}] — ${arm.what}; zero-based ` +
+              `byte offsets, start-inclusive end-exclusive, so code-point, ` +
+              `UTF-16, line/column, or 1-based ranges all fail (SPEC 1.7)`,
+          );
+        } catch (error) {
+          if (!(error instanceof HarnessAssertionError)) throw error;
+          mismatches.push(error.message);
+        }
+      });
+      if (mismatches.length > 0) {
+        fail(
+          `${context}: ${String(mismatches.length)} of ` +
+            `${String(OCC_EXPECTED.length)} occurrence records differ from ` +
+            `the pinned ones:\n` +
+            mismatches.join("\n"),
+        );
+      }
+    } finally {
+      await workspace.dispose();
+    }
   },
 });
 
@@ -1166,4 +2816,5 @@ export const section16to17Tests: readonly ProductTestEntry[] = [
   T1_6_4,
   T1_6_5,
   T1_7_1,
+  T1_7_2,
 ];

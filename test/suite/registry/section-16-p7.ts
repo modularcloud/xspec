@@ -5,10 +5,13 @@
 // E-5) produce random patterns and paths over SPEC 7's glob grammar and SPEC
 // 7.5's capture grammar — with the glob metacharacters of common dialects
 // (`[` `]` `{` `}` `!` `+` `(` `)`) in both the pattern and the path
-// alphabets, and `$` as a discovery-glob literal — and assert that the
-// product's match decisions and capture values equal the harness's
-// independent spec oracle (helpers/oracles/glob.ts, HARNESS-09), which S-6
-// certifies against fixed vectors before any property trusts it
+// alphabets, `$` as a discovery-glob literal, and the `$` forms at the
+// capture boundary in 7.5 policy patterns (`$0`, `$` before a non-digit,
+// trailing `$` — literal bytes in `from` and `to` alike, never captures or
+// capture violations; SPEC 7.5, T7.5-5, P-7) — and assert that the product's
+// match decisions and capture values equal the harness's independent spec
+// oracle (helpers/oracles/glob.ts, HARNESS-09), which S-6 certifies against
+// fixed vectors before any property trusts it
 // (test/self/s6-glob-oracle.test.ts).
 //
 // Two properties under the one P-7 entry, one per black-box channel:
@@ -70,10 +73,14 @@
 //     exactly its own bytes — the dot rule reads the pattern as written), so
 //     the generated policy patterns are the trial's only wildcard matching.
 //     For that staging to be sound under SPEC 7 itself, capture-side PATH
-//     bytes exclude `*`, `?`, and `$` (a source path `t*t/x.ts` would, as its
-//     own literal glob, legitimately match under `tgt/` and could collide
-//     with the spec group, 14.14) — the foreign-dialect metacharacters stay,
-//     probing literal-ness through the config→discovery channel too. Source
+//     bytes exclude `*` and `?` (a source path `t*t/x.ts` would, as its own
+//     literal glob, legitimately match under `tgt/` and could collide with
+//     the spec group, 14.14) — the foreign-dialect metacharacters stay, and
+//     so does `$`, an ordinary literal in a discovery glob (SPEC 7.5
+//     confines captures to policy `files` selectors), so a `$`-bearing path
+//     still matches exactly itself while the policy patterns meet `$` bytes
+//     in the paths they judge — probing literal-ness through the
+//     config→discovery channel too. Source
 //     paths never start with `tgt` (the target namespace: keeps spec and
 //     code groups file-disjoint, 7.2) and never contain `.xspec.` (never a
 //     product-written derived path, 13.4). Targets end in `.mdx` (7.1).
@@ -86,8 +93,15 @@
 //   * A rejected capture-side `to` never references an index absent from its
 //     `from` and a `from` never repeats an index (both 14.14 configuration
 //     errors, not match decisions): capture tokens are injected from a
-//     managed distinct-index set and `$` is absent from the capture-side
-//     literal alphabets, so no accidental `$<digit>` can form.
+//     managed distinct-index set, and `$` enters the policy-pattern literals
+//     only through three atomic forms — `$0`, `$` fused to a non-digit
+//     character, and a bare `$` appended as a segment's final token — so no
+//     accidental `$<digit 1–9>` can form: the fused forms carry no digit
+//     `1`–`9` after their `$`, and a segment-final `$` is followed in the
+//     rendered pattern only by `/`, the end of the pattern, or a
+//     later-spliced capture/reference token, whose rendering starts with `$`
+//     (making the pair the literal-`$`-before-non-digit form `$$<d>`, a
+//     literal `$` then a modeled capture — the oracle reads the same bytes).
 //
 // The capture-side protocol follows T7.5-4/T7.5-5: `build` first (exit 0 —
 // sources are valid by construction and build does not evaluate policy, SPEC
@@ -117,12 +131,16 @@ import {
   matchFromPattern,
   matchToPattern,
 } from "../../helpers/oracles/glob.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import {
+  TestWorkspace,
+  mdxPathsOf,
+  tsPathsOf,
+} from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertSameJson,
@@ -196,10 +214,37 @@ const DISCOVERY_PATH_ALPHABET: Weighted = [
   [2, "?"],
 ];
 
-// Path-segment characters for the capture property: no `*`/`?`/`$`, so the
+// Path-segment characters for the capture property: no `*`/`?`, so the
 // literal path-globs that stage discovery are metacharacter-free and match
-// exactly their own path under SPEC 7 (module header).
-const CAPTURE_PATH_ALPHABET: Weighted = PATTERN_LITERAL_ALPHABET;
+// exactly their own path under SPEC 7 — but `$` is a path byte here: in a
+// discovery glob it is an ordinary literal (SPEC 7.5), so a staged path
+// still matches exactly itself, while the 7.5 policy patterns then meet `$`
+// bytes in the paths they judge (module header).
+const CAPTURE_PATH_ALPHABET: Weighted = [...PATTERN_LITERAL_ALPHABET, [2, "$"]];
+
+// The `$<non-digit>` literal form draws its fused character from the
+// digit-free pattern literals: a capture is exactly `$` followed by one
+// digit `1`–`9` (SPEC 7.5), so with every digit excluded the fused pair can
+// never spell one (`$0`, the digit form that is still a literal, is its own
+// atomic arm below).
+const NON_DIGIT_PATTERN_LITERALS: Weighted = PATTERN_LITERAL_ALPHABET.filter(
+  ([, char]) => char < "0" || char > "9",
+);
+
+/**
+ * A position-free literal `$` form at the capture boundary (SPEC 7.5: a
+ * capture is exactly `$` followed by one digit `1`–`9`; every other `$` —
+ * `$0` and a trailing `$` included — is a literal byte in either pattern,
+ * never a capture or a capture violation; TEST-SPEC §16 P-7, T7.5-5): `$0`,
+ * or `$` fused to a non-digit character. Injected as one atomic literal
+ * token, so no rendering adjacency can turn the `$` into a capture (module
+ * header). The position-dependent trailing-`$` form is `withTrailingDollar`.
+ */
+function dollarLiteral(choices: Choices): string {
+  return choices.boolean(0.4)
+    ? "$0"
+    : `$${choices.weightedPick(NON_DIGIT_PATTERN_LITERALS)}`;
+}
 
 const pathChar =
   (alphabet: Weighted): Gen<string> =>
@@ -253,21 +298,50 @@ function renderPattern(segs: readonly PatternSeg[]): string {
   return segs.map(renderSegment).join("/");
 }
 
-/** A token segment of 1..3 tokens over the given literal alphabet. */
-function tokenSegmentGen(literalAlphabet: Weighted): Gen<PatternSeg> {
+/**
+ * A token segment of 1..3 tokens over the given literal alphabet. With
+ * `dollarForms` (the 7.5 policy-pattern generators), tokens also draw the
+ * atomic literal `$` forms of `dollarLiteral`.
+ */
+function tokenSegmentGen(
+  literalAlphabet: Weighted,
+  dollarForms = false,
+): Gen<PatternSeg> {
   return (choices) => {
     const count = choices.intInclusive(1, 3);
     const tokens: PatternToken[] = [];
     for (let i = 0; i < count; i += 1) {
-      tokens.push(
-        choices.weightedPick<PatternToken>([
-          [6, { kind: "lit", text: fillerGen(literalAlphabet, 1, 3)(choices) }],
-          [3, { kind: "star" }],
-          [2, { kind: "question" }],
-        ]),
-      );
+      const entries: Array<readonly [number, PatternToken]> = [
+        [6, { kind: "lit", text: fillerGen(literalAlphabet, 1, 3)(choices) }],
+        [3, { kind: "star" }],
+        [2, { kind: "question" }],
+      ];
+      if (dollarForms) {
+        entries.push([2, { kind: "lit", text: dollarLiteral(choices) }]);
+      }
+      tokens.push(choices.weightedPick(entries));
     }
     return { kind: "tokens", tokens };
+  };
+}
+
+/**
+ * With probability 0.15, append the trailing-`$` literal form to a token
+ * segment (SPEC 7.5: a trailing `$` is a literal byte, never a capture or a
+ * capture violation; TEST-SPEC §16 P-7, T7.5-5). Appended as the segment's
+ * final token, the `$` is followed in the rendered pattern only by `/`, the
+ * end of the pattern, or a later-spliced capture/reference token — whose
+ * rendering starts with `$`, not a digit — so it can never spell a capture
+ * (module header); a pattern-final segment stages the genuinely trailing
+ * form. Applied after `repairPatternSegment`, whose `.`/`..` checks read the
+ * pre-append rendering.
+ */
+function withTrailingDollar(seg: PatternSeg, choices: Choices): PatternSeg {
+  const trailing = choices.boolean(0.15);
+  if (!trailing || seg.kind === "globstar") return seg;
+  return {
+    kind: "tokens",
+    tokens: [...seg.tokens, { kind: "lit", text: "$" }],
   };
 }
 
@@ -606,6 +680,55 @@ function mdxSection(id: string): string {
   return `<S id="${id}">\nText for ${id}.\n</S>\n`;
 }
 
+/**
+ * The fixed form-vector set of the P-7 stagings (S-9; the §16 preamble):
+ * the one template both arms compose — `mdxSection` — under the discovery
+ * arm's `s<index>` ids (paths capped at 8) and the capture arm's `t<index>`
+ * ids (targets capped at 5), the first and the last admissible index each.
+ */
+export const P7_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ["discovery arm: mdxSection of the first path (s0)", mdxSection("s0")],
+  ["discovery arm: mdxSection of the last path (s7)", mdxSection("s7")],
+  ["capture arm: mdxSection of the first target (t0)", mdxSection("t0")],
+  ["capture arm: mdxSection of the last target (t4)", mdxSection("t4")],
+];
+
+// S-9's per-draw check (helpers/property.ts `drawSources`): every file each
+// arm stages — the configuration the draw composed (judged well-formed
+// TypeScript), one `mdxSection` per drawn path (judged for derivability),
+// and, in the capture arm, each code source (judged well-formed TypeScript:
+// a code group discovers it whatever its name, and no capture-side source
+// name ends in a TypeScript-default suffix, so each is marked a code
+// source). The bodies stage exactly these files, from the same pure
+// functions.
+function stagedDiscoverySources(trial: DiscoveryTrial): DrawSource[] {
+  return [
+    ["xspec.config.ts", discoveryConfig(trial)],
+    ...trial.paths.map((path, index): DrawSource => [
+      path,
+      mdxSection(`s${String(index)}`),
+    ]),
+  ];
+}
+
+function stagedCaptureSources(trial: CaptureTrial): DrawSource[] {
+  return [
+    ["xspec.config.ts", captureConfig(trial)],
+    ...trial.targets.map((target, j): DrawSource => [
+      target,
+      mdxSection(`t${String(j)}`),
+    ]),
+    ...trial.sources.map((source): DrawSource => [
+      source,
+      codeSource(source, trial.targets),
+      "code source",
+      "code-source",
+    ]),
+  ];
+}
+
 /** One `{file, ids}` listing entry, and a bytewise-sorted copy for compare. */
 interface ListingEntry {
   readonly file: string;
@@ -620,6 +743,16 @@ function sortedListing(entries: readonly ListingEntry[]): ListingEntry[] {
     );
 }
 
+/** The discovery arm's configuration: one spec group over the patterns. */
+function discoveryConfig(trial: DiscoveryTrial): string {
+  return (
+    `import { defineConfig } from "xspec"\n\nexport default defineConfig({\n` +
+    `  specs: {\n    g: [${trial.patterns
+      .map((pattern) => JSON.stringify(pattern))
+      .join(", ")}]\n  }\n})\n`
+  );
+}
+
 function renderDiscoveryTrial(trial: DiscoveryTrial): string {
   return JSON.stringify({ patterns: trial.patterns, paths: trial.paths });
 }
@@ -630,11 +763,7 @@ async function assertDiscoveryAgreement(
   trial: DiscoveryTrial,
 ): Promise<void> {
   const files: Record<string, string> = {
-    "xspec.config.ts":
-      `import { defineConfig } from "xspec"\n\nexport default defineConfig({\n` +
-      `  specs: {\n    g: [${trial.patterns
-        .map((pattern) => JSON.stringify(pattern))
-        .join(", ")}]\n  }\n})\n`,
+    "xspec.config.ts": discoveryConfig(trial),
   };
   const expected: ListingEntry[] = [];
   trial.paths.forEach((path, index) => {
@@ -644,7 +773,17 @@ async function assertDiscoveryAgreement(
       expected.push({ file: path, ids: [id] });
     }
   });
-  const workspace = await TestWorkspace.create({ files });
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedDiscoverySources` above) — declared per draw, as every
+  // initial `.mdx` file a trial stages after the body's first product
+  // invocation must be (helpers/workspace.ts); the configuration the draw
+  // composed is declared per draw too (`ts.perDraw`: judged well-formed at
+  // staging, past the undeclared-staging guard's TypeScript arm).
+  const workspace = await TestWorkspace.create({
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
+    ts: { perDraw: tsPathsOf(files) },
+  });
   try {
     const context =
       `P-7 discovery: patterns ${JSON.stringify(trial.patterns)} over staged ` +
@@ -702,7 +841,11 @@ function captureIndicesGen(choices: Choices): number[] {
 
 /**
  * A `from` pattern: 1..3 repaired segments with every capture index injected
- * exactly once into a token segment (SPEC 7.5: each at most once).
+ * exactly once into a token segment (SPEC 7.5: each at most once). Its
+ * segments draw the literal `$` forms — `$0`/`$<non-digit>` in-segment,
+ * trailing `$` segment-final (P-7, T7.5-5); a capture spliced after a
+ * trailing `$` renders as the literal-`$`-before-`$` pair `$$<d>` (module
+ * header).
  */
 function fromPatternSegments(
   choices: Choices,
@@ -713,8 +856,8 @@ function fromPatternSegments(
   for (let i = 0; i < count; i += 1) {
     const seg = choices.boolean(0.12)
       ? ({ kind: "globstar" } as const)
-      : tokenSegmentGen(PATTERN_LITERAL_ALPHABET)(choices);
-    segs.push(repairPatternSegment(seg, false));
+      : tokenSegmentGen(PATTERN_LITERAL_ALPHABET, true)(choices);
+    segs.push(withTrailingDollar(repairPatternSegment(seg, false), choices));
   }
   const tokenPositions = segs.flatMap((seg, index) =>
     seg.kind === "tokens" ? [index] : [],
@@ -744,7 +887,10 @@ function fromPatternSegments(
  * A `to` pattern: literal first segment `tgt`, an optional middle segment,
  * and a final token segment referencing 0..2 of the `from` captures (repeats
  * allowed) with a forced literal `.mdx` suffix (targets are spec sources,
- * SPEC 7.1).
+ * SPEC 7.1). The middle and final segments draw the literal `$` forms too —
+ * in a `to`, `$0` and a segment-final `$` reference no absent capture (SPEC
+ * 7.5, T7.5-5): they are literal bytes, so the pattern loads without 14.14
+ * and must match exactly the paths spelling them.
  */
 function toPatternSegments(
   choices: Choices,
@@ -757,9 +903,12 @@ function toPatternSegments(
     segs.push(
       choices.boolean(0.25)
         ? { kind: "globstar" }
-        : repairPatternSegment(
-            tokenSegmentGen(PATTERN_LITERAL_ALPHABET)(choices),
-            false,
+        : withTrailingDollar(
+            repairPatternSegment(
+              tokenSegmentGen(PATTERN_LITERAL_ALPHABET, true)(choices),
+              false,
+            ),
+            choices,
           ),
     );
   }
@@ -777,6 +926,7 @@ function toPatternSegments(
         ],
         [2, { kind: "star" }],
         [1, { kind: "question" }],
+        [1, { kind: "lit", text: dollarLiteral(choices) }],
       ]),
     );
   }
@@ -974,13 +1124,19 @@ function expectedFindingRenderings(trial: CaptureTrial): string[] {
   return expected.sort();
 }
 
+/**
+ * Render one policy finding from its contractual identities — in order, the
+ * violated rule's name and the offending edge's source identity, kind token,
+ * and target identity (SPEC 14.12, 12.7) — as `rule :: kind: from -> to`.
+ * A finding without the four identities renders verbatim, failing the
+ * comparison with the offense visible.
+ */
 function renderFinding(finding: Finding): string {
-  return (
-    `${finding.rule ?? "<no rule>"} :: ` +
-    (finding.edge === undefined
-      ? "<no edge>"
-      : `${finding.edge.kind}: ${finding.edge.from} -> ${finding.edge.to}`)
-  );
+  if (finding.identities.length !== 4) {
+    return `<malformed 14.12 identities> ${JSON.stringify(finding.identities)}`;
+  }
+  const [rule, from, kind, to] = finding.identities;
+  return `${rule} :: ${kind}: ${from} -> ${to}`;
 }
 
 function renderCaptureTrial(trial: CaptureTrial): string {
@@ -1006,7 +1162,21 @@ async function assertCaptureAgreement(
     files[source] = codeSource(source, trial.targets);
   }
   const expected = expectedFindingRenderings(trial);
-  const workspace = await TestWorkspace.create({ files });
+  // S-9: every staged file is the draw's, judged by the property runner
+  // before the body saw it (`stagedCaptureSources` above). The targets are
+  // declared per draw; a code source never ends in `.mdx` (the path
+  // alphabet spells no `m`, `d`, or `x`), so that list is exactly the
+  // targets. The configuration and the code sources the draw composed are
+  // declared per draw too (`ts.perDraw`: judged well-formed at staging, past
+  // the undeclared-staging guard's TypeScript arm); a code source never ends
+  // in a TypeScript-default suffix (the alphabet spells no `t` or `j`), so
+  // `tsPathsOf` lists the configuration alone and each code source is
+  // listed by name — a code group discovers it whatever its name.
+  const workspace = await TestWorkspace.create({
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
+    ts: { perDraw: [...new Set([...tsPathsOf(files), ...trial.sources])] },
+  });
   try {
     const base =
       `P-7 captures: rules ${JSON.stringify(trial.rules)} over sources ` +
@@ -1058,6 +1228,112 @@ async function assertCaptureAgreement(
 }
 
 // ---------------------------------------------------------------------------
+// S-9's fixed TypeScript form-vector set
+// ---------------------------------------------------------------------------
+
+/**
+ * Each distinct character an alphabet draws, then é — drawn on the Linux leg
+ * alone (`withByteProbe`), spelled here on every platform, so the vectors
+ * cover every leg's draws.
+ */
+function everyCharacterOf(alphabet: Weighted): string {
+  return [...new Set([...alphabet.map(([, char]) => char), E_ACUTE])].join("");
+}
+
+const DISCOVERY_LITERALS = everyCharacterOf(DISCOVERY_PATTERN_LITERAL_ALPHABET);
+const CAPTURE_LITERALS = everyCharacterOf(PATTERN_LITERAL_ALPHABET);
+const CAPTURE_PATH_CHARACTERS = everyCharacterOf(CAPTURE_PATH_ALPHABET);
+
+/** The capture arm's maximal target list (5, the cap), every path byte. */
+const VECTOR_TARGETS: readonly string[] = [
+  `tgt/${CAPTURE_PATH_CHARACTERS}.mdx`,
+  "tgt/a.mdx",
+  "tgt/b/c.mdx",
+  "tgt/$/$0.mdx",
+  "tgt/q/.a.mdx",
+];
+
+/**
+ * The fixed TypeScript form-vector set of the P-7 stagings (TEST-SPEC 17
+ * S-9; the §16 preamble): every configuration file and code source the two
+ * arms compose, through the templates the bodies stage from —
+ * `discoveryConfig` over one pattern and over two (the generator's maximum),
+ * spelling every discovery literal, `*`, `?`, and `**`; `captureConfig` over
+ * one rule, target, and source and over two rules, five targets, and three
+ * sources (the caps), its patterns spelling every capture-side literal,
+ * the captures `$1`–`$3`, and the literal `$` forms (`$0`, `$` fused to a
+ * non-digit, a trailing `$`); and `codeSource` at depths 0, 1, and 3 over
+ * one target and five, spelling every capture-side path byte. Each is
+ * `[name, staged path, source]`: the path selects the grammar (plain
+ * TypeScript, no capture-side source name ending `.tsx`), and a capture
+ * source is a code source whatever its name (a code group globs it).
+ */
+export const P7_TS_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, path: string, source: string]
+> = [
+  [
+    "discovery arm: discoveryConfig over one pattern",
+    "xspec.config.ts",
+    discoveryConfig({
+      patterns: [`**/${DISCOVERY_LITERALS}*?/w*`],
+      paths: [],
+    }),
+  ],
+  [
+    "discovery arm: discoveryConfig over two patterns",
+    "xspec.config.ts",
+    discoveryConfig({
+      patterns: [`${DISCOVERY_LITERALS}/**`, "w/*?/**"],
+      paths: ["w/a.mdx"],
+    }),
+  ],
+  [
+    "capture arm: captureConfig over one rule, target, and source",
+    "xspec.config.ts",
+    captureConfig({
+      rules: [{ name: "r0", from: "a$1", to: "tgt/$1.mdx" }],
+      sources: ["ab"],
+      targets: ["tgt/b.mdx"],
+    }),
+  ],
+  [
+    "capture arm: captureConfig over two rules, five targets, and three sources",
+    "xspec.config.ts",
+    captureConfig({
+      rules: [
+        {
+          name: "r0",
+          from: `**/$0$a$$1/${CAPTURE_LITERALS}*?$`,
+          to: "tgt/**/$$1$0.mdx",
+        },
+        {
+          name: "r1",
+          from: "a$2$3/$(*",
+          to: `tgt/${CAPTURE_LITERALS}$/$3$2.mdx`,
+        },
+      ],
+      sources: [`${CAPTURE_PATH_CHARACTERS}/q`, "a/b/c", "$0"],
+      targets: VECTOR_TARGETS,
+    }),
+  ],
+  [
+    "capture arm: codeSource at depth 0 over one target",
+    "ab",
+    codeSource("ab", ["tgt/b.mdx"]),
+  ],
+  [
+    "capture arm: codeSource at depth 1 over five targets",
+    `${CAPTURE_PATH_CHARACTERS}/q`,
+    codeSource(`${CAPTURE_PATH_CHARACTERS}/q`, VECTOR_TARGETS),
+  ],
+  [
+    "capture arm: codeSource at depth 3 over five targets",
+    "a/b/c/$0",
+    codeSource("a/b/c/$0", VECTOR_TARGETS),
+  ],
+];
+
+// ---------------------------------------------------------------------------
 // The registered property test
 // ---------------------------------------------------------------------------
 
@@ -1065,15 +1341,12 @@ const P_7 = defineProductTest({
   id: "P-7",
   title:
     "property: over random patterns and paths (foreign-dialect metacharacters " +
-    "included), discovery match decisions equal the spec oracle via `ids`, and " +
-    "policy capture matching — from-match, unique shortest-match capture " +
-    "values, to-expansion agreement, captures never spanning `/` or matching " +
-    "empty — equals the oracle via `check` findings (SPEC 7, 7.5; TEST-SPEC " +
-    "§16 P-7)",
-  // Wall-clock hang guard only (H-10): two properties over three fixed seeds
-  // (E-5); one workspace and one to three subprocess runs per trial, plus the
-  // shrink budgets on falsification.
-  timeoutMs: 420_000,
+    "and the literal `$` capture-boundary forms `$0`/`$<non-digit>`/trailing " +
+    "`$` included), discovery match decisions equal the spec oracle via " +
+    "`ids`, and policy capture matching — from-match, unique shortest-match " +
+    "capture values, to-expansion agreement, captures never spanning `/` or " +
+    "matching empty — equals the oracle via `check` findings (SPEC 7, 7.5; " +
+    "TEST-SPEC §16 P-7)",
   run: async (product) => {
     await checkProperty(
       "P-7 glob matching (discovery)",
@@ -1081,7 +1354,12 @@ const P_7 = defineProductTest({
       async (trial) => {
         await assertDiscoveryAgreement(product, trial);
       },
-      { runs: 8, maxShrinkExecutions: 120, render: renderDiscoveryTrial },
+      {
+        runs: 8,
+        maxShrinkExecutions: 120,
+        render: renderDiscoveryTrial,
+        drawSources: stagedDiscoverySources,
+      },
     );
     await checkProperty(
       "P-7 captures (policy)",
@@ -1089,7 +1367,12 @@ const P_7 = defineProductTest({
       async (trial) => {
         await assertCaptureAgreement(product, trial);
       },
-      { runs: 5, maxShrinkExecutions: 120, render: renderCaptureTrial },
+      {
+        runs: 5,
+        maxShrinkExecutions: 120,
+        render: renderCaptureTrial,
+        drawSources: stagedCaptureSources,
+      },
     );
   },
 });

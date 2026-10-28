@@ -1,0 +1,1213 @@
+// Permission-based stagings of environment refusals (TEST-SPEC T14-9, T14-10,
+// T13.5-7; E-1). Harness machinery only: no product imports, no test
+// framework dependence.
+//
+// - T14-9 (write refusals): an environment refusal is staged by permission
+//   removal alone — the directory holding the path made read-only and, where
+//   the path is occupied, its occupant made unwritable — so that creation,
+//   replacement in place or by renaming, appending, and removal are all
+//   refused whatever write strategy the product uses (14.24 pins the effect,
+//   never the mechanism). `stageWriteRefusal` is that discipline for one
+//   path; `stageWriteRefusalUnder` applies it to every path beneath a
+//   directory whose contents the harness does not know by name (the derived
+//   files under `specs/b/`, emitted Markdown under `out/specs`) while
+//   leaving the directory's own parent untouched, so a product's
+//   exclusivity state, wherever in the workspace it keeps it, never meets
+//   the staging. Graph data's is T14-9's graph-data staging,
+//   `stageGraphDataWriteRefusal`, wherever a test refuses a graph-data write
+//   by staging `.xspec` unwritable: graph data's paths are unenumerated
+//   (SPEC 13.3: files directly in the area or in directories of its own
+//   below it), so it covers the area and every path of T13.3-2's
+//   operational path set, as T14-10(f) stages graph data's refused reads —
+//   `.xspec` itself and every directory of the set made read-only and every
+//   file of it unwritable (the adapter layer's `collectGraphDataEntries`
+//   walks the set), so every graph-data write is refused whatever layout
+//   graph data takes — while the journal, the session directory, and the
+//   lock path keep their modes: neither a journal append, a session write,
+//   nor a held run's own entry meets the staging (release's deletion of the
+//   emptied lock directory, an entry of the read-only area, is refused,
+//   which changes no outcome — SPEC 13.5, 14.24).
+// - T14-10 (read refusals): a refused content read is the file's read
+//   permission removed with its write permission kept (mode `-w-------`,
+//   0o200), so a regeneration that replaces or rewrites the object is never
+//   itself refused; a refused directory listing is the directory's read
+//   permission removed with search kept (`--x------`, 0o100), so its entries
+//   stay reachable by name. Nonexistence is never staged as a refusal, and
+//   symbolic links and non-directory components are never involved: a
+//   staging naming an absent, symlinked, or otherwise unstageable object is a
+//   staging error, not a refusal.
+// - Directory modes (T13.5-10(d), (h), T13.5-11, T14-9's and T14-10's
+//   acquisition arms): a directory given a stated mode — a lock directory,
+//   a leftover in it, or `.xspec` made unlistable but writable (`-wx`),
+//   unwritable (`r-x`), or unsearchable (`rw-`) — whose effect TEST-SPEC
+//   states probe by probe: its listing, a creation in it, the examination of
+//   an entry's kind, an entry's removal, the read of a file below it, each
+//   refused or kept as declared (`stageDirectoryMode`). Mode `000` — read,
+//   write, and search all removed — is the form for a directory both of
+//   whose routes TEST-SPEC refuses alike (T14-10(k)'s working directory,
+//   entered first — helpers/subprocess.ts `runProductInEnteredDirectory` —
+//   and (l)'s directories holding the journal, a session file, and the
+//   configuration; T11.2-6's emit directory `out`; T6.3-6(e)'s object store
+//   and inner `.git`): its listing, the examination of every kind below it,
+//   and every read below it are refused, spelled relative to it or walked
+//   absolutely, so a product meets a refusal whatever its route; the
+//   staging verifies on this process the listing, the examination of the
+//   entry the test names, and, where the test names a file below it, that
+//   file's read. Its restore reinstates the recorded mode where
+//   the directory still stands, a directory a product's removal took away or
+//   renamed being left to the checks' diagnosis.
+// - E-1 self-verification: before returning, every staging verifies itself
+//   in the harness's own process — its own attempt at the staged object must
+//   be refused (`EACCES`/`EPERM`), and the permission it keeps must still be
+//   granted — and reports an ineffective one as `HarnessStagingError`. That
+//   error is deliberately NOT a `HarnessAssertionError` (H-8): a privileged
+//   runner, whose CAP_DAC_OVERRIDE writes into a read-only directory and
+//   reads a mode-0o200 file, is a harness error (H-11), never a diagnosed
+//   product failure, a pass, or a skip (H-9). CI makes the runner
+//   unprivileged through .github/scripts/run-without-network.sh; a root
+//   sandbox reproduces its inner stage with
+//   `unshare --map-user=<uid> --map-group=<gid> -- <command>` (AGENTS.md).
+// - Names (SPEC 13.1, 13.3): the names in a product-written area are the
+//   product's to choose — graph data under `.xspec`, a companion's suffix
+//   under `specs/b` — and need be neither ASCII nor even valid UTF-8 (Linux).
+//   So wherever a staging reaches entries the harness does not name (the
+//   area form's walk, the graph-data staging's, a listing refusal's by-name
+//   probe) it lists them as raw bytes and acts on each at its exact byte
+//   path, never through a UTF-8 decode, which would misname such an entry
+//   and so skip or miss it; a caller holding such a path passes it as bytes
+//   (`StagedPath`). A diagnosis renders a path segment that is not valid
+//   UTF-8 as its hex.
+// - Platform: the Linux leg's (E-1). On any other platform every staging
+//   throws `HarnessStagingError` at once; the Linux-leg tests are never
+//   selected into the Windows subset (E-6).
+//
+// Every staging records the modes it changes and returns a `restore()` that
+// reinstates them (idempotent) — each where its object still stands: an
+// object a product's removal took away, or renamed away, restores nothing,
+// its state left to the checks' diagnosis (H-8: a product fault is a
+// diagnosed failure, never a harness error; T13.4-12's unreadable entry and
+// unlistable lock directory, which a product may remove). The workspace
+// builder's disposal chmods its tree writable before removal regardless, so
+// a staging left unrestored by a failing test never blocks cleanup.
+
+import { Buffer } from "node:buffer";
+import { randomBytes } from "node:crypto";
+import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { GraphDataEntries } from "./adapters/record-staging.js";
+import {
+  collectGraphDataEntries,
+  GRAPH_DATA_AREA_PATH,
+} from "./adapters/record-staging.js";
+import { snapshotKeyBytes } from "./snapshot.js";
+
+/**
+ * The staging modes, named in every `HarnessStagingError`: the permission
+ * stagings of this module (`directory-mode` among them: a directory given a
+ * stated mode, each declared probe verified; and
+ * `graph-data-write-refusal`: T14-9's graph-data staging, the area and
+ * T13.3-2's operational path set), the workspace builder's S-9
+ * derivability check
+ * of a staged MDX source (`mdx-derivability`, helpers/workspace.ts), its
+ * TypeScript check of a staged code source or configuration file
+ * (`ts-derivability`, helpers/workspace.ts and helpers/ts-derivability.ts),
+ * the builder's undeclared-staging guard (`undeclared-staging`: a plain `.mdx`
+ * staging after a product invocation, which S-7's sweep never reaches and
+ * so must be a staged-source record; helpers/workspace.ts,
+ * helpers/product-invocations.ts), the lock-path leftover and
+ * obstruction stagings (`lock-path-leftover`, helpers/lock-staging.ts: a
+ * staged tree not reading back as declared, a permission removal on a
+ * leftover file the harness's own read reaches, `mkfifo` failing, a platform
+ * that is not the Linux leg's), and 13.5's machine-wide stagings
+ * (helpers/machine-staging.ts; TEST-SPEC E-1, T13.5-9, T13.5-10(e)–(g)):
+ * the administrative access they are made with (`administrative-access`:
+ * `sudo` missing, refusing, or not silent), the second user (`second-user`:
+ * its creation, a launch through it, or its verification failing), the
+ * shared group's access to a workspace (`group-access`), the second mount
+ * (`second-mount`: not made, not verified, or not removed), and the fresh
+ * process-identifier namespaces (`pid-namespace`: a namespace not made, its
+ * first process not answering, a run not lying in it, or one of
+ * T13.5-10(e)–(g)'s verifications on the harness failing), H-1's
+ * ancestor precondition (`self-contained-root`,
+ * helpers/self-contained-root.ts: an ancestor of an arm's staging root
+ * holding an entry named `xspec.config.ts`, the root lying inside a git
+ * working tree, or either left unverified), and H-2's consumer isolation
+ * (`consumer-isolation`, helpers/tooling.ts: an ancestor of a consumer
+ * program's root, or of the directory its runtime output is written to,
+ * holding an entry named `node_modules`, a package named `xspec` where
+ * Node.js's resolver would find it from that output, or either left
+ * unverified).
+ */
+export type StagingMode =
+  | "write-refusal"
+  | "write-refusal-under"
+  | "graph-data-write-refusal"
+  | "read-refusal-of-file"
+  | "read-refusal-of-directory"
+  | "directory-mode"
+  | "mdx-derivability"
+  | "ts-derivability"
+  | "undeclared-staging"
+  | "lock-path-leftover"
+  | "administrative-access"
+  | "second-user"
+  | "group-access"
+  | "second-mount"
+  | "pid-namespace"
+  | "self-contained-root"
+  | "consumer-isolation";
+
+/**
+ * An ineffective or impossible staging: a permission staging (E-1, H-11)
+ * whose object the harness's own attempt reached unrefused (a privileged
+ * runner), a kept permission not granted, an object that cannot be staged
+ * (absent, symlinked, wrong kind), a platform that is not the Linux leg's —
+ * or a staged MDX source contradicting its S-9 declaration (declared
+ * well-formed yet rejected by the stock parser, or declared unparseable yet
+ * deriving; helpers/workspace.ts), a staged code source or configuration
+ * file contradicting its S-9 TypeScript declaration or accepted read one way
+ * only (`ts-derivability`, helpers/workspace.ts), or an MDX source staged
+ * with plain contents after a product invocation, outside the staged-source
+ * ledger the S-9 self-test judges before any product exists
+ * (`undeclared-staging`, helpers/workspace.ts), or a lock-path leftover or
+ * obstruction staging that did not take effect as declared
+ * (`lock-path-leftover`, helpers/lock-staging.ts), or one of 13.5's
+ * machine-wide stagings not made or not verified — a runner withholding
+ * administrative access among them (helpers/machine-staging.ts; E-1), or
+ * H-1's ancestor precondition unmet: an arm presuming nothing above its
+ * staging root whose root has an `xspec.config.ts` above it or lies inside
+ * a git working tree, or where either is left unverified
+ * (`self-contained-root`, helpers/self-contained-root.ts), or H-2's consumer
+ * isolation unmet: a consumer program's root or its runtime output with a
+ * `node_modules` entry above it, or a package named `xspec` within reach of
+ * Node.js's resolver from that output, or either left unverified
+ * (`consumer-isolation`, helpers/tooling.ts). Never a
+ * `HarnessAssertionError`: nothing here is a product verdict — it is a
+ * harness error, never a diagnosed product failure and never a skip.
+ */
+export class HarnessStagingError extends Error {
+  readonly mode: StagingMode;
+  /** The staged object's path: a path string as given, a byte path rendered. */
+  readonly path: string;
+
+  constructor(mode: StagingMode, stagedPath: string, detail: string) {
+    super(`${mode} staging of ${stagedPath}: ${detail}`);
+    this.name = "HarnessStagingError";
+    this.mode = mode;
+    this.path = stagedPath;
+  }
+}
+
+/** A staging in effect: what it staged, and how to undo it. */
+export interface PermissionStaging {
+  readonly mode: StagingMode;
+  /** The staged object as given: a path string, or its exact bytes. */
+  readonly path: string | Buffer;
+  /**
+   * Reinstate every recorded mode, in reverse order of change; idempotent.
+   * An object no longer at its path — a product's removal took it away —
+   * restores nothing, its state left to the checks' diagnosis.
+   */
+  restore(): Promise<void>;
+}
+
+/**
+ * A path a staging takes, absolute: a path string (Node hands it to the
+ * filesystem as UTF-8), or exact path bytes — the form for a name the
+ * product chose that is not valid UTF-8 (module header: Names), e.g.
+ * `TestWorkspace.bytePath`'s.
+ */
+export type StagedPath = string | Uint8Array;
+
+/** A path as this module hands it to `fs`: a string, or exact bytes. */
+type FsPath = string | Buffer;
+
+const WRITE_BITS = 0o222;
+const MODE_BITS = 0o7777;
+const CONTENT_UNREADABLE = 0o200; // -w-------
+const LISTING_UNREADABLE = 0o100; // --x------
+
+const PRIVILEGED_HINT =
+  "the harness's own attempt succeeded, so the staging is ineffective — a " +
+  "privileged runner (E-1 requires an unprivileged identity: CI runs through " +
+  ".github/scripts/run-without-network.sh; as root, run under " +
+  "`unshare --map-user=<uid> --map-group=<gid>`, see AGENTS.md)";
+
+interface ModeRecord {
+  readonly path: FsPath;
+  readonly mode: number;
+}
+
+const SLASH = 0x2f;
+
+/** A staged path as `fs` takes it: a string as given, bytes as a `Buffer`. */
+function toFsPath(target: StagedPath): FsPath {
+  return typeof target === "string" ? target : Buffer.from(target);
+}
+
+/** A path's exact bytes: a byte path's own, a string's UTF-8 (as `fs`'s). */
+function pathBytes(target: FsPath): Buffer {
+  return typeof target === "string" ? Buffer.from(target, "utf8") : target;
+}
+
+/** The entry `name` of the directory `dir`, byte for byte (no decode). */
+function joinBytes(dir: Buffer, name: Buffer): Buffer {
+  return Buffer.concat([dir, Buffer.from([SLASH]), name]);
+}
+
+/** `name` within `dir`: `path.join` for two strings, else the bytes joined. */
+function joinPath(dir: FsPath, name: FsPath): FsPath {
+  if (typeof dir === "string" && typeof name === "string") {
+    return path.join(dir, name);
+  }
+  return joinBytes(pathBytes(dir), pathBytes(name));
+}
+
+/** Whether a path is absolute (bytes: a leading `/`). */
+function isAbsolutePath(target: FsPath): boolean {
+  return typeof target === "string"
+    ? path.isAbsolute(target)
+    : target[0] === SLASH;
+}
+
+/**
+ * A path rendered for a diagnosis: a string as itself; a byte path segment
+ * by segment, each valid UTF-8 segment as its text and any other as
+ * `<bytes HEX>` (the hex of its exact bytes) — so the bytes of a path string
+ * render as that string.
+ */
+function displayPath(target: FsPath): string {
+  if (typeof target === "string") return target;
+  const segments: string[] = [];
+  let start = 0;
+  for (let end = 0; end <= target.length; end++) {
+    if (end < target.length && target[end] !== SLASH) continue;
+    const segment = target.subarray(start, end);
+    const text = segment.toString("utf8");
+    segments.push(
+      Buffer.from(text, "utf8").equals(segment)
+        ? text
+        : `<bytes ${segment.toString("hex")}>`,
+    );
+    start = end + 1;
+  }
+  return segments.join("/");
+}
+
+function errorCode(thrown: unknown): string | undefined {
+  if (typeof thrown === "object" && thrown !== null && "code" in thrown) {
+    const code = (thrown as { code?: unknown }).code;
+    return typeof code === "string" ? code : undefined;
+  }
+  return undefined;
+}
+
+function describeError(thrown: unknown): string {
+  return errorCode(thrown) ?? (thrown instanceof Error ? thrown.message : "");
+}
+
+function freshName(): string {
+  return `.xspec-harness-probe-${randomBytes(6).toString("hex")}`;
+}
+
+/** A probe attempt: resolves to an undo of its effect when not refused. */
+type Attempt = () => Promise<() => Promise<void>>;
+
+/**
+ * Run an attempt that the staging must refuse. A resolved attempt is undone
+ * (best effort) and reported as an ineffective staging; a rejection other
+ * than `EACCES`/`EPERM` is reported as a staging error too — it proves
+ * nothing about the permission.
+ */
+async function expectRefused(
+  mode: StagingMode,
+  stagedPath: string,
+  description: string,
+  attempt: Attempt,
+): Promise<void> {
+  let undo: (() => Promise<void>) | undefined;
+  try {
+    undo = await attempt();
+  } catch (thrown) {
+    const code = errorCode(thrown);
+    if (code === "EACCES" || code === "EPERM") return;
+    throw new HarnessStagingError(
+      mode,
+      stagedPath,
+      `${description} failed with ${describeError(thrown) || String(thrown)} rather than a permission refusal`,
+    );
+  }
+  await undo().catch(() => undefined);
+  throw new HarnessStagingError(
+    mode,
+    stagedPath,
+    `${description} was not refused: ${PRIVILEGED_HINT}`,
+  );
+}
+
+/** Run an attempt the staging must still permit (the kept permission). */
+async function expectAllowed(
+  mode: StagingMode,
+  stagedPath: string,
+  description: string,
+  attempt: Attempt,
+): Promise<void> {
+  let undo: () => Promise<void>;
+  try {
+    undo = await attempt();
+  } catch (thrown) {
+    throw new HarnessStagingError(
+      mode,
+      stagedPath,
+      `${description} failed with ${describeError(thrown) || String(thrown)}: the staging removed more than it may`,
+    );
+  }
+  await undo();
+}
+
+function assertLinux(mode: StagingMode, target: FsPath): void {
+  if (process.platform !== "linux") {
+    throw new HarnessStagingError(
+      mode,
+      displayPath(target),
+      `permission-based stagings belong to the Linux leg (E-1); this platform is ${process.platform}`,
+    );
+  }
+  if (!isAbsolutePath(target)) {
+    throw new HarnessStagingError(
+      mode,
+      displayPath(target),
+      "the staged path must be absolute",
+    );
+  }
+}
+
+type EntryKind = "absent" | "file" | "directory" | "symlink" | "other";
+
+async function kindOf(target: FsPath): Promise<EntryKind> {
+  let stats: fs.Stats;
+  try {
+    stats = await fsp.lstat(target);
+  } catch (thrown) {
+    if (errorCode(thrown) === "ENOENT") return "absent";
+    throw thrown;
+  }
+  if (stats.isSymbolicLink()) return "symlink";
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  return "other";
+}
+
+async function assertPlainDirectory(
+  mode: StagingMode,
+  stagedPath: string,
+  dir: FsPath,
+  role: string,
+): Promise<void> {
+  const kind = await kindOf(dir);
+  if (kind !== "directory") {
+    throw new HarnessStagingError(
+      mode,
+      stagedPath,
+      `${role} ${displayPath(dir)} is ${kind}, not a directory (symbolic links and non-directory components are never involved)`,
+    );
+  }
+}
+
+async function modeOf(target: FsPath): Promise<number> {
+  return (await fsp.stat(target)).mode & MODE_BITS;
+}
+
+/** Record `target`'s mode bits, then set them to `next`. */
+async function setMode(
+  records: ModeRecord[],
+  target: FsPath,
+  next: (prior: number) => number,
+): Promise<void> {
+  const prior = await modeOf(target);
+  records.push({ path: target, mode: prior });
+  await fsp.chmod(target, next(prior));
+}
+
+function makeStaging(
+  mode: StagingMode,
+  staged: FsPath,
+  records: readonly ModeRecord[],
+): PermissionStaging {
+  let restored = false;
+  return {
+    mode,
+    path: staged,
+    async restore(): Promise<void> {
+      if (restored) return;
+      restored = true;
+      for (let i = records.length - 1; i >= 0; i--) {
+        const record = records[i]!;
+        try {
+          await fsp.chmod(record.path, record.mode);
+        } catch (thrown) {
+          // Nothing stands there any more — a product's removal took the
+          // object away, or put a non-directory above it: nothing to
+          // restore, its state left to the checks' diagnosis (H-8).
+          const code = errorCode(thrown);
+          if (code === "ENOENT" || code === "ENOTDIR") continue;
+          throw new HarnessStagingError(
+            mode,
+            displayPath(staged),
+            `restoring mode ${record.mode.toString(8)} of ${displayPath(record.path)} failed with ${describeError(thrown) || String(thrown)}`,
+          );
+        }
+      }
+    },
+  };
+}
+
+/** Verify, then hand the staging out — or undo it and rethrow. */
+async function verified(
+  staging: PermissionStaging,
+  verify: () => Promise<void>,
+): Promise<PermissionStaging> {
+  try {
+    await verify();
+  } catch (thrown) {
+    await staging.restore().catch(() => undefined);
+    throw thrown;
+  }
+  return staging;
+}
+
+// --- write-refusal probes ---------------------------------------------------
+
+/** Creation in `dir`: a fresh file (`wx`) and a fresh directory. */
+async function probeCreation(
+  mode: StagingMode,
+  stagedPath: string,
+  dir: FsPath,
+): Promise<void> {
+  const file = joinPath(dir, freshName());
+  await expectRefused(
+    mode,
+    stagedPath,
+    `creating ${displayPath(file)}`,
+    async () => {
+      const handle = await fsp.open(file, "wx");
+      return async () => {
+        await handle.close();
+        await fsp.unlink(file);
+      };
+    },
+  );
+  const sub = joinPath(dir, freshName());
+  await expectRefused(
+    mode,
+    stagedPath,
+    `creating directory ${displayPath(sub)}`,
+    async () => {
+      await fsp.mkdir(sub);
+      return () => fsp.rmdir(sub);
+    },
+  );
+}
+
+/** Opening `file` for writing (`r+`, no truncation) and for appending. */
+async function probeWriteOpen(
+  mode: StagingMode,
+  stagedPath: string,
+  file: FsPath,
+): Promise<void> {
+  for (const flags of ["r+", "a"] as const) {
+    await expectRefused(
+      mode,
+      stagedPath,
+      `opening ${displayPath(file)} with ${JSON.stringify(flags)}`,
+      async () => {
+        const handle = await fsp.open(file, flags);
+        return () => handle.close();
+      },
+    );
+  }
+}
+
+/**
+ * Renaming a fresh sibling over `target` (absent or a file), and — when the
+ * occupant is a file — unlinking it. The sibling lives in a scratch
+ * directory under the OS temp directory, where every `TestWorkspace` is
+ * created (one filesystem, so the rename reaches the permission check rather
+ * than `EXDEV`); it carries the occupant's bytes so an unrefused rename
+ * leaves them in place, and it backs an unrefused unlink.
+ */
+async function probeReplaceAndRemove(
+  mode: StagingMode,
+  stagedPath: string,
+  target: FsPath,
+  occupied: boolean,
+): Promise<void> {
+  const scratch = await fsp.mkdtemp(
+    path.join(os.tmpdir(), "xspec-harness-probe-"),
+  );
+  const sibling = path.join(scratch, "sibling");
+  try {
+    if (occupied) {
+      await fsp
+        .copyFile(target, sibling)
+        .catch(() => fsp.writeFile(sibling, ""));
+    } else {
+      await fsp.writeFile(sibling, "");
+    }
+    await expectRefused(
+      mode,
+      stagedPath,
+      `renaming ${sibling} over ${displayPath(target)}`,
+      async () => {
+        await fsp.rename(sibling, target);
+        return async () => {
+          if (occupied) await fsp.copyFile(target, sibling);
+          else await fsp.unlink(target);
+        };
+      },
+    );
+    if (occupied) {
+      await expectRefused(
+        mode,
+        stagedPath,
+        `unlinking ${displayPath(target)}`,
+        async () => {
+          await fsp.unlink(target);
+          return () => fsp.copyFile(sibling, target);
+        },
+      );
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+/**
+ * E-1 verification of a path-form write refusal (exported for the harness
+ * self-test, which runs it on an unstaged path to see the ineffective-staging
+ * report fire): every write the discipline refuses is attempted in this
+ * process and must be refused.
+ */
+export async function verifyWriteRefusal(target: string): Promise<void> {
+  const mode: StagingMode = "write-refusal";
+  const dir = path.dirname(target);
+  await probeCreation(mode, target, dir);
+  const occupied = (await kindOf(target)) === "file";
+  if (occupied) await probeWriteOpen(mode, target, target);
+  await probeReplaceAndRemove(mode, target, target, occupied);
+}
+
+/**
+ * Stage a write refusal at `target` (T14-9's discipline): the directory
+ * holding it made read-only and, where `target` is a regular file, that
+ * occupant made unwritable. `target` may be absent (a creation the product
+ * owes) but never a directory (`stageWriteRefusalUnder`), a symbolic link, or
+ * any other kind. Verified on this process before returning (E-1).
+ */
+export async function stageWriteRefusal(
+  target: string,
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "write-refusal";
+  assertLinux(mode, target);
+  const dir = path.dirname(target);
+  await assertPlainDirectory(mode, target, dir, "the holding directory");
+  const kind = await kindOf(target);
+  if (kind === "directory") {
+    throw new HarnessStagingError(
+      mode,
+      target,
+      "the target is a directory; stage every path beneath it with stageWriteRefusalUnder",
+    );
+  }
+  if (kind !== "absent" && kind !== "file") {
+    throw new HarnessStagingError(
+      mode,
+      target,
+      `the target is ${kind} (symbolic links and non-directory components are never involved)`,
+    );
+  }
+  const records: ModeRecord[] = [];
+  await setMode(records, dir, (prior) => prior & ~WRITE_BITS);
+  if (kind === "file") {
+    await setMode(records, target, (prior) => prior & ~WRITE_BITS);
+  }
+  return verified(makeStaging(mode, target, records), () =>
+    verifyWriteRefusal(target),
+  );
+}
+
+interface Subtree {
+  readonly dirs: Buffer[];
+  readonly files: Buffer[];
+}
+
+/**
+ * Every directory (the root first) and regular file beneath `root`, each as
+ * its exact byte path: names are listed as raw bytes in byte order and each
+ * entry classified by `lstat` at its exact bytes (module header: Names), so
+ * a name that is not valid UTF-8 is reached like any other; symbolic links
+ * and other kinds are left out.
+ */
+async function walkSubtree(root: FsPath): Promise<Subtree> {
+  const dirs = [pathBytes(root)];
+  const files: Buffer[] = [];
+  for (let i = 0; i < dirs.length; i++) {
+    const dir = dirs[i]!;
+    const names = (await fsp.readdir(dir, { encoding: "buffer" })).sort(
+      Buffer.compare,
+    );
+    for (const name of names) {
+      const entry = joinBytes(dir, name);
+      const kind = await kindOf(entry);
+      if (kind === "directory") dirs.push(entry);
+      else if (kind === "file") files.push(entry);
+    }
+  }
+  return { dirs, files };
+}
+
+/**
+ * E-1 verification of an area write refusal (exported for the self-test):
+ * creation is attempted in every directory beneath `directory`, a write-open
+ * on every regular file, a rename into `directory`, and the removal of its
+ * first regular file — each entry reached at its exact bytes.
+ */
+export async function verifyWriteRefusalUnder(
+  directory: StagedPath,
+): Promise<void> {
+  const mode: StagingMode = "write-refusal-under";
+  const area = toFsPath(directory);
+  const shown = displayPath(area);
+  const { dirs, files } = await walkSubtree(area);
+  for (const dir of dirs) await probeCreation(mode, shown, dir);
+  for (const file of files) await probeWriteOpen(mode, shown, file);
+  await probeReplaceAndRemove(mode, shown, joinPath(area, freshName()), false);
+  if (files.length > 0) {
+    await probeReplaceAndRemove(mode, shown, files[0]!, true);
+  }
+}
+
+/**
+ * Stage a write refusal of every path beneath `directory` — T14-9's
+ * discipline for an area whose write paths the harness cannot name
+ * (`specs/b`, `out/specs`; never the graph-data area, whose durable and
+ * transient occupants keep their modes under `stageGraphDataWriteRefusal`):
+ * the directory and every directory beneath it made read-only, every
+ * regular file beneath made unwritable, symbolic links left alone, and the
+ * directory's own parent untouched. Every entry is reached at its exact
+ * bytes, whatever name the product chose (module header: Names). Verified
+ * before returning (E-1).
+ */
+export async function stageWriteRefusalUnder(
+  directory: StagedPath,
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "write-refusal-under";
+  const area = toFsPath(directory);
+  assertLinux(mode, area);
+  const shown = displayPath(area);
+  await assertPlainDirectory(mode, shown, area, "the staged area");
+  const { dirs, files } = await walkSubtree(area);
+  const records: ModeRecord[] = [];
+  for (const entry of [...dirs, ...files]) {
+    await setMode(records, entry, (prior) => prior & ~WRITE_BITS);
+  }
+  return verified(makeStaging(mode, area, records), () =>
+    verifyWriteRefusalUnder(area),
+  );
+}
+
+// --- the graph-data write refusal -------------------------------------------
+
+/** The area's durable occupants, no graph data (SPEC 13.4, 6.1, 10.7). */
+const JOURNAL_NAME = "journal";
+const SESSION_DIRECTORY_NAME = "reviews";
+/** The owner's bits a kept path's own mode must grant for it to be probed. */
+const OWNER_WRITE = 0o200;
+const OWNER_WRITE_AND_SEARCH = 0o300;
+
+/** T13.3-2's operational path set as the graph-data staging reaches it. */
+interface GraphDataPaths {
+  /** Every directory of the set, never the area itself, in byte order. */
+  readonly dirs: Buffer[];
+  /** Every plain file of the set, in byte order. */
+  readonly files: Buffer[];
+}
+
+/**
+ * Every directory and plain file of T13.3-2's operational path set in the
+ * workspace rooted at `root` — every path under `.xspec/` but the durable
+ * journal and session directory and the transient lock path, each with
+ * everything under it — as the adapter layer's one walk of the set finds
+ * them (`collectGraphDataEntries`: names listed as raw bytes, each entry
+ * classified by `lstat`, symbolic links and other kinds left out), each as
+ * its exact byte path (module header: Names). A walk that fails — the area
+ * absent, or a listing the environment refuses — is a staging error.
+ */
+async function graphDataPaths(
+  mode: StagingMode,
+  root: string,
+  area: string,
+): Promise<GraphDataPaths> {
+  let entries: GraphDataEntries;
+  try {
+    entries = await collectGraphDataEntries(root);
+  } catch (thrown) {
+    throw new HarnessStagingError(
+      mode,
+      area,
+      `walking T13.3-2's operational path set failed with ${describeError(thrown) || String(thrown)}`,
+    );
+  }
+  const rootBytes = pathBytes(root);
+  const at = (key: string): Buffer =>
+    joinBytes(rootBytes, snapshotKeyBytes(key));
+  return { dirs: entries.directories.map(at), files: entries.files.map(at) };
+}
+
+/**
+ * The permissions the graph-data staging keeps, attempted in this process
+ * and required granted (E-1): the journal, where a plain file whose mode
+ * grants its owner writing, opens for appending (no byte written), and the
+ * session directory, where a plain directory whose mode grants its owner
+ * writing and search, admits a fresh file, created and removed again — the
+ * read-only area refusing neither (SPEC 6.1, 10.7, 13.5). A path absent, of
+ * another kind, or whose own mode withholds the permission holds none the
+ * staging keeps and is not probed; nor is the lock path, a held run's
+ * (13.5), where the harness never makes an entry.
+ */
+async function probeGraphDataStagingKeeps(
+  mode: StagingMode,
+  area: string,
+): Promise<void> {
+  const journal = path.join(area, JOURNAL_NAME);
+  if (
+    (await kindOf(journal)) === "file" &&
+    ((await modeOf(journal)) & OWNER_WRITE) !== 0
+  ) {
+    await expectAllowed(
+      mode,
+      area,
+      `opening ${journal} for appending`,
+      async () => {
+        const handle = await fsp.open(journal, "a");
+        return () => handle.close();
+      },
+    );
+  }
+  const sessions = path.join(area, SESSION_DIRECTORY_NAME);
+  if (
+    (await kindOf(sessions)) === "directory" &&
+    ((await modeOf(sessions)) & OWNER_WRITE_AND_SEARCH) ===
+      OWNER_WRITE_AND_SEARCH
+  ) {
+    const file = path.join(sessions, freshName());
+    await expectAllowed(
+      mode,
+      area,
+      `creating and removing ${file}`,
+      async () => {
+        const handle = await fsp.open(file, "wx");
+        await handle.close();
+        await fsp.unlink(file);
+        return async () => undefined;
+      },
+    );
+  }
+}
+
+/**
+ * E-1 verification of T14-9's graph-data staging in the workspace rooted at
+ * `root` (exported for the self-test, which runs it on an unstaged
+ * workspace to see the ineffective-staging report fire): creation is
+ * attempted in `.xspec` and in every directory of T13.3-2's operational
+ * path set, a write-open on every file of the set, a rename into `.xspec`,
+ * and the replacement and removal of the set's first file — each refused,
+ * each entry reached at its exact bytes — and the permissions the staging
+ * keeps are attempted, each required granted
+ * (`probeGraphDataStagingKeeps`).
+ */
+export async function verifyGraphDataWriteRefusal(root: string): Promise<void> {
+  const mode: StagingMode = "graph-data-write-refusal";
+  const area = path.join(root, GRAPH_DATA_AREA_PATH);
+  const { dirs, files } = await graphDataPaths(mode, root, area);
+  for (const dir of [area, ...dirs]) await probeCreation(mode, area, dir);
+  for (const file of files) await probeWriteOpen(mode, area, file);
+  await probeReplaceAndRemove(mode, area, joinPath(area, freshName()), false);
+  if (files.length > 0) {
+    await probeReplaceAndRemove(mode, area, files[0]!, true);
+  }
+  await probeGraphDataStagingKeeps(mode, area);
+}
+
+/**
+ * Stage T14-9's graph-data write refusal in the workspace rooted at `root`
+ * — the discipline wherever a test refuses a graph-data write by staging
+ * `.xspec` unwritable. Graph data's paths are unenumerated (SPEC 13.3: a
+ * product may keep it in files directly in the area or in directories of
+ * its own below it), so the staging covers the area and every path of
+ * T13.3-2's operational path set, as T14-10(f) stages graph data's refused
+ * reads: `.xspec` itself and every directory of the set made read-only and
+ * every plain file of it unwritable, each reached at its exact name bytes
+ * (module header: Names), symbolic links and other kinds left alone — so
+ * every graph-data write is refused whatever layout graph data takes, where
+ * `.xspec` alone made read-only would leave a file in a directory below it
+ * replaceable. The journal, the session directory, and the lock path, each
+ * with everything under it, keep their modes. `.xspec` must be a plain
+ * directory; graph data may be absent, its creation refused by the area's
+ * mode. Verified before returning (E-1, `verifyGraphDataWriteRefusal`); a
+ * staging that fails part-way, or whose verification fails, reinstates
+ * every mode it changed.
+ */
+export async function stageGraphDataWriteRefusal(
+  root: string,
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "graph-data-write-refusal";
+  assertLinux(mode, root);
+  const area = path.join(root, GRAPH_DATA_AREA_PATH);
+  await assertPlainDirectory(mode, area, area, "the graph-data area");
+  const { dirs, files } = await graphDataPaths(mode, root, area);
+  const records: ModeRecord[] = [];
+  const staging = makeStaging(mode, area, records);
+  try {
+    for (const entry of [area, ...dirs, ...files]) {
+      await setMode(records, entry, (prior) => prior & ~WRITE_BITS);
+    }
+  } catch (thrown) {
+    await staging.restore().catch(() => undefined);
+    throw thrown;
+  }
+  return verified(staging, () => verifyGraphDataWriteRefusal(root));
+}
+
+// --- read-refusal probes ----------------------------------------------------
+
+/**
+ * E-1 verification of a file read refusal (exported for the self-test): the
+ * read must be refused, a write-open (append, no bytes written) must succeed.
+ */
+export async function verifyReadRefusalOfFile(
+  target: StagedPath,
+): Promise<void> {
+  const mode: StagingMode = "read-refusal-of-file";
+  const file = toFsPath(target);
+  const shown = displayPath(file);
+  await expectRefused(mode, shown, `reading ${shown}`, async () => {
+    const handle = await fsp.open(file, "r");
+    return () => handle.close();
+  });
+  await expectAllowed(mode, shown, `opening ${shown} for writing`, async () => {
+    const handle = await fsp.open(file, "a");
+    return () => handle.close();
+  });
+}
+
+/**
+ * Stage a refused content read of the regular file `target` (T14-10): mode
+ * 0o200, its write permission kept so a regeneration replacing or rewriting
+ * it is never refused. Nonexistence is never staged as a refusal. A file
+ * whose name the product chose is passed as its exact bytes (module header:
+ * Names). Verified before returning (E-1).
+ */
+export async function stageReadRefusalOfFile(
+  target: StagedPath,
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "read-refusal-of-file";
+  const file = toFsPath(target);
+  assertLinux(mode, file);
+  const kind = await kindOf(file);
+  if (kind !== "file") {
+    throw new HarnessStagingError(
+      mode,
+      displayPath(file),
+      `the target is ${kind}, not a regular file (nonexistence is never staged as a refusal; symbolic links are never involved)`,
+    );
+  }
+  const records: ModeRecord[] = [];
+  await setMode(records, file, () => CONTENT_UNREADABLE);
+  return verified(makeStaging(mode, file, records), () =>
+    verifyReadRefusalOfFile(file),
+  );
+}
+
+/**
+ * E-1 verification of a directory read refusal (exported for the self-test):
+ * the listing must be refused; search must be kept — the directory passes an
+ * execute-access check and, when `knownEntry` names one of its entries (a
+ * name string, or its exact bytes), that entry is reachable by name.
+ */
+export async function verifyReadRefusalOfDirectory(
+  target: StagedPath,
+  knownEntry?: StagedPath,
+): Promise<void> {
+  const mode: StagingMode = "read-refusal-of-directory";
+  const dir = toFsPath(target);
+  const shown = displayPath(dir);
+  await expectRefused(mode, shown, `listing ${shown}`, async () => {
+    await fsp.readdir(dir);
+    return async () => undefined;
+  });
+  await expectAllowed(mode, shown, `searching ${shown}`, async () => {
+    await fsp.access(dir, fs.constants.X_OK);
+    return async () => undefined;
+  });
+  if (knownEntry !== undefined) {
+    const entry = joinPath(dir, toFsPath(knownEntry));
+    await expectAllowed(
+      mode,
+      shown,
+      `reaching ${displayPath(entry)} by name`,
+      async () => {
+        await fsp.lstat(entry);
+        return async () => undefined;
+      },
+    );
+  }
+}
+
+/**
+ * Stage a refused listing of the directory `target` (T14-10): mode 0o100,
+ * its search permission kept so its entries stay reachable by name.
+ * Verified before returning (E-1), the by-name probe using the entry listed
+ * first (bytewise) before the staging, at its exact bytes (module header:
+ * Names), when the directory holds one.
+ */
+export async function stageReadRefusalOfDirectory(
+  target: StagedPath,
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "read-refusal-of-directory";
+  const dir = toFsPath(target);
+  assertLinux(mode, dir);
+  await assertPlainDirectory(mode, displayPath(dir), dir, "the target");
+  const knownEntry = (await fsp.readdir(dir, { encoding: "buffer" })).sort(
+    Buffer.compare,
+  )[0];
+  const records: ModeRecord[] = [];
+  await setMode(records, dir, () => LISTING_UNREADABLE);
+  return verified(makeStaging(mode, dir, records), () =>
+    verifyReadRefusalOfDirectory(dir, knownEntry),
+  );
+}
+
+// --- directory modes --------------------------------------------------------
+
+/**
+ * One verification of a directory-mode staging (`stageDirectoryMode`),
+ * attempted in this process on the staged directory once its mode is set
+ * (E-1): each declared refusal must be refused (`EACCES`/`EPERM`), each
+ * declared kept permission granted.
+ */
+export type DirectoryModeProbe =
+  /** Listing the directory (`readdir`). */
+  | { readonly attempt: "list"; readonly refused: boolean }
+  /**
+   * Creating in it: refused, a fresh file (`wx`) and a fresh directory each
+   * refused; kept, a fresh file created and removed again.
+   */
+  | { readonly attempt: "create"; readonly refused: boolean }
+  /**
+   * Examining the kind of its entry `name` (`lstat`, never following a
+   * link) — a name or its exact bytes; an entry declared examinable must
+   * stand there, one declared refused may be absent (the refusal comes
+   * first).
+   */
+  | {
+      readonly attempt: "examine";
+      readonly name: StagedPath;
+      readonly refused: boolean;
+    }
+  /**
+   * Removing its entry `name`, a plain file: renaming a fresh sibling over
+   * it and unlinking it, each refused (T14-9's removal and replacement).
+   */
+  | { readonly attempt: "remove"; readonly name: StagedPath }
+  /**
+   * Reading the file `name` below it — an entry, or a relative path through
+   * its subdirectories (T6.3-6(e)'s object file under the object store), a
+   * string or its exact bytes — opened for reading; the file must stand
+   * there, a plain file, judged before anything changes, so a refusal
+   * declared is a real file's.
+   */
+  | {
+      readonly attempt: "read";
+      readonly name: StagedPath;
+      readonly refused: boolean;
+    };
+
+/**
+ * E-1 verification of a directory-mode staging (exported for the self-test,
+ * which runs it on an unstaged directory to see the ineffective-staging
+ * report fire): every probe attempted in this process, in order.
+ */
+export async function verifyDirectoryMode(
+  target: StagedPath,
+  probes: readonly DirectoryModeProbe[],
+): Promise<void> {
+  const mode: StagingMode = "directory-mode";
+  const dir = toFsPath(target);
+  const shown = displayPath(dir);
+  for (const probe of probes) {
+    switch (probe.attempt) {
+      case "list": {
+        const attempt: Attempt = async () => {
+          await fsp.readdir(dir);
+          return async () => undefined;
+        };
+        if (probe.refused) {
+          await expectRefused(mode, shown, `listing ${shown}`, attempt);
+        } else {
+          await expectAllowed(mode, shown, `listing ${shown}`, attempt);
+        }
+        break;
+      }
+      case "create": {
+        if (probe.refused) {
+          await probeCreation(mode, shown, dir);
+          break;
+        }
+        const file = joinPath(dir, freshName());
+        await expectAllowed(
+          mode,
+          shown,
+          `creating and removing ${displayPath(file)}`,
+          async () => {
+            const handle = await fsp.open(file, "wx");
+            await handle.close();
+            await fsp.unlink(file);
+            return async () => undefined;
+          },
+        );
+        break;
+      }
+      case "examine": {
+        const entry = joinPath(dir, toFsPath(probe.name));
+        const attempt: Attempt = async () => {
+          await fsp.lstat(entry);
+          return async () => undefined;
+        };
+        const description = `examining ${displayPath(entry)}`;
+        if (probe.refused) {
+          await expectRefused(mode, shown, description, attempt);
+        } else {
+          await expectAllowed(mode, shown, description, attempt);
+        }
+        break;
+      }
+      case "remove":
+        await probeReplaceAndRemove(
+          mode,
+          shown,
+          joinPath(dir, toFsPath(probe.name)),
+          true,
+        );
+        break;
+      case "read": {
+        const file = joinPath(dir, toFsPath(probe.name));
+        const attempt: Attempt = async () => {
+          const handle = await fsp.open(file, "r");
+          return () => handle.close();
+        };
+        const description = `reading ${displayPath(file)}`;
+        if (probe.refused) {
+          await expectRefused(mode, shown, description, attempt);
+        } else {
+          await expectAllowed(mode, shown, description, attempt);
+        }
+        break;
+      }
+    }
+  }
+}
+
+/**
+ * Give the directory `target` the mode `bits` — e.g. 0o300 (`-wx`: its
+ * listing refused, its writes and search kept), 0o500 (`r-x`: creation and
+ * removal in it refused), 0o600 (`rw-`: its entries' examination refused),
+ * 0o000 (read, write, and search removed: its listing, every examination
+ * and read below it, and creation in it refused, by whatever route; module
+ * header, Directory modes) — and verify on this process each of `probes`
+ * (E-1), at least one. The directory must be a plain directory (no symbolic
+ * link), a `remove` or `read` probe's entry a plain file and a kept
+ * `examine` probe's entry present, judged before anything changes. Its
+ * restore reinstates the recorded mode where a directory still stands at
+ * `target` — one a product's removal took away or renamed restores nothing,
+ * its state left to the checks' diagnosis — and is idempotent.
+ */
+export async function stageDirectoryMode(
+  target: StagedPath,
+  bits: number,
+  probes: readonly DirectoryModeProbe[],
+): Promise<PermissionStaging> {
+  const mode: StagingMode = "directory-mode";
+  const dir = toFsPath(target);
+  assertLinux(mode, dir);
+  const shown = displayPath(dir);
+  await assertPlainDirectory(mode, shown, dir, "the target");
+  if (!Number.isInteger(bits) || bits < 0 || bits > MODE_BITS) {
+    throw new HarnessStagingError(mode, shown, `${String(bits)} is no mode`);
+  }
+  if (probes.length === 0) {
+    throw new HarnessStagingError(
+      mode,
+      shown,
+      "a directory-mode staging verifies at least one probe (E-1)",
+    );
+  }
+  for (const probe of probes) {
+    const plainFile = probe.attempt === "remove" || probe.attempt === "read";
+    const entry =
+      plainFile || (probe.attempt === "examine" && !probe.refused)
+        ? joinPath(dir, toFsPath(probe.name))
+        : undefined;
+    if (entry === undefined) continue;
+    let kind: EntryKind;
+    try {
+      kind = await kindOf(entry);
+    } catch (thrown) {
+      throw new HarnessStagingError(
+        mode,
+        shown,
+        `the ${probe.attempt} probe's entry ${displayPath(entry)} cannot be examined: ${describeError(thrown) || String(thrown)}`,
+      );
+    }
+    const wanted = plainFile ? kind === "file" : kind !== "absent";
+    if (!wanted) {
+      throw new HarnessStagingError(
+        mode,
+        shown,
+        `the ${probe.attempt} probe's entry ${displayPath(entry)} is ${kind}` +
+          (plainFile ? ", not a plain file" : ""),
+      );
+    }
+  }
+  const prior = await modeOf(dir);
+  await fsp.chmod(dir, bits);
+  let restored = false;
+  const staging: PermissionStaging = {
+    mode,
+    path: dir,
+    async restore(): Promise<void> {
+      if (restored) return;
+      restored = true;
+      let kind: EntryKind;
+      try {
+        kind = await kindOf(dir);
+      } catch (thrown) {
+        if (errorCode(thrown) === "ENOTDIR") return;
+        throw thrown;
+      }
+      if (kind !== "directory") return;
+      try {
+        await fsp.chmod(dir, prior);
+      } catch (thrown) {
+        throw new HarnessStagingError(
+          mode,
+          shown,
+          `restoring mode ${prior.toString(8)} failed with ${describeError(thrown) || String(thrown)}`,
+        );
+      }
+    },
+  };
+  return verified(staging, () => verifyDirectoryMode(dir, probes));
+}

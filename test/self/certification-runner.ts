@@ -12,13 +12,24 @@
 //   fail   the body threw `HarnessAssertionError` — a diagnosed assertion
 //          failure, the only legitimate way a test rejects a product; this is
 //          what C-1's "fails against a violator" and the S-7 sweep's
-//          "diagnosed assertion failure" mean;
+//          "diagnosed assertion failure" mean, and what H-8's no-product run
+//          yields: the built product's missing artifact fails every body
+//          diagnosed (helpers/subprocess.ts, `missingFilesFailDiagnosed`);
 //   error  the body threw anything else — a harness defect (or an unbuilt
-//          fixture), never a certified failure;
-//   hang   the body did not settle within its budget — the runner records the
-//          hang, leaves the abandoned body observed (a late rejection cannot
-//          crash the run), and completes: a hanging test never hangs the
-//          runner (H-8).
+//          fixture, whose binding never marks its missing executable as
+//          the missing product), never a certified failure — but:
+//   hang   the body ended with the subprocess driver's hang-guard kill
+//          (`ProductRunTimeoutError`, directly or as the cause of what it
+//          threw: helpers/hang-guards.ts `isHangGuardKill`) unconverted — a
+//          product invocation that did not terminate within its own guard
+//          (TEST-SPEC S-3), never a certified failure either.
+//
+// Hang guards (TEST-SPEC S-3, helpers/hang-guards.ts): the runner applies no
+// guard of its own — no per-test watchdog, no run budget. A test is a span
+// over its invocations and harness steps, bounded by their own guards: a
+// hanging product invocation is killed at its own guard, which ends its test
+// (a hang, or the body's diagnosed failure), and the run goes on to the next
+// test, so a hanging product never hangs the runner (H-8).
 //
 // Determinism (E-5, H-10): results are assembled in selection order — the
 // caller's order for named subsets, canonical ID order for the full suite —
@@ -27,6 +38,8 @@
 // wall-clock data.
 
 import { HarnessAssertionError } from "../helpers/assertions.js";
+import { isHangGuardKill } from "../helpers/hang-guards.js";
+import { runProductTestBody } from "../helpers/product-invocations.js";
 import type { ProductTestEntry } from "../helpers/registry.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 
@@ -57,12 +70,6 @@ export interface CertificationRunOptions {
    * conservative: each body may spawn several product subprocesses.
    */
   readonly concurrency?: number;
-  /**
-   * Hang-watchdog override applied to every test in this run, replacing each
-   * entry's own budget (`entry.timeoutMs`). A run knob, never an assertion
-   * input (H-10).
-   */
-  readonly testTimeoutMs?: number;
 }
 
 const DEFAULT_CONCURRENCY = 4;
@@ -101,17 +108,9 @@ export async function runProductTests(
       `certification runner: concurrency must be a positive integer, got ${String(options.concurrency)}.`,
     );
   }
-  if (
-    options.testTimeoutMs !== undefined &&
-    (!Number.isInteger(options.testTimeoutMs) || options.testTimeoutMs <= 0)
-  ) {
-    throw new Error(
-      `certification runner: testTimeoutMs must be a positive integer, got ${String(options.testTimeoutMs)}.`,
-    );
-  }
 
   const results = await inPool(tests, concurrency, (entry) =>
-    runOne(binding, entry, options.testTimeoutMs ?? entry.timeoutMs),
+    runOne(binding, entry),
   );
   const counts = { pass: 0, fail: 0, error: 0, hang: 0 };
   for (const result of results) {
@@ -167,39 +166,35 @@ type Verdict = Pick<ProductTestResult, "outcome" | "diagnosis">;
 async function runOne(
   binding: ProductBinding,
   entry: ProductTestEntry,
-  budgetMs: number,
 ): Promise<ProductTestResult> {
-  const body = (async () => {
-    await entry.run(binding);
-  })();
-  // Keep an abandoned body's eventual rejection observed (hang path): the
-  // verdict is already recorded, and an unhandled rejection would crash the
-  // whole run (H-8).
-  body.catch(() => {});
-
-  let timer: NodeJS.Timeout | undefined;
-  const watchdog = new Promise<Verdict>((resolve) => {
-    timer = setTimeout(() => {
-      resolve({
-        outcome: "hang",
-        diagnosis:
-          `test body did not settle within its ${budgetMs} ms budget — recorded as a hang ` +
-          `and abandoned; a hanging test is a harness defect and never hangs the run (H-8).`,
-      });
-    }, budgetMs);
-  });
-  const settled: Promise<Verdict> = body.then(
+  // The body runs inside its own invocation context
+  // (helpers/product-invocations.ts): the workspace builder's
+  // undeclared-staging guard sees the body's first product invocation
+  // wherever it happens, exactly as under the suite's Vitest wrapper. No
+  // watchdog races it (module header): it settles once its invocations and
+  // steps have, each within its own guard.
+  const verdict: Verdict = await runProductTestBody(entry.id, () =>
+    entry.run(binding),
+  ).then(
     () => ({ outcome: "pass", diagnosis: null }),
     (thrown: unknown) => classifyThrown(thrown),
   );
-  const verdict = await Promise.race([settled, watchdog]);
-  clearTimeout(timer);
   return { id: entry.id, title: entry.title, ...verdict };
 }
 
 function classifyThrown(thrown: unknown): Verdict {
   if (isDiagnosedAssertionFailure(thrown)) {
     return { outcome: "fail", diagnosis: thrown.message };
+  }
+  if (isHangGuardKill(thrown)) {
+    const error = thrown as Error;
+    return {
+      outcome: "hang",
+      diagnosis:
+        `hang — a product invocation did not terminate within its own hang ` +
+        `guard and was killed, ending the test (TEST-SPEC S-3; H-8): ` +
+        `${error.stack ?? `${error.name}: ${error.message}`}`,
+    };
   }
   if (thrown instanceof Error) {
     return {

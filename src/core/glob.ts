@@ -16,10 +16,23 @@
 // adjacent `*` runs. A path segment beginning with `.` is matched only by a
 // pattern segment written with a leading `.` — read from the pattern as
 // written, so `*`, `?`, `**`, captures, and capture references never match
-// a dot-initial segment, and `**` never consumes one. A pattern that
-// resolves outside the workspace root is a configuration error (14.14); an
-// outside-root `--file` value is the flag-level counterpart, a usage error
-// (SPEC 11, 12.0) — this module only reports the condition as data.
+// a dot-initial segment, and `**` never consumes one. Whether a pattern
+// lies outside the workspace root is decided by its spelling alone, a pure
+// depth count over its segments ({@link globLiesOutsideRoot}), separate from
+// matching. An outside-root configured glob or policy selector is a
+// configuration error (14.14); an outside-root `--file` value is the
+// flag-level counterpart, a usage error (SPEC 11, 12.0, 12.3) — this module
+// only reports the condition as data. Every other pattern is inside the
+// root and is matched exactly as spelled: no segment is resolved,
+// collapsed, or dropped. SPEC 7: "every other glob is inside, its `.`,
+// `..`, and empty segments matching nothing" — a discovered file's
+// workspace-relative path is the directory-entry names descending from the
+// root, joined with `/`, so it carries no such segment — and SPEC 12.0:
+// `./specs/A.mdx` and `specs//A.mdx` "name or match no discovered file".
+// Each such segment matches no path segment, and every pattern segment but
+// `**` consumes exactly one, so a pattern holding one matches no path at
+// all: `./specs/*.mdx`, `specs//*.mdx`, `specs/*.mdx/`, `a/../b/*.mdx`, and
+// `specs/**/../*.mdx` match nothing.
 //
 // SPEC 7.5: a `from` pattern MAY contain capture wildcards `$1`…`$9`, each
 // appearing at most once; a capture matches one or more bytes within a
@@ -62,11 +75,12 @@ export type CaptureValues = ReadonlyMap<number, Uint8Array>;
 
 /**
  * Why a pattern does not compile, as data (IMPLEMENTATION cross-cutting
- * rules): "outside-root" — the pattern resolves outside the workspace root
- * (SPEC 7); "duplicate-capture" — a `from` pattern uses a capture wildcard
- * more than once (SPEC 7.5). Both are configuration errors (14.14) when the
- * pattern comes from configuration; an outside-root `--file` value is a
- * usage error (SPEC 11, 12.0). The caller assigns the exit class.
+ * rules): "outside-root" — the pattern lies outside the workspace root by
+ * its spelling alone (SPEC 7, {@link globLiesOutsideRoot});
+ * "duplicate-capture" — a `from` pattern uses a capture wildcard more than
+ * once (SPEC 7.5). Both are configuration errors (14.14) when the pattern
+ * comes from configuration; an outside-root `--file` value is a usage error
+ * (SPEC 11, 12.0). The caller assigns the exit class.
  */
 export type GlobCompileError =
   | { readonly kind: "outside-root" }
@@ -84,6 +98,9 @@ type SegmentToken =
 
 type PatternSegment =
   | { readonly kind: "globstar" } // the whole segment written exactly `**`
+  // A segment written `.`, `..`, or empty (a doubled or trailing `/`, or
+  // the empty pattern): SPEC 7 — it matches nothing, no path segment at all.
+  | { readonly kind: "never" }
   | {
       readonly kind: "tokens";
       readonly tokens: readonly SegmentToken[];
@@ -123,62 +140,68 @@ function isDotDotSegment(segment: Uint8Array): boolean {
   return segment.length === 2 && segment[0] === DOT && segment[1] === DOT;
 }
 
-/**
- * Resolve a pattern's `.` and `..` segments lexically against the
- * workspace root (SPEC 7: configured paths and globs resolve relative to
- * the configuration file's directory, which is the workspace root).
- * Wildcard segments count as ordinary names to resolution; matched paths
- * are canonical workspace-relative paths and never contain dot segments,
- * so matching uses the resolved form. Returns null when the pattern
- * resolves outside the workspace root (SPEC 7 → 14.14): an absolute
- * pattern, or a `..` with no preceding segment left to cancel. Interior
- * empty segments (`//` runs) collapse; a trailing slash keeps one final
- * empty segment — no real path has one, so such a pattern matches nothing.
- */
-function resolveSegments(
-  raw: readonly Uint8Array[],
-): readonly Uint8Array[] | null {
-  const first = raw[0];
-  if (raw.length > 1 && first.length === 0) {
-    return null; // absolute: not workspace-root-relative
-  }
-  const resolved: Uint8Array[] = [];
-  for (let index = 0; index < raw.length; index += 1) {
-    const segment = raw[index];
-    if (segment.length === 0) {
-      if (index > 0 && index === raw.length - 1) {
-        resolved.push(segment);
-      }
-      continue;
-    }
-    if (isDotSegment(segment)) {
-      continue;
-    }
-    if (isDotDotSegment(segment)) {
-      if (resolved.length === 0) {
-        return null; // steps above the workspace root
-      }
-      resolved.pop();
-      continue;
-    }
-    resolved.push(segment);
-  }
-  return resolved;
+function isGlobstarSegment(segment: Uint8Array): boolean {
+  return segment.length === 2 && segment[0] === STAR && segment[1] === STAR;
 }
 
 /**
- * Tokenize one pattern segment: the whole-segment `**` wildcard, or a run
- * of literal bytes, `*`, `?`, and — in capture modes — `$1`…`$9` tokens.
- * Every other byte is a literal (SPEC 7); `$` not followed by `1`…`9`, and
- * every `$` in plain mode, is a literal too (SPEC 7.5: capture wildcards
- * exist only in policy `files` selectors).
+ * SPEC 7: whether a glob lies outside the workspace root is decided by its
+ * spelling alone — for configured group globs and policy `files` selectors
+ * (14.14) and for the `--file` patterns of 11 and 12.3 (a usage error,
+ * 12.0) alike. Reading its `/`-separated segments in order from a depth of
+ * zero, a `..` segment lowers the depth by one; a `.` segment, an empty
+ * segment (a doubled or trailing `/`), and a `**` segment, which may match
+ * no segment at all, leave it unchanged; and every other segment raises it
+ * by one (a drive-qualified spelling is ordinary segments). A glob
+ * beginning with `/`, or whose depth ever falls below zero, is outside the
+ * root; every other glob is inside. Pure: no filesystem, no matching.
+ */
+export function globLiesOutsideRoot(pattern: PathInput): boolean {
+  const bytes = toBytes(pattern);
+  if (bytes.length > 0 && bytes[0] === SLASH) return true;
+  let depth = 0;
+  for (const segment of splitOnSlash(bytes)) {
+    if (isDotDotSegment(segment)) {
+      depth -= 1;
+      if (depth < 0) return true;
+    } else if (
+      segment.length > 0 &&
+      !isDotSegment(segment) &&
+      !isGlobstarSegment(segment)
+    ) {
+      depth += 1;
+    }
+  }
+  return false;
+}
+
+/**
+ * Tokenize one pattern segment, as spelled — nothing is resolved (SPEC 7,
+ * 12.0): the whole-segment `**` wildcard; a segment matching nothing,
+ * written `.`, `..`, or empty; or a run of literal bytes, `*`, `?`, and —
+ * in capture modes — `$1`…`$9` tokens. Every other byte is a literal
+ * (SPEC 7); `$` not followed by `1`…`9`, and every `$` in plain mode, is a
+ * literal too (SPEC 7.5: capture wildcards exist only in policy `files`
+ * selectors).
  */
 function parseSegment(
   segment: Uint8Array,
   capturesEnabled: boolean,
 ): PatternSegment {
-  if (segment.length === 2 && segment[0] === STAR && segment[1] === STAR) {
+  if (isGlobstarSegment(segment)) {
     return { kind: "globstar" };
+  }
+  if (
+    segment.length === 0 ||
+    isDotSegment(segment) ||
+    isDotDotSegment(segment)
+  ) {
+    // SPEC 7: an inside glob's `.`, `..`, and empty segments match nothing
+    // — never resolved against their neighbours, so `specs/../specs/*.mdx`
+    // and `./specs/*.mdx` match no path, as `specs//A.mdx` names none
+    // (12.0). The outside-root decision reads these same spellings apart,
+    // by depth alone ({@link globLiesOutsideRoot}).
+    return { kind: "never" };
   }
   const tokens: SegmentToken[] = [];
   let literalStart = -1;
@@ -342,7 +365,8 @@ function matchTokenSegment(
  * Match the pattern segments against the path segments. `**` takes as few
  * whole segments as possible while the remainder still matches (SPEC 7.5
  * disambiguation; fewest whole segments is fewest bytes), and never
- * consumes a dot-initial segment (SPEC 7 dot rule). Every other pattern
+ * consumes a dot-initial segment (SPEC 7 dot rule). A segment written `.`,
+ * `..`, or empty matches no path segment (SPEC 7). Every other pattern
  * segment matches exactly one whole path segment — which is what confines
  * `*`, `?`, and captures within a single segment (never `/`). A token
  * segment consumes its whole path segment whatever internal assignment is
@@ -383,7 +407,11 @@ function matchSegments(
           if (next.length > 0 && next[0] === DOT) break;
           end += 1;
         }
-      } else if (pathIndex === pathSegments.length) {
+      } else if (
+        segment.kind === "never" ||
+        pathIndex === pathSegments.length
+      ) {
+        // SPEC 7: a `.`, `..`, or empty pattern segment matches nothing.
         matched = false;
       } else {
         const pathSegment = pathSegments[pathIndex];
@@ -430,6 +458,12 @@ export class CompiledGlob {
    */
   readonly captures: ReadonlySet<number>;
   private readonly segments: readonly PatternSegment[];
+  /**
+   * SPEC 7: the pattern holds a segment written `.`, `..`, or empty, which
+   * matches no path segment — so, every pattern segment but `**` consuming
+   * exactly one path segment, the pattern matches no path at all.
+   */
+  private readonly matchesNothing: boolean;
 
   private constructor(
     source: string,
@@ -441,16 +475,23 @@ export class CompiledGlob {
     this.mode = mode;
     this.captures = captures;
     this.segments = segments;
+    this.matchesNothing = segments.some((segment) => segment.kind === "never");
   }
 
   /** @internal Use {@link compileGlob}. */
   static compileInternal(pattern: string, mode: GlobMode): GlobCompileResult {
-    const resolved = resolveSegments(splitOnSlash(utf8Encoder.encode(pattern)));
-    if (resolved === null) {
+    const bytes = utf8Encoder.encode(pattern);
+    // SPEC 7: the outside-root decision is the spelling's depth count alone,
+    // made before and apart from matching.
+    if (globLiesOutsideRoot(bytes)) {
       return { ok: false, error: { kind: "outside-root" } };
     }
+    // Every other pattern is inside, matched as spelled (SPEC 7, 12.0): its
+    // segments are never resolved, so a `.`, `..`, or empty one stays in
+    // place, matching nothing. Captures are read from the whole spelling
+    // too, those beside such a segment included (SPEC 7.5).
     const capturesEnabled = mode !== "plain";
-    const segments = resolved.map((segment) =>
+    const segments = splitOnSlash(bytes).map((segment) =>
       parseSegment(segment, capturesEnabled),
     );
     const written = writtenCaptures(segments);
@@ -546,9 +587,12 @@ export class CompiledGlob {
    * dot-initial path segments — then asks whether pattern segments remain
    * to consume at least one further path segment (a file under the prefix
    * always adds one). Captures, in capture modes, act as anonymous
-   * one-plus-byte wildcards here, as in {@link CompiledGlob.matches}.
+   * one-plus-byte wildcards here, as in {@link CompiledGlob.matches}. A
+   * pattern holding a `.`, `..`, or empty segment matches no path (SPEC 7),
+   * so it enters no directory.
    */
   mayMatchWithin(prefix: PathInput): boolean {
+    if (this.matchesNothing) return false;
     const prefixSegments = splitOnSlash(toBytes(prefix));
     const scratch = new Map<number, Uint8Array>();
     const noValues = new Map<number, Uint8Array>();
@@ -580,6 +624,7 @@ export class CompiledGlob {
         if (patternSegment.kind === "globstar") {
           if (!dotInitial) addWithClosure(next, index);
         } else if (
+          patternSegment.kind === "tokens" &&
           (!dotInitial || patternSegment.writtenLeadingDot) &&
           matchTokenSegment(
             patternSegment.tokens,
@@ -599,6 +644,47 @@ export class CompiledGlob {
       if (index < this.segments.length) return true;
     }
     return false;
+  }
+
+  /**
+   * Could some path below the workspace root, none of them under the
+   * root-level directory named `excluded`, match this pattern? `excluded`
+   * is one directory-entry name: a single non-empty segment. Supports the
+   * SPEC 7 discovery walk's decision at the root, which has no prefix for
+   * {@link CompiledGlob.mayMatchWithin}: discovery lists a directory, the
+   * workspace root included, exactly when some configured spec or code glob
+   * matches a path below it, paths under `.xspec/`, which SPEC 13.4
+   * excludes from every group, counting for none (the caller passes
+   * `.xspec`). Judged from the pattern alone, before any read, and exact:
+   * - a pattern holding a `.`, `..`, or empty segment matches no path at
+   *   all (SPEC 7), so it never qualifies;
+   * - a pattern whose first segment is exactly the literal `excluded`, no
+   *   wildcard in it, matches only paths whose first segment is `excluded`:
+   *   those under it, which count for none, and the root-level path
+   *   `excluded` itself, which lies below the root but not under it,
+   *   exactly when every later pattern segment is `**` (any number of
+   *   whole segments, including none) or there is none;
+   * - every other pattern qualifies: a first segment written `**`, holding
+   *   a wildcard, or spelling another literal matches some first path
+   *   segment other than `excluded`, and every later segment matches some
+   *   path segment (`**` none at all, a token segment a name its dot rule
+   *   admits), each segment matched apart from its neighbours.
+   */
+  mayMatchBelowRoot(excluded: PathInput): boolean {
+    if (this.matchesNothing) return false;
+    const [first, ...later] = this.segments;
+    if (first === undefined) return false; // never: every pattern has one
+    const excludedBytes = toBytes(excluded);
+    const spellsExcluded =
+      first.kind === "tokens" &&
+      first.tokens.length === 1 &&
+      first.tokens[0].kind === "literal" &&
+      first.tokens[0].bytes.length === excludedBytes.length &&
+      startsWithAt(excludedBytes, first.tokens[0].bytes, 0);
+    if (!spellsExcluded) return true;
+    // `.xspec` and `.xspec/**` match the root-level path `.xspec`;
+    // `.xspec/*.mdx` matches only paths under `.xspec/`.
+    return later.every((segment) => segment.kind === "globstar");
   }
 }
 

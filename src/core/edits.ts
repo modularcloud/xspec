@@ -8,6 +8,7 @@
 // that produce them live in ./rename.ts and ./move.ts.
 
 import type { ByteRange } from "./bytes.js";
+import { compareBytes } from "./bytes.js";
 
 /** One in-place edit: replace the bytes of `range` with `replacement`. */
 export interface SourceEdit {
@@ -21,6 +22,67 @@ export interface SourceRewrite {
   readonly path: string;
   /** The file's complete rewritten bytes (SPEC 6.4/6.5: edits applied). */
   readonly content: Uint8Array;
+}
+
+/**
+ * One source write of a rewriting operation (SPEC 6.4, 6.5, 13.5): a file's
+ * complete new bytes at its path, or the removal of a relocation's origin.
+ */
+export type SourceWrite =
+  | {
+      readonly kind: "write";
+      readonly path: string;
+      readonly content: Uint8Array;
+    }
+  | { readonly kind: "remove"; readonly path: string };
+
+/**
+ * A file-form move's relocation (SPEC 6.5): the moved file produced at the
+ * destination, then the origin removed.
+ */
+export interface Relocation {
+  readonly origin: string;
+  readonly destination: string;
+}
+
+/**
+ * SPEC 13.5: the order of a rewriting operation's source writes — one write
+ * per file the operation rewrites, relocates, or creates, in the order the
+ * preview's `files` lists them (6.6, 12.7: by the file's current,
+ * pre-operation path bytes — a relocated file's entry under its origin
+ * path, a created file's under the path its creation occupies), a
+ * relocation producing the destination and then removing the origin. A
+ * command stopped by a refused write (14.24) therefore leaves exactly the
+ * writes before it in this order, each complete.
+ */
+export function orderSourceWrites(
+  rewrites: readonly SourceRewrite[],
+  relocation: Relocation | null,
+): SourceWrite[] {
+  if (
+    relocation !== null &&
+    !rewrites.some((rewrite) => rewrite.path === relocation.destination)
+  ) {
+    // Unreachable: a file-form move always produces its destination (SPEC
+    // 6.5). Guarded so the origin's removal can never go unordered.
+    throw new Error(
+      "xspec internal error: a relocation without the destination's write",
+    );
+  }
+  const entries = rewrites.map((rewrite) => {
+    const write: SourceWrite = {
+      kind: "write",
+      path: rewrite.path,
+      content: rewrite.content,
+    };
+    if (relocation !== null && rewrite.path === relocation.destination) {
+      const removal: SourceWrite = { kind: "remove", path: relocation.origin };
+      return { key: relocation.origin, writes: [write, removal] };
+    }
+    return { key: rewrite.path, writes: [write] };
+  });
+  entries.sort((a, b) => compareBytes(a.key, b.key));
+  return entries.flatMap((entry) => entry.writes);
 }
 
 const encoder = new TextEncoder();
@@ -82,40 +144,55 @@ export class EditCollector {
 }
 
 /**
- * A JavaScript string literal holding exactly `value`, written with `quote`
- * (SPEC 6.4: quote style preserved; the fallback form is double-quoted).
- * Only the quote character and the backslash need escaping: the rewritten
- * values — ID segments (SPEC 1.4) and workspace-relative import specifiers
- * (SPEC 2.1) — contain no characters whose escape sequence differs, and the
- * literal re-parses to `value`.
+ * A JavaScript string literal whose value is exactly `value` (SPEC 6.4, 6.5
+ * rewrites and added imports). The value of a static string literal is the
+ * characters between its delimiters exactly as spelled — no escape sequence
+ * is interpreted (SPEC 2.4) — so the value is written verbatim: an escaped
+ * spelling would read back as its escape's characters. `quote` is the style
+ * the edit keeps (SPEC 6.4: quote style preserved; the fallback form and an
+ * added import's specifier are double-quoted, 6.4, 6.5). Rewritten
+ * identities hold no quote character, `\`, or control character (1.4), so
+ * they always take `quote` itself; a rewritten or added import specifier is
+ * a path (2.1), which may hold a quote character. Where the value holds
+ * `quote`, no literal in that style has it as its value, and the other
+ * quote character is taken — SPEC 6.4 and 6.5 prescribe the style for
+ * values it can delimit, and a path holding the prescribed quote has no
+ * spelling in it at all. A value holding both quote characters, or a line
+ * feed or carriage return (which no string literal holds unescaped), has
+ * no verbatim spelling: an internal error, never a malformed rewrite.
  */
 export function jsStringLiteral(value: string, quote: '"' | "'"): string {
-  let escaped = "";
-  for (const character of value) {
-    escaped +=
-      character === "\\" || character === quote ? `\\${character}` : character;
+  const other = quote === '"' ? "'" : '"';
+  const chosen = !value.includes(quote)
+    ? quote
+    : !value.includes(other)
+      ? other
+      : null;
+  if (chosen === null || /[\n\r]/u.test(value)) {
+    throw new Error(
+      `xspec internal error: the string value ${JSON.stringify(value)} has ` +
+        `no verbatim string-literal spelling (SPEC 2.4)`,
+    );
   }
-  return `${quote}${escaped}${quote}`;
+  return `${chosen}${value}${chosen}`;
 }
 
 /**
  * The characters of a quoted MDX attribute value holding exactly `value`
  * under `quote` (SPEC 2.7: quoted attribute form; SPEC 6.4: the quote style
- * is preserved). MDX decodes character references in attribute values, so
- * `&` and the quote character are written as character references — every
- * other character is written verbatim — and the attribute re-parses to
- * exactly `value`.
+ * is preserved). A quoted attribute value is the characters between its
+ * quotes exactly as spelled — no character reference is interpreted
+ * (SPEC 2.4) — so the value is written verbatim and reads back as itself.
+ * The rewritten values are identities, whose segments hold no quote
+ * character (SPEC 1.4); a value holding `quote` has no spelling in that
+ * form at all.
  */
 export function attributeValueText(value: string, quote: '"' | "'"): string {
-  let encoded = "";
-  for (const character of value) {
-    if (character === "&") {
-      encoded += "&amp;";
-    } else if (character === quote) {
-      encoded += quote === '"' ? "&quot;" : "&#x27;";
-    } else {
-      encoded += character;
-    }
+  if (value.includes(quote)) {
+    throw new Error(
+      `xspec internal error: the attribute value ${JSON.stringify(value)} ` +
+        `holds its own quote character ${quote} and has no quoted spelling`,
+    );
   }
-  return encoded;
+  return value;
 }

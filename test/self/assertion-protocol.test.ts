@@ -290,7 +290,64 @@ test("parseJsonStdout fails diagnosed on empty stdout, concatenated documents, t
   );
 });
 
-test("assertJsonOutputConvention: one document on exit 0/1, empty stdout on exit 2, everything else diagnosed (12.0/H-5)", () => {
+test("parseJsonStdout fails diagnosed on a stdout led by a UTF-8 byte-order mark — no part of a JSON text — and accepts the same document without it (SPEC.md 12.0, H-5)", () => {
+  // U+FEFF, the bytes EF BB BF: JSON's whitespace is U+0009, U+000A, U+000D,
+  // and U+0020 alone, so a stdout the mark leads is not exactly one JSON
+  // document as the entire standard output — never a signature the decode
+  // drops (H-4: the helpers normalize nothing).
+  const byteOrderMark = bytes(0xef, 0xbb, 0xbf);
+  const naming =
+    "begins with a UTF-8 byte-order mark (U+FEFF, the bytes EF BB BF)";
+  // {"a":1} and U+000A.
+  const document = Buffer.concat([Buffer.from('{"a":1}', "utf8"), bytes(0x0a)]);
+  expectDiagnosed(
+    () =>
+      parseJsonStdout(
+        syntheticResult({ stdout: Buffer.concat([byteOrderMark, document]) }),
+        "byte-order mark case",
+      ),
+    "byte-order mark case: ",
+    naming,
+    "not exactly one JSON document",
+    "`stand-in --json` [synthetic result]",
+  );
+  expectDiagnosed(
+    () => parseJsonStdout(syntheticResult({ stdout: byteOrderMark })),
+    naming,
+  );
+  expect(parseJsonStdout(syntheticResult({ stdout: document }))).toEqual({
+    a: 1,
+  });
+  // assertJsonOutputConvention parses through parseJsonStdout on every exit:
+  // a report on exit 0, the 12.7 error document on exit 2.
+  expectDiagnosed(
+    () =>
+      assertJsonOutputConvention(
+        syntheticResult({
+          exitCode: 0,
+          stdout: Buffer.concat([byteOrderMark, document]),
+        }),
+      ),
+    naming,
+  );
+  expectDiagnosed(
+    () =>
+      assertJsonOutputConvention(
+        syntheticResult({
+          exitCode: 2,
+          stdout: Buffer.concat([
+            byteOrderMark,
+            Buffer.from('{"error":{}}', "utf8"),
+            bytes(0x0a),
+          ]),
+        }),
+      ),
+    naming,
+    "exit-2 error document",
+  );
+});
+
+test("assertJsonOutputConvention: one document on every exit — a report/answer document on exit 0/1, the 12.7 error document on exit 2 — everything else diagnosed (12.0/H-5)", () => {
   expect(
     assertJsonOutputConvention(
       syntheticResult({ exitCode: 0, stdout: '{"ok":true}\n' }),
@@ -301,18 +358,66 @@ test("assertJsonOutputConvention: one document on exit 0/1, empty stdout on exit
       syntheticResult({ exitCode: 1, stdout: '{"findings":[]}\n' }),
     ),
   ).toEqual({ findings: [] });
+  // Exit 2 with JSON output in effect: the 12.7 error document — {"error":…}
+  // exactly — is the entire stdout (SPEC 12.0), returned parsed.
   expect(
     assertJsonOutputConvention(
-      syntheticResult({ exitCode: 2, stderr: "usage: xspec\n" }),
+      syntheticResult({
+        exitCode: 2,
+        stdout:
+          '{"error":{"code":null,"message":"unknown flag","locations":[],"path":null,"identities":[]}}\n',
+        stderr: "usage: xspec\n",
+      }),
     ),
-  ).toBeUndefined();
+  ).toEqual({
+    error: {
+      code: null,
+      message: "unknown flag",
+      locations: [],
+      path: null,
+      identities: [],
+    },
+  });
+  // Byte-empty exit-2 stdout is the JSON-NOT-in-effect form — under this
+  // convention (JSON in effect) it is a missing error document, diagnosed.
+  expectDiagnosed(
+    () =>
+      assertJsonOutputConvention(
+        syntheticResult({ exitCode: 2, stderr: "usage: xspec\n" }),
+      ),
+    /stdout is empty/,
+  );
   expectDiagnosed(
     () =>
       assertJsonOutputConvention(
         syntheticResult({ exitCode: 2, stdout: "contaminated\n" }),
       ),
-    /stdout must be empty on exit 2/,
-    "contaminated",
+    /not exactly one JSON document/,
+  );
+  // One JSON document that is not the error document form: diagnosed.
+  expectDiagnosed(
+    () =>
+      assertJsonOutputConvention(
+        syntheticResult({ exitCode: 2, stdout: '{"findings":[]}\n' }),
+      ),
+    /error document/,
+  );
+  expectDiagnosed(
+    () =>
+      assertJsonOutputConvention(
+        syntheticResult({
+          exitCode: 2,
+          stdout: '{"error":{"code":null},"extra":1}\n',
+        }),
+      ),
+    /error document/,
+  );
+  expectDiagnosed(
+    () =>
+      assertJsonOutputConvention(
+        syntheticResult({ exitCode: 2, stdout: '{"error":"oops"}\n' }),
+      ),
+    /error document/,
   );
   expectDiagnosed(
     () => assertJsonOutputConvention(syntheticResult({ exitCode: 0 })),

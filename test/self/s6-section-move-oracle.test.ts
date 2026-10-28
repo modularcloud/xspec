@@ -1,0 +1,2048 @@
+// S-6 section-move-oracle vectors (TEST-SPEC 17 S-6): the in-harness
+// section-move category oracle for P-5 (test/helpers/oracles/section-move.ts)
+// passes this fixed vector suite, derived from SPEC.md 6.2's worked
+// straddling-line case, the clean-boundary case and sibling stagings of
+// TEST-SPEC T6.2-3, and T6.2-4's final-position shapes, before any property
+// test trusts it. Every vector's expected sequences and category tables
+// are hand-computed; no product is involved (the product's own 6.2/5.6
+// behavior is asserted by the suite's T6.2-* tests against fixtures, not
+// against this oracle). Every vector's composed documents, before and
+// after the move, are checked to derive under the harness's own S-9 check
+// (`deriveMdx`): the form vectors derive (S-9). The same suite vets the
+// module's would-be-text composer (`composeSectionMoveTexts`, SPEC 6.5's
+// byte rules): every vector spelling its after texts — each but the misuse
+// guards — ends by asserting that the composer, given the vector's own
+// move, returns exactly the files that move rewrites, each byte-equal to
+// the vector's hand-derived after text (`expectComposed`).
+//
+// Coverage, by the rules the vectors derive from:
+//   * T6.2-3's clean-boundary case: tags alone on their lines — every moved
+//     node's own-content sequence is preserved, the origin and target
+//     parents are each `changed`, the file roots' `descendant-changed` and
+//     the dependents' `upstream-changed` cascade with exact attributions
+//     (SPEC 6.2, 5.6);
+//   * SPEC 6.2's worked straddling-line case (T6.2-3's impure arm, in the
+//     suite's I3 staging): the moved section's opening tag preceded on its
+//     origin line by non-whitespace, its closing tag preceded on its line by
+//     spaces and followed by non-whitespace — the opening line's terminator
+//     and the closing line's spaces contribute at the origin (lines kept)
+//     and not at the destination (lines dropped, SPEC 3), the moved node
+//     itself `changed`, with the two-sided descendant-changed tolerance on
+//     the parents and roots exactly as T6.2-3 documents;
+//   * T6.2-3's three impure stagings — (a) the worked shape exactly as
+//     spelled, (b) its both-sided U+000B/U+000C spelling, (c) the `body</S>`
+//     variant with such a remainder — each moved to another file's top
+//     level and into a flow-position parent: the moved node `changed` by
+//     its boundary lines, the two parents `changed`, no other node;
+//   * T6.2-4's final-position cases: a parent's last child moved onto
+//     itself, in the flow-form pinned shape and in T6.5-13(f)'s top-level
+//     shape, reproduces the parent's sequence — no node changes, no
+//     categories; its `changed` twin (T6.5-13(e)'s shape): the coincident
+//     parent alone `changed`, the moved node and the root keeping their
+//     content; and a non-final child re-inserted at the end, which changes
+//     the coincident parent;
+//   * P-5's created-target-file rule: the created root is `changed` as an
+//     added node and carries no other category — even over a changed moved
+//     descendant;
+//   * 6.5's insertion terminators (the preceding U+000A landing in the
+//     target parent's run when the insertion point is mid-line), the
+//     self-closing moved section, and the self-closing target parent
+//     rewrite (T6.5-2's byte rule);
+//   * T6.5-2's fourth geometry and T6.5-16(c)'s controls: a single-line
+//     in-line section holding prose outside its tags moved into each
+//     text-position target parent shape — the closing tag on the opening
+//     tag's line (a U+000A added before the moved text), on a later line
+//     (none added: a line start), and a self-closing parent rewritten to
+//     paired form (one added) — the insertion point's line holding the
+//     target root's own bytes on both sides of the insertion, kept at both
+//     sides: the parent alone `changed` at the destination, the root
+//     keeping its sequence and carrying `descendant-changed` from it;
+//   * the drop-rule delegation to P-2's oracle, expansion semantics
+//     included (a non-empty expansion keeps the origin straddling line);
+//   * 6.2's enumeration beyond the parents and the moved subtree — each
+//     other node with own-content bytes on a line the deletion joins or
+//     drops or the insertion splits, `changed` iff the drop rule of 3
+//     decides that line differently: T6.2-3's sibling stagings (d) (a
+//     sibling's whitespace residue left alone on the deletion's merged
+//     line — kept before, dropped after) and (e) (a sibling's U+000C
+//     residue left alone on the line the insertion splits), a residue the
+//     deletion joins to prose (dropped before, kept after), and a
+//     non-parent ancestor whose whitespace lead rides the merged line;
+//   * a section tag spanning lines: its internal terminator deleted with
+//     the construct, the lines joined (SPEC 3);
+//   * the composer's byte rules (SPEC 6.5), each reached by these vectors'
+//     after texts: the merged line the deletion leaves whitespace-only
+//     dropped with its terminator (an unterminated last line without one)
+//     and one keeping non-whitespace source characters kept, an embedding
+//     or a sibling's tags included; the U+000A before an insertion point
+//     that is no line start, judged over the post-deletion text when origin
+//     and target coincide; the self-closing target parent's paired form;
+//     the `id` attributes' prefix replacement, a multi-line tag's included;
+//     and a created target needing no declaration, the moved text and
+//     U+000A (T6.5-14) — no vector spelling a text that needs a reference
+//     respelling, which the composer leaves out;
+// plus misuse guards: degenerate constructs and incomplete graphs throw
+// plain errors (harness defects), never diagnosed product failures.
+
+import { expect, test } from "vitest";
+import { deriveMdx } from "../helpers/mdx-derivability.js";
+import {
+  composeSectionMoveTexts,
+  predictSectionMoveImpact,
+  sectionMoveSourceText,
+} from "../helpers/oracles/section-move.js";
+import type {
+  SectionMoveComposedFile,
+  SectionMoveDocument,
+  SectionMoveGraphNode,
+  SectionMoveInput,
+  SectionMoveOwnToken,
+  SectionMovePiece,
+  SectionMovePrediction,
+} from "../helpers/oracles/section-move.js";
+
+// --- vector-side document builders -------------------------------------------
+
+// U+000B and U+000C, built from code points (never escape spellings).
+const VT = String.fromCharCode(0x0b);
+const FF = String.fromCharCode(0x0c);
+
+const content = (text: string): SectionMovePiece => ({ kind: "content", text });
+
+/** S-9: a vector's composed document derives under the harness's own check. */
+function expectDerives(label: string, text: string): void {
+  expect(
+    deriveMdx(text, { allowances: [] }),
+    `${label} must derive (S-9): ${JSON.stringify(text)}`,
+  ).toEqual({ derives: true });
+}
+
+/** A paired-form section with its open-tag props spelled by the vector. */
+function sec(
+  id: string,
+  props: string,
+  body: readonly SectionMovePiece[],
+  depends: readonly string[] = [],
+): SectionMovePiece {
+  return {
+    kind: "section",
+    id,
+    open: `<S id="${id}"${props}>`,
+    close: "</S>",
+    body,
+    depends,
+  };
+}
+
+/** A self-closing section (SPEC 1.1): the whole tag, empty body. */
+function selfClosing(id: string, props: string): SectionMovePiece {
+  return {
+    kind: "section",
+    id,
+    open: `<S id="${id}"${props} />`,
+    close: null,
+    body: [],
+    depends: [],
+  };
+}
+
+function doc(
+  path: string,
+  pieces: readonly SectionMovePiece[],
+): SectionMoveDocument {
+  return { path, pieces };
+}
+
+function node(
+  identity: string,
+  children: readonly string[] = [],
+  edgeTargets: readonly string[] = [],
+): SectionMoveGraphNode {
+  return { identity, children, edgeTargets };
+}
+
+// --- expectation helpers -----------------------------------------------------
+
+interface CategoryRow {
+  readonly required: boolean;
+  readonly within: readonly string[];
+  readonly mustInclude: readonly string[];
+}
+
+/** The full prediction table as plain JSON (sorted members). */
+function tableOf(
+  prediction: SectionMovePrediction,
+): Record<string, Record<string, CategoryRow>> {
+  const table: Record<string, Record<string, CategoryRow>> = {};
+  for (const [identity, nodePrediction] of prediction.nodes) {
+    const categories: Record<string, CategoryRow> = {};
+    for (const [name, category] of nodePrediction.categories) {
+      categories[name] = {
+        required: category.required,
+        within: [...category.attributionWithin],
+        mustInclude: [...category.attributionMustInclude],
+      };
+    }
+    table[identity] = categories;
+  }
+  return table;
+}
+
+/** Required with exact attribution: within = mustInclude = `ids`. */
+const req = (...ids: string[]): CategoryRow => ({
+  required: true,
+  within: [...ids].sort(),
+  mustInclude: [...ids].sort(),
+});
+
+/** Required, attribution within `within`, must include `mustInclude`. */
+const reqWithin = (
+  within: readonly string[],
+  mustInclude: readonly string[],
+): CategoryRow => ({
+  required: true,
+  within: [...within].sort(),
+  mustInclude: [...mustInclude].sort(),
+});
+
+/** Tolerated-optional with attribution bound `ids` (a relocated cause). */
+const opt = (...ids: string[]): CategoryRow => ({
+  required: false,
+  within: [...ids].sort(),
+  mustInclude: [],
+});
+
+/** The `changed` row: attribution within the whole originating set. */
+const chg = (allChanged: readonly string[]): CategoryRow => ({
+  required: true,
+  within: [...allChanged].sort(),
+  mustInclude: [],
+});
+
+function sortedSet(values: ReadonlySet<string>): string[] {
+  return [...values].sort();
+}
+
+/**
+ * S-6's vetting of the would-be-text composer (`composeSectionMoveTexts`:
+ * SPEC 6.5's byte rules, composing the forms P-5's draws must derive):
+ * given the vector's own move — the very input its prediction reads — the
+ * composer returns exactly the files the move's structural edits rewrite,
+ * in its order (the origin, then the target or the created file; or the
+ * one coincident file), each byte-equal to the after text the vector
+ * derives by hand and checks to derive (S-9). Each vector calls it last,
+ * after every prediction assertion, so a composer defect never masks an
+ * oracle one.
+ * No vector needs a reference respelling, which the composer leaves out by
+ * design, in a text it spells: the references into a moved subtree that
+ * `DEPS_NODES` and `P_WATCH_NODES` carry stand in files no vector spells an
+ * after text for, and the respelling alone would touch them.
+ */
+function expectComposed(
+  input: SectionMoveInput,
+  expected: readonly SectionMoveComposedFile[],
+): void {
+  expect(
+    composeSectionMoveTexts(input),
+    "S-6: the would-be-text composer reproduces the vector's hand-derived after texts (SPEC 6.5)",
+  ).toEqual(expected);
+}
+
+// =============================================================================
+// T6.2-3 clean boundary (the C3 fixture shapes of the suite's section-6.2)
+// =============================================================================
+
+const ORIGIN = "specs/Origin.mdx";
+const OP = "specs/Origin.mdx#origin";
+const TARGET = "specs/Target.mdx";
+const TP = "specs/Target.mdx#tgt";
+const MV_POST = "specs/Target.mdx#tgt.mv";
+const KID_POST = "specs/Target.mdx#tgt.mv.kid";
+const WATCH = "specs/Watch.mdx";
+const W_TOP = "specs/Watch.mdx#watch";
+const W_ONORIGIN = "specs/Watch.mdx#watch.onorigin";
+const W_ONTARGET = "specs/Watch.mdx#watch.ontarget";
+
+function cleanOrigin(): SectionMoveDocument {
+  // <S id="origin">\nOrigin holder text.\n\n<S id="origin.mv" …>\nMoved root
+  // text.\n\n<S id="origin.mv.kid">\nMoved kid text.\n</S>\n</S>\n</S>\n
+  return doc(ORIGIN, [
+    sec("origin", "", [
+      content("\nOrigin holder text.\n\n"),
+      sec("origin.mv", ' coverage="none" tags="keep mv"', [
+        content("\nMoved root text.\n\n"),
+        sec("origin.mv.kid", "", [content("\nMoved kid text.\n")]),
+        content("\n"),
+      ]),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+}
+
+function cleanTarget(): SectionMoveDocument {
+  return doc(TARGET, [
+    sec("tgt", "", [content("\nTarget parent text.\n")]),
+    content("\n"),
+  ]);
+}
+
+const WATCH_NODES: readonly SectionMoveGraphNode[] = [
+  node(WATCH, [W_TOP]),
+  node(W_TOP, [W_ONORIGIN, W_ONTARGET]),
+  node(W_ONORIGIN, [], [OP]),
+  node(W_ONTARGET, [], [TP]),
+];
+
+test("S-6 (T6.2-3 clean boundary): parents changed, moved subtree preserved, cascades attributed per parent", () => {
+  const origin = cleanOrigin();
+  const target = cleanTarget();
+  const originAfter = '<S id="origin">\nOrigin holder text.\n\n</S>\n';
+  const targetAfter =
+    '<S id="tgt">\nTarget parent text.\n<S id="tgt.mv" coverage="none" tags="keep mv">\nMoved root text.\n\n<S id="tgt.mv.kid">\nMoved kid text.\n</S>\n</S>\n</S>\n';
+  expectDerives("Origin before", sectionMoveSourceText(origin.pieces));
+  expectDerives("Origin after", originAfter);
+  expectDerives("Target before", sectionMoveSourceText(target.pieces));
+  expectDerives("Target after", targetAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "origin.mv",
+    newId: "tgt.mv",
+    otherNodes: WATCH_NODES,
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    "specs/Origin.mdx#origin.mv": MV_POST,
+    "specs/Origin.mdx#origin.mv.kid": KID_POST,
+  });
+  expect(sortedSet(prediction.changed)).toEqual([OP, TP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+
+  // Every moved node keeps its own-content sequence (clean boundary): the
+  // straddling tag-only lines are dropped at origin and destination alike.
+  expect(prediction.beforeOwnTokens.get("specs/Origin.mdx#origin.mv")).toEqual([
+    ["run", "Moved root text.\n\n"],
+    ["child", "specs/Origin.mdx#origin.mv.kid"],
+    ["run", ""],
+  ]);
+  expect(prediction.afterOwnTokens.get(MV_POST)).toEqual([
+    ["run", "Moved root text.\n\n"],
+    ["child", KID_POST],
+    ["run", ""],
+  ]);
+  expect(
+    prediction.beforeOwnTokens.get("specs/Origin.mdx#origin.mv.kid"),
+  ).toEqual([["run", "Moved kid text.\n"]]);
+  expect(prediction.afterOwnTokens.get(KID_POST)).toEqual([
+    ["run", "Moved kid text.\n"],
+  ]);
+
+  const changed = [OP, TP];
+  expect(tableOf(prediction)).toEqual({
+    [ORIGIN]: { "descendant-changed": req(OP) },
+    [OP]: { changed: chg(changed) },
+    [TARGET]: { "descendant-changed": req(TP) },
+    [TP]: { changed: chg(changed) },
+    [MV_POST]: {},
+    [KID_POST]: {},
+    [WATCH]: { "upstream-changed": req(OP, TP) },
+    [W_TOP]: { "upstream-changed": req(OP, TP) },
+    [W_ONORIGIN]: { "upstream-changed": req(OP) },
+    [W_ONTARGET]: { "upstream-changed": req(TP) },
+  });
+  expectComposed(input, [
+    { path: ORIGIN, role: "origin", text: originAfter },
+    { path: TARGET, role: "target", text: targetAfter },
+  ]);
+});
+
+// =============================================================================
+// SPEC 6.2's worked straddling-line case (T6.2-3's impure arm; the I3 shapes)
+// =============================================================================
+
+const ROOM = "specs/Room.mdx";
+const I_OP = "specs/Room.mdx#op";
+const I_IMP_PRE = "specs/Room.mdx#op.imp";
+const HALL = "specs/Hall.mdx";
+const I_TP = "specs/Hall.mdx#tp";
+const I_IMP_POST = "specs/Hall.mdx#tp.imp";
+const DEPS = "specs/Deps.mdx";
+const D_TOP = "specs/Deps.mdx#watch";
+const D_ONIMP = "specs/Deps.mdx#watch.onimp";
+
+function impureRoom(): SectionMoveDocument {
+  // <S id="op">\nOp holder text.\n\nLead-in prose. <S id="op.imp" …>\n
+  // Impure line one.\nImpure line two.\n  </S> Trailing prose.\n</S>\n —
+  // SPEC 6.2's worked case as the suite's T6.2-3 fixture stages it
+  // (`I3_ROOM_SOURCE`): the moved section's opening tag preceded on its
+  // line by non-whitespace and followed there by nothing, its closing tag
+  // preceded on its line by two spaces and followed there by non-whitespace
+  // — both tags in text position, so the shape derives (S-9), which the
+  // former relative with its closing tag alone on its line did not.
+  return doc(ROOM, [
+    sec("op", "", [
+      content("\nOp holder text.\n\nLead-in prose. "),
+      sec("op.imp", ' coverage="none" tags="edge imp"', [
+        content("\nImpure line one.\nImpure line two.\n  "),
+      ]),
+      content(" Trailing prose.\n"),
+    ]),
+    content("\n"),
+  ]);
+}
+
+function impureHall(): SectionMoveDocument {
+  return doc(HALL, [
+    sec("tp", "", [content("\nHall parent text.\n")]),
+    content("\n"),
+  ]);
+}
+
+/**
+ * `impureRoom()` as moving `op.imp` out leaves it: the construct's own
+ * characters deleted, its merged line `Lead-in prose.  Trailing prose.`
+ * keeping non-whitespace and so its terminator (6.5, 3) — the worked
+ * case's origin after text and the created-target vector's.
+ */
+const ROOM_AFTER =
+  '<S id="op">\nOp holder text.\n\nLead-in prose.  Trailing prose.\n</S>\n';
+
+const DEPS_NODES: readonly SectionMoveGraphNode[] = [
+  node(DEPS, [D_TOP]),
+  node(D_TOP, [D_ONIMP]),
+  node(D_ONIMP, [], [I_IMP_PRE]),
+];
+
+test("S-6 (SPEC 6.2 worked case): the impure-boundary moved node contributes the opening line's terminator and the closing line's spaces at the origin, not at the destination, and is itself changed", () => {
+  const origin = impureRoom();
+  const target = impureHall();
+  const hallAfter =
+    '<S id="tp">\nHall parent text.\n<S id="tp.imp" coverage="none" tags="edge imp">\nImpure line one.\nImpure line two.\n  </S>\n</S>\n';
+  expectDerives("Room before", sectionMoveSourceText(origin.pieces));
+  expectDerives("Room after", ROOM_AFTER);
+  expectDerives("Hall before", sectionMoveSourceText(target.pieces));
+  expectDerives("Hall after", hallAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "op.imp",
+    newId: "tp.imp",
+    otherNodes: DEPS_NODES,
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  // The straddling-line drop of 6.2, computed by the rules of 3: at the
+  // origin both boundary lines are kept (`Lead-in prose. `, ` Trailing
+  // prose.`), so the opening line's terminator and the closing line's two
+  // spaces contribute; at the destination each tag is alone on its line and
+  // both lines drop.
+  expect(prediction.beforeOwnTokens.get(I_IMP_PRE)).toEqual([
+    ["run", "\nImpure line one.\nImpure line two.\n  "],
+  ]);
+  expect(prediction.afterOwnTokens.get(I_IMP_POST)).toEqual([
+    ["run", "Impure line one.\nImpure line two.\n"],
+  ]);
+  // The origin parent keeps the joined line — the lead-in and trailing
+  // prose with the terminator — after the deletion.
+  expect(prediction.afterOwnTokens.get(I_OP)).toEqual([
+    ["run", "Op holder text.\n\nLead-in prose.  Trailing prose.\n"],
+  ]);
+
+  expect(sortedSet(prediction.changed)).toEqual([I_TP, I_IMP_POST, I_OP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+
+  const changed = [I_OP, I_TP, I_IMP_POST];
+  expect(tableOf(prediction)).toEqual({
+    [ROOM]: {
+      "descendant-changed": reqWithin([I_OP, I_IMP_POST], [I_OP]),
+    },
+    [I_OP]: {
+      changed: chg(changed),
+      "descendant-changed": opt(I_IMP_POST),
+    },
+    [HALL]: {
+      "descendant-changed": reqWithin([I_TP, I_IMP_POST], [I_TP]),
+    },
+    [I_TP]: {
+      changed: chg(changed),
+      "descendant-changed": opt(I_IMP_POST),
+    },
+    [I_IMP_POST]: { changed: chg(changed) },
+    [DEPS]: { "upstream-changed": req(I_IMP_POST) },
+    [D_TOP]: { "upstream-changed": req(I_IMP_POST) },
+    [D_ONIMP]: { "upstream-changed": req(I_IMP_POST) },
+  });
+  expectComposed(input, [
+    { path: ROOM, role: "origin", text: ROOM_AFTER },
+    { path: HALL, role: "target", text: hallAfter },
+  ]);
+});
+
+// =============================================================================
+// A further final-position shape — the former T6.2-4 fixture (blank lines,
+// `coverage` and `tags`; a flow-form last child beyond the pinned ones, its
+// re-insertion reproducing the parent's sequence all the same) — and its
+// non-final contrast
+// =============================================================================
+
+const P_FILE = "specs/P.mdx";
+const P_TOP = "specs/P.mdx#p";
+const P_FIRST = "specs/P.mdx#p.first";
+const P_LAST = "specs/P.mdx#p.last";
+const P_FINAL = "specs/P.mdx#p.final";
+const P_WATCH = "specs/Watch.mdx";
+const P_W_TOP = "specs/Watch.mdx#watch";
+
+function pDoc(): SectionMoveDocument {
+  // <S id="p">\nParent text.\n\n<S id="p.first">\nFirst child text.\n</S>\n
+  // \n<S id="p.last" …>\nTail child text.\n</S>\n</S>\n
+  return doc(P_FILE, [
+    sec("p", "", [
+      content("\nParent text.\n\n"),
+      sec("p.first", "", [content("\nFirst child text.\n")]),
+      content("\n\n"),
+      sec("p.last", ' coverage="none" tags="tail"', [
+        content("\nTail child text.\n"),
+      ]),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+}
+
+const P_WATCH_NODES: readonly SectionMoveGraphNode[] = [
+  node(P_WATCH, [P_W_TOP]),
+  // `d={P.p.last}` plus `{text(P.p.last)}`: two edge kinds, one target.
+  node(P_W_TOP, [], [P_LAST, P_LAST]),
+];
+
+test("S-6 (T6.2-4, a further final-position shape): a parent's last child moved onto itself reproduces the parent's sequence — no node changed, no categories", () => {
+  const document = pDoc();
+  const pAfter =
+    '<S id="p">\nParent text.\n\n<S id="p.first">\nFirst child text.\n</S>\n\n<S id="p.final" coverage="none" tags="tail">\nTail child text.\n</S>\n</S>\n';
+  expectDerives("P before", sectionMoveSourceText(document.pieces));
+  expectDerives("P after", pAfter);
+  const input: SectionMoveInput = {
+    origin: document,
+    target: document,
+    movedId: "p.last",
+    newId: "p.final",
+    otherNodes: P_WATCH_NODES,
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [P_LAST]: P_FINAL,
+  });
+  expect(sortedSet(prediction.changed)).toEqual([]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  // The coincident parent's re-insertion reproduces its sequence exactly
+  // (SPEC 6.2: a final construct re-inserted at its own former position).
+  expect(prediction.afterOwnTokens.get(P_TOP)).toEqual([
+    ["run", "Parent text.\n\n"],
+    ["child", P_FIRST],
+    ["run", "\n"],
+    ["child", P_FINAL],
+    ["run", ""],
+  ]);
+  expect(tableOf(prediction)).toEqual({
+    [P_FILE]: {},
+    [P_TOP]: {},
+    [P_FIRST]: {},
+    [P_FINAL]: {},
+    [P_WATCH]: {},
+    [P_W_TOP]: {},
+  });
+  expectComposed(input, [{ path: P_FILE, role: "coincident", text: pAfter }]);
+});
+
+test("S-6 (T6.2-4 contrast): a non-final child re-inserted at the end fails to reproduce the coincident parent's sequence — the parent alone is changed", () => {
+  const document = pDoc();
+  const pAfter =
+    '<S id="p">\nParent text.\n\n\n<S id="p.last" coverage="none" tags="tail">\nTail child text.\n</S>\n<S id="p.zeta">\nFirst child text.\n</S>\n</S>\n';
+  expectDerives("P before", sectionMoveSourceText(document.pieces));
+  expectDerives("P after", pAfter);
+  const input: SectionMoveInput = {
+    origin: document,
+    target: document,
+    movedId: "p.first",
+    newId: "p.zeta",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(sortedSet(prediction.changed)).toEqual([P_TOP]);
+  // Children reordered and the dropped/kept line pattern shifted: the
+  // parent's own-content sequence differs.
+  expect(prediction.afterOwnTokens.get(P_TOP)).toEqual([
+    ["run", "Parent text.\n\n\n"],
+    ["child", P_LAST],
+    ["run", ""],
+    ["child", "specs/P.mdx#p.zeta"],
+    ["run", ""],
+  ]);
+  expect(tableOf(prediction)).toEqual({
+    [P_FILE]: { "descendant-changed": req(P_TOP) },
+    [P_TOP]: { changed: chg([P_TOP]) },
+    [P_LAST]: {},
+    ["specs/P.mdx#p.zeta"]: {},
+  });
+  expectComposed(input, [{ path: P_FILE, role: "coincident", text: pAfter }]);
+});
+
+// =============================================================================
+// T6.2-4's pinned shapes — (1) the flow-form last child, (2) T6.5-13(f)'s
+// top-level shape — and its `changed` twin (T6.5-13(e)): 6.2's `may` on
+// both of its sides
+// =============================================================================
+
+const G_A = "specs/ga.mdx";
+const G_AP = "specs/ga.mdx#p";
+const G_APM = "specs/ga.mdx#p.m";
+const G_APN = "specs/ga.mdx#p.n";
+
+test("S-6 (T6.2-4, pinned shape (1)): a flow-form last child, its tags and its parent's closing tag alone on their lines, moved onto its own final position reproduces the coincident parent's sequence — no node changed, no categories", () => {
+  // `<S id="p">`, U+000A, `<S id="p.m">`, U+000A, `y`, U+000A, `</S>`,
+  // U+000A, `</S>`, U+000A under `move specs/ga.mdx#p.m specs/ga.mdx#p.n`:
+  // the deletion removes exactly the construct's lines (the joined line it
+  // leaves empty dropping with line 4's terminator), leaving `<S id="p">`,
+  // U+000A, `</S>`, U+000A, and the insertion before that `</S>`, at a line
+  // start (no terminator added), restores them — the composed file
+  // byte-identical but for the `id` attribute. Both of `p`'s runs are empty
+  // at both sides (its tags' lines and the child's closing tag's line each
+  // dropped, 3), so its sequence is reproduced: no hash changes, no node
+  // carries any category.
+  const document = doc(G_A, [
+    sec("p", "", [
+      content("\n"),
+      sec("p.m", "", [content("\ny\n")]),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+  const gaAfter = '<S id="p">\n<S id="p.n">\ny\n</S>\n</S>\n';
+  expectDerives("ga before", sectionMoveSourceText(document.pieces));
+  expectDerives("ga after", gaAfter);
+
+  const input: SectionMoveInput = {
+    origin: document,
+    target: document,
+    movedId: "p.m",
+    newId: "p.n",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [G_APM]: G_APN,
+  });
+  expect(prediction.beforeOwnTokens.get(G_AP)).toEqual([
+    ["run", ""],
+    ["child", G_APM],
+    ["run", ""],
+  ]);
+  expect(prediction.afterOwnTokens.get(G_AP)).toEqual([
+    ["run", ""],
+    ["child", G_APN],
+    ["run", ""],
+  ]);
+  const rootTokens = [
+    ["run", ""],
+    ["child", G_AP],
+    ["run", ""],
+  ];
+  expect(prediction.beforeOwnTokens.get(G_A)).toEqual(rootTokens);
+  expect(prediction.afterOwnTokens.get(G_A)).toEqual(rootTokens);
+  expect(prediction.beforeOwnTokens.get(G_APM)).toEqual([["run", "y\n"]]);
+  expect(prediction.afterOwnTokens.get(G_APN)).toEqual([["run", "y\n"]]);
+  expect(sortedSet(prediction.changed)).toEqual([]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  expect(tableOf(prediction)).toEqual({
+    [G_A]: {},
+    [G_AP]: {},
+    [G_APN]: {},
+  });
+  expectComposed(input, [{ path: G_A, role: "coincident", text: gaAfter }]);
+});
+
+const F_A = "specs/fa.mdx";
+const F_AA = "specs/fa.mdx#a";
+const F_AM = "specs/fa.mdx#m";
+const F_AN = "specs/fa.mdx#n";
+
+test("S-6 (T6.2-4, T6.5-13(f)): the file's unterminated last section moved onto its own top-level position reproduces the root's sequence — no node changed, no categories", () => {
+  // `<S id="a">x</S>`, U+000A, `<S id="m">`, U+000A, `y`, U+000A, `</S>`
+  // with no final terminator, `move specs/fa.mdx#m specs/fa.mdx#n`: the
+  // deletion leaves `<S id="a">x</S>`, U+000A — the joined line it leaves
+  // empty dropping, there being no terminator to drop with it — so the
+  // insertion at the file's end is at a line start, no terminator added,
+  // and the result is `<S id="a">x</S>`, U+000A, `<S id="n">`, U+000A, `y`,
+  // U+000A, `</S>`, U+000A. The root, origin and target parent at once,
+  // keeps its own content — U+000A at both sides: line 1's terminator after
+  // `a`'s excised contribution on that kept line, the construct's own lines
+  // dropped (3) — the re-inserted child entering by its canonical identity
+  // (5.4): no hash changes, no node carries any category.
+  const document = doc(F_A, [
+    sec("a", "", [content("x")]),
+    content("\n"),
+    sec("m", "", [content("\ny\n")]),
+  ]);
+  const faAfter = '<S id="a">x</S>\n<S id="n">\ny\n</S>\n';
+  expectDerives("fa before", sectionMoveSourceText(document.pieces));
+  expectDerives("fa after", faAfter);
+
+  const input: SectionMoveInput = {
+    origin: document,
+    target: document,
+    movedId: "m",
+    newId: "n",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({ [F_AM]: F_AN });
+  expect(prediction.beforeOwnTokens.get(F_A)).toEqual([
+    ["run", ""],
+    ["child", F_AA],
+    ["run", "\n"],
+    ["child", F_AM],
+    ["run", ""],
+  ]);
+  expect(prediction.afterOwnTokens.get(F_A)).toEqual([
+    ["run", ""],
+    ["child", F_AA],
+    ["run", "\n"],
+    ["child", F_AN],
+    ["run", ""],
+  ]);
+  expect(prediction.beforeOwnTokens.get(F_AM)).toEqual([["run", "y\n"]]);
+  expect(prediction.afterOwnTokens.get(F_AN)).toEqual([["run", "y\n"]]);
+  expect(sortedSet(prediction.changed)).toEqual([]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  expect(tableOf(prediction)).toEqual({
+    [F_A]: {},
+    [F_AA]: {},
+    [F_AN]: {},
+  });
+  expectComposed(input, [{ path: F_A, role: "coincident", text: faAfter }]);
+});
+
+const T_A = "specs/ta.mdx";
+const T_AP = "specs/ta.mdx#p";
+const T_APM = "specs/ta.mdx#p.m";
+const T_APN = "specs/ta.mdx#p.n";
+
+test("S-6 (T6.2-4 changed twin, T6.5-13(e)): a last child re-inserted at its own position whose composed lines fail to reproduce the coincident parent's sequence — the parent alone is changed; the moved node and the root keep their content", () => {
+  // `foo <S id="p">`, U+000A, `<S id="p.m">x</S></S> baz`, U+000A under
+  // `move specs/ta.mdx#p.m specs/ta.mdx#p.n`: the deletion's range ends
+  // exactly at the insertion point, which line 1's terminator precedes in
+  // the composed text, so no terminator is added before the moved text and
+  // the result is `foo <S id="p">`, U+000A, `<S id="p.n">x</S>`, U+000A,
+  // `</S> baz`, U+000A. `p`'s run after its child was empty (its closing tag
+  // followed the child's at once) and is now the moved text's terminator,
+  // U+000A, on a kept line (`x`) — `p` `changed`, its cascade on the root;
+  // the moved node's `x` rides a kept line at both sides, and so do the
+  // root's `foo ` and ` baz`, U+000A: neither carries a category.
+  const document = doc(T_A, [
+    content("foo "),
+    sec("p", "", [content("\n"), sec("p.m", "", [content("x")])]),
+    content(" baz\n"),
+  ]);
+  const taAfter = 'foo <S id="p">\n<S id="p.n">x</S>\n</S> baz\n';
+  expectDerives("ta before", sectionMoveSourceText(document.pieces));
+  expectDerives("ta after", taAfter);
+
+  const input: SectionMoveInput = {
+    origin: document,
+    target: document,
+    movedId: "p.m",
+    newId: "p.n",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [T_APM]: T_APN,
+  });
+  expect(prediction.beforeOwnTokens.get(T_AP)).toEqual([
+    ["run", "\n"],
+    ["child", T_APM],
+    ["run", ""],
+  ]);
+  expect(prediction.afterOwnTokens.get(T_AP)).toEqual([
+    ["run", "\n"],
+    ["child", T_APN],
+    ["run", "\n"],
+  ]);
+  const rootTokens = [
+    ["run", "foo "],
+    ["child", T_AP],
+    ["run", " baz\n"],
+  ];
+  expect(prediction.beforeOwnTokens.get(T_A)).toEqual(rootTokens);
+  expect(prediction.afterOwnTokens.get(T_A)).toEqual(rootTokens);
+  expect(prediction.beforeOwnTokens.get(T_APM)).toEqual([["run", "x"]]);
+  expect(prediction.afterOwnTokens.get(T_APN)).toEqual([["run", "x"]]);
+  expect(sortedSet(prediction.changed)).toEqual([T_AP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  expect(tableOf(prediction)).toEqual({
+    [T_A]: { "descendant-changed": req(T_AP) },
+    [T_AP]: { changed: chg([T_AP]) },
+    [T_APN]: {},
+  });
+  expectComposed(input, [{ path: T_A, role: "coincident", text: taAfter }]);
+});
+
+// =============================================================================
+// Created target file: the root is changed as an added node (P-5)
+// =============================================================================
+
+const NEW_FILE = "specs/New.mdx";
+const NEW_IMP = "specs/New.mdx#imp2";
+
+test("S-6 (P-5 created target): the created root is changed by addition and carries no other category — even over a changed moved descendant", () => {
+  const origin = impureRoom();
+  const newAfter =
+    '<S id="imp2" coverage="none" tags="edge imp">\nImpure line one.\nImpure line two.\n  </S>\n';
+  expectDerives("Room before", sectionMoveSourceText(origin.pieces));
+  expectDerives("New after", newAfter);
+  const input: SectionMoveInput = {
+    origin,
+    target: { createdPath: NEW_FILE },
+    movedId: "op.imp",
+    newId: "imp2",
+    otherNodes: DEPS_NODES,
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(sortedSet(prediction.added)).toEqual([NEW_FILE]);
+  expect(sortedSet(prediction.changed)).toEqual([NEW_FILE, NEW_IMP, I_OP]);
+  // The created file's context is a line start with a trailing terminator
+  // (6.5), so the impure boundary still drops the tag-only line there.
+  expect(prediction.afterOwnTokens.get(NEW_IMP)).toEqual([
+    ["run", "Impure line one.\nImpure line two.\n"],
+  ]);
+
+  const changed = [I_OP, NEW_FILE, NEW_IMP];
+  expect(tableOf(prediction)).toEqual({
+    [ROOM]: { "descendant-changed": reqWithin([I_OP, NEW_IMP], [I_OP]) },
+    [I_OP]: {
+      changed: chg(changed),
+      "descendant-changed": opt(NEW_IMP),
+    },
+    // Added: `changed` only — never descendant-changed, whatever changed
+    // children it holds (SPEC 5.6; P-5: by addition, not comparison).
+    [NEW_FILE]: { changed: chg(changed) },
+    [NEW_IMP]: { changed: chg(changed) },
+    [DEPS]: { "upstream-changed": req(NEW_IMP) },
+    [D_TOP]: { "upstream-changed": req(NEW_IMP) },
+    [D_ONIMP]: { "upstream-changed": req(NEW_IMP) },
+  });
+  // The origin's deletion is the worked case's (above), so its after text
+  // is that vector's; the created file needs no declaration (T6.5-14).
+  expectComposed(input, [
+    { path: ROOM, role: "origin", text: ROOM_AFTER },
+    { path: NEW_FILE, role: "created", text: newAfter },
+  ]);
+});
+
+// =============================================================================
+// Self-closing arms (SPEC 1.1; T6.5-2's target-parent rewrite)
+// =============================================================================
+
+test("S-6 (6.5 self-closing moved section): the tag's own characters move; its empty sequence is preserved", () => {
+  const origin = doc("specs/O.mdx", [
+    sec("op", "", [
+      content("\nOp text.\n"),
+      selfClosing("op.solo", ""),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+  const target = doc("specs/H.mdx", [
+    sec("tp", "", [content("\nHall parent text.\n")]),
+    content("\n"),
+  ]);
+  const oAfter = '<S id="op">\nOp text.\n</S>\n';
+  const hAfter = '<S id="tp">\nHall parent text.\n<S id="tp.solo" />\n</S>\n';
+  expectDerives("O before", sectionMoveSourceText(origin.pieces));
+  expectDerives("O after", oAfter);
+  expectDerives("H before", sectionMoveSourceText(target.pieces));
+  expectDerives("H after", hAfter);
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "op.solo",
+    newId: "tp.solo",
+  };
+  const prediction = predictSectionMoveImpact(input);
+  expect(sortedSet(prediction.changed)).toEqual([
+    "specs/H.mdx#tp",
+    "specs/O.mdx#op",
+  ]);
+  expect(prediction.afterOwnTokens.get("specs/H.mdx#tp.solo")).toEqual([
+    ["run", ""],
+  ]);
+  const changed = ["specs/O.mdx#op", "specs/H.mdx#tp"];
+  expect(tableOf(prediction)).toEqual({
+    "specs/O.mdx": { "descendant-changed": req("specs/O.mdx#op") },
+    "specs/O.mdx#op": { changed: chg(changed) },
+    "specs/H.mdx": { "descendant-changed": req("specs/H.mdx#tp") },
+    "specs/H.mdx#tp": { changed: chg(changed) },
+    "specs/H.mdx#tp.solo": {},
+  });
+  expectComposed(input, [
+    { path: "specs/O.mdx", role: "origin", text: oAfter },
+    { path: "specs/H.mdx", role: "target", text: hAfter },
+  ]);
+});
+
+test("S-6 (T6.5-2): a self-closing target parent is rewritten to paired form and gains the moved child, the moved subtree preserved", () => {
+  const origin = doc("specs/O.mdx", [
+    sec("m", "", [content("\nMoved body.\n")]),
+    content("\n"),
+  ]);
+  const target = doc("specs/H.mdx", [selfClosing("tp", ""), content("\n")]);
+  const hAfter = '<S id="tp">\n<S id="tp.m">\nMoved body.\n</S>\n</S>\n';
+  expectDerives("O before", sectionMoveSourceText(origin.pieces));
+  expectDerives("O after", "");
+  expectDerives("H before", sectionMoveSourceText(target.pieces));
+  expectDerives("H after", hAfter);
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "m",
+    newId: "tp.m",
+  };
+  const prediction = predictSectionMoveImpact(input);
+  // The rewrite (`<S id="tp">` + U+000A + moved + U+000A + `</S>`) keeps
+  // the moved node's clean boundary: sequence preserved.
+  expect(prediction.beforeOwnTokens.get("specs/O.mdx#m")).toEqual([
+    ["run", "Moved body.\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get("specs/H.mdx#tp.m")).toEqual([
+    ["run", "Moved body.\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get("specs/H.mdx#tp")).toEqual([
+    ["run", ""],
+    ["child", "specs/H.mdx#tp.m"],
+    ["run", ""],
+  ]);
+  const changed = ["specs/O.mdx", "specs/H.mdx#tp"];
+  expect(tableOf(prediction)).toEqual({
+    "specs/O.mdx": { changed: chg(changed) },
+    "specs/H.mdx": { "descendant-changed": req("specs/H.mdx#tp") },
+    "specs/H.mdx#tp": { changed: chg(changed) },
+    "specs/H.mdx#tp.m": {},
+  });
+  expectComposed(input, [
+    { path: "specs/O.mdx", role: "origin", text: "" },
+    { path: "specs/H.mdx", role: "target", text: hAfter },
+  ]);
+});
+
+// =============================================================================
+// Insertion terminators (SPEC 6.5): the mid-line insertion point
+// =============================================================================
+
+test("S-6 (6.5 insertion): a top-level move into a file whose last line has no terminator inserts the preceding U+000A into the target root's run", () => {
+  const origin = doc("specs/O.mdx", [
+    sec("m", "", [content("\nM body.\n")]),
+    content("\n"),
+  ]);
+  // `<S id="tp">x</S>` with no trailing terminator: the insertion point
+  // (end of file) is not at a line start.
+  const target = doc("specs/T.mdx", [sec("tp", "", [content("x")])]);
+  const tAfter = '<S id="tp">x</S>\n<S id="z">\nM body.\n</S>\n';
+  expectDerives("O before", sectionMoveSourceText(origin.pieces));
+  expectDerives("O after", "");
+  expectDerives("T before", sectionMoveSourceText(target.pieces));
+  expectDerives("T after", tAfter);
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "m",
+    newId: "z",
+  };
+  const prediction = predictSectionMoveImpact(input);
+  expect(prediction.afterOwnTokens.get("specs/T.mdx")).toEqual([
+    ["run", ""],
+    ["child", "specs/T.mdx#tp"],
+    ["run", "\n"], // the inserted preceding terminator (SPEC 6.5)
+    ["child", "specs/T.mdx#z"],
+    ["run", ""],
+  ]);
+  const changed = ["specs/O.mdx", "specs/T.mdx"];
+  expect(sortedSet(prediction.changed)).toEqual([...changed].sort());
+  expect(tableOf(prediction)).toEqual({
+    "specs/O.mdx": { changed: chg(changed) },
+    "specs/T.mdx": { changed: chg(changed) },
+    "specs/T.mdx#tp": {},
+    "specs/T.mdx#z": {},
+  });
+  expectComposed(input, [
+    { path: "specs/O.mdx", role: "origin", text: "" },
+    { path: "specs/T.mdx", role: "target", text: tAfter },
+  ]);
+});
+
+// =============================================================================
+// T6.5-2's fourth geometry and T6.5-16(c)'s controls: a single-line in-line
+// section holding prose outside its tags, moved into each text-position
+// target parent shape — the insertion point's line holding the target
+// parent's parent's own bytes on both sides of the insertion (6.2's
+// enumeration at the destination; P-5's text-position draws)
+// =============================================================================
+
+const X_A = "specs/xa.mdx";
+const X_AK = "specs/xa.mdx#k";
+const X_AM = "specs/xa.mdx#m";
+const X_B = "specs/xb.mdx";
+const X_BP = "specs/xb.mdx#p";
+const X_BPM = "specs/xb.mdx#p.m";
+
+/**
+ * The shared origin, as T6.5-16(c)'s control stages it: `<S id="k">z</S>`,
+ * U+000A, `<S id="m">x</S>`, U+000A — the moved section alone on its line,
+ * a paragraph line (`x</S>` follows its opening tag, so the flow attempt
+ * fails and both tags stand in text position). Its deletion leaves line 2
+ * empty purely by removal, dropped with its terminator (6.5, 3), so the
+ * origin root loses its child reference and that line's U+000A — `changed`
+ * (5.6) — while `k`, alone on line 1, keeps its content. The moved node's
+ * own content is `x` at both sides: its line's terminator is the root's,
+ * outside the construct, and at the destination 6.5's U+000A after the
+ * moved text is the target parent's.
+ */
+function textPositionOrigin(): SectionMoveDocument {
+  return doc(X_A, [
+    sec("k", "", [content("z")]),
+    content("\n"),
+    sec("m", "", [content("x")]),
+    content("\n"),
+  ]);
+}
+
+const X_ORIGIN_SOURCE_BEFORE = '<S id="k">z</S>\n<S id="m">x</S>\n';
+const X_ORIGIN_SOURCE_AFTER = '<S id="k">z</S>\n';
+const X_ORIGIN_TOKENS_BEFORE = [
+  ["run", ""],
+  ["child", X_AK],
+  ["run", "\n"],
+  ["child", X_AM],
+  ["run", "\n"],
+];
+const X_ORIGIN_TOKENS_AFTER = [
+  ["run", ""],
+  ["child", X_AK],
+  ["run", "\n"],
+];
+/**
+ * The target root's own content at both sides of every vector here: `foo `
+ * before `p`'s construct and ` baz`, U+000A after it, each on a line kept
+ * before and after the move (3).
+ */
+const X_TARGET_ROOT_TOKENS = [
+  ["run", "foo "],
+  ["child", X_BP],
+  ["run", " baz\n"],
+];
+
+test("S-6 (T6.5-2's fourth geometry; T6.5-16(c)'s control, first parent): an in-line section moved into a text-position parent whose closing tag shares its line takes a U+000A before the moved text — the parent alone changed at the destination, the target root keeping its content", () => {
+  // Target `foo <S id="p">bar</S> baz`, U+000A receiving `<S id="m">x</S>`
+  // into `p.m`, the hand-derived anchor (T6.5-2's fourth geometry): the
+  // insertion point, immediately before `p`'s closing tag, follows `bar` —
+  // no line start — so 6.5 adds a U+000A before the moved text as well as
+  // the one after it, giving `foo <S id="p">bar`, U+000A,
+  // `<S id="p.m">x</S>`, U+000A, `</S> baz`, U+000A: the insertion point's
+  // line split into three, each keeping non-whitespace once the tags are
+  // removed (3) — the moved text's line a paragraph continuation, the prose
+  // `x` denying the flow attempt. `p`'s own content, `bar` before, is
+  // `bar`, U+000A (the added terminator ending its first line), the child
+  // reference, U+000A (6.5's following terminator) after — `changed` (1.6,
+  // 5.5). The target root's `foo ` and ` baz`, U+000A ride kept lines at
+  // both sides — its sequence unchanged, so it is not `changed` and carries
+  // `descendant-changed` attributed to `p` (5.6); the moved node keeps `x`
+  // and carries nothing; the origin root is `changed` by its lost child.
+  const origin = textPositionOrigin();
+  const target = doc(X_B, [
+    content("foo "),
+    sec("p", "", [content("bar")]),
+    content(" baz\n"),
+  ]);
+  expect(sectionMoveSourceText(origin.pieces)).toBe(X_ORIGIN_SOURCE_BEFORE);
+  expect(sectionMoveSourceText(target.pieces)).toBe(
+    'foo <S id="p">bar</S> baz\n',
+  );
+  const xbAfter = 'foo <S id="p">bar\n<S id="p.m">x</S>\n</S> baz\n';
+  expectDerives("xa before", X_ORIGIN_SOURCE_BEFORE);
+  expectDerives("xa after", X_ORIGIN_SOURCE_AFTER);
+  expectDerives("xb before", sectionMoveSourceText(target.pieces));
+  expectDerives("xb after", xbAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "m",
+    newId: "p.m",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [X_AM]: X_BPM,
+  });
+  expect(prediction.beforeOwnTokens.get(X_BP)).toEqual([["run", "bar"]]);
+  expect(prediction.afterOwnTokens.get(X_BP)).toEqual([
+    ["run", "bar\n"],
+    ["child", X_BPM],
+    ["run", "\n"],
+  ]);
+  expect(prediction.beforeOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.afterOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.beforeOwnTokens.get(X_AM)).toEqual([["run", "x"]]);
+  expect(prediction.afterOwnTokens.get(X_BPM)).toEqual([["run", "x"]]);
+  expect(prediction.beforeOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_BEFORE);
+  expect(prediction.afterOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_AFTER);
+  expect(sortedSet(prediction.changed)).toEqual([X_A, X_BP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  const changed = [X_A, X_BP];
+  expect(tableOf(prediction)).toEqual({
+    [X_A]: { changed: chg(changed) },
+    [X_AK]: {},
+    [X_B]: { "descendant-changed": req(X_BP) },
+    [X_BP]: { changed: chg(changed) },
+    [X_BPM]: {},
+  });
+  expectComposed(input, [
+    { path: X_A, role: "origin", text: X_ORIGIN_SOURCE_AFTER },
+    { path: X_B, role: "target", text: xbAfter },
+  ]);
+});
+
+test("S-6 (T6.5-16(c)'s control, second parent): an in-line section moved into a text-position parent whose closing tag stands on a later line takes no terminator before the moved text — the parent alone changed at the destination, the target root keeping its content", () => {
+  // Target `foo <S id="p">bar`, U+000A, `</S> baz`, U+000A: the insertion
+  // point, immediately before `p`'s closing tag, is that line's start, so
+  // 6.5 adds no terminator before the moved text — the composed file is
+  // the first parent's, byte for byte: `foo <S id="p">bar`, U+000A,
+  // `<S id="p.m">x</S>`, U+000A, `</S> baz`, U+000A. `p`'s own content,
+  // `bar`, U+000A before (line 1's terminator already its own), gains the
+  // child reference and 6.5's following U+000A — `changed`. The root's
+  // `foo ` stays on line 1 and its ` baz`, U+000A on the closing tag's
+  // line, both kept at both sides (3): its sequence unchanged, not
+  // `changed`, `descendant-changed` attributed to `p` (5.6); the moved node
+  // keeps `x`; the origin root is `changed` by its lost child.
+  const origin = textPositionOrigin();
+  const target = doc(X_B, [
+    content("foo "),
+    sec("p", "", [content("bar\n")]),
+    content(" baz\n"),
+  ]);
+  expect(sectionMoveSourceText(origin.pieces)).toBe(X_ORIGIN_SOURCE_BEFORE);
+  expect(sectionMoveSourceText(target.pieces)).toBe(
+    'foo <S id="p">bar\n</S> baz\n',
+  );
+  const xbAfter = 'foo <S id="p">bar\n<S id="p.m">x</S>\n</S> baz\n';
+  expectDerives("xa before", X_ORIGIN_SOURCE_BEFORE);
+  expectDerives("xa after", X_ORIGIN_SOURCE_AFTER);
+  expectDerives("xb before", sectionMoveSourceText(target.pieces));
+  expectDerives("xb after", xbAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "m",
+    newId: "p.m",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [X_AM]: X_BPM,
+  });
+  expect(prediction.beforeOwnTokens.get(X_BP)).toEqual([["run", "bar\n"]]);
+  expect(prediction.afterOwnTokens.get(X_BP)).toEqual([
+    ["run", "bar\n"],
+    ["child", X_BPM],
+    ["run", "\n"],
+  ]);
+  expect(prediction.beforeOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.afterOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.beforeOwnTokens.get(X_AM)).toEqual([["run", "x"]]);
+  expect(prediction.afterOwnTokens.get(X_BPM)).toEqual([["run", "x"]]);
+  expect(prediction.beforeOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_BEFORE);
+  expect(prediction.afterOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_AFTER);
+  expect(sortedSet(prediction.changed)).toEqual([X_A, X_BP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  const changed = [X_A, X_BP];
+  expect(tableOf(prediction)).toEqual({
+    [X_A]: { changed: chg(changed) },
+    [X_AK]: {},
+    [X_B]: { "descendant-changed": req(X_BP) },
+    [X_BP]: { changed: chg(changed) },
+    [X_BPM]: {},
+  });
+  expectComposed(input, [
+    { path: X_A, role: "origin", text: X_ORIGIN_SOURCE_AFTER },
+    { path: X_B, role: "target", text: xbAfter },
+  ]);
+});
+
+test("S-6 (T6.5-16(c)'s control, self-closing parent; T6.5-2's self-closing arm): an in-line section moved into a self-closing text-position parent — rewritten to paired form, a U+000A before the moved text — the parent alone changed at the destination, the target root keeping its content", () => {
+  // Target `foo <S id="p" /> baz`, U+000A: 6.5 first rewrites the parent
+  // to the paired form — its `/` and the space before it deleted, `</S>`
+  // appended immediately after its `>` — so the insertion point, before
+  // that closing tag, follows `<S id="p">`, no line start, and a U+000A
+  // precedes the moved text as well as following it: `foo <S id="p">`,
+  // U+000A, `<S id="p.m">x</S>`, U+000A, `</S> baz`, U+000A. `p`'s own
+  // content, an empty run before (an empty body), is U+000A, the child
+  // reference, U+000A after — `changed`. The line `foo <S id="p">` keeps
+  // `foo ` once the tag is removed (3), and ` baz`, U+000A rides the
+  // closing tag's line, so the root's sequence is unchanged — not
+  // `changed`, `descendant-changed` attributed to `p` (5.6); the moved node
+  // keeps `x`; the origin root is `changed` by its lost child.
+  const origin = textPositionOrigin();
+  const target = doc(X_B, [
+    content("foo "),
+    selfClosing("p", ""),
+    content(" baz\n"),
+  ]);
+  expect(sectionMoveSourceText(origin.pieces)).toBe(X_ORIGIN_SOURCE_BEFORE);
+  expect(sectionMoveSourceText(target.pieces)).toBe('foo <S id="p" /> baz\n');
+  const xbAfter = 'foo <S id="p">\n<S id="p.m">x</S>\n</S> baz\n';
+  expectDerives("xa before", X_ORIGIN_SOURCE_BEFORE);
+  expectDerives("xa after", X_ORIGIN_SOURCE_AFTER);
+  expectDerives("xb before", sectionMoveSourceText(target.pieces));
+  expectDerives("xb after", xbAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "m",
+    newId: "p.m",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [X_AM]: X_BPM,
+  });
+  expect(prediction.beforeOwnTokens.get(X_BP)).toEqual([["run", ""]]);
+  expect(prediction.afterOwnTokens.get(X_BP)).toEqual([
+    ["run", "\n"],
+    ["child", X_BPM],
+    ["run", "\n"],
+  ]);
+  expect(prediction.beforeOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.afterOwnTokens.get(X_B)).toEqual(X_TARGET_ROOT_TOKENS);
+  expect(prediction.beforeOwnTokens.get(X_AM)).toEqual([["run", "x"]]);
+  expect(prediction.afterOwnTokens.get(X_BPM)).toEqual([["run", "x"]]);
+  expect(prediction.beforeOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_BEFORE);
+  expect(prediction.afterOwnTokens.get(X_A)).toEqual(X_ORIGIN_TOKENS_AFTER);
+  expect(sortedSet(prediction.changed)).toEqual([X_A, X_BP]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  const changed = [X_A, X_BP];
+  expect(tableOf(prediction)).toEqual({
+    [X_A]: { changed: chg(changed) },
+    [X_AK]: {},
+    [X_B]: { "descendant-changed": req(X_BP) },
+    [X_BP]: { changed: chg(changed) },
+    [X_BPM]: {},
+  });
+  expectComposed(input, [
+    { path: X_A, role: "origin", text: X_ORIGIN_SOURCE_AFTER },
+    { path: X_B, role: "target", text: xbAfter },
+  ]);
+});
+
+// =============================================================================
+// Drop-rule delegation to P-2's oracle: expansion semantics
+// =============================================================================
+
+test("S-6 (3, delegated): a non-empty expansion keeps the origin straddling line — the moved node's leading terminator contributes there and not at the destination", () => {
+  const origin = doc("specs/E.mdx", [
+    sec("op", "", [
+      content("\nOp text.\n\n"),
+      {
+        kind: "embedding",
+        text: "{text(X)}",
+        expansion: "EXP",
+        target: "specs/X.mdx#x",
+      },
+      sec("op.mv", "", [content("\nBody.\n")]),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+  const target = doc("specs/H2.mdx", [
+    sec("tp", "", [content("\nHall text.\n")]),
+    content("\n"),
+  ]);
+  // `{text(X)}<S id="op.mv">` at a line start derives as a flow expression
+  // followed by a flow-position tag (the stock grammar admits a tag directly
+  // after a flow expression on its line), which the closing tag alone on
+  // its line closes.
+  const eAfter = '<S id="op">\nOp text.\n\n{text(X)}\n</S>\n';
+  const h2After =
+    '<S id="tp">\nHall text.\n<S id="tp.mv">\nBody.\n</S>\n</S>\n';
+  expectDerives("E before", sectionMoveSourceText(origin.pieces));
+  expectDerives("E after", eAfter);
+  expectDerives("H2 before", sectionMoveSourceText(target.pieces));
+  expectDerives("H2 after", h2After);
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "op.mv",
+    newId: "tp.mv",
+    otherNodes: [node("specs/X.mdx", ["specs/X.mdx#x"]), node("specs/X.mdx#x")],
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  // Origin: the line `{text(X)}<S id="op.mv">` + terminator is kept — the
+  // non-empty expansion keeps it (3) — so the moved node's leading
+  // terminator contributes at the origin; the destination drops the
+  // tag-only line.
+  expect(prediction.beforeOwnTokens.get("specs/E.mdx#op.mv")).toEqual([
+    ["run", "\nBody.\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get("specs/H2.mdx#tp.mv")).toEqual([
+    ["run", "Body.\n"],
+  ]);
+  // The origin parent keeps the embedding token and gains the merged
+  // line's terminator (the line stays kept after the deletion).
+  expect(prediction.afterOwnTokens.get("specs/E.mdx#op")).toEqual([
+    ["run", "Op text.\n\n"],
+    ["embed", "specs/X.mdx#x"],
+    ["run", "\n"],
+  ]);
+
+  const MV2 = "specs/H2.mdx#tp.mv";
+  const changed = ["specs/E.mdx#op", "specs/H2.mdx#tp", MV2];
+  expect(sortedSet(prediction.changed)).toEqual([...changed].sort());
+  expect(tableOf(prediction)).toEqual({
+    "specs/E.mdx": {
+      "descendant-changed": reqWithin(
+        ["specs/E.mdx#op", MV2],
+        ["specs/E.mdx#op"],
+      ),
+    },
+    "specs/E.mdx#op": {
+      changed: chg(changed),
+      "descendant-changed": opt(MV2),
+    },
+    "specs/H2.mdx": {
+      "descendant-changed": reqWithin(
+        ["specs/H2.mdx#tp", MV2],
+        ["specs/H2.mdx#tp"],
+      ),
+    },
+    "specs/H2.mdx#tp": {
+      changed: chg(changed),
+      "descendant-changed": opt(MV2),
+    },
+    [MV2]: { changed: chg(changed) },
+    "specs/X.mdx": {},
+    "specs/X.mdx#x": {},
+  });
+  // The merged line `{text(X)}` keeps non-whitespace source characters, so
+  // the byte deletion keeps it and its terminator (6.5).
+  expectComposed(input, [
+    { path: "specs/E.mdx", role: "origin", text: eAfter },
+    { path: "specs/H2.mdx", role: "target", text: h2After },
+  ]);
+});
+
+// =============================================================================
+// 6.2's enumeration beyond the parents and the moved subtree: a sibling
+// whose residue the deletion joins to prose (dropped before, kept after)
+// =============================================================================
+
+const G = "specs/G.mdx";
+const G_P = "specs/G.mdx#p";
+const G_PX = "specs/G.mdx#p.x";
+const G_MV_PRE = "specs/G.mdx#p.mv";
+const H3 = "specs/H3.mdx";
+const H3_TP = "specs/H3.mdx#tp";
+const H3_MV = "specs/H3.mdx#tp.mv";
+
+test("S-6 (6.2's enumeration): a sibling whose whitespace residue the deletion joins to prose — its line dropped before, kept after — is changed", () => {
+  // Origin `<S id="p">`, U+000A, `<S id="p.x"> </S><S id="p.mv">`, U+000C,
+  // U+000A, `M.`, U+000A, U+000C, `</S>tail`, U+000A, `</S>`, U+000A — the
+  // moved section in T6.2-3(b)'s both-sided spelling (its tags in text
+  // position at both sides), the sibling `p.x` sharing its opening line.
+  // Before, that line is left whitespace-only purely by removals (` ` and
+  // U+000C are 1.4 whitespace) and drops, so `p.x` contributes nothing;
+  // the deletion joins the residue `<S id="p.x"> </S>` to `tail`, a kept
+  // line, so its run ` ` appears — `p.x` is `changed` beside the parents.
+  // The moved node's lead U+000C rides a kept line at the origin and a
+  // dropped one at the destination, so it is `changed` too (T6.2-3(b)).
+  const origin = doc(G, [
+    sec("p", "", [
+      content("\n"),
+      sec("p.x", "", [content(" ")]),
+      sec("p.mv", "", [content(`${FF}\nM.\n${FF}`)]),
+      content("tail\n"),
+    ]),
+    content("\n"),
+  ]);
+  const target = doc(H3, [sec("tp", "", [content("\nT.\n")]), content("\n")]);
+  const gAfter = '<S id="p">\n<S id="p.x"> </S>tail\n</S>\n';
+  const h3After = `<S id="tp">\nT.\n<S id="tp.mv">${FF}\nM.\n${FF}</S>\n</S>\n`;
+  expectDerives("G before", sectionMoveSourceText(origin.pieces));
+  expectDerives("G after", gAfter);
+  expectDerives("H3 before", sectionMoveSourceText(target.pieces));
+  expectDerives("H3 after", h3After);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "p.mv",
+    newId: "tp.mv",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(prediction.beforeOwnTokens.get(G_PX)).toEqual([["run", ""]]);
+  expect(prediction.afterOwnTokens.get(G_PX)).toEqual([["run", " "]]);
+  expect(prediction.beforeOwnTokens.get(G_MV_PRE)).toEqual([
+    ["run", `M.\n${FF}`],
+  ]);
+  expect(prediction.afterOwnTokens.get(H3_MV)).toEqual([["run", "M.\n"]]);
+  expect(prediction.afterOwnTokens.get(G_P)).toEqual([
+    ["run", ""],
+    ["child", G_PX],
+    ["run", "tail\n"],
+  ]);
+
+  expect(sortedSet(prediction.changed)).toEqual([G_P, G_PX, H3_TP, H3_MV]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+
+  const changed = [G_P, G_PX, H3_TP, H3_MV];
+  expect(tableOf(prediction)).toEqual({
+    [G]: {
+      "descendant-changed": reqWithin([G_P, G_PX, H3_MV], [G_P, G_PX]),
+    },
+    [G_P]: {
+      changed: chg(changed),
+      "descendant-changed": reqWithin([G_PX, H3_MV], [G_PX]),
+    },
+    [G_PX]: { changed: chg(changed) },
+    [H3]: { "descendant-changed": reqWithin([H3_TP, H3_MV], [H3_TP]) },
+    [H3_TP]: { changed: chg(changed), "descendant-changed": opt(H3_MV) },
+    [H3_MV]: { changed: chg(changed) },
+  });
+  expectComposed(input, [
+    { path: G, role: "origin", text: gAfter },
+    { path: H3, role: "target", text: h3After },
+  ]);
+});
+
+// =============================================================================
+// T6.2-3's sibling stagings (d) and (e), and a non-parent ancestor: 6.2's
+// enumeration reaching every node with bytes on a line the edits touch
+// =============================================================================
+
+const A = "specs/a.mdx";
+const A_P = "specs/a.mdx#p";
+const A_PS = "specs/a.mdx#p.s";
+const A_PM = "specs/a.mdx#p.m";
+const B = "specs/b.mdx";
+const B_K = "specs/b.mdx#k";
+const B_M = "specs/b.mdx#m";
+
+test("S-6 (T6.2-3(d)): at the origin, a sibling's whitespace residue left alone on the deletion's merged line — kept before, dropped after — is changed; the moved node keeps its sequence", () => {
+  // Origin `<S id="p">`, U+000A, `<S id="p.s"> </S><S id="p.m">text</S>`,
+  // U+000A, `</S>`, U+000A; `move a.mdx#p.m b.mdx#m`, the target
+  // `<S id="k">z</S>`, U+000A. The second line, a paragraph of two in-line
+  // siblings, is kept before (`text` remaining once the tags are removed)
+  // and dropped after (`<S id="p.s"> </S>` alone, whitespace-only purely by
+  // removals), so `p.s` loses its run ` `; `p.m`'s `text` rides a kept
+  // line at both sides.
+  const origin = doc(A, [
+    sec("p", "", [
+      content("\n"),
+      sec("p.s", "", [content(" ")]),
+      sec("p.m", "", [content("text")]),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+  const target = doc(B, [sec("k", "", [content("z")]), content("\n")]);
+  const aAfter = '<S id="p">\n<S id="p.s"> </S>\n</S>\n';
+  const bAfter = '<S id="k">z</S>\n<S id="m">text</S>\n';
+  expectDerives("a before", sectionMoveSourceText(origin.pieces));
+  expectDerives("a after", aAfter);
+  expectDerives("b before", sectionMoveSourceText(target.pieces));
+  expectDerives("b after", bAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "p.m",
+    newId: "m",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(prediction.beforeOwnTokens.get(A_PS)).toEqual([["run", " "]]);
+  expect(prediction.afterOwnTokens.get(A_PS)).toEqual([["run", ""]]);
+  expect(prediction.beforeOwnTokens.get(A_PM)).toEqual([["run", "text"]]);
+  expect(prediction.afterOwnTokens.get(B_M)).toEqual([["run", "text"]]);
+  expect(prediction.beforeOwnTokens.get(A_P)).toEqual([
+    ["run", ""],
+    ["child", A_PS],
+    ["run", ""],
+    ["child", A_PM],
+    ["run", "\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get(A_P)).toEqual([
+    ["run", ""],
+    ["child", A_PS],
+    ["run", ""],
+  ]);
+  expect(prediction.afterOwnTokens.get(B)).toEqual([
+    ["run", ""],
+    ["child", B_K],
+    ["run", "\n"],
+    ["child", B_M],
+    ["run", "\n"],
+  ]);
+
+  expect(sortedSet(prediction.changed)).toEqual([A_P, A_PS, B]);
+  const changed = [A_P, A_PS, B];
+  expect(tableOf(prediction)).toEqual({
+    [A]: { "descendant-changed": req(A_P, A_PS) },
+    [A_P]: { changed: chg(changed), "descendant-changed": req(A_PS) },
+    [A_PS]: { changed: chg(changed) },
+    [B]: { changed: chg(changed) },
+    [B_K]: {},
+    [B_M]: {},
+  });
+  // The merged line keeps the sibling's tags, non-whitespace source
+  // characters, so the byte deletion keeps it (6.5).
+  expectComposed(input, [
+    { path: A, role: "origin", text: aAfter },
+    { path: B, role: "target", text: bAfter },
+  ]);
+});
+
+const E_A = "specs/ea.mdx";
+const E_AA = "specs/ea.mdx#a";
+const E_B = "specs/eb.mdx";
+const E_BP = "specs/eb.mdx#p";
+const E_BPS = "specs/eb.mdx#p.s";
+const E_BPN = "specs/eb.mdx#p.n";
+
+test("S-6 (T6.2-3(e)): at the destination, a sibling's U+000C residue left alone on the line the insertion splits — kept before, dropped after — is changed; the target root keeps its content", () => {
+  // Target `foo <S id="p">`, U+000A, `<S id="p.s">`, U+000C, `</S></S> tail`,
+  // U+000A receiving `<S id="m">text</S>` (alone on its origin line) into
+  // `p.n`: the insertion point, preceded by `p.s`'s closing tag, is not at
+  // a line start, so 6.5's added terminator splits the line, leaving
+  // `<S id="p.s">`, U+000C, `</S>` alone — dropped as whitespace-only under
+  // 1.4 — while `foo ` and ` tail` ride kept lines at both sides.
+  const origin = doc(E_A, [
+    sec("a", "", [content("x")]),
+    content("\n"),
+    sec("m", "", [content("text")]),
+    content("\n"),
+  ]);
+  const target = doc(E_B, [
+    content("foo "),
+    sec("p", "", [content("\n"), sec("p.s", "", [content(FF)])]),
+    content(" tail\n"),
+  ]);
+  const eaAfter = '<S id="a">x</S>\n';
+  const ebAfter = `foo <S id="p">\n<S id="p.s">${FF}</S>\n<S id="p.n">text</S>\n</S> tail\n`;
+  expectDerives("ea before", sectionMoveSourceText(origin.pieces));
+  expectDerives("ea after", eaAfter);
+  expectDerives("eb before", sectionMoveSourceText(target.pieces));
+  expectDerives("eb after", ebAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "m",
+    newId: "p.n",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(prediction.beforeOwnTokens.get(E_BPS)).toEqual([["run", FF]]);
+  expect(prediction.afterOwnTokens.get(E_BPS)).toEqual([["run", ""]]);
+  expect(prediction.afterOwnTokens.get(E_BPN)).toEqual([["run", "text"]]);
+  expect(prediction.beforeOwnTokens.get(E_B)).toEqual([
+    ["run", "foo "],
+    ["child", E_BP],
+    ["run", " tail\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get(E_B)).toEqual([
+    ["run", "foo "],
+    ["child", E_BP],
+    ["run", " tail\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get(E_BP)).toEqual([
+    ["run", "\n"],
+    ["child", E_BPS],
+    ["run", ""],
+    ["child", E_BPN],
+    ["run", "\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get(E_A)).toEqual([
+    ["run", ""],
+    ["child", E_AA],
+    ["run", "\n"],
+  ]);
+
+  expect(sortedSet(prediction.changed)).toEqual([E_A, E_BP, E_BPS]);
+  const changed = [E_A, E_BP, E_BPS];
+  expect(tableOf(prediction)).toEqual({
+    [E_A]: { changed: chg(changed) },
+    [E_AA]: {},
+    [E_B]: { "descendant-changed": req(E_BP, E_BPS) },
+    [E_BP]: { changed: chg(changed), "descendant-changed": req(E_BPS) },
+    [E_BPS]: { changed: chg(changed) },
+    [E_BPN]: {},
+  });
+  expectComposed(input, [
+    { path: E_A, role: "origin", text: eaAfter },
+    { path: E_B, role: "target", text: ebAfter },
+  ]);
+});
+
+const N_A = "specs/na.mdx";
+const N_G = "specs/na.mdx#g";
+const N_GP = "specs/na.mdx#g.p";
+const N_GPM = "specs/na.mdx#g.p.m";
+const N_B = "specs/nb.mdx";
+const N_BK = "specs/nb.mdx#k";
+const N_BM = "specs/nb.mdx#m";
+
+test("S-6 (6.2's enumeration): a non-parent ancestor whose whitespace lead rides the deletion's merged line — kept before, dropped after — is changed", () => {
+  // Origin `<S id="g">`, U+000A, `  <S id="g.p"><S id="g.p.m">body`, U+000A,
+  // `lead</S></S>`, U+000A, `</S>`, U+000A: the moved section a multi-line
+  // in-line section with prose remainder and lead (both text-position),
+  // the parent `g.p` an in-line element holding nothing else, and the
+  // grandparent `g` owning the opening line's two-space lead and the
+  // closing line's terminator — on kept lines before (`body`, `lead`) and
+  // on the merged line `  <S id="g.p"></S>` after, whitespace-only purely
+  // by removals and dropped. Moved to `nb.mdx`'s top level, the moved node
+  // keeps its sequence: `body`, U+000A, `lead` ride kept lines there too.
+  const origin = doc(N_A, [
+    sec("g", "", [
+      content("\n  "),
+      sec("g.p", "", [sec("g.p.m", "", [content("body\nlead")])]),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+  const target = doc(N_B, [sec("k", "", [content("z")]), content("\n")]);
+  const naAfter = '<S id="g">\n  <S id="g.p"></S>\n</S>\n';
+  const nbAfter = '<S id="k">z</S>\n<S id="m">body\nlead</S>\n';
+  expectDerives("na before", sectionMoveSourceText(origin.pieces));
+  expectDerives("na after", naAfter);
+  expectDerives("nb before", sectionMoveSourceText(target.pieces));
+  expectDerives("nb after", nbAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target,
+    movedId: "g.p.m",
+    newId: "m",
+  };
+  const prediction = predictSectionMoveImpact(input);
+
+  expect(prediction.beforeOwnTokens.get(N_G)).toEqual([
+    ["run", "  "],
+    ["child", N_GP],
+    ["run", "\n"],
+  ]);
+  expect(prediction.afterOwnTokens.get(N_G)).toEqual([
+    ["run", ""],
+    ["child", N_GP],
+    ["run", ""],
+  ]);
+  expect(prediction.afterOwnTokens.get(N_GP)).toEqual([["run", ""]]);
+  expect(prediction.beforeOwnTokens.get(N_GPM)).toEqual([
+    ["run", "body\nlead"],
+  ]);
+  expect(prediction.afterOwnTokens.get(N_BM)).toEqual([["run", "body\nlead"]]);
+
+  expect(sortedSet(prediction.changed)).toEqual([N_G, N_GP, N_B]);
+  const changed = [N_G, N_GP, N_B];
+  expect(tableOf(prediction)).toEqual({
+    [N_A]: { "descendant-changed": req(N_G, N_GP) },
+    [N_G]: { changed: chg(changed), "descendant-changed": req(N_GP) },
+    [N_GP]: { changed: chg(changed) },
+    [N_B]: { changed: chg(changed) },
+    [N_BK]: {},
+    [N_BM]: {},
+  });
+  // The merged line keeps the parent's tags, non-whitespace source
+  // characters, so the byte deletion keeps it (6.5).
+  expectComposed(input, [
+    { path: N_A, role: "origin", text: naAfter },
+    { path: N_B, role: "target", text: nbAfter },
+  ]);
+});
+
+// =============================================================================
+// T6.2-3's three impure stagings, each moved to another file's top level and
+// into a flow-position parent (S-6): 6.2's worked straddling-line shape (a)
+// exactly as spelled, its both-sided U+000B/U+000C spelling (b), and the
+// `body</S>` variant with such a remainder (c)
+// =============================================================================
+
+const C_A = "specs/ca.mdx";
+const C_AM = "specs/ca.mdx#m";
+const C_B = "specs/cb.mdx";
+const C_BK = "specs/cb.mdx#k";
+const C_BM = "specs/cb.mdx#m";
+const C_BP = "specs/cb.mdx#p";
+const C_BPM = "specs/cb.mdx#p.m";
+
+/**
+ * One impure shape, staged at the origin file's top level as `foo <S id="m">`
+ * + `body` + `</S>` + `afterClose`, U+000A — the moved text `<S id="m">` +
+ * `body` + `</S>` landing at the destination's line start followed by U+000A
+ * (6.5). The runs are hand-derived from SPEC 3's drop rule, as each shape's
+ * comment spells.
+ */
+interface ImpureShape {
+  readonly tag: string;
+  readonly label: string;
+  /** The moved section's body: the bytes between its tags. */
+  readonly body: string;
+  /** What follows the closing tag on its origin line. */
+  readonly afterClose: string;
+  /** The origin root's one run after the deletion — also its composed text. */
+  readonly originAfter: string;
+  /** The moved node's run at the origin. */
+  readonly beforeRun: string;
+  /** The moved node's run at the destination. */
+  readonly afterRun: string;
+  /**
+   * The target parent's run after the moved child: U+000A when the closing
+   * tag's line is kept at the destination, empty when it drops.
+   */
+  readonly parentTail: string;
+}
+
+const IMPURE_SHAPES: readonly ImpureShape[] = [
+  {
+    // (a) `foo <S id="m">`, U+000A, `body`, U+000A, two spaces, `</S> bar`:
+    // at the origin both boundary lines are kept (`foo`, `bar`), so the
+    // opening line's terminator and the closing line's two spaces contribute
+    // to the node; at the destination each tag is alone on its line, a
+    // flow-position tag, and both lines — `<S id="…">` and `  </S>` — are
+    // left empty or whitespace-only purely by removals and drop with their
+    // terminators (3): the node keeps `body`, U+000A alone.
+    tag: "(a)",
+    label: "the worked shape with spaces before its closing tag",
+    body: "\nbody\n  ",
+    afterClose: " bar",
+    originAfter: "foo  bar\n",
+    beforeRun: "\nbody\n  ",
+    afterRun: "body\n",
+    parentTail: "",
+  },
+  ...(
+    [
+      ["U+000B", VT],
+      ["U+000C", FF],
+    ] as const
+  ).map(([name, ws]): ImpureShape => ({
+    // (b) `foo <S id="m">`, ws, U+000A, `body`, U+000A, ws, `</S> bar`:
+    // whitespace under 1.4, so both destination lines are left
+    // whitespace-only by the removals and drop with their terminators,
+    // but no whitespace to the MDX grammar, so both tags stay in text
+    // position there, the section closing within its paragraph (6.2).
+    tag: "(b)",
+    label: `the both-sided ${name} spelling`,
+    body: `${ws}\nbody\n${ws}`,
+    afterClose: " bar",
+    originAfter: "foo  bar\n",
+    beforeRun: `${ws}\nbody\n${ws}`,
+    afterRun: "body\n",
+    parentTail: "",
+  })),
+  ...(
+    [
+      ["U+000B", VT],
+      ["U+000C", FF],
+    ] as const
+  ).map(([name, ws]): ImpureShape => ({
+    // (c) `foo <S id="m">`, ws, U+000A, `body</S>`: an in-line section
+    // closed within its paragraph, whose difference is realized on the
+    // opening line alone — the destination line `<S id="…">`, ws is
+    // whitespace-only purely by the removal and drops, the tag staying an
+    // in-line tag there too; the closing tag's line, `body</S>`, is kept
+    // at both sides, so its terminator at the destination is the parent's.
+    tag: "(c)",
+    label: `the body</S> variant with a ${name} remainder`,
+    body: `${ws}\nbody`,
+    afterClose: "",
+    originAfter: "foo \n",
+    beforeRun: `${ws}\nbody`,
+    afterRun: "body",
+    parentTail: "\n",
+  })),
+];
+
+/**
+ * A destination T6.2-3 stages each shape into, with the hand-derived
+ * target-side expectations every shape shares: the moved text lands at a
+ * line start followed by U+000A (6.5), so no terminator enters the parent's
+ * runs; the parent is `changed` (it gains a child reference), the moved node
+ * is `changed` by its boundary lines, and the file root above a section
+ * parent is `descendant-changed` attributed to the parent (5.6), with the
+ * two-sided tolerance for the relocated moved node.
+ */
+interface ImpureDestination {
+  readonly name: string;
+  readonly newId: string;
+  readonly parent: string;
+  readonly moved: string;
+  readonly target: () => SectionMoveDocument;
+  /** The composed target text around the moved text (its `id` rewritten). */
+  readonly compose: (movedText: string) => string;
+  /** The parent's own-content sequence after the move. */
+  readonly parentAfter: (tail: string) => SectionMoveOwnToken[];
+  /** The target file's rows of the category table. */
+  readonly rows: (
+    changed: readonly string[],
+  ) => Record<string, Record<string, CategoryRow>>;
+}
+
+const IMPURE_DESTINATIONS: readonly ImpureDestination[] = [
+  {
+    // `<S id="k">z</S>`, U+000A — a file ending with a terminator, so the
+    // insertion point, its end, is a line start; the target root is the
+    // parent. Line 1 is kept (`z`), its terminator the root's run after `k`.
+    name: "another file's top level",
+    newId: "m",
+    parent: C_B,
+    moved: C_BM,
+    target: () => doc(C_B, [sec("k", "", [content("z")]), content("\n")]),
+    compose: (movedText) => `<S id="k">z</S>\n${movedText}\n`,
+    parentAfter: (tail) => [
+      ["run", ""],
+      ["child", C_BK],
+      ["run", "\n"],
+      ["child", C_BM],
+      ["run", tail],
+    ],
+    rows: (changed) => ({
+      [C_B]: { changed: chg(changed), "descendant-changed": opt(C_BM) },
+      [C_BK]: {},
+      [C_BM]: { changed: chg(changed) },
+    }),
+  },
+  {
+    // `<S id="p">`, U+000A, `x`, U+000A, `</S>`, U+000A — a flow-position
+    // parent, its tags alone on their lines, the insertion point before its
+    // closing tag a line start. `p`'s tag-only lines drop at both sides (3),
+    // so its run before the moved child is `x`, U+000A and the root's runs
+    // around it stay empty: the root keeps its content.
+    name: "a flow-position parent",
+    newId: "p.m",
+    parent: C_BP,
+    moved: C_BPM,
+    target: () => doc(C_B, [sec("p", "", [content("\nx\n")]), content("\n")]),
+    compose: (movedText) => `<S id="p">\nx\n${movedText}\n</S>\n`,
+    parentAfter: (tail) => [
+      ["run", "x\n"],
+      ["child", C_BPM],
+      ["run", tail],
+    ],
+    rows: (changed) => ({
+      [C_B]: { "descendant-changed": reqWithin([C_BP, C_BPM], [C_BP]) },
+      [C_BP]: { changed: chg(changed), "descendant-changed": opt(C_BPM) },
+      [C_BPM]: { changed: chg(changed) },
+    }),
+  },
+];
+
+for (const shape of IMPURE_SHAPES) {
+  for (const dest of IMPURE_DESTINATIONS) {
+    test(`S-6 (T6.2-3${shape.tag}): ${shape.label}, moved into ${dest.name} — the moved node is changed by its boundary lines, the two parents changed, no other node`, () => {
+      const origin = doc(C_A, [
+        content("foo "),
+        sec("m", "", [content(shape.body)]),
+        content(`${shape.afterClose}\n`),
+      ]);
+      const target = dest.target();
+      const movedText = `<S id="${dest.newId}">${shape.body}</S>`;
+      const cbAfter = dest.compose(movedText);
+      expectDerives("ca before", sectionMoveSourceText(origin.pieces));
+      expectDerives("ca after", shape.originAfter);
+      expectDerives("cb before", sectionMoveSourceText(target.pieces));
+      expectDerives("cb after", cbAfter);
+
+      const input: SectionMoveInput = {
+        origin,
+        target,
+        movedId: "m",
+        newId: dest.newId,
+      };
+      const prediction = predictSectionMoveImpact(input);
+
+      expect(prediction.beforeOwnTokens.get(C_AM)).toEqual([
+        ["run", shape.beforeRun],
+      ]);
+      expect(prediction.afterOwnTokens.get(dest.moved)).toEqual([
+        ["run", shape.afterRun],
+      ]);
+      expect(prediction.afterOwnTokens.get(C_A)).toEqual([
+        ["run", shape.originAfter],
+      ]);
+      expect(prediction.afterOwnTokens.get(dest.parent)).toEqual(
+        dest.parentAfter(shape.parentTail),
+      );
+
+      const changed = [C_A, dest.parent, dest.moved];
+      expect(sortedSet(prediction.changed)).toEqual([...changed].sort());
+      expect(sortedSet(prediction.added)).toEqual([]);
+      expect(tableOf(prediction)).toEqual({
+        [C_A]: { changed: chg(changed), "descendant-changed": opt(dest.moved) },
+        ...dest.rows(changed),
+      });
+      expectComposed(input, [
+        { path: C_A, role: "origin", text: shape.originAfter },
+        { path: C_B, role: "target", text: cbAfter },
+      ]);
+    });
+  }
+}
+
+// =============================================================================
+// Multi-line section tags (SPEC 3): a tag's internal terminators
+// =============================================================================
+
+test("S-6 (3): a section tag spanning lines — its internal terminator deleted with the construct, the lines joined — is handled like any multi-line removal", () => {
+  // Origin `<S`, U+000A, `  id="m">`, U+000A, `x`, U+000A, `</S>`, U+000A
+  // (the own-lines multi-line tag form of the §3 fixtures), moved to a
+  // created file: the joined tag line is left empty purely by the removal
+  // at both sides and drops, so the moved node's sequence is preserved;
+  // the deletion leaves the origin empty (its whole first line dropped).
+  const O = "specs/O.mdx";
+  const N = "specs/N.mdx";
+  const origin = doc(O, [
+    {
+      kind: "section",
+      id: "m",
+      open: '<S\n  id="m">',
+      close: "</S>",
+      body: [content("\nx\n")],
+      depends: [],
+    },
+    content("\n"),
+  ]);
+  const nAfter = '<S\n  id="m2">\nx\n</S>\n';
+  expectDerives("O before", sectionMoveSourceText(origin.pieces));
+  expectDerives("O after", "");
+  expectDerives("N after", nAfter);
+
+  const input: SectionMoveInput = {
+    origin,
+    target: { createdPath: N },
+    movedId: "m",
+    newId: "m2",
+  };
+  const prediction = predictSectionMoveImpact(input);
+  expect(prediction.beforeOwnTokens.get(`${O}#m`)).toEqual([["run", "x\n"]]);
+  expect(prediction.afterOwnTokens.get(`${N}#m2`)).toEqual([["run", "x\n"]]);
+  expect(prediction.afterOwnTokens.get(O)).toEqual([["run", ""]]);
+  expect(sortedSet(prediction.changed)).toEqual([N, O]);
+  expect(sortedSet(prediction.added)).toEqual([N]);
+  const changed = [N, O];
+  expect(tableOf(prediction)).toEqual({
+    [N]: { changed: chg(changed) },
+    [`${N}#m2`]: {},
+    [O]: { changed: chg(changed) },
+  });
+  expectComposed(input, [
+    { path: O, role: "origin", text: "" },
+    { path: N, role: "created", text: nAfter },
+  ]);
+});
+
+// =============================================================================
+// Misuse guards
+// =============================================================================
+
+test("S-6: a moved id the origin does not spell throws", () => {
+  expect(() =>
+    predictSectionMoveImpact({
+      origin: cleanOrigin(),
+      target: cleanTarget(),
+      movedId: "origin.absent",
+      newId: "tgt.z",
+    }),
+  ).toThrow(/oracle misuse:.*spells no section/);
+});
+
+test("S-6: a missing target parent throws — the oracle predicts successful moves only", () => {
+  expect(() =>
+    predictSectionMoveImpact({
+      origin: cleanOrigin(),
+      target: cleanTarget(),
+      movedId: "origin.mv",
+      newId: "zz.mv",
+    }),
+  ).toThrow(/oracle misuse:.*spells no section/);
+});
+
+test("S-6: a created target file with a multi-segment new id throws", () => {
+  expect(() =>
+    predictSectionMoveImpact({
+      origin: cleanOrigin(),
+      target: { createdPath: "specs/New.mdx" },
+      movedId: "origin.mv",
+      newId: "a.b",
+    }),
+  ).toThrow(/oracle misuse:.*single-segment/);
+});
+
+test("S-6: a self-closing section declaring a body throws", () => {
+  const origin = doc("specs/O.mdx", [
+    {
+      kind: "section",
+      id: "m",
+      open: '<S id="m" />',
+      close: null,
+      body: [content("x")],
+      depends: [],
+    },
+    content("\n"),
+  ]);
+  expect(() =>
+    predictSectionMoveImpact({
+      origin,
+      target: { createdPath: "specs/N.mdx" },
+      movedId: "m",
+      newId: "m2",
+    }),
+  ).toThrow(/oracle misuse:.*no body/);
+});
+
+test("S-6: an otherNodes edge target that is no node throws — the cascade graph must be complete", () => {
+  expect(() =>
+    predictSectionMoveImpact({
+      origin: cleanOrigin(),
+      target: cleanTarget(),
+      movedId: "origin.mv",
+      newId: "tgt.mv",
+      otherNodes: [node("specs/W.mdx", [], ["specs/Gone.mdx#nope"])],
+    }),
+  ).toThrow(/oracle misuse:.*no node/);
+});
+
+test("S-6: duplicate section identities in one document throw", () => {
+  const origin = doc("specs/O.mdx", [
+    sec("m", "", [content("\nx\n")]),
+    content("\n"),
+    sec("m", "", [content("\ny\n")]),
+    content("\n"),
+  ]);
+  expect(() =>
+    predictSectionMoveImpact({
+      origin,
+      target: { createdPath: "specs/N.mdx" },
+      movedId: "m",
+      newId: "m2",
+    }),
+  ).toThrow(/oracle misuse:.*duplicate section identity/);
+});

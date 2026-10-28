@@ -13,11 +13,15 @@
 // - the journal is well-formed and replayable with no conflicting mappings
 //   (SPEC 14.13 — likewise);
 // - no policy violations exist (SPEC 7.5 → 14.12, `check`-only;
-//   core/policy.ts);
+//   core/policy.ts) — evaluated on a workspace passing `build`'s
+//   validations alone;
 // - review sessions are not internally corrupt (SPEC 14.21, judged without
 //   modifying anything; workspace/reviews.ts);
-// - write paths a build would use traverse no symbolic link — reported
-//   without writing (SPEC 14.22).
+// - no write path a build would use has a workspace-relative directory
+//   component occupied by anything other than a directory — reported
+//   without writing (SPEC 14.22), judged over the paths discovery and
+//   configuration define whatever the sources' validity, beside the
+//   source and journal findings (workspace/build-validation.ts).
 //
 // `check` never refreshes (SPEC 13.3): it reports staleness instead of
 // rewriting graph data, and it writes nothing whatsoever — every probe here
@@ -25,18 +29,33 @@
 // load by every command (SPEC 14.14) and is a usage error, not a finding.
 
 import type { BuildOutputs } from "../../core/build.js";
-import { computeBuildOutputs } from "../../core/build.js";
+import {
+  computeBuildOutputs,
+  discoveredGeneratedPaths,
+  discoveredSourcePaths,
+  discoveredWritePaths,
+  orphanedRecordedPaths,
+  rebuildObstructingOrphans,
+} from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { evaluatePolicy } from "../../core/policy.js";
-import { stalenessFindings } from "../../workspace/check.js";
-import { loadGraphData } from "../../workspace/graph-data.js";
+import { buildValidationFindings } from "../../workspace/build-validation.js";
+import {
+  mismatchStalenessFindings,
+  recordStalenessFindings,
+} from "../../workspace/check.js";
+import {
+  loadGraphData,
+  readDerivedFileRecord,
+  recordedPathsOf,
+} from "../../workspace/graph-data.js";
 import {
   analyzeWorkspace,
   workspaceInputsOf,
 } from "../../workspace/pipeline.js";
 import { loadAllSessions } from "../../workspace/reviews.js";
-import { symlinkWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
+import { jsonOutputInEffect } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { emitConfigurationErrors, emitFindingsReport } from "../report.js";
 
@@ -50,20 +69,61 @@ export async function checkCommand(
 
   // SPEC 14.14/12.0: a discovery-level configuration error is a usage error
   // preceding all source analysis — exit 2, diagnostics on standard error,
-  // and with `--json` an empty standard output.
+  // and with JSON output in effect the 12.7 error document on standard
+  // output.
   if (analysis.configurationErrors.length > 0) {
-    emitConfigurationErrors(context.stderr, analysis.configurationErrors);
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      workspace.configAnchor,
+      analysis.configurationErrors,
+    );
     return 2;
   }
 
-  const findings: Finding[] = [...analysis.findings];
+  // SPEC 14.10: the recorded-file form compares the record against the set
+  // of generated paths alone — a set discovery and configuration define on
+  // any workspace (13.1, 7.3, 11.6; core/build.ts) — so, like the
+  // unreadable-record unit form, it is detectable whatever the sources'
+  // validity: beside source validation errors, journal errors (14.13), and
+  // refused writes (14.22) alike. A recorded path holding a discovered
+  // source is no orphan: the removal of 13.4 leaves it as it is, so the
+  // form never reports it (SPEC 14.10: "neither a directory nor a
+  // discovered source"; the directory is judged at the occupant's read,
+  // workspace/check.ts).
+  const record = await readDerivedFileRecord(workspace.root);
+  const sources = discoveredSourcePaths(analysis.classification);
+  const orphans = orphanedRecordedPaths(
+    recordedPathsOf(record),
+    new Set(
+      discoveredGeneratedPaths(
+        workspace.configuration,
+        analysis.classification,
+      ),
+    ),
+    sources,
+  );
 
-  // SPEC 14.10/14.22 — judged against the pure build derivation, which is
-  // defined only for a workspace that passes build validation: with
-  // findings present, "what the current sources and configuration
-  // generate" is undefined and the validation errors mask staleness
-  // (SPEC 14); the write set is equally undefined for 14.22.
-  if (analysis.findings.length === 0) {
+  // SPEC 12.2 → 12.1, 13.3: all build validations — source validation
+  // findings and journal errors (the analysis) and the refused writes of
+  // 14.22, which `check` reports without writing, judging exactly
+  // `build`'s write paths: the set discovery and configuration define on
+  // any workspace (13.1, 7.3, 13.3; workspace/build-validation.ts), so a
+  // refused write reports beside the source and journal findings (SPEC
+  // 14). Whether the workspace passes them — none present — is the one
+  // state in which the content the current sources and configuration
+  // generate (14.10) and the graph policy constrains (14.12) are defined.
+  const buildFindings = await buildValidationFindings(workspace, analysis);
+  const findings: Finding[] = [...buildFindings];
+  const passesBuildValidations = buildFindings.length === 0;
+
+  // SPEC 14.10 — the mismatch forms, per file and graph data, judged
+  // against the pure build derivation (core/build.ts), computed only over
+  // a workspace passing `build`'s validations: with a source validation
+  // finding, a journal error, or a refused write (14.22) present, "what
+  // the current sources and configuration generate" is undefined and the
+  // mismatch forms are undetectable (SPEC 14).
+  if (passesBuildValidations) {
     const stored = await loadGraphData(workspace.root);
     const outputs: BuildOutputs = computeBuildOutputs(
       workspace.configuration,
@@ -71,24 +131,46 @@ export async function checkCommand(
       analysis.graph,
       analysis.textModel,
       analysis.hashes,
-      stored.data,
+      recordedPathsOf(record),
+      sources,
       workspaceInputsOf(workspace, analysis),
     );
     findings.push(
-      ...(await stalenessFindings(workspace.root, outputs, stored)),
-    );
-    // SPEC 14.22: `check` reports a symbolic link in a write path without
-    // writing — the same findings a `build` would refuse on.
-    findings.push(
-      ...(await symlinkWritePathFindings(workspace.root, outputs.writePaths)),
+      ...(await mismatchStalenessFindings(
+        workspace.root,
+        outputs,
+        stored,
+        record,
+      )),
     );
   }
 
-  // SPEC 7.5 → 14.12 (`check`-only): policy is evaluated over the workspace
-  // graph — detectable, and therefore reported (SPEC 14), whether or not
-  // other findings are present: every flagged edge is a resolved edge of
-  // the current graph.
-  findings.push(...evaluatePolicy(workspace.configuration, analysis.graph));
+  // SPEC 14.10: the forms consulting no generated content — the
+  // unreadable-record unit form and the recorded-file form — are reported
+  // whatever the sources' validity. A recorded file obstructing a path the
+  // rebuild writes — one at a workspace-relative directory component of
+  // `build`'s write paths, the set 14.22 judges (core/build.ts) — refuses
+  // the rebuild (13.4, 14.22), so its correction is its manual deletion.
+  const obstructing = rebuildObstructingOrphans(
+    orphans,
+    discoveredWritePaths(workspace.configuration, analysis.classification),
+  );
+  findings.push(
+    ...(await recordStalenessFindings(
+      workspace.root,
+      record,
+      orphans,
+      obstructing,
+    )),
+  );
+
+  // SPEC 7.5 → 14.12 (`check`-only): the rules are evaluated only over a
+  // workspace passing `build`'s validations, the one state in which the
+  // graph they constrain is defined — on a failing workspace no violation
+  // is detectable, and none is reported (SPEC 14).
+  if (passesBuildValidations) {
+    findings.push(...evaluatePolicy(workspace.configuration, analysis.graph));
+  }
 
   // SPEC 14.21: review sessions are not internally corrupt — every session
   // is loaded read-only, in byte order of session name (SPEC 12.0), and

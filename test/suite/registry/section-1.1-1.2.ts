@@ -9,12 +9,19 @@
 // failures (H-8). Consumer-side contracts — the generated-module skeleton
 // (SPEC 4.1) and `text()` at runtime (SPEC 4.3) — are exercised under
 // standard TypeScript tooling with no xspec runtime dependency (SPEC 13.1)
-// through helpers/tooling.ts. Consumer workspaces carry no package.json, so
-// consumer files compile and run in CommonJS mode under the driver's NodeNext
-// defaults — the standard-tooling arrangement in which the spec-fixed
-// specifier `./NAME.xspec` (SPEC 4) resolves by Node's extension lookup.
+// through helpers/tooling.ts, in TEST-SPEC H-2's two fixed configurations
+// (§4's opening paragraph): every type-checking verdict and skeleton read is
+// made under each of them in turn — a clean verdict admitting no diagnostic
+// anywhere in the program, the generated module and the companions it
+// reaches included, and a type-error assertion expecting the program's
+// diagnostics at the consumer references under test alone — and the runtime
+// arm runs under the CommonJS configuration alone: the consumer program and
+// the generated module it imports compiled to CommonJS JavaScript written
+// outside the workspace, run there under plain Node. In both, the
+// spec-fixed extensionless specifier `./NAME.xspec` (SPEC 4) resolves.
 
 import {
+  classifyIgnoredReasons,
   decodeCoverageReport,
   decodeNodeReport,
   decodeNodeRowsReport,
@@ -27,12 +34,21 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import {
-  assertCompileErrorAt,
-  assertNoCompileErrors,
+  assertTypeChecksClean,
+  assertTypeErrorsAt,
+  COMMONJS_CONFIGURATION,
   ConsumerProject,
-  formatConsumerDiagnostic,
-  runConsumer,
+  diffModuleSkeletons,
+  forEachConfiguration,
+  forEachConsumerProject,
+  skeletonChains,
+  withCompiledConsumer,
+} from "../../helpers/tooling.js";
+import type {
+  ConsumerConfiguration,
+  ModuleSkeleton,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -160,22 +176,45 @@ const MIXED_TAGS_SOURCE = [
   "",
 ].join("\n");
 
-// The identical consumer compiles against both workspaces' generated modules:
-// bare references are dependency markers (SPEC 4.5), so a clean compile of
-// the full chain set demonstrates both modules expose the same skeleton.
-const SKELETON_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  "SPEC.login;",
-  "SPEC.login.validCredentials;",
-  "SPEC.meta;",
-  "",
-].join("\n");
+// The identical consumer type-checks clean against both workspaces' generated
+// modules under each of H-2's configurations: bare references are dependency
+// markers (SPEC 4.5), so a clean verdict over the full chain set shows both
+// modules expose at least the staged chains, and — the verdict being the
+// whole program's — that each module and the companions it reaches carry no
+// diagnostic under either configuration (H-2). The skeletons' equality itself
+// is read through TypeScript's checker (`moduleSkeleton`, below), under each
+// configuration too: a type check cannot see a member one module exposes
+// alone.
+const SKELETON_CONSUMER = stagedTs(
+  "T1.1-2 consumer.ts — the skeleton consumer both tag forms compile against, staged after `build`",
+  [
+    'import SPEC from "./specs/A.xspec";',
+    "",
+    "SPEC.login;",
+    "SPEC.login.validCredentials;",
+    "SPEC.meta;",
+    "",
+  ].join("\n"),
+);
+
+// The files whose declarations make up `specs/A.mdx`'s generated skeleton:
+// the module `specs/A.xspec.ts` and its companions, each named `A.xspec.`
+// plus a suffix beside the source (SPEC 13.1). A member declared anywhere
+// else (TypeScript's lib) is a leaf of the skeleton, recorded by name.
+const isGeneratedFileOfA = (file: string): boolean =>
+  /^specs\/A\.xspec\.[^/]+$/.test(file);
+
+// Well above the staging's depth: two section levels, then each node's own
+// members (a product's brand, say) one or two levels further.
+const T1_1_2_SKELETON_DEPTH_BOUND = 16;
+
+// At most this many entries (chains, differences) are listed in a diagnosis.
+const T1_1_2_LISTED_ENTRIES = 40;
 
 const T1_1_2 = defineProductTest({
   id: "T1.1-2",
   title:
-    "`<S>` and `<Spec>` are equivalent: same builds, byte-identical Markdown, same node set, same generated skeleton; mixing both in one file is valid (SPEC 1.1)",
+    "`<S>` and `<Spec>` are equivalent: same builds, byte-identical Markdown, same node set, same generated skeleton under both of H-2's configurations; mixing both in one file is valid (SPEC 1.1)",
   run: async (product) => {
     const sForm = await TestWorkspace.create({
       files: {
@@ -213,12 +252,14 @@ const T1_1_2 = defineProductTest({
 
       // `query nodes` reports the same node set. Compared on identity, tags,
       // and coverage — source ranges are excluded, since the two spellings
-      // legitimately differ in byte length.
+      // legitimately differ in byte length. A root's absent tags decode as
+      // `null` (SPEC 11.1) and are carried through as `null`, so absent
+      // compares equal to absent and still differs from an empty set `[]`.
       const nodeSetOf = async (
         workspace: TestWorkspace,
         label: string,
       ): Promise<
-        { identity: string; tags: string[]; coverage: string | null }[]
+        { identity: string; tags: string[] | null; coverage: string | null }[]
       > => {
         const rows = decodeNodeRowsReport(
           await runJson(product, workspace, ["query", "nodes"], label),
@@ -227,7 +268,7 @@ const T1_1_2 = defineProductTest({
         return rows
           .map((row) => ({
             identity: row.identity,
-            tags: [...row.tags].sort(),
+            tags: row.tags === null ? null : [...row.tags].sort(),
             coverage: row.coverage ?? null,
           }))
           .sort((x, y) =>
@@ -257,22 +298,81 @@ const T1_1_2 = defineProductTest({
         }
       }
 
-      // Generated modules expose the same skeleton: the identical consumer
-      // compiles cleanly against both (SPEC 4.1, 13.1).
-      for (const [workspace, styleLabel] of [
-        [sForm, "<S>"],
-        [specForm, "<Spec>"],
-      ] as const) {
-        await workspace.file("consumer.ts", SKELETON_CONSUMER);
+      // Generated modules expose the same skeleton (SPEC 1.1, 4.1, 13.1),
+      // under each of H-2's configurations in turn (CommonJS, then
+      // ES-module; every diagnosis naming its configuration). The identical
+      // consumer type-checks clean against both — its whole program, the
+      // module and the companions it reaches included — and TypeScript's
+      // checker reads each module's whole exposed skeleton — its export
+      // names, and its default export's member tree through the module and
+      // its companions, names and nesting only (never a type or interface
+      // name the product generates, H-4). The two must be equal under each
+      // configuration: "the same" is an equality, so a member one tag form's
+      // module exposes alone fails, named by its access chain.
+      await sForm.file("consumer.ts", SKELETON_CONSUMER);
+      await specForm.file("consumer.ts", SKELETON_CONSUMER);
+      const readSkeleton = async (
+        workspace: TestWorkspace,
+        styleLabel: "<S>" | "<Spec>",
+        configuration: ConsumerConfiguration,
+      ): Promise<ModuleSkeleton> => {
         const project = await ConsumerProject.load({
           rootDir: workspace.root,
           rootFiles: ["consumer.ts"],
+          configuration,
         });
-        assertNoCompileErrors(
-          project,
-          `T1.1-2 skeleton consumer against the ${styleLabel} workspace's generated module`,
+        const context = `T1.1-2 skeleton consumer against the ${styleLabel} workspace's generated module`;
+        assertTypeChecksClean(project, context);
+        const skeleton = project.moduleSkeleton("specs/A.xspec.ts", {
+          isOwnFile: isGeneratedFileOfA,
+          maxDepth: T1_1_2_SKELETON_DEPTH_BOUND,
+          context,
+        });
+        // Not vacuous: the compare below sees the staged chains in both
+        // skeletons (a default export TypeScript reads as `any` exposes no
+        // member, though the consumer type-checks clean against it).
+        const chains = skeletonChains(skeleton, "SPEC");
+        for (const chain of [
+          "SPEC.login",
+          "SPEC.login.validCredentials",
+          "SPEC.meta",
+        ]) {
+          if (!chains.includes(chain)) {
+            fail(
+              `${context}: its default export's member tree lacks ${chain} — the default ` +
+                `export is the root node, and each node exposes its child sections as ` +
+                `readonly properties named by ID segment (SPEC 4.1); the tree read: ` +
+                JSON.stringify(chains.slice(0, T1_1_2_LISTED_ENTRIES)),
+            );
+          }
+        }
+        return skeleton;
+      };
+      await forEachConfiguration(async (configuration) => {
+        const difference = diffModuleSkeletons(
+          await readSkeleton(sForm, "<S>", configuration),
+          await readSkeleton(specForm, "<Spec>", configuration),
+          "SPEC",
         );
-      }
+        if (difference.onlyInA.length > 0 || difference.onlyInB.length > 0) {
+          const listed = (entries: readonly string[]): string =>
+            entries.length === 0
+              ? "nothing"
+              : entries.slice(0, T1_1_2_LISTED_ENTRIES).join(", ") +
+                (entries.length > T1_1_2_LISTED_ENTRIES
+                  ? `, … (${entries.length} in all)`
+                  : "");
+          fail(
+            "T1.1-2: the `<S>` and `<Spec>` workspaces' generated modules (specs/A.xspec.ts) " +
+              "expose different skeletons — the two tag names are equivalent (SPEC 1.1), so " +
+              "the module generated from either spelling exposes the same node skeleton " +
+              "(SPEC 4.1). Exposed by the `<S>` form's module alone: " +
+              `${listed(difference.onlyInA)}; exposed by the \`<Spec>\` form's module alone: ` +
+              `${listed(difference.onlyInB)} (each entry topmost: an export name, or an ` +
+              "access chain from the default export, nothing below it listed).",
+          );
+        }
+      });
 
       // Mixing both tag names in one file is valid.
       await buildOk(
@@ -339,26 +439,39 @@ export default defineConfig({
 })
 `;
 
-const VALID_LEAF_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  "SPEC.main;",
-  "SPEC.todo;",
-  "SPEC.empty;",
-  "",
-].join("\n");
+const VALID_LEAF_CONSUMER = stagedTs(
+  "T1.1-3 consumer.ts — the leaf-chain consumer, staged after `build`",
+  [
+    'import SPEC from "./specs/A.xspec";',
+    "",
+    "SPEC.main;",
+    "SPEC.todo;",
+    "SPEC.empty;",
+    "",
+  ].join("\n"),
+);
 
-const CHILD_CHAIN_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  "SPEC.todo.child;",
-  "",
-].join("\n");
+// One child chain per self-closing spelling — `<S id="todo" />` and
+// `<Spec id="empty" />` — each its own statement, so each leaf's type error
+// is located at its own `child`: H-2's type-error assertion
+// (`assertTypeErrorsAt`) expects the program's diagnostics at the two
+// `child` references alone, each of them covered by an error, under each of
+// H-2's configurations.
+const CHILD_CHAIN_CONSUMER = stagedTs(
+  "T1.1-3 bad-consumer.ts — the child-of-a-leaf chains, staged after `build`",
+  [
+    'import SPEC from "./specs/A.xspec";',
+    "",
+    "SPEC.todo.child;",
+    "SPEC.empty.child;",
+    "",
+  ].join("\n"),
+);
 
 const T1_1_3 = defineProductTest({
   id: "T1.1-3",
   title:
-    "self-closing sections are empty leaves: empty texts, singleton subtree, no outgoing `contains`, childless skeleton, coverage-required (SPEC 1.1)",
+    "self-closing sections are empty leaves: empty texts, singleton subtree, no outgoing `contains`, childless skeleton under both of H-2's configurations, coverage-required (SPEC 1.1)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -457,29 +570,43 @@ const T1_1_3 = defineProductTest({
       }
 
       // Generated module (SPEC 4.1): the empty leaves exist as nodes with no
-      // child properties — the full-chain consumer compiles, a child chain on
-      // a leaf is a type error.
+      // child properties — under each of H-2's configurations the full-chain
+      // consumer type-checks clean, the whole program included, and a child
+      // chain on either leaf, whichever self-closing spelling it has, is a
+      // type error there, the program's diagnostics at the two `child`
+      // references alone.
       await workspace.file("consumer.ts", VALID_LEAF_CONSUMER);
       await workspace.file("bad-consumer.ts", CHILD_CHAIN_CONSUMER);
-      const valid = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["consumer.ts"],
-      });
-      assertNoCompileErrors(
-        valid,
-        "T1.1-3 consumer referencing the self-closing nodes",
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: ["consumer.ts"] },
+        (valid) =>
+          assertTypeChecksClean(
+            valid,
+            "T1.1-3 consumer referencing the self-closing nodes",
+          ),
       );
-      const invalid = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["bad-consumer.ts"],
-      });
-      assertCompileErrorAt(
-        invalid,
-        invalid.locate("bad-consumer.ts", "SPEC.todo.child", {
-          charOffset: "SPEC.todo.".length,
-        }),
-        {},
-        "T1.1-3 child chain on an empty leaf (a missing requirement path is a type error, SPEC 4.1)",
+      await forEachConsumerProject(
+        { rootDir: workspace.root, rootFiles: ["bad-consumer.ts"] },
+        (invalid) =>
+          assertTypeErrorsAt(
+            invalid,
+            [
+              {
+                at: invalid.locate("bad-consumer.ts", "SPEC.todo.child", {
+                  charOffset: "SPEC.todo.".length,
+                }),
+              },
+              {
+                at: invalid.locate("bad-consumer.ts", "SPEC.empty.child", {
+                  charOffset: "SPEC.empty.".length,
+                }),
+              },
+            ],
+            'T1.1-3 child chains `SPEC.todo.child` (line 3) on the `<S id="todo" />` ' +
+              'empty leaf and `SPEC.empty.child` (line 4) on the `<Spec id="empty" />` ' +
+              "empty leaf, each `child` a type error (a missing requirement path is a " +
+              "type error, SPEC 4.1)",
+          ),
       );
     } finally {
       await workspace.dispose();
@@ -576,17 +703,26 @@ const ROOT_TEXT_SOURCE = [
 const ROOT_TEXT_COMPILED =
   "# Title\n\nIntro prose.\n\nAlpha requirement.\n\nAlpha one.\n\n";
 
-const ROOT_TEXT_CONSUMER = [
-  'import SPEC, { text } from "./specs/A.xspec";',
-  "",
-  "process.stdout.write(text(SPEC));",
-  "",
-].join("\n");
+// The consumer writes the text exactly, no terminator added, through Node.js's
+// `process.stdout` — whose one member it uses it declares itself, H-2's
+// configurations supplying no `@types/node` (module-scoped, the file holding
+// an import), so the program is valid under both.
+const ROOT_TEXT_CONSUMER = stagedTs(
+  "T1.2-2 main.ts — `text` of the root node, staged after `build`",
+  [
+    'import SPEC, { text } from "./specs/A.xspec";',
+    "",
+    "declare const process: { readonly stdout: { write(chunk: string): boolean } };",
+    "",
+    "process.stdout.write(text(SPEC));",
+    "",
+  ].join("\n"),
+);
 
 const T1_2_2 = defineProductTest({
   id: "T1.2-2",
   title:
-    "the generated module's default export is the root node: `text(default export)` returns the file's entire compiled Markdown output (SPEC 1.2, 4.3)",
+    "the generated module's default export is the root node: a consumer passing it to `text()`, type-checking clean under both of H-2's configurations and run compiled under its CommonJS configuration, receives the file's entire compiled Markdown output (SPEC 1.2, 4.3)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -597,31 +733,29 @@ const T1_2_2 = defineProductTest({
     try {
       await buildOk(product, workspace, "T1.2-2 `build`");
       await workspace.file("main.ts", ROOT_TEXT_CONSUMER);
-      const project = await ConsumerProject.load({
-        rootDir: workspace.root,
-        rootFiles: ["main.ts"],
-      });
-      assertNoCompileErrors(
-        project,
-        "T1.2-2 consumer passing the default export to `text()`",
+      const sources = { rootDir: workspace.root, rootFiles: ["main.ts"] };
+      const context = "T1.2-2 consumer passing the default export to `text()`";
+      // Type-checked clean under each of H-2's configurations — the whole
+      // program, the generated module and its companions included — then
+      // run under the CommonJS configuration alone: compiled to CommonJS
+      // JavaScript written outside the workspace and run there under plain
+      // Node, no package named `xspec` resolvable (H-2, SPEC 13.1).
+      await forEachConsumerProject(sources, (project) =>
+        assertTypeChecksClean(project, context),
       );
-      const emitted = project.emit();
-      if (emitted.emitSkipped) {
-        fail(
-          "T1.2-2: consumer emit was skipped; diagnostics:\n" +
-            emitted.diagnostics
-              .map((diagnostic) => `  ${formatConsumerDiagnostic(diagnostic)}`)
-              .join("\n"),
-        );
-      }
-      const run = await runConsumer({
-        dir: workspace.root,
-        entry: "main.js",
-      });
+      const run = await withCompiledConsumer(
+        await ConsumerProject.load({
+          ...sources,
+          configuration: COMMONJS_CONFIGURATION,
+        }),
+        context,
+        async (compiled) => await compiled.run("main.ts"),
+      );
       assertExitCode(
         run,
         0,
-        "T1.2-2 compiled consumer under plain Node (SPEC 13.1)",
+        "T1.2-2 compiled consumer under plain Node, compiled under H-2's " +
+          "CommonJS configuration outside the workspace (SPEC 13.1)",
       );
       assertBytesEqual(
         run.stdoutBytes,
@@ -672,7 +806,7 @@ export default defineConfig({
 const T1_2_3 = defineProductTest({
   id: "T1.2-3",
   title:
-    "roots are never coverage targets: ignored with reason `root node`, absent from required/covered/uncovered, unmatched by `--coverage`, coverage attribute absent (SPEC 1.2, 8, 11)",
+    "roots are never coverage targets: ignored with the root-node reason (adapter-located, no wording pinned), absent from required/covered/uncovered, unmatched by `--coverage`, coverage attribute absent (SPEC 1.2, 8, 11)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -739,10 +873,18 @@ const T1_2_3 = defineProductTest({
             JSON.stringify(profile.ignored.map((entry) => entry.identity)),
         );
       }
+      // The reason's spelling is output shape (SPEC 8.2 names it in prose and
+      // pins no wording): classify each reported reason string onto its SPEC
+      // 8.2 identity through the coverage adapter — the discipline T8.2-1
+      // applies — and assert the identities: the root-node reason, alone.
       assertSameJson(
-        rootEntry.reasons,
-        ["root node"],
-        `${coverageLabel}: the root's exclusion reasons (SPEC 8.2 — only the root-node reason applies here)`,
+        classifyIgnoredReasons(
+          rootEntry.reasons,
+          `${coverageLabel} ignored ${rootEntry.identity}`,
+        ),
+        ["root"],
+        `${coverageLabel}: the root's exclusion reasons — the root-node reason and nothing else ` +
+          `(SPEC 8.2; adapter-located, H-3)`,
       );
 
       // `query nodes --coverage …` matches no root (SPEC 11).

@@ -9,22 +9,97 @@
 // and rejects a product only via diagnosed assertion failures (H-8).
 //
 // SPEC 7.1: spec groups are named glob lists; a file MAY belong to multiple
-// groups; every matched file MUST have the `.mdx` extension, any other match
-// being invalid (14.19). SPEC 7.2: code groups serve as coverage boundaries
+// groups; every matched file MUST have the `.mdx` extension — compared
+// byte-wise and case-sensitively, no case folding anywhere (12.0), so
+// `A.MDX` has none — and its workspace-relative path MUST NOT contain
+// U+0022, U+0027, U+005C (the backslash), U+000A, U+000D, U+2028, or
+// U+2029, any other match being invalid (14.19) — a bar binding spec groups
+// alone, 14.19's code-source forms being `#`, U+FFFD, and non-UTF-8; a
+// spec-group file without the extension generates and emits nothing, so
+// `inventory`'s `derived` entry for it carries `module` and `markdown`
+// `null` (13.1, 11.6). SPEC 7.2: code groups serve as coverage boundaries
 // and as the impacted-code population; a file matched by both a spec and a
-// code group is a configuration error (14.14). SPEC 7.3: `markdown` absent →
-// no emission; when present, `emit` (boolean) is REQUIRED and controls
-// emission; `outDir` redirects emitted files preserving workspace-relative
-// paths, resolves against the workspace root, and MUST resolve within it
-// (else 14.14); the configured emit destinations exist exactly while emission
-// is enabled — with `emit: true` they are the destination paths whether or
-// not emission has yet run, with `markdown` absent or `emit: false` no path
-// is a destination, so the 13.4 exclusion and the import rule of 4 have no
-// Markdown component.
+// code group is a configuration error (14.14). SPEC 7.3: `markdown` absent
+// → no emission; when present, `emit` (a boolean) is REQUIRED and controls
+// emission, and the optional `outDir` (a path) redirects emitted files
+// preserving workspace-relative paths — a well-formed literal of another
+// type for either field being a configuration error (14.14), never
+// coerced. `outDir` is a directory path relative to the workspace root
+// spelled as one or more non-empty `/`-separated segments, none `.` or
+// `..` — the form of every workspace-relative path (1.5, 7) — so that each
+// emit destination (`outDir` joined by `/` to the default
+// workspace-relative path) is itself a plain workspace-relative path; any
+// other spelling — empty, beginning with `/`, or carrying a `.`, `..`, or
+// empty segment — is a configuration error (14.14), decided by spelling
+// alone, never by where the path would resolve; so is an `outDir` of
+// `.xspec` or beginning with `.xspec/` — no emit destination lies in the
+// graph-data area (13.3), so graph data is the only derived file under it
+// (13.1, 13.4; 11.6's claim) — the spelling compared byte-wise, with no
+// case folding (12.0), so `.XSPEC` names no area; the configured emit
+// destinations exist exactly while emission is enabled — with `emit: true`
+// they are the destination paths whether or not emission has yet run, with
+// `markdown` absent or `emit: false` no path is a destination, so the 13.4
+// exclusion and the import rule of 4 have no Markdown component.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
-//   2 exactly, byte-empty stdout under --json, stderr matching /config/i.
+//   2 exactly, the single 12.7 error document (stable code
+//   `configuration-error`, concerned path) as the entire stdout under
+//   --json, stderr matching /config/i. T7.2-1's overlap arm and T7.3-1's
+//   own refusal arms (the local `expectConfigRefused`) further pin, through
+//   the local `assertFoundConfigurationConcerned`, the document's `path` to
+//   exactly `xspec.config.ts` — the configuration file the upward search
+//   found, in the anchoring form of 11.6 relative to the invocation working
+//   directory, the workspace root; for the overlap the configuration file,
+//   never the doubly matched file — and `locations` to `[]` (a
+//   configuration condition carries the file it concerns, never a source
+//   range: SPEC 14, 12.7). T7.3-1's arms also compare the workspace around
+//   the refused `build`: a build failing at configuration load modifies
+//   nothing (SPEC 12.1, 12.0).
+// - T7.3-1 `outDir` validity is decided by spelling (SPEC 7.3): one arm per
+//   pinned spelling — `""`, `"/out"`, `"./out"`, `"out/../x"`, `"out//x"`,
+//   `"out/"` — each 14.14, beside the two `..`-bearing spellings the arm
+//   always drove (`"../out"`, `"docs/../../out"`), while `"out/sub"` is the
+//   pinned valid multi-segment spelling, asserted through the emission it
+//   redirects. No arm depends on where a spelling would resolve: a product
+//   normalizing `./out`, `out//x`, or `out/` to a path inside the root, or
+//   reading `""` as "next to each source", fails its arm at the exit code.
+//   The graph-data area is refused by segment, one arm each: `".xspec"`
+//   and `".xspec/md"` are 14.14 through the same refusal contract, beside
+//   their look-alike controls `".xspec2"` and `".xspecs/md"`, each valid
+//   and asserted through the emission it redirects — its absent directory
+//   chain created as real directories (T13.4-8) — so a product testing the
+//   byte prefix `.xspec` without its segment boundary fails a control at
+//   the exit code, and one accepting the area fails its refused arm there.
+//   On the Linux leg the single-casing spellings `".XSPEC"` and
+//   `".XSPEC/md"` join the controls (12.0: compared byte-wise, no case
+//   folding), each valid and asserted the same way, so a product folding
+//   case in the bar fails one at the exit code; they are gated in the body
+//   (`process.platform === "linux"`, T7-6's gate for `.XSPEC/a.ts`): only
+//   there is `.XSPEC` a directory of its own, where a case-insensitive
+//   filesystem makes it the graph-data area itself.
+// - T7.3-1 wrong-type literals (SPEC 7.3, 7): `emit: "true"` (7.3: a
+//   boolean) and `outDir: true` (a path), one arm each, are 14.14 through
+//   the same refusal contract. Each literal is a form 7 admits — a static
+//   string literal, a boolean literal — so the configuration is refused by
+//   type, never by form (T7-2's number-for-boolean arm is refused by
+//   form); `outDir: true` stands beside `emit: true`, so a product coercing
+//   either literal builds the staged source — emitting it next to its
+//   source, or under `true/` — and fails its arm at the exit code.
+// - T7.1-1 wrong-case extension (SPEC 7.1, 12.0, 13.1, 11.6, 14.19):
+//   `specs/A.MDX`, holding `<S id="a">A</S>` and matched by the spec glob
+//   `specs/*.MDX` with emission enabled next to sources, alone in its
+//   workspace with condition-free content, so its one 14.19 finding — the
+//   stable code, `locations` empty, the path as concerned path — is the
+//   exact multiset of `build --json` and of `check --json` after it (the
+//   failed build writes nothing, so no record exists and `check` reports
+//   exactly `build`'s validation findings: SPEC 12.1, 12.2); `inventory
+//   --json` then answers exit 0 — it parses no sources, so it carries no
+//   14.19 (11.6) — listing the file in `sources` under its group and, as
+//   its `derived` entry, exactly `{source, module: null, markdown: null}`.
+//   A product folding case in the extension test builds the file cleanly
+//   (`build` exit 0) or derives its module and Markdown paths, failing at
+//   the exit code or at the derived entry.
 // - T7.1-1 coverage: profiles are looked up by name (T8.2-1 owns report
 //   ordering and the full report contract — counts and the ignored-node
 //   composition are not asserted here); "sees it in both" is asserted as the
@@ -34,6 +109,23 @@
 // - T7.1-1 policy findings are compared as sorted "rule :: kind: from -> to"
 //   renderings: SPEC 7.5 fixes the information (rule name + offending edge),
 //   not an order, and one finding per (rule, edge) pair.
+// - T7.1-1 path characters (SPEC 7.1, 14.19): one arm per character 7.1
+//   bars in a spec-group file name (`specs/a<c>b.mdx`) plus U+0027 in a
+//   directory component (`specs/it's/a.mdx`), each file alone in its own
+//   workspace with condition-free content, so its one 14.19 finding — the
+//   stable code, `locations` empty, the path as concerned path — is the
+//   build's exact multiset. "Still discovered and reachable as T11.2-3's
+//   invalid-path files are" is asserted through `view --file <glob>`
+//   (T11.5-3's reading of "glob-reached"): exit 1, the file's finding
+//   accompanying, one view whose tree keeps its ranges and raw attribute
+//   entries with every identity, root included, unavailable (T11.2-3's
+//   projection). The U+0022, backslash, U+000A, and U+000D arms — names
+//   other filesystems cannot hold — are staged on the Linux leg alone
+//   (`process.platform === "linux"`, T1.5-2's precedent), gated in the
+//   body; so is the code-source control `src/it's<U+005C>x.ts`, its name
+//   holding a backslash, asserted finding-free under `build --json` and
+//   `check --json` and through its workspace's exact `query edges` set.
+//   Every barred character is built from its code point.
 // - T7.3-1 emitted Markdown is byte-asserted (SPEC 3 fixes the compiled
 //   bytes; H-4); the compilation semantics themselves are T3-*'s subject —
 //   fixture sources are single-section files with trivially known output.
@@ -52,6 +144,41 @@
 //   14.15 finding (`emit: true` — the specifier designates a configured
 //   destination) and a clean build (`emit: false` — no path is a
 //   destination, so the ordinary import is outside xspec's validations).
+// - Staged-source records (TEST-SPEC S-9's before-any-product clause;
+//   helpers/staged-mdx.ts): every MDX source a body stages in a workspace
+//   created after its first product invocation — `expectConfigRefused`'s
+//   one staging site, T7.1-1's non-`.mdx`-match (its `specs/notes.txt`
+//   included: a spec-group file not named `.mdx` is an MDX source all the
+//   same, invalid by its name yet judged by 14.20, and a record at that
+//   path declares it a well-formed one), wrong-case-extension (its
+//   `specs/A.MDX` likewise: `.MDX` is no `.mdx`), path-character (one
+//   record staged at every barred path), and code-source-control
+//   workspaces, T7.3-1's `EMISSION_FILES` (its first workspace's too, the
+//   map being shared) and destination workspaces — is a ledger record,
+//   judged by test/self/s9-staged-sources.test.ts before any product
+//   exists: the minimal `a` and `b` sources are section-7-basics.ts's
+//   shared records, staged byte-identically by the three §7 modules.
+//   T7.1-1's two-group workspace and T7.2-1's overlap workspace, each its
+//   body's first, precede any invocation and stay plain.
+// - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
+//   timing clauses; helpers/staged-ts.ts): every configuration file and
+//   code source a body stages in a workspace created after its first
+//   product invocation — `expectConfigRefused`'s one staging site (its
+//   arm tables' rows each a record made at module load: T7.3-1's
+//   wrong-type literals among them), T7.1-1's non-`.mdx`-match,
+//   wrong-case-extension, and path-character configurations and its
+//   code-source control's configuration and code source (the record
+//   staged at `src/it's<U+005C>x.ts`), T7.3-1's emission-matrix variants
+//   (the first's too, the table being one), outDir (its graph-data-area
+//   look-alikes' and single-casing spellings' included), destination, and
+//   configuration-alone workspaces — is a ledger record carrying its S-9
+//   declaration, judged by test/self/s9-staged-sources.test.ts before any
+//   product exists: every one well-formed, T7.3-1's destination code
+//   source at `specs/A.md` included (its record makes the path judged, a
+//   name the default does not reach). The same two first workspaces stay
+//   plain; `specs/A.md`'s user-authored text in T7.3-1's
+//   configuration-alone arm lies in a spec group, no code source, and
+//   stays a string.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -60,26 +187,42 @@ import type {
   Finding,
   GraphEdge,
   IdsFileEntry,
+  PathValue,
+  SourceRange,
+  ViewAttributeEntry,
+  ViewNode,
 } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
   decodeEdgesReport,
   decodeFindingsReport,
   decodeIdsReport,
+  decodeInventoryDocument,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
+  assertExitCode,
   assertFileBytes,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import {
+  assertSnapshotsEqual,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
+import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -89,7 +232,11 @@ import {
   buildOk,
   byteWindow,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
+  runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -149,26 +296,87 @@ async function expectIdsListing(
 }
 
 /**
- * Stage a workspace whose only defect is the given configuration text and
- * assert `build --json` refuses it per 14.14. The staged source is valid and
- * matched by every fixture configuration's spec glob, so a product that
- * wrongly accepts the configuration proceeds to a successful build (exit 0)
- * and fails the exit-code assertion — never exits 2 for a side reason.
+ * Assert a configuration error's one finding — its 12.7 error document
+ * decoded by `expectErrorDocument` — concerns the configuration file the
+ * upward search found: the stable code "configuration-error", `locations`
+ * [] (a configuration condition carries the file it concerns, never a
+ * source range), and as its concerned path that file in the anchoring form
+ * of 11.6 relative to the invocation working directory. Every caller runs
+ * its invocation at the workspace root, where the staged `xspec.config.ts`
+ * sits, so the path is exactly "xspec.config.ts" (SPEC 14, 12.7, 11.6)
+ * whatever the defect — T7.2-1's overlap included, whose doubly matched
+ * file is never the concerned path. `citation` lists the SPEC sections the
+ * failure cites.
+ */
+function assertFoundConfigurationConcerned(
+  finding: Finding,
+  context: string,
+  citation: string,
+): void {
+  assertSameJson(
+    {
+      code: finding.code,
+      path: finding.path,
+      locations: finding.locations.map((location) => location.file),
+    },
+    {
+      code: "configuration-error",
+      path: "xspec.config.ts",
+      locations: [],
+    },
+    `${context}: the error document's one finding carries the stable ` +
+      `code "configuration-error", locations [] (a configuration ` +
+      `condition carries the file it concerns, never a source range), ` +
+      `and as its concerned path the configuration file the upward ` +
+      `search found, in the anchoring form of 11.6 relative to the ` +
+      `invocation working directory — the workspace root, so exactly ` +
+      `"xspec.config.ts" (${citation})`,
+  );
+}
+
+/**
+ * Stage a workspace whose only defect is the given configuration — a
+ * staged-source record, well-formed (module header), since T7.3-1 stages
+ * every arm after its first product invocation (S-9's timing clause) — and
+ * assert `build --json` refuses it per 14.14, its one finding concerning
+ * the configuration file (`assertFoundConfigurationConcerned`). The staged
+ * source is valid and matched by every fixture configuration's spec glob,
+ * so a product that wrongly accepts the configuration proceeds to a
+ * successful build (exit 0) and fails the exit-code assertion — never exits
+ * 2 for a side reason.
  */
 async function expectConfigRefused(
   product: ProductBinding,
-  config: string,
+  config: StagedTs,
   context: string,
 ): Promise<void> {
   await withWorkspace(
     {
       files: {
         "xspec.config.ts": config,
-        "specs/A.mdx": mdxSection("a"),
+        "specs/A.mdx": SECTION_A_SOURCE,
       },
     },
     async (workspace) => {
-      await expectConfigurationError(product, workspace, ["build"], context);
+      const before = await snapshotDirectory(workspace.root);
+      const result = await expectConfigurationError(
+        product,
+        workspace,
+        ["build"],
+        context,
+      );
+      assertFoundConfigurationConcerned(
+        expectErrorDocument(result, context),
+        context,
+        "SPEC 14, 12.7, 11.6",
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(workspace.root),
+        `${context}: a build failing at configuration load modifies ` +
+          `nothing (SPEC 12.1, 12.0) — no derived file or graph data ` +
+          `appears anywhere under the root`,
+      );
     },
   );
 }
@@ -316,25 +524,547 @@ function assertProfileSeesSharedFile(
   );
 }
 
+/**
+ * Render one policy finding from its contractual identities — in order, the
+ * violated rule's name and the offending edge's source identity, kind token,
+ * and target identity (SPEC 14.12, 12.7) — as `rule :: kind: from -> to`.
+ * A finding without the four identities renders verbatim, failing the
+ * comparison with the offense visible.
+ */
+function renderPolicyIdentities(finding: Finding): string {
+  if (finding.identities.length !== 4) {
+    return `<malformed 14.12 identities> ${JSON.stringify(finding.identities)}`;
+  }
+  const [rule, from, kind, to] = finding.identities;
+  return `${rule} :: ${kind}: ${from} -> ${to}`;
+}
+
 /** Render policy findings for order-insensitive exact comparison (7.5). */
 function renderPolicyFindings(findings: readonly Finding[]): string[] {
-  return findings
-    .map(
-      (finding) =>
-        `${finding.rule ?? "<no rule>"} :: ` +
-        (finding.edge === undefined
-          ? "<no edge>"
-          : `${finding.edge.kind}: ${finding.edge.from} -> ${finding.edge.to}`),
-    )
-    .sort();
+  return findings.map(renderPolicyIdentities).sort();
 }
+
+// The non-`.mdx`-match workspace's configuration: the one spec group's glob
+// `specs/*` matches `specs/notes.txt`. A staged-source record (module
+// header): T7.1-1 stages it after its first product invocation.
+const NON_MDX_MATCH_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the spec-group glob specs/* matching " +
+    "specs/notes.txt)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*"]
+  }
+})
+`,
+);
+
+// The non-`.mdx`-match workspace's spec-group file not named `.mdx`: an MDX
+// source all the same — invalid by its name (SPEC 7.1, 14.19), its content
+// still judged by 14.20 (11.2 keeps its parse-local structure) — whose
+// content is well-formed, so the invalid path is the workspace's only
+// condition and the arm's exact `{"14.19": 1}` has teeth. T7.1-1 stages it
+// after its first product invocation, so it is a staged-source record
+// (module header; S-9's before-any-product clause): a record at a path not
+// named `.mdx` declares that path a well-formed MDX source for its own
+// write, so the ledger self-test judges it before any product exists.
+const NON_MDX_MATCH_NOTES = stagedMdx(
+  "T7.1-1 specs/notes.txt (the spec-group match without .mdx, its content " +
+    "well-formed so the 14.19 is the workspace's only condition)",
+  mdxSection("n"),
+);
+
+// --- T7.1-1's wrong-case extension arm (SPEC 7.1, 12.0, 13.1, 11.6) ----------
+//
+// `specs/A.MDX`, holding `<S id="a">A</S>` and matched by the spec glob
+// `specs/*.MDX` with emission enabled next to sources, has no `.mdx`
+// extension — 12.0 compares paths byte-wise and case-sensitively, with no
+// case folding anywhere — so it is invalid (14.19); a spec-group file
+// without the extension generates and emits nothing (13.1), so
+// `inventory`'s `derived` entry for it carries `module` and `markdown`
+// `null` (11.6). A single-casing arm, alone in its workspace (module
+// header): a product folding case in the extension test builds the file
+// cleanly, or derives a generated module and a Markdown destination for it.
+
+/** The arm's spec-group file, its extension spelled `.MDX`. */
+const WRONG_CASE_EXTENSION_PATH = "specs/A.MDX";
+
+// The arm's configuration: the one spec group's glob `specs/*.MDX`, and
+// emission enabled next to sources, so a product folding case would derive
+// the file a Markdown destination too. A staged-source record (module
+// header): T7.1-1 stages it after its first product invocation.
+const WRONG_CASE_EXTENSION_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the wrong-case extension arm: the spec-group " +
+    "glob specs/*.MDX, emission enabled)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.MDX"]
+  },
+  markdown: { emit: true }
+})
+`,
+);
+
+// The arm's file content, exactly as T7.1-1 spells it: well-formed, so the
+// invalid path is the workspace's only condition and the exact
+// `{"14.19": 1}` has teeth. A staged-source record (module header): a
+// record at a path not named `.mdx` declares that path a well-formed MDX
+// source for its own write, so the ledger self-test judges it before any
+// product exists.
+const WRONG_CASE_EXTENSION_SOURCE = stagedMdx(
+  'T7.1-1 specs/A.MDX (<S id="a">A</S>: the wrong-case extension arm, a ' +
+    "spec-group file without .mdx, its content well-formed so the 14.19 is " +
+    "the workspace's only condition)",
+  '<S id="a">A</S>',
+);
+
+/**
+ * T7.1-1's wrong-case extension arm (module header): `build --json`, and
+ * `check --json` after it, report exactly `specs/A.MDX`'s condition-19
+ * finding, concerning its path; `inventory --json` answers exit 0, listing
+ * the file under its spec group, its `derived` entry's `module` and
+ * `markdown` `null` (SPEC 7.1, 12.0, 14.19, 12.1, 12.2, 13.1, 11.6).
+ */
+async function runWrongCaseExtensionArm(
+  product: ProductBinding,
+): Promise<void> {
+  const label =
+    `the spec-group file ${WRONG_CASE_EXTENSION_PATH} matched by ` +
+    `specs/*.MDX, emission enabled`;
+  const expected19 = [invalidPathFinding(WRONG_CASE_EXTENSION_PATH)];
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": WRONG_CASE_EXTENSION_CONFIG,
+        [WRONG_CASE_EXTENSION_PATH]: WRONG_CASE_EXTENSION_SOURCE,
+      },
+    },
+    async (workspace) => {
+      for (const command of ["build", "check"] as const) {
+        const context = `T7.1-1 \`${command} --json\` with ${label}`;
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          [command, "--json"],
+          1,
+          `${context} — the file has no \`.mdx\` extension (paths compare ` +
+            `byte-wise and case-sensitively, so \`.MDX\` is none), so the ` +
+            `match is invalid, a finding outcome (SPEC 7.1, 12.0, 14.19)` +
+            (command === "check"
+              ? `; \`check\` reports exactly build's validation findings, ` +
+                `the failed build having written nothing (SPEC 12.2, 12.1)`
+              : ""),
+        );
+        assertConditionCounts(findings, { "14.19": 1 }, context);
+        assertSameJson(
+          findings.map(projectPathFinding),
+          expected19,
+          `${context} — one condition-19 finding with the stable code ` +
+            `"invalid-source-path", no in-source locations, and the file's ` +
+            `workspace-relative path as its concerned path (SPEC 7.1, ` +
+            `14.19, 14, 12.7)`,
+        );
+      }
+
+      const inventoryLabel = `T7.1-1 \`inventory --json\` with ${label}`;
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          `${inventoryLabel} — the inventory parses no sources, so it ` +
+            `answers whatever their validity and carries no 14.19: a ` +
+            `complete, finding-free answer (SPEC 11.6, 12.0)`,
+        ),
+        inventoryLabel,
+      );
+      assertSameJson(
+        { sources: inventory.sources, derived: inventory.derived },
+        {
+          sources: [
+            {
+              path: WRONG_CASE_EXTENSION_PATH,
+              groups: [{ name: "main", kind: "spec" }],
+            },
+          ],
+          derived: [
+            { source: WRONG_CASE_EXTENSION_PATH, module: null, markdown: null },
+          ],
+        },
+        `${inventoryLabel}: the file is discovered — listed in \`sources\` ` +
+          `under its spec group main — and, without the \`.mdx\` extension ` +
+          `(12.0: byte-wise, case-sensitive), generates and emits nothing, ` +
+          `so its \`derived\` entry carries \`module\` and \`markdown\` ` +
+          `null though emission is enabled — the stated null, never ` +
+          `omission (SPEC 13.1, 11.6, 7.3, 12.7); a product folding case ` +
+          `in the extension test derives both paths for it`,
+      );
+    },
+  );
+}
+
+// --- T7.1-1's path-character arms (SPEC 7.1, 14.19) --------------------------
+//
+// SPEC 7.1 bars U+0022, U+0027, U+005C (the backslash), U+000A, U+000D,
+// U+2028, and U+2029 from a spec-group file's workspace-relative path
+// (14.19): one arm per character in the file name (`specs/a<c>b.mdx`) plus
+// one with U+0027 in a directory component (`specs/it's/a.mdx`), each file
+// alone in its own workspace (module header). Every barred character is
+// built from its code point, never from an escape spelling.
+
+/** Whether the Linux-leg arms are staged (module-header note). */
+const LINUX_LEG = process.platform === "linux";
+
+const APOSTROPHE = String.fromCodePoint(0x27);
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+/** One path-character arm: a barred spec-group file, alone in its workspace. */
+interface PathCharacterArm {
+  /** The barred character and where it stands, for diagnoses. */
+  readonly what: string;
+  /** The spec-group file's workspace-relative path. */
+  readonly path: string;
+  /** The `view --file` glob reaching exactly that file (SPEC 7's globs). */
+  readonly glob: string;
+  /** Staged on the Linux leg alone: a name other filesystems cannot hold. */
+  readonly linuxLeg: boolean;
+}
+
+function fileNameArm(
+  codePoint: number,
+  name: string,
+  linuxLeg: boolean,
+): PathCharacterArm {
+  return {
+    what: `${name} in the file name`,
+    path: `specs/a${String.fromCodePoint(codePoint)}b.mdx`,
+    glob: "specs/a*b.mdx",
+    linuxLeg,
+  };
+}
+
+const PATH_CHARACTER_ARMS: readonly PathCharacterArm[] = [
+  fileNameArm(0x22, "U+0022 QUOTATION MARK", true),
+  fileNameArm(0x27, "U+0027 APOSTROPHE", false),
+  fileNameArm(0x5c, "U+005C REVERSE SOLIDUS (the backslash)", true),
+  fileNameArm(0x0a, "U+000A LINE FEED", true),
+  fileNameArm(0x0d, "U+000D CARRIAGE RETURN", true),
+  fileNameArm(0x2028, "U+2028 LINE SEPARATOR", false),
+  fileNameArm(0x2029, "U+2029 PARAGRAPH SEPARATOR", false),
+  {
+    what: "U+0027 APOSTROPHE in a directory component",
+    path: `specs/it${APOSTROPHE}s/a.mdx`,
+    glob: "specs/*/a.mdx",
+    linuxLeg: false,
+  },
+];
+
+// The arms' configuration: one spec group whose glob reaches every arm's
+// file, the directory component included. A staged-source record (module
+// header): T7.1-1 stages it after its first product invocation.
+const PATH_CHARACTER_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the path-character arms: the spec-group glob " +
+    "specs/**/*.mdx)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+
+/**
+ * Running byte-offset composer (the T5.7-2 discipline): `add` appends a
+ * segment and returns its byte range, `attr` an attribute segment as its
+ * expected raw view entry (SPEC 11.4: the entry's text is the attribute's
+ * own characters), so every expected offset is composed from the parts the
+ * staged file is made of.
+ */
+class SourceComposer {
+  private readonly parts: string[] = [];
+  private bytes = 0;
+
+  get pos(): number {
+    return this.bytes;
+  }
+
+  get source(): string {
+    return this.parts.join("");
+  }
+
+  add(segment: string): SourceRange {
+    const start = this.bytes;
+    this.parts.push(segment);
+    this.bytes += Buffer.byteLength(segment, "utf8");
+    return { start, end: this.bytes };
+  }
+
+  attr(name: string, text: string): ViewAttributeEntry {
+    return { name, range: this.add(text), text };
+  }
+}
+
+// The arms' one spec source, staged at each barred path: a section with a
+// nested child, so "every identity unavailable" reaches the root, a
+// top-level section, and a nested one. Its content is condition-free — the
+// path is each arm's only defect, so the exact 14.19 count has teeth.
+const PATH_ARM = new SourceComposer();
+const PATH_ARM_OUTER_START = PATH_ARM.pos;
+PATH_ARM.add("<S ");
+const PATH_ARM_OUTER_ID = PATH_ARM.attr("id", 'id="p"');
+PATH_ARM.add(">\nText for p.\n\n");
+const PATH_ARM_INNER_START = PATH_ARM.pos;
+PATH_ARM.add("<S ");
+const PATH_ARM_INNER_ID = PATH_ARM.attr("id", 'id="p.kid"');
+PATH_ARM.add(">\nText for p.kid.\n</S>");
+const PATH_ARM_INNER_RANGE: SourceRange = {
+  start: PATH_ARM_INNER_START,
+  end: PATH_ARM.pos,
+};
+PATH_ARM.add("\n</S>");
+const PATH_ARM_OUTER_RANGE: SourceRange = {
+  start: PATH_ARM_OUTER_START,
+  end: PATH_ARM.pos,
+};
+PATH_ARM.add("\n");
+const PATH_ARM_SOURCE = stagedMdx(
+  "T7.1-1 the path-character arms' spec source (staged at each barred path)",
+  PATH_ARM.source,
+);
+
+/** The 12.7 unavailability marker, as decoded (one-datum state). */
+const UNAVAILABLE = { unavailable: true } as const;
+
+/**
+ * The tree projection T11.2-3 pins: per node, the identity datum (11.2
+ * three-state), the construct range (1.7), the raw attribute entries as
+ * parsed, and the children in document order.
+ */
+interface TreeExpectation {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly children: readonly TreeExpectation[];
+}
+
+function projectTree(node: ViewNode): TreeExpectation {
+  return {
+    identity: node.identity,
+    range: node.range,
+    attributes: node.attributes.map((entry) => ({
+      name: entry.name,
+      range: entry.range,
+      text: entry.text,
+    })),
+    children: node.children.map(projectTree),
+  };
+}
+
+// The arm source's full positional tree, every identity unavailable.
+const PATH_ARM_TREE: TreeExpectation = {
+  identity: UNAVAILABLE,
+  range: { start: 0, end: PATH_ARM.pos },
+  attributes: [],
+  children: [
+    {
+      identity: UNAVAILABLE,
+      range: PATH_ARM_OUTER_RANGE,
+      attributes: [PATH_ARM_OUTER_ID],
+      children: [
+        {
+          identity: UNAVAILABLE,
+          range: PATH_ARM_INNER_RANGE,
+          attributes: [PATH_ARM_INNER_ID],
+          children: [],
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * The asserted projection of a 14.19 finding (T11.2-3's): the stable code
+ * token, the empty locations of a path-level condition, and the concerned
+ * path (SPEC 14, 12.7). Message and identities stay unpinned.
+ */
+interface PathFindingExpectation {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: PathValue | null;
+}
+
+function projectPathFinding(finding: Finding): PathFindingExpectation {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+function invalidPathFinding(path: string): PathFindingExpectation {
+  return { code: "invalid-source-path", locations: [], path };
+}
+
+/**
+ * One path-character arm (module header): `build --json` reports exactly
+ * the file's condition-19 finding, concerning its path, and the
+ * glob-reached `view` serves its tree with every identity unavailable, the
+ * finding accompanying — the file still discovered and reachable as
+ * T11.2-3's invalid-path files are (SPEC 7.1, 14.19, 11.2, 11.4).
+ */
+async function runPathCharacterArm(
+  product: ProductBinding,
+  arm: PathCharacterArm,
+): Promise<void> {
+  const label = `${JSON.stringify(arm.path)} (${arm.what})`;
+  const expected19 = [invalidPathFinding(arm.path)];
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": PATH_CHARACTER_CONFIG,
+        [arm.path]: PATH_ARM_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const buildContext = `T7.1-1 \`build --json\` with the spec-group file ${label}`;
+      const findings = await buildFindings(product, workspace, buildContext);
+      assertConditionCounts(findings, { "14.19": 1 }, buildContext);
+      assertSameJson(
+        findings.map(projectPathFinding),
+        expected19,
+        `${buildContext} — the file is discovered and its path is invalid: ` +
+          `one condition-19 finding with the stable code ` +
+          `"invalid-source-path", no in-source locations, and the file's ` +
+          `workspace-relative path as its concerned path (SPEC 7.1, 14.19, ` +
+          `14, 12.7)`,
+      );
+
+      const viewContext =
+        `T7.1-1 \`view --file ${arm.glob}\` (the glob-reached view) over ` +
+        `the spec-group file ${label}`;
+      const viewResult = await runCli(product, workspace, [
+        "view",
+        "--file",
+        arm.glob,
+      ]);
+      assertExitCode(
+        viewResult,
+        1,
+        `${viewContext} — the answer carries the file's condition-19 ` +
+          `finding and explicitly-unavailable identities, so exit 1 with ` +
+          `the full document still emitted (SPEC 11.2, 11.4)`,
+      );
+      const report = decodeViewReport(
+        parseJsonStdout(
+          viewResult,
+          `${viewContext} — a single JSON document is the only output ` +
+            `form (SPEC 11)`,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        report.findings.map(projectPathFinding),
+        expected19,
+        `${viewContext} — the file's condition-19 finding accompanies the ` +
+          `answer whose consulted domain includes it (SPEC 11.2, 14.19)`,
+      );
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [arm.path],
+        `${viewContext} — the glob admits the discovered file: one ` +
+          `per-file view, its \`file\` the workspace-relative path (SPEC ` +
+          `11.4, 7)`,
+      );
+      const view = report.views[0]!;
+      assertSameJson(
+        projectTree(view.root),
+        PATH_ARM_TREE,
+        `${viewContext} — the file keeps its full positional tree with ` +
+          `byte-exact construct ranges and raw attribute entries while ` +
+          `every node identity, root included, is explicitly unavailable ` +
+          `(SPEC 11.2, 11.4, 1.5)`,
+      );
+      assertSameJson(
+        [view.imports, view.occurrences, view.comments],
+        [[], [], []],
+        `${viewContext} — the file holds no imports, occurrences, or ` +
+          `comments: empty arrays, never null (SPEC 11.4, 12.7)`,
+      );
+    },
+  );
+}
+
+// --- T7.1-1's code-source control (SPEC 7.1, 14.19) --------------------------
+//
+// 7.1's bar binds spec groups alone (14.19's code-source forms are `#`,
+// U+FFFD, and non-UTF-8), so a code-group file whose path holds U+0027 and
+// the backslash — `src/it's<U+005C>x.ts`, one file name: the backslash is
+// no separator of a workspace-relative path (1.5) — is valid: `build` and
+// `check` exit 0, and its top-level marker records its `references` edge
+// from that whole-file location (4.5, 4.6), discriminating a product that
+// applies the bar to every source. Staged on the Linux leg (module header):
+// the name holds a backslash.
+const CODE_PATH_CONTROL_FILE = `src/it${APOSTROPHE}s${BACKSLASH}x.ts`;
+
+// The control's configuration and code source: staged-source records
+// (module header), T7.1-1 staging them after its first product invocation.
+const CODE_PATH_CONTROL_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the code-source path control: spec glob " +
+    "specs/*.mdx, code glob src/*.ts)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: ["src/*.ts"]
+  }
+})
+`,
+);
+const CODE_PATH_CONTROL_SOURCE = stagedTs(
+  "T7.1-1 the code-source path control's code source (staged at " +
+    "src/it's<U+005C>x.ts: a top-level marker of specs/A.mdx#a)",
+  `import SPEC from "../specs/A.xspec"
+
+SPEC.a
+`,
+);
+
+// The control workspace's complete edge set (SPEC 5.1, 5.2): the source's
+// containment edge and the marker's references edge, sourced at the code
+// file's whole-file location — its path, the identity of a valid path.
+const CODE_PATH_CONTROL_EDGES: readonly GraphEdge[] = [
+  { from: "specs/A.mdx", to: "specs/A.mdx#a", kind: "contains" },
+  { from: CODE_PATH_CONTROL_FILE, to: "specs/A.mdx#a", kind: "references" },
+];
 
 const T7_1_1 = defineProductTest({
   id: "T7.1-1",
   title:
     "spec groups: a file in two spec groups is valid, listed once, and " +
     "coverage and policy see it in both groups; a spec-group match without " +
-    "`.mdx` is invalid (SPEC 7.1, 8, 7.5, 14.19)",
+    "`.mdx` is invalid — the wrong-case extension among them: " +
+    "`specs/A.MDX` under `specs/*.MDX`, emission enabled, is 14.19 from " +
+    "`build` and `check` (12.0: byte-wise, case-sensitive), its " +
+    "`inventory` `derived` entry carrying `module` and `markdown` null; a " +
+    "spec-group file whose path holds U+0022, U+0027, U+005C, U+000A, " +
+    "U+000D, U+2028, or U+2029 — one arm per character in the file name, " +
+    "plus U+0027 in a directory component; the U+0022, U+005C, U+000A, and " +
+    "U+000D arms on the Linux leg — is invalid (14.19), still discovered " +
+    "and reachable: its finding concerns its path and a glob-reached " +
+    "`view` serves its tree with every identity unavailable; control " +
+    "(Linux leg): the code-group file `src/it's<U+005C>x.ts` is valid, " +
+    "`build` and `check` exiting 0 and its marker recording its edge from " +
+    "the whole-file location (SPEC 7.1, 8, 7.5, 12.0, 13.1, 11.6, 14.19, " +
+    "11.2, 11.4)",
   run: async (product) => {
     // A file in two spec groups is valid — and coverage/policy see it in
     // both.
@@ -410,23 +1140,17 @@ const T7_1_1 = defineProductTest({
     });
 
     // A spec-group match without `.mdx` → 14.19. The offending file's
-    // content is itself well-formed, so the invalid path is the workspace's
+    // content is itself well-formed (its record declares it so, and S-9's
+    // ledger self-test judges it), so the invalid path is the workspace's
     // only condition (the exact-count assertion has teeth) — and a product
     // that wrongly accepts the match builds cleanly and fails the exit-code
     // assertion.
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/*"]
-  }
-})
-`,
-          "specs/A.mdx": mdxSection("a"),
-          "specs/notes.txt": mdxSection("n"),
+          "xspec.config.ts": NON_MDX_MATCH_CONFIG,
+          "specs/A.mdx": SECTION_A_SOURCE,
+          "specs/notes.txt": NON_MDX_MATCH_NOTES,
         },
       },
       async (workspace) => {
@@ -436,16 +1160,79 @@ export default defineConfig({
         const findings = await buildFindings(product, workspace, context);
         assertConditionCounts(findings, { "14.19": 1 }, context);
         const finding = findings[0]!;
-        if (finding.file !== "specs/notes.txt") {
+        if (finding.path !== "specs/notes.txt") {
           fail(
             `${context}: the 14.19 finding must identify the offending ` +
-              `workspace-relative source path (SPEC 14, 7.1, 1.5); expected ` +
-              `file "specs/notes.txt", got ${JSON.stringify(finding.file)} ` +
+              `workspace-relative source path as its concerned path (SPEC ` +
+              `14, 7.1, 1.5, 12.7); expected "specs/notes.txt", got ` +
+              `${JSON.stringify(finding.path)} ` +
               `(message: ${JSON.stringify(finding.message)})`,
           );
         }
       },
     );
+
+    // The wrong-case extension among them (SPEC 7.1, 12.0, 13.1, 11.6):
+    // `specs/A.MDX` under `specs/*.MDX`, emission enabled, is 14.19 from
+    // `build` and `check`, and its `inventory` `derived` entry carries
+    // `module` and `markdown` null — a single-casing arm (module header).
+    await runWrongCaseExtensionArm(product);
+
+    // Path characters (SPEC 7.1, 14.19): one arm per barred character in
+    // the file name plus U+0027 in a directory component, each file alone
+    // in its own workspace; the U+0022, backslash, U+000A, and U+000D arms
+    // on the Linux leg alone (module header).
+    for (const arm of PATH_CHARACTER_ARMS) {
+      if (arm.linuxLeg && !LINUX_LEG) continue;
+      await runPathCharacterArm(product, arm);
+    }
+
+    // Control (Linux leg: the name holds a backslash): the code-group file
+    // `src/it's<U+005C>x.ts` is valid — 7.1's bar binds spec groups alone —
+    // so `build` and `check` are finding-free and its top-level marker
+    // records its edge from the whole-file location.
+    if (LINUX_LEG) {
+      await withWorkspace(
+        {
+          files: {
+            "xspec.config.ts": CODE_PATH_CONTROL_CONFIG,
+            "specs/A.mdx": SECTION_A_SOURCE,
+            [CODE_PATH_CONTROL_FILE]: CODE_PATH_CONTROL_SOURCE,
+          },
+        },
+        async (workspace) => {
+          const label =
+            `the code-group file ${JSON.stringify(CODE_PATH_CONTROL_FILE)} ` +
+            `(U+0027 and the backslash in a code source's path)`;
+          await expectFindingFreeReport(
+            product,
+            workspace,
+            ["build", "--json"],
+            `T7.1-1 \`build --json\` with ${label} — valid: 7.1's bar ` +
+              `binds spec groups alone, 14.19's code-source forms being ` +
+              `\`#\`, U+FFFD, and non-UTF-8 (SPEC 7.1, 14.19)`,
+          );
+          await expectFindingFreeReport(
+            product,
+            workspace,
+            ["check", "--json"],
+            `T7.1-1 \`check --json\` with ${label}, after the build — ` +
+              `valid and current (SPEC 7.1, 14.19, 12.2)`,
+          );
+          const edgesLabel = `T7.1-1 \`query edges\` with ${label}`;
+          assertEdgeSetEqual(
+            decodeEdgesReport(
+              await runJson(product, workspace, ["query", "edges"], edgesLabel),
+              edgesLabel,
+            ),
+            CODE_PATH_CONTROL_EDGES,
+            `${edgesLabel}: the file's top-level marker records its ` +
+              `references edge from the whole-file location, whose ` +
+              `identity is the file's path (SPEC 4.5, 4.6, 7.1)`,
+          );
+        },
+      );
+    }
   },
 });
 
@@ -458,11 +1245,16 @@ export default defineConfig({
 // (T8-3, T9.2-*), per T7.2-1's own text. This test's subject is the overlap
 // rule: a file matched by both a spec and a code group is a configuration
 // error (14.14), reported when the configuration is loaded and sources are
-// discovered, as a usage error (exit 2). The decoy pair — a spec source and
-// a code source each matched by exactly one group — keeps the overlap the
-// workspace's only defect: a product that wrongly accepts it proceeds past
-// configuration load (to exit 0 or a finding exit 1, whatever it makes of
-// mixed/X.mdx) and fails the exit-2 assertion either way.
+// discovered, as a usage error (exit 2). The error document's one finding
+// concerns the configuration file the upward search found — exactly
+// `xspec.config.ts`, the invocation running at the workspace root (11.6's
+// anchoring form), never the doubly matched mixed/X.mdx — and carries
+// `locations` [] (SPEC 14, 12.7; `assertFoundConfigurationConcerned`). The
+// decoy pair — a spec source and a code source each matched by exactly one
+// group — keeps the overlap the workspace's only defect: a product that
+// wrongly accepts it proceeds past configuration load (to exit 0 or a
+// finding exit 1, whatever it makes of mixed/X.mdx) and fails the exit-2
+// assertion either way.
 const OVERLAP_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -492,12 +1284,19 @@ const T7_2_1 = defineProductTest({
         },
       },
       async (workspace) => {
-        await expectConfigurationError(
+        const context =
+          "T7.2-1 `build --json` with mixed/X.mdx matched by both the spec " +
+          "group (mixed/*.mdx) and the code group (mixed/*)";
+        const result = await expectConfigurationError(
           product,
           workspace,
           ["build"],
-          "T7.2-1 `build --json` with mixed/X.mdx matched by both the spec " +
-            "group (mixed/*.mdx) and the code group (mixed/*)",
+          context,
+        );
+        assertFoundConfigurationConcerned(
+          expectErrorDocument(result, context),
+          context,
+          "SPEC 14, 12.7, 11.6, 7.2",
         );
       },
     );
@@ -524,60 +1323,261 @@ export default defineConfig({
 // outDir path preservation are both observable. Compiled bytes are fixed by
 // SPEC 3 (the tag-only lines drop with their terminators; the content line
 // keeps its own): byte-asserted per H-4; compilation semantics are T3-*'s.
-const EMISSION_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
-  "specs/sub/B.mdx": mdxSection("b"),
+const EMISSION_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/A.mdx": SECTION_A_SOURCE,
+  "specs/sub/B.mdx": SECTION_B_SOURCE,
 };
 const A_COMPILED = "Text for a.\n";
 const B_COMPILED = "Text for b.\n";
 
 // The emission-scope matrix (SPEC 7.3): absent and `emit: false` mean no
-// emission; `emit: true` emits next to each source.
+// emission; `emit: true` emits next to each source. Each variant's
+// configuration is a staged-source record (module header): T7.3-1 stages
+// every variant past the first after its first product invocation.
 const EMISSION_VARIANTS = [
-  { key: "`markdown` absent", config: specsMainConfig(""), emits: false },
+  {
+    key: "`markdown` absent",
+    config: stagedTs(
+      "T7.3-1 xspec.config.ts (emission matrix: `markdown` absent)",
+      specsMainConfig(""),
+    ),
+    emits: false,
+  },
   {
     key: "`markdown: { emit: false }`",
-    config: specsMainConfig(",\n  markdown: { emit: false }"),
+    config: stagedTs(
+      "T7.3-1 xspec.config.ts (emission matrix: `markdown: { emit: false }`)",
+      specsMainConfig(",\n  markdown: { emit: false }"),
+    ),
     emits: false,
   },
   {
     key: "`markdown: { emit: true }`",
-    config: specsMainConfig(",\n  markdown: { emit: true }"),
+    config: stagedTs(
+      "T7.3-1 xspec.config.ts (emission matrix: `markdown: { emit: true }`)",
+      specsMainConfig(",\n  markdown: { emit: true }"),
+    ),
     emits: true,
   },
 ] as const;
 
+/** A refused-configuration arm (T7.3-1): its label and its record. */
+interface RefusedConfigArm {
+  readonly label: string;
+  readonly config: StagedTs;
+}
+
 // `markdown` present without `emit` → 14.14 (SPEC 7.3: `emit` is required
 // when `markdown` is present). The outDir-bearing arm discriminates a
-// product that infers emission from any other markdown key.
-const EMIT_REQUIRED_VIOLATIONS: readonly { label: string; extra: string }[] = [
+// product that infers emission from any other markdown key. Each arm's
+// configuration is a staged-source record made at module load from its row
+// (module header).
+const EMIT_REQUIRED_VIOLATIONS: readonly RefusedConfigArm[] = [
   { label: "markdown: {}", extra: ",\n  markdown: {}" },
   {
     label: 'markdown: { outDir: "docs" } (outDir given, emit still missing)',
     extra: ',\n  markdown: { outDir: "docs" }',
   },
-];
+].map((row) => ({
+  label: row.label,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (${row.label})`,
+    specsMainConfig(row.extra),
+  ),
+}));
+
+// A well-formed literal of the wrong type for a scalar field → 14.14, never
+// coerced (SPEC 7.3: `emit` a boolean, `outDir` a path; 7: a configuration
+// that does not conform is a configuration error), one arm each (TEST-SPEC
+// T7.3-1): `emit: "true"` and `outDir: true`. Each literal is a form 7
+// admits — a static string literal, a boolean literal — so each arm is
+// refused by type, never by form (T7-2's number-for-boolean arm is refused
+// by form); `outDir: true` stands beside `emit: true`, so a product
+// coercing either literal builds the staged source and fails its arm at
+// the exit code. Each arm's configuration is a staged-source record made
+// at module load from its row (module header).
+const WRONG_TYPE_VIOLATIONS: readonly RefusedConfigArm[] = [
+  {
+    label: 'markdown: { emit: "true" } (a string where 7.3 requires a boolean)',
+    extra: ',\n  markdown: { emit: "true" }',
+  },
+  {
+    label:
+      "markdown: { emit: true, outDir: true } (a boolean where 7.3 " +
+      "requires a path)",
+    extra: ",\n  markdown: { emit: true, outDir: true }",
+  },
+].map((row) => ({
+  label: row.label,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (${row.label})`,
+    specsMainConfig(row.extra),
+  ),
+}));
 
 // `outDir` redirect (SPEC 7.3: emitted files land under outDir, preserving
 // workspace-relative paths; outDir resolves against the workspace root).
-const OUTDIR_CONFIG = specsMainConfig(
-  ',\n  markdown: { emit: true, outDir: "docs" }',
+// A staged-source record (module header).
+const OUTDIR_CONFIG = stagedTs(
+  'T7.3-1 xspec.config.ts (outDir "docs")',
+  specsMainConfig(',\n  markdown: { emit: true, outDir: "docs" }'),
 );
 
-// `outDir` resolving outside the workspace root → 14.14: a plain `../`
-// escape and a `..` traversal buried mid-path.
-const OUTSIDE_OUTDIRS: readonly string[] = ["../out", "docs/../../out"];
+// `outDir` not in plain workspace-relative form → 14.14 (SPEC 7.3: one or
+// more non-empty `/`-separated segments, none `.` or `..`; any other
+// spelling — empty, beginning with `/`, or carrying a `.`, `..`, or empty
+// segment — is a configuration error, by spelling alone). One arm per
+// pinned spelling (TEST-SPEC T7.3-1), then the two `..`-bearing spellings
+// the arm always drove. Each is serialized into the configuration through
+// `JSON.stringify`, so the literal the product reads is exactly the
+// spelling listed; each arm's configuration is a staged-source record made
+// at module load from its row (module header).
+const INVALID_OUTDIRS: readonly {
+  readonly outDir: string;
+  readonly why: string;
+  readonly config: StagedTs;
+}[] = [
+  { outDir: "", why: "empty" },
+  { outDir: "/out", why: "begins with `/`" },
+  { outDir: "./out", why: "carries a `.` segment" },
+  { outDir: "out/../x", why: "carries a `..` segment" },
+  { outDir: "out//x", why: "carries an empty segment" },
+  { outDir: "out/", why: "carries a trailing empty segment" },
+  { outDir: "../out", why: "begins with a `..` segment" },
+  {
+    outDir: "docs/../../out",
+    why: "carries `..` segments (resolving outside the root besides)",
+  },
+].map((row) => ({
+  outDir: row.outDir,
+  why: row.why,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)} ${row.why})`,
+    specsMainConfig(
+      `,\n  markdown: { emit: true, outDir: ${JSON.stringify(row.outDir)} }`,
+    ),
+  ),
+}));
+
+// The pinned valid multi-segment spelling (SPEC 7.3, TEST-SPEC T7.3-1):
+// `out/sub` redirects the emission under `out/sub/`, preserving each
+// source's workspace-relative path beneath it. A staged-source record
+// (module header).
+const OUTDIR_SUB_CONFIG = stagedTs(
+  'T7.3-1 xspec.config.ts (outDir "out/sub")',
+  specsMainConfig(',\n  markdown: { emit: true, outDir: "out/sub" }'),
+);
+
+// An `outDir` naming the graph-data area or a path under it → 14.14 (SPEC
+// 7.3: "So is an `outDir` of `.xspec` or beginning with `.xspec/`" — no emit
+// destination lies in the graph-data area, 13.3, so graph data is the only
+// derived file under it, 11.6, 13.1, 13.4). Both spellings are in plain
+// workspace-relative form, so each arm is refused for the area alone, one
+// arm each (TEST-SPEC T7.3-1). Each arm's configuration is a staged-source
+// record made at module load from its row (module header).
+const GRAPH_DATA_AREA_OUTDIRS: readonly {
+  readonly outDir: string;
+  readonly why: string;
+  readonly config: StagedTs;
+}[] = [
+  { outDir: ".xspec", why: "names the graph-data area itself" },
+  { outDir: ".xspec/md", why: "names a path under the graph-data area" },
+].map((row) => ({
+  outDir: row.outDir,
+  why: row.why,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)} ${row.why})`,
+    specsMainConfig(
+      `,\n  markdown: { emit: true, outDir: ${JSON.stringify(row.outDir)} }`,
+    ),
+  ),
+}));
+
+// The graph-data area's look-alikes (TEST-SPEC T7.3-1): `.xspec2` and
+// `.xspecs/md` are neither `.xspec` nor begin with `.xspec/` — a product
+// testing the byte prefix `.xspec` without its segment boundary refuses
+// them — and, on the Linux leg, neither are the single-casing spellings
+// `.XSPEC` and `.XSPEC/md` (12.0: compared byte-wise, no case folding) — a
+// product folding case in the bar refuses them; only there is `.XSPEC` a
+// directory of its own, where a case-insensitive filesystem makes it the
+// graph-data area itself (module header). So each is a valid `outDir`, and
+// emission writes each destination under it, creating the missing
+// directory chain (SPEC 7.3, 13.4; T13.4-8). `chain` lists every directory
+// the destinations need, `outDir`'s own components first, none of which
+// the arm's staging creates. Each arm's configuration is a staged-source
+// record made at module load from its row (module header).
+const LOOKALIKE_OUTDIRS: readonly {
+  readonly outDir: string;
+  /** What the spelling is beside the area (labels and record names). */
+  readonly what: string;
+  /** Why the spelling names no path of the area (diagnostics). */
+  readonly why: string;
+  /** Staged on the Linux leg alone (module header). */
+  readonly linuxLeg: boolean;
+  readonly chain: readonly string[];
+  readonly config: StagedTs;
+}[] = [
+  {
+    outDir: ".xspec2",
+    what: "a look-alike of the graph-data area",
+    why: "the bar is by segment, never by byte prefix",
+    linuxLeg: false,
+    chain: [".xspec2"],
+  },
+  {
+    outDir: ".xspecs/md",
+    what: "a look-alike of the graph-data area",
+    why: "the bar is by segment, never by byte prefix",
+    linuxLeg: false,
+    chain: [".xspecs", ".xspecs/md"],
+  },
+  {
+    outDir: ".XSPEC",
+    what: "a single-casing spelling of the graph-data area, Linux leg",
+    why: "compared byte-wise, with no case folding: SPEC 12.0",
+    linuxLeg: true,
+    chain: [".XSPEC"],
+  },
+  {
+    outDir: ".XSPEC/md",
+    what:
+      "a single-casing spelling of a path under the graph-data area, " +
+      "Linux leg",
+    why: "compared byte-wise, with no case folding: SPEC 12.0",
+    linuxLeg: true,
+    chain: [".XSPEC", ".XSPEC/md"],
+  },
+].map((row) => ({
+  outDir: row.outDir,
+  what: row.what,
+  why: row.why,
+  linuxLeg: row.linuxLeg,
+  chain: [...row.chain, `${row.outDir}/specs`, `${row.outDir}/specs/sub`],
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)}, ` +
+      `${row.what})`,
+    specsMainConfig(
+      `,\n  markdown: { emit: true, outDir: ${JSON.stringify(row.outDir)} }`,
+    ),
+  ),
+}));
 
 // Classification-follows-emit, discovery channel (module header): the
 // destination path `specs/A.md` staged as a *valid code source* — plain-TS
 // content whose top-level marker records a `references` edge attributed to
 // the file (SPEC 4.5, 4.6, 14.20) — in a code group whose glob matches only
 // it. The spec and code globs are disjoint (`*.mdx` vs `*.md` suffixes), so
-// no 14.14 overlap arises.
-const DESTINATION_CODE_SOURCE = `import BASE from "./A.xspec"
+// no 14.14 overlap arises. S-9: the destination path's code source, a name
+// the default does not reach, is declared well-formed (a valid code source,
+// 14.20) by its staged-source record (module header; the record makes the
+// path judged), staged in both workspaces of the arm.
+const DESTINATION_CODE_SOURCE = stagedTs(
+  "T7.3-1 specs/A.md (the destination path staged as a valid code source)",
+  `import BASE from "./A.xspec"
 
 BASE.a
-`;
+`,
+);
 
 function destinationDiscoveryConfig(emit: boolean): string {
   return `import { defineConfig } from "xspec"
@@ -594,8 +1594,20 @@ export default defineConfig({
 `;
 }
 
-const DESTINATION_DISCOVERY_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
+// The arm's two configurations, staged-source records (module header).
+const DESTINATION_DISCOVERY_NO_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination discovery: emission disabled)",
+  destinationDiscoveryConfig(false),
+);
+const DESTINATION_DISCOVERY_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination discovery: emission enabled)",
+  destinationDiscoveryConfig(true),
+);
+
+const DESTINATION_DISCOVERY_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  "specs/A.mdx": SECTION_A_SOURCE,
   "specs/A.md": DESTINATION_CODE_SOURCE,
 };
 
@@ -630,16 +1642,33 @@ export default defineConfig({
 `;
 }
 
-const DESTINATION_IMPORT_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
-  "src/use.ts": `${DESTINATION_IMPORT_STATEMENT}\n`,
-};
+// The arm's two configurations and the importing code source, staged-source
+// records (module header).
+const DESTINATION_IMPORT_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination import: emission enabled)",
+  destinationImportConfig(true),
+);
+const DESTINATION_IMPORT_NO_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination import: emission disabled)",
+  destinationImportConfig(false),
+);
+
+const DESTINATION_IMPORT_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    "specs/A.mdx": SECTION_A_SOURCE,
+    "src/use.ts": stagedTs(
+      "T7.3-1 src/use.ts (importing the destination path ../specs/A.md)",
+      `${DESTINATION_IMPORT_STATEMENT}\n`,
+    ),
+  };
 
 // Classification-by-configuration-alone arm (SPEC 7.3 "whether or not
 // emission has yet run"): emission enabled, no emission ever run, a
 // user-authored file at the destination, one spec-group glob matching both
-// the source and the destination.
-const CONFIG_ALONE_CONFIG = `import { defineConfig } from "xspec"
+// the source and the destination. A staged-source record (module header).
+const CONFIG_ALONE_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (classification by configuration alone)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -647,7 +1676,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 const USER_AUTHORED_DESTINATION =
   "User-authored notes at the emit destination.\n";
@@ -663,8 +1693,9 @@ async function assertNotEmitted(
     fail(
       `${context}: expected nothing at ${rel} — with \`markdown\` absent or ` +
         `\`emit: false\` no path is a Markdown emit destination, and with ` +
-        `outDir the default next-to-source paths are not destinations ` +
-        `(SPEC 7.3) — but found: ${kind}`,
+        `outDir only the paths beneath outDir itself, joined by \`/\` to ` +
+        `each source's default workspace-relative destination, are ` +
+        `destinations (SPEC 7.3, 13.2) — but found: ${kind}`,
     );
   }
 }
@@ -674,10 +1705,19 @@ const T7_3_1 = defineProductTest({
   title:
     "markdown configuration: absent and emit:false mean no emission, " +
     "emit:true emits next to each source; markdown without emit is 14.14; " +
-    "outDir redirects preserving workspace-relative paths and must resolve " +
-    "within the root (else 14.14); emit-destination classification follows " +
-    "emit — by configuration alone, whether or not emission has yet run " +
-    "(SPEC 7.3, 13.2, 13.4, 14.14)",
+    "a well-formed literal of the wrong type for a scalar field (emit: " +
+    '"true", outDir: true) is 14.14, exit 2, never coerced; outDir ' +
+    "redirects preserving workspace-relative paths and must be spelled in " +
+    "plain workspace-relative form — non-empty `/`-separated segments, " +
+    "none `.` or `..` — decided by spelling alone (else 14.14: " +
+    '"", "/out", "./out", "out/../x", "out//x", "out/"; "out/sub" valid); ' +
+    "an outDir naming the graph-data area or a path under it is 14.14 " +
+    '(".xspec", ".xspec/md"), its look-alikes (".xspec2", ".xspecs/md") ' +
+    'and, on the Linux leg, its single-casing spellings (".XSPEC", ' +
+    '".XSPEC/md"; 12.0: byte-wise, no case folding) valid, emission ' +
+    "writing under them; emit-destination classification follows emit — " +
+    "by configuration alone, whether or not emission has yet run (SPEC " +
+    "7.3, 7, 12.0, 13.2, 13.3, 13.4, 14.14)",
   run: async (product) => {
     // (a) The emission-scope matrix: absent → none, emit:false → none,
     // emit:true → next to each source. Fresh workspace per variant, so no
@@ -724,9 +1764,22 @@ const T7_3_1 = defineProductTest({
     for (const arm of EMIT_REQUIRED_VIOLATIONS) {
       await expectConfigRefused(
         product,
-        specsMainConfig(arm.extra),
+        arm.config,
         `T7.3-1 (${arm.label}) \`build --json\` — \`emit\` is required when ` +
           `\`markdown\` is present (SPEC 7.3, 14.14)`,
+      );
+    }
+
+    // (b') A well-formed literal of the wrong type for a scalar field →
+    // 14.14 (exit 2, the configuration the concerned path, nothing
+    // modified), never coerced: `emit: "true"`, `outDir: true`.
+    for (const arm of WRONG_TYPE_VIOLATIONS) {
+      await expectConfigRefused(
+        product,
+        arm.config,
+        `T7.3-1 (${arm.label}) \`build --json\` — \`emit\` is a boolean and ` +
+          `\`outDir\` a path: a well-formed literal of another type is ` +
+          `refused by type, never coerced (SPEC 7.3, 7, 14.14)`,
       );
     }
 
@@ -762,15 +1815,125 @@ const T7_3_1 = defineProductTest({
       },
     );
 
-    // (d) `outDir` resolving outside the workspace root → 14.14 (exit 2).
-    for (const outDir of OUTSIDE_OUTDIRS) {
+    // (d) `outDir` not in plain workspace-relative form → 14.14 (exit 2,
+    // the configuration the concerned path, nothing modified), one arm per
+    // spelling.
+    for (const arm of INVALID_OUTDIRS) {
       await expectConfigRefused(
         product,
-        specsMainConfig(
-          `,\n  markdown: { emit: true, outDir: ${JSON.stringify(outDir)} }`,
-        ),
-        `T7.3-1 (outDir ${JSON.stringify(outDir)} resolves outside the ` +
-          `workspace root) \`build --json\` (SPEC 7.3, 14.14)`,
+        arm.config,
+        `T7.3-1 (outDir ${JSON.stringify(arm.outDir)} ${arm.why}: not in ` +
+          `plain workspace-relative form — one or more non-empty ` +
+          `\`/\`-separated segments, none \`.\` or \`..\`, decided by ` +
+          `spelling alone) \`build --json\` (SPEC 7.3, 14.14)`,
+      );
+    }
+
+    // (d') `outDir` `"out/sub"` is valid: a multi-segment plain spelling
+    // redirects the emission under `out/sub/`, preserving each source's
+    // workspace-relative path — and redirects rather than duplicates.
+    await withWorkspace(
+      { files: { "xspec.config.ts": OUTDIR_SUB_CONFIG, ...EMISSION_FILES } },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T7.3-1 `build` with outDir out/sub — a multi-segment plain " +
+            "workspace-relative spelling is valid (SPEC 7.3)",
+        );
+        await assertFileBytes(
+          workspace.path("out/sub/specs/A.md"),
+          A_COMPILED,
+          "T7.3-1 (outDir out/sub): specs/A.mdx emits out/sub/specs/A.md — " +
+            "outDir prefixes the preserved workspace-relative path (SPEC 7.3)",
+        );
+        await assertFileBytes(
+          workspace.path("out/sub/specs/sub/B.md"),
+          B_COMPILED,
+          "T7.3-1 (outDir out/sub): specs/sub/B.mdx emits " +
+            "out/sub/specs/sub/B.md — subdirectory structure preserved " +
+            "under outDir (SPEC 7.3)",
+        );
+        for (const vacant of [
+          "specs/A.md",
+          "specs/sub/B.md",
+          "out/specs/A.md",
+          "out/specs/sub/B.md",
+        ]) {
+          await assertNotEmitted(
+            workspace,
+            vacant,
+            "T7.3-1 (outDir out/sub redirects, not duplicates; every " +
+              "segment of the spelling is honored)",
+          );
+        }
+      },
+    );
+
+    // (d'') An `outDir` naming the graph-data area or a path under it →
+    // 14.14 (exit 2, the configuration the concerned path, nothing modified
+    // — no graph data and no emitted file appears), one arm per spelling.
+    for (const arm of GRAPH_DATA_AREA_OUTDIRS) {
+      await expectConfigRefused(
+        product,
+        arm.config,
+        `T7.3-1 (outDir ${JSON.stringify(arm.outDir)} ${arm.why}: no emit ` +
+          `destination lies in the graph-data area, graph data being the ` +
+          `only derived file under it) \`build --json\` (SPEC 7.3, 13.3, ` +
+          `11.6, 14.14)`,
+      );
+    }
+
+    // (d''') The look-alikes `.xspec2` and `.xspecs/md` — and, on the Linux
+    // leg, the single-casing spellings `.XSPEC` and `.XSPEC/md` (12.0: no
+    // case folding; module header) — are valid: emission writes each
+    // destination under them, the absent directory chain created as real
+    // directories (13.4; T13.4-8), workspace-relative paths preserved — and
+    // redirects rather than duplicates.
+    for (const arm of LOOKALIKE_OUTDIRS) {
+      if (arm.linuxLeg && !LINUX_LEG) continue;
+      const label = `T7.3-1 (outDir ${JSON.stringify(arm.outDir)}, ${arm.what})`;
+      await withWorkspace(
+        { files: { "xspec.config.ts": arm.config, ...EMISSION_FILES } },
+        async (workspace) => {
+          await buildOk(
+            product,
+            workspace,
+            `${label} \`build\` — neither \`.xspec\` nor beginning with ` +
+              `\`.xspec/\` (${arm.why}), the spelling is a valid outDir ` +
+              `(SPEC 7.3)`,
+          );
+          for (const dir of arm.chain) {
+            const kind = await workspace.kind(dir);
+            if (kind !== "dir") {
+              fail(
+                `${label}: every directory component of the emit ` +
+                  `destinations comes into existence as a real directory ` +
+                  `(SPEC 13.4, 7.3; T13.4-8) — expected a directory at ` +
+                  `${dir}, found: ${kind}`,
+              );
+            }
+          }
+          await assertFileBytes(
+            workspace.path(`${arm.outDir}/specs/A.md`),
+            A_COMPILED,
+            `${label}: specs/A.mdx emits ${arm.outDir}/specs/A.md — outDir ` +
+              `prefixes the preserved workspace-relative path (SPEC 7.3, 13.2)`,
+          );
+          await assertFileBytes(
+            workspace.path(`${arm.outDir}/specs/sub/B.md`),
+            B_COMPILED,
+            `${label}: specs/sub/B.mdx emits ${arm.outDir}/specs/sub/B.md — ` +
+              `subdirectory structure preserved under outDir (SPEC 7.3, 13.2)`,
+          );
+          for (const vacant of ["specs/A.md", "specs/sub/B.md"]) {
+            await assertNotEmitted(
+              workspace,
+              vacant,
+              `${label} (outDir redirects, not duplicates)`,
+            );
+          }
+        },
       );
     }
 
@@ -781,7 +1944,7 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationDiscoveryConfig(false),
+          "xspec.config.ts": DESTINATION_DISCOVERY_NO_EMIT_CONFIG,
           ...DESTINATION_DISCOVERY_FILES,
         },
       },
@@ -821,7 +1984,7 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationDiscoveryConfig(true),
+          "xspec.config.ts": DESTINATION_DISCOVERY_EMIT_CONFIG,
           ...DESTINATION_DISCOVERY_FILES,
         },
       },
@@ -849,11 +2012,12 @@ const T7_3_1 = defineProductTest({
             `group, so the path is unknown, a usage error (SPEC 7.3, 13.4, ` +
             `11, 12.0)`,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           fromResult,
           `${fromLabel} — query's single JSON document is its only output ` +
-            `form, and the exit-2 error prevents emitting one (SPEC 11, ` +
-            `12.0, H-5)`,
+            `form, so JSON output is in effect without --json and the ` +
+            `exit-2 error document is the entire stdout (SPEC 11, 12.0, ` +
+            `12.7, H-5)`,
         );
         if (fromResult.stderrBytes.length === 0) {
           fail(
@@ -873,7 +2037,7 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationImportConfig(true),
+          "xspec.config.ts": DESTINATION_IMPORT_EMIT_CONFIG,
           ...DESTINATION_IMPORT_FILES,
         },
       },
@@ -896,7 +2060,7 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationImportConfig(false),
+          "xspec.config.ts": DESTINATION_IMPORT_NO_EMIT_CONFIG,
           ...DESTINATION_IMPORT_FILES,
         },
       },
@@ -920,7 +2084,7 @@ const T7_3_1 = defineProductTest({
       {
         files: {
           "xspec.config.ts": CONFIG_ALONE_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
           "specs/A.md": USER_AUTHORED_DESTINATION,
         },
       },

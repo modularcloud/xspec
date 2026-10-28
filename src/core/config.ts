@@ -2,12 +2,16 @@
 //
 // SPEC 7: `xspec.config.ts` is declarative — data, not executed code. The
 // file MUST consist of exactly an import of `defineConfig` from the module
-// specifier "xspec" (optionally aliased) and a default export of one call
+// specifier "xspec" (optionally aliased; no `type` or `defer` modifier and
+// no import attributes) and a default export of one call
 // to that binding, whose sole argument is statically literal: object
 // literals with non-computed identifier or string-literal keys, array
 // literals, static string literals (2.4), and the boolean literals `true`
 // and `false` — no other statement or expression form, no spread, no
-// computed value. IMPLEMENTATION (Key libraries): the file is parsed with
+// computed value. Every string literal it holds, and every key, is read as
+// spelled (SPEC 2.4: "every configuration literal (7)"; SPEC 7: a key is
+// repeated when two keys spell the same name) — no escape sequence is
+// interpreted. IMPLEMENTATION (Key libraries): the file is parsed with
 // the TypeScript compiler API as an AST reduced to data, never executed or
 // imported. A file that is not well-formed TypeScript or does not conform,
 // and every schema violation of SPEC 7.1–7.5, is a configuration error
@@ -18,10 +22,20 @@
 // `Configuration` or to condition-14 findings. Locating and reading the
 // file is the workspace layer's (src/workspace/config.ts).
 
-import ts from "typescript";
+import ts from "./ts-module.js";
+import type * as tst from "typescript";
+import { byteOrderedSet } from "./bytes.js";
+import {
+  outDirNamesGraphDataArea,
+  outDirSpellingProblem,
+} from "./discovery.js";
 import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
 import { compileGlob, unboundToCaptures } from "./glob.js";
+import { GRAPH_DATA_AREA } from "./graph-data.js";
+import { identifierSpelling, stringLiteralValue } from "./references.js";
+import { propagateWhileRerunPossible } from "./stack-exhaustion.js";
 
 // ---------------------------------------------------------------------------
 // The validated configuration model
@@ -36,6 +50,17 @@ export const DEPENDENCY_EDGE_KINDS: readonly DependencyEdgeKind[] = [
   "embeds",
   "references",
 ];
+
+/**
+ * The set form of a dependency-kind list (SPEC 12.7's kind-set value form):
+ * each distinct kind once, in the order SPEC 5.2 lists them — `"depends"`,
+ * `"embeds"`, `"references"` — however the list was spelled.
+ */
+export function dependencyKindSet(
+  kinds: readonly DependencyEdgeKind[],
+): DependencyEdgeKind[] {
+  return DEPENDENCY_EDGE_KINDS.filter((kind) => kinds.includes(kind));
+}
 
 /** One configured spec or code group (SPEC 7.1, 7.2): a named glob list. */
 export interface ConfiguredGroup {
@@ -61,7 +86,11 @@ export interface CoverageProfile {
   readonly name: string;
   /** Spec group whose requirements must be covered (SPEC 7.4). */
   readonly target: string;
-  /** When present, restricts the target set by tags (SPEC 7.4); never empty. */
+  /**
+   * When present, restricts the target set by tags (SPEC 7.4); never empty.
+   * Read as a set (SPEC 7.4): held in its 12.7 tag-set form — byte order,
+   * duplicates collapsed.
+   */
   readonly targetTags?: readonly string[];
   /** SPEC 7.4: default `"leaves"`. */
   readonly targets: "leaves" | "all";
@@ -69,7 +98,11 @@ export interface CoverageProfile {
   /** Resolved kind: inferred when unambiguous, else as given (SPEC 7.4). */
   readonly boundaryKind: "spec" | "code";
   readonly mode: "direct" | "transitive";
-  /** SPEC 7.4: defaults to all three dependency edge kinds; never empty. */
+  /**
+   * SPEC 7.4: defaults to all three dependency edge kinds; never empty.
+   * Read as a set (SPEC 7.4): held in its 12.7 kind-set form — 5.2's order,
+   * duplicates collapsed.
+   */
   readonly edgeKinds: readonly DependencyEdgeKind[];
 }
 
@@ -93,7 +126,11 @@ export type PolicySelector =
     }
   | {
       readonly selector: "tags";
-      /** Matching means carrying at least one listed tag (SPEC 7.5); never empty. */
+      /**
+       * Matching means carrying at least one listed tag (SPEC 7.5); never
+       * empty. Read as a set (SPEC 7.4, 7.5): held in its 12.7 tag-set
+       * form — byte order, duplicates collapsed.
+       */
       readonly tags: readonly string[];
     };
 
@@ -103,7 +140,11 @@ export interface PolicyRule {
   readonly type: "forbidden" | "allowedOnly";
   readonly from: PolicySelector;
   readonly to: PolicySelector;
-  /** SPEC 7.5: defaults to all three dependency edge kinds; never empty. */
+  /**
+   * SPEC 7.5: defaults to all three dependency edge kinds; never empty.
+   * Read as a set (SPEC 7.4): held in its 12.7 kind-set form — 5.2's order,
+   * duplicates collapsed.
+   */
   readonly kinds: readonly DependencyEdgeKind[];
 }
 
@@ -141,7 +182,10 @@ class ConfigFindings {
 
   /** SPEC 14.14: every entry is a configuration error (usage error, 12.0). */
   add(message: string, line?: number): void {
-    this.findings.push({ condition: 14, message, file: this.fileName, line });
+    // The offending line, when known, is message content: a configuration
+    // error carries a concerned path, not an in-source location (SPEC 14).
+    const where = line === undefined ? "" : `line ${String(line)}: `;
+    this.findings.push(pathFinding(14, `${where}${message}`, this.fileName));
   }
 
   get count(): number {
@@ -154,7 +198,7 @@ class ConfigFindings {
 // ---------------------------------------------------------------------------
 
 /** 1-based line of a node's start, for actionable findings (SPEC 14). */
-function lineOf(node: ts.Node, sourceFile: ts.SourceFile): number {
+function lineOf(node: tst.Node, sourceFile: tst.SourceFile): number {
   return (
     sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
   );
@@ -162,23 +206,56 @@ function lineOf(node: ts.Node, sourceFile: ts.SourceFile): number {
 
 /**
  * SPEC 7/14.14: "a configuration file that is not well-formed TypeScript".
- * `ts.transpileModule` with `reportDiagnostics` surfaces the file's
- * syntactic diagnostics through the public compiler API without building a
- * program (and without executing anything). Returns false when any error
- * was reported.
+ * The file's syntactic diagnostics through the public compiler API, read
+ * off a single-file, in-memory program over the file's one parse — no lib,
+ * no module resolution, no file system, nothing executed, nothing emitted:
+ * the parse's diagnostics under the grammar the file name selects (with
+ * the added syntactic ones of a JavaScript-grammar name) and the program's
+ * option-level diagnostics, which no input text changes — the diagnostics
+ * `ts.transpileModule` reports for the same text and name, without the
+ * JavaScript emit it performs, which no check reads (and which fails
+ * outright for a declaration-file or JSON name). Returns false when any
+ * error was reported.
  */
 function checkSyntax(
   text: string,
   fileName: string,
   findings: ConfigFindings,
 ): boolean {
-  const output = ts.transpileModule(text, {
+  const sourceFile = ts.createSourceFile(
     fileName,
-    reportDiagnostics: true,
-    compilerOptions: { target: ts.ScriptTarget.Latest },
-  });
+    text,
+    ts.ScriptTarget.Latest,
+  );
+  const host: tst.CompilerHost = {
+    // The program's one file, under whatever spelling it normalizes the
+    // root name to: with no lib and no resolution nothing else is read.
+    getSourceFile: () => sourceFile,
+    getDefaultLibFileName: () => "lib.d.ts",
+    writeFile: () => undefined,
+    getCurrentDirectory: () => "",
+    getCanonicalFileName: (name) => name,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => "\n",
+    fileExists: () => true,
+    readFile: () => undefined,
+  };
+  const program = ts.createProgram(
+    [fileName],
+    {
+      noLib: true,
+      noResolve: true,
+      noEmit: true,
+      allowNonTsExtensions: true,
+      target: ts.ScriptTarget.Latest,
+    },
+    host,
+  );
   let wellFormed = true;
-  for (const diagnostic of output.diagnostics ?? []) {
+  for (const diagnostic of [
+    ...program.getSyntacticDiagnostics(sourceFile),
+    ...program.getOptionsDiagnostics(),
+  ]) {
     if (diagnostic.category !== ts.DiagnosticCategory.Error) continue;
     wellFormed = false;
     const line =
@@ -207,11 +284,11 @@ const FORM_EXPECTATION =
  * argument expression, or null after reporting the deviations.
  */
 function checkForm(
-  sourceFile: ts.SourceFile,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
-): ts.Expression | null {
-  let importDecl: ts.ImportDeclaration | undefined;
-  let exportAssign: ts.ExportAssignment | undefined;
+): tst.Expression | null {
+  let importDecl: tst.ImportDeclaration | undefined;
+  let exportAssign: tst.ExportAssignment | undefined;
   let ok = true;
   for (const statement of sourceFile.statements) {
     if (importDecl === undefined && ts.isImportDeclaration(statement)) {
@@ -249,15 +326,22 @@ function checkForm(
  * "xspec", optionally aliased. Returns the local binding name, or null.
  */
 function checkImport(
-  decl: ts.ImportDeclaration,
-  sourceFile: ts.SourceFile,
+  decl: tst.ImportDeclaration,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
 ): string | null {
   let ok = true;
   const specifier = decl.moduleSpecifier;
-  if (!ts.isStringLiteral(specifier) || specifier.text !== "xspec") {
+  // SPEC 2.4: the specifier is a configuration literal, its value the
+  // characters between its delimiters as spelled — an escape-spelled
+  // "xspec" is some other specifier.
+  if (
+    !ts.isStringLiteral(specifier) ||
+    stringLiteralValue(specifier, sourceFile) !== "xspec"
+  ) {
     findings.add(
-      `the import must be from the module specifier "xspec" (SPEC 7)`,
+      `the import must be from the module specifier "xspec", read as ` +
+        `spelled with no escape sequence interpreted (SPEC 7, 2.4)`,
       lineOf(specifier, sourceFile),
     );
     ok = false;
@@ -286,6 +370,19 @@ function checkImport(
       `the defineConfig import must not be type-only — the default export ` +
         `calls the binding (SPEC 7)`,
       lineOf(decl, sourceFile),
+    );
+    ok = false;
+  }
+  // SPEC 7: "no `type` or `defer` modifier". TypeScript 5.9 parses
+  // `import defer { defineConfig } from "xspec"` with no syntax diagnostic
+  // (a deferred import's namespace-only rule is a checker rule, which
+  // configuration loading never runs), so the clause's phase modifier is
+  // read here; the clause starts at the `defer` keyword.
+  if (clause.phaseModifier === ts.SyntaxKind.DeferKeyword) {
+    findings.add(
+      `the defineConfig import must not carry the \`defer\` modifier — the ` +
+        `configuration is declarative data (SPEC 7)`,
+      lineOf(clause, sourceFile),
     );
     ok = false;
   }
@@ -323,7 +420,13 @@ function checkImport(
     );
     ok = false;
   }
-  const importedName = (element.propertyName ?? element.name).text;
+  // SPEC 2.4: a string-literal export name is a configuration literal, read
+  // as spelled; an identifier names the export the language reads it as
+  // (which binding an import makes is the language's question).
+  const exported = element.propertyName ?? element.name;
+  const importedName = ts.isStringLiteral(exported)
+    ? stringLiteralValue(exported, sourceFile)
+    : exported.text;
   if (importedName !== "defineConfig") {
     findings.add(
       `the import must bind defineConfig (found "${importedName}") (SPEC 7)`,
@@ -339,11 +442,11 @@ function checkImport(
  * exactly one (sole) argument. Returns the argument expression, or null.
  */
 function checkExport(
-  decl: ts.ExportAssignment,
+  decl: tst.ExportAssignment,
   binding: string | null,
-  sourceFile: ts.SourceFile,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
-): ts.Expression | null {
+): tst.Expression | null {
   if (decl.isExportEquals === true) {
     findings.add(
       `\`export =\` is not the declarative form — use ` +
@@ -428,7 +531,7 @@ interface ObjectNode {
 }
 
 /** Names the rejected expression form in "not statically literal" findings. */
-function describeExpression(expr: ts.Expression): string {
+function describeExpression(expr: tst.Expression): string {
   if (ts.isNumericLiteral(expr) || ts.isBigIntLiteral(expr)) {
     return "a number literal";
   }
@@ -458,8 +561,8 @@ const LITERAL_EXPECTATION =
  * part failed.
  */
 function reduceLiteral(
-  expr: ts.Expression,
-  sourceFile: ts.SourceFile,
+  expr: tst.Expression,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
 ): ConfigNode | null {
   const line = lineOf(expr, sourceFile);
@@ -481,8 +584,15 @@ function reduceLiteral(
       }
       const name = property.name;
       let key: string;
-      if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
-        key = name.text;
+      // SPEC 7, 2.4: a key is the name it spells — an identifier key's own
+      // characters, a string-literal key's characters between its
+      // delimiters, no escape sequence interpreted — so an identifier key
+      // and a string-literal key spelling the same name repeat one key,
+      // and an escape-spelled key names what it spells.
+      if (ts.isIdentifier(name)) {
+        key = identifierSpelling(name, sourceFile);
+      } else if (ts.isStringLiteral(name)) {
+        key = stringLiteralValue(name, sourceFile);
       } else {
         findings.add(
           `${LITERAL_EXPECTATION}; object keys must be non-computed ` +
@@ -534,8 +644,16 @@ function reduceLiteral(
   }
   if (ts.isStringLiteral(expr)) {
     // SPEC 2.4: a static string literal is a plain single- or double-quoted
-    // string; both parse as StringLiteral. Template literals do not.
-    return { kind: "string", value: expr.text, line };
+    // string; both parse as StringLiteral. Template literals do not. Its
+    // value is the characters between its delimiters exactly as spelled —
+    // a configuration literal (7) like every other — so a glob or name
+    // spelled with an escape sequence carries the escape's characters, and
+    // whatever rule they then break decides the outcome.
+    return {
+      kind: "string",
+      value: stringLiteralValue(expr, sourceFile),
+      line,
+    };
   }
   if (expr.kind === ts.SyntaxKind.TrueKeyword) {
     return { kind: "boolean", value: true, line };
@@ -590,6 +708,40 @@ function requireString(
   return { value: node.value, line: node.line };
 }
 
+/** U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (12.0). */
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
+/**
+ * SPEC 7, 14.14: a group, profile, or rule name is non-empty — `""` is a
+ * configuration error — and contains no U+FFFD, since no argument value
+ * carries the character (12.0) and configured names are named in
+ * arguments. `name` is the name as spelled (a key's or a string literal's
+ * characters, no escape interpreted, 2.4), so only the encoded character
+ * counts. Reports the violation, if any, at `line`.
+ */
+function checkConfiguredName(
+  name: string,
+  what: "group" | "profile" | "rule",
+  where: string,
+  line: number | undefined,
+  findings: ConfigFindings,
+): void {
+  if (name.length === 0) {
+    findings.add(
+      `${where}: the ${what} name is empty ("") — group, profile, and ` +
+        `rule names are non-empty (SPEC 7, 14.14)`,
+      line,
+    );
+  } else if (name.includes(REPLACEMENT_CHARACTER)) {
+    findings.add(
+      `${where}: the ${what} name "${name}" contains U+FFFD (REPLACEMENT ` +
+        `CHARACTER) — no argument value carries the character, and ` +
+        `configured names are named in arguments (SPEC 7, 12.0, 14.14)`,
+      line,
+    );
+  }
+}
+
 /**
  * Optional enumerated string field; reports invalid values. Returns
  * undefined when absent or invalid.
@@ -618,7 +770,10 @@ function optionalEnum<T extends string>(
 
 /**
  * Optional tag-list field (SPEC 7.4 `targetTags`, 7.5 selector `tags`): a
- * list of strings; an empty list is a configuration error (14.14).
+ * list of strings; an empty list is a configuration error (14.14). The list
+ * is read as a set (SPEC 7.4, 7.5) — a repeated element collapses, as on a
+ * list-valued flag (11.1) — and returned in its 12.7 tag-set form, byte
+ * order (SPEC 12.0), so every consumer and every output sees the set.
  */
 function optionalTagList(
   object: ObjectNode,
@@ -649,14 +804,16 @@ function optionalTagList(
     }
     tags.push(element.value);
   }
-  return tags;
+  return byteOrderedSet(tags);
 }
 
 /**
  * Optional dependency-edge-kind list (SPEC 7.4 `edgeKinds`, 7.5 rule
  * `kinds`): a subset of depends/embeds/references; empty is a configuration
  * error (14.14). Returns undefined when absent (caller applies the
- * all-three default) or invalid.
+ * all-three default) or invalid. The list is read as a set (SPEC 7.4) and
+ * returned in its 12.7 kind-set form: 5.2's order, duplicates collapsed,
+ * however it was spelled.
  */
 function optionalKindList(
   object: ObjectNode,
@@ -692,9 +849,9 @@ function optionalKindList(
       );
       continue;
     }
-    if (!kinds.includes(element.value)) kinds.push(element.value);
+    kinds.push(element.value);
   }
-  return kinds;
+  return dependencyKindSet(kinds);
 }
 
 /**
@@ -765,6 +922,16 @@ function validateGroups(
   }
   const groups: ConfiguredGroup[] = [];
   for (const [name, value] of node.entries) {
+    // SPEC 7, 14.14: the group's key is its name — non-empty, free of
+    // U+FFFD. The group stays configured either way, so references to it
+    // resolve and the name is its one reported defect.
+    checkConfiguredName(
+      name,
+      "group",
+      label,
+      node.keyLines.get(name),
+      findings,
+    );
     const patterns: string[] = [];
     const globs: CompiledGlob[] = [];
     if (value.kind !== "array") {
@@ -804,8 +971,10 @@ function validateGroups(
 
 /**
  * SPEC 7.3: `markdown.emit` is a required boolean; `markdown.outDir` is an
- * optional path resolving relative to the workspace root that MUST resolve
- * within it; unknown keys are configuration errors (14.14).
+ * optional directory path relative to the workspace root, spelled in plain
+ * workspace-relative form and naming neither the graph-data area nor a path
+ * under it; any other spelling or placement and unknown keys are
+ * configuration errors (14.14).
  */
 function validateMarkdown(
   node: ConfigNode,
@@ -852,38 +1021,38 @@ function validateMarkdown(
         `"markdown.outDir" must be a path string (SPEC 7.3)`,
         outDirNode.line,
       );
-    } else if (!resolvesInsideRoot(outDirNode.value)) {
-      findings.add(
-        `"markdown.outDir" ("${outDirNode.value}") resolves outside the ` +
-          `workspace root — it must resolve within it (SPEC 7.3, 14.14)`,
-        outDirNode.line,
-      );
     } else {
-      outDir = outDirNode.value;
+      // SPEC 7.3, 14.14: the verbatim literal (2.4) must spell a plain
+      // workspace-relative directory path; nothing is resolved, collapsed,
+      // or dropped, so `./out`, `out/.`, `out//x`, and `out/` are refused
+      // like `/out` and `../out`.
+      const problem = outDirSpellingProblem(outDirNode.value);
+      if (problem !== null) {
+        findings.add(
+          `"markdown.outDir" ("${outDirNode.value}") ${problem} — spell it ` +
+            `as a directory path relative to the workspace root: one or ` +
+            `more non-empty "/"-separated segments, none "." or ".." ` +
+            `(SPEC 7.3, 14.14)`,
+          outDirNode.line,
+        );
+      } else if (outDirNamesGraphDataArea(outDirNode.value)) {
+        // SPEC 7.3, 14.14: "So is an `outDir` of `.xspec` or beginning
+        // with `.xspec/`" — compared byte-wise (12.0), so `.xspec2` and
+        // `.xspecs/md` stay valid.
+        findings.add(
+          `"markdown.outDir" ("${outDirNode.value}") names the graph-data ` +
+            `area "${GRAPH_DATA_AREA}" or a path under it — no emit ` +
+            `destination may lie in the graph-data area, where graph data ` +
+            `is the only derived file; choose a directory outside ` +
+            `"${GRAPH_DATA_AREA}/" (SPEC 7.3, 13.3, 14.14)`,
+          outDirNode.line,
+        );
+      } else {
+        outDir = outDirNode.value;
+      }
     }
   }
   return { emit, outDir };
-}
-
-/**
- * SPEC 7.3 (and SPEC 7 for globs): lexical containment in the workspace
- * root — an absolute path, or a `..` stepping above the root, resolves
- * outside it.
- */
-function resolvesInsideRoot(relativePath: string): boolean {
-  const segments = relativePath.split("/");
-  if (segments.length > 1 && segments[0] === "") return false; // absolute
-  let depth = 0;
-  for (const segment of segments) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") {
-      if (depth === 0) return false;
-      depth -= 1;
-      continue;
-    }
-    depth += 1;
-  }
-  return true;
 }
 
 const PROFILE_KEYS: readonly string[] = [
@@ -938,6 +1107,13 @@ function validateCoverage(
       findings,
     );
     if (name !== undefined) {
+      checkConfiguredName(
+        name.value,
+        "profile",
+        `${where}.name`,
+        name.line,
+        findings,
+      );
       if (names.has(name.value)) {
         findings.add(
           `${where}: duplicate profile name "${name.value}" — profile ` +
@@ -1197,6 +1373,13 @@ function validatePolicy(
       findings,
     );
     if (name !== undefined) {
+      checkConfiguredName(
+        name.value,
+        "rule",
+        `${where}.name`,
+        name.line,
+        findings,
+      );
       if (names.has(name.value)) {
         findings.add(
           `${where}: duplicate rule name "${name.value}" — rule names are ` +
@@ -1345,8 +1528,12 @@ function validateSchema(
 
 /**
  * Parse and validate configuration text (SPEC 7). `fileName` names the file
- * in findings (its base name — never an absolute path, SPEC 12.0). The text
- * is analyzed statically and never executed or imported (IMPLEMENTATION).
+ * in the findings' concerned-path member (the caller's label — the anchored
+ * spelling of SPEC 14 for the current configuration; never an
+ * environment-dependent absolute path, SPEC 12.0). The text is analyzed
+ * statically and never executed or imported (IMPLEMENTATION). A call-stack
+ * overflow is no verdict about it while a rerun on a larger stack is
+ * possible: it propagates there (SPEC 14.14, 14.20; core/stack-exhaustion.ts).
  */
 export function parseConfiguration(
   text: string,
@@ -1379,25 +1566,29 @@ export function parseConfiguration(
     }
     return { ok: true, configuration };
   } catch (error) {
-    // SPEC 14.14: a file whose nesting exceeds what the recursive parser
-    // and this static analysis can process (a call-stack overflow surfaces
-    // as a RangeError) is not analyzable as well-formed declarative
-    // configuration — a configuration error, never a crash: exit codes
-    // partition all outcomes (SPEC 12.0). Anything else is an internal
-    // defect and propagates.
+    // SPEC 14.14, 14.20: the configuration is judged by TypeScript's
+    // grammar, whose derivability is the parser's acceptance — which a
+    // call-stack overflow, in the recursive parser or in this static
+    // analysis, never reports. While the invocation can still run again on
+    // a larger stack, the overflow propagates to that rerun
+    // (core/stack-exhaustion.ts, cli/reruns.ts), so the file is judged
+    // whatever its depth and no answer depends on the stack a run had
+    // (SPEC 12.0). Only the last attempt answers from it: a configuration
+    // error, never a crash — exit codes partition all outcomes (SPEC
+    // 12.0). Anything else is an internal defect and propagates.
     if (!(error instanceof RangeError)) throw error;
+    propagateWhileRerunPossible(error);
     return {
       ok: false,
       findings: [
-        {
-          condition: 14,
-          file: fileName,
-          message:
-            `not well-formed TypeScript in the declarative form of SPEC 7 ` +
+        pathFinding(
+          14,
+          `not well-formed TypeScript in the declarative form of SPEC 7 ` +
             `— the file's expression nesting exceeds what the parser can ` +
             `process; flatten the configuration to plain literal form ` +
             `(SPEC 7, 14.14)`,
-        },
+          fileName,
+        ),
       ],
     };
   }

@@ -1,0 +1,1773 @@
+// In-harness section-move category oracle (TEST-SPEC 16 P-5, 17 S-6): an
+// independent implementation of the SPEC.md 6.2/5.6 prediction for the
+// section form of `xspec move` — which nodes are `changed` and exactly which
+// 5.6 cascades (`descendant-changed`, `upstream-changed`, attributions
+// included) follow, relative to a baseline committed immediately before the
+// move. Per S-6, the oracle passes its fixed vector suite
+// (test/self/s6-section-move-oracle.test.ts) — derived from SPEC.md 6.2's
+// worked straddling-line case in T6.2-3's stagings, T6.2-3's clean-boundary
+// case and sibling stagings, and T6.2-4's final-position shapes — before
+// any property test trusts it. Harness machinery only: pure functions, no
+// product imports, no I/O, no test-framework dependence.
+//
+// The oracle does not parse MDX (the markdown oracle's independence
+// discipline): its caller — the P-5 generator, the S-6 vectors — composed
+// the documents, so it describes them as piece trees (`SectionMovePiece`),
+// every construct located by construction, and states the move
+// (`movedId` → `newId` into `target`). Everything is stated in BASELINE
+// identities; the oracle derives the identity mapping (prefix replacement,
+// SPEC 6.5) and reports its prediction in CURRENT identities.
+//
+// SPEC.md 6.2/5.6 via TEST-SPEC P-5, as implemented here:
+//
+// * The `changed` set is drawn from exactly 6.2's enumeration of what a
+//   successful move leaves `changed`: the origin parent, the target parent,
+//   the moved subtree's nodes, and each other node with own-content bytes
+//   on a line the deletion joins or drops or the insertion splits — the
+//   construct's boundary lines at the origin, the insertion point's line at
+//   the destination (the import-addition member of the enumeration is
+//   undrawn; its anchors are T6.5-13(h)/(j)) — each `changed` iff its own
+//   content sequence (1.6) differs across the move:
+//     - distinct parents necessarily (one loses a child reference, one
+//       gains one — reference tokens enter the sequence at their positions);
+//     - a created target file's root, present on no baseline side, is
+//       instead `changed` as an added node — by addition, not comparison —
+//       and per 5.6 carries no other category;
+//     - a coincident parent iff the re-insertion fails to reproduce its
+//       sequence (a final child re-inserted at its own former position is
+//       pure in effect, 6.2: T6.2-4's pinned shapes reproduce it, its
+//       `changed` twin does not);
+//     - every other enumerated node — a moved-subtree node, an ancestor or
+//       a sibling with bytes on those lines — iff the line-drop rules of 3,
+//       judged on each side, change its runs: a line kept before and
+//       dropped after (a sibling's whitespace residue left alone on the
+//       deletion's merged line, T6.2-3(d); a line the insertion splits
+//       into a whitespace-only remainder, T6.2-3(e); a boundary line whose
+//       within-construct bytes are 1.4 whitespace — nothing, spaces, tabs,
+//       U+000B, U+000C — dropping at the destination whatever the tag's
+//       position there, T6.2-3(a)–(c)) or dropped before and kept after (a
+//       residue joined to prose). The oracle delegates every logical line's
+//       keep/drop decision to P-2's markdown oracle (`compileMarkdown`), so
+//       the two oracles cannot disagree on 3, and U+000B/U+000C count as
+//       whitespace exactly as 1.4 classifies them.
+//   The enumeration is complete (6.2: a successful section move leaves
+//   `changed` no node but these), so a node outside it whose sequence
+//   differs is an oracle defect — the edit model contradicting 6.2 — and
+//   throws; it is never a prediction.
+// * `metadata-changed` on no node (6.2: every moved node keeps its
+//   metadataHash, and canonical identities preserve every other node's) —
+//   the prediction's category vocabulary simply excludes it.
+// * `descendant-changed` and `upstream-changed` exactly per 5.6's cascades
+//   from the changed nodes, attributions included, with one two-sided
+//   tolerance the suite's T6.2-3 body shares: SPEC 5.6's baseline
+//   comparison is defined for nodes present on both sides, and the
+//   relocated moved subtree is a descendant of each parent's chain on only
+//   one side — so a cascade whose only cause is a relocated (one-side-only)
+//   member is predicted as tolerated-optional (accepted present or absent,
+//   attributed within that member), while a both-sides cause makes the
+//   category required with the causing originators pinned into its
+//   attribution.
+//
+// Own-content sequences (SPEC 1.6, 5.5, as the P-4 model pins them): per
+// node, its own-text runs in document order interleaved with one reference
+// token per child construct and per `text(...)` embedding, each entering as
+// the referenced node's identity — child and embedding references
+// distinguished. Reference tokens are unconditional (a construct on a
+// dropped line still divides the runs, 1.6); run bytes are exactly the
+// node's surviving content bytes under the rules of 3, expansions excluded
+// (an embedded target's text is no part of the embedder's own content, 5.5)
+// though a non-empty expansion still keeps its line (3, delegated). All
+// reference values compare as canonical identities, which the journaled
+// move preserves (5.4): the baseline side is mapped through the move's
+// identity mapping before comparison, and the after side reads every
+// reference in current identities.
+//
+// The after side is derived, not supplied: the oracle performs 6.5's edits
+// at the piece level — the origin deletion enters the compile as one
+// removal piece (its merged straddling line dropped iff left empty or
+// whitespace-only, the rule of 3, which composes with the after compile's
+// own removals to the same sequences the two-stage edit yields); the
+// insertion places the moved construct as the target parent's last child,
+// followed by a U+000A content piece and preceded by one when the insertion
+// point is not at the start of a line in the post-deletion file bytes; a
+// self-closing target parent is first rewritten to paired form (T6.5-2's
+// byte rule). Import additions and removals are not modeled: 6.5 pins added
+// imports as lines of their own and removals as the declaration plus its
+// adjunct line drop, so import edits never touch any node's surviving runs
+// or reference tokens.
+//
+// The would-be texts (`composeSectionMoveTexts`, at the end of the module)
+// are the same structural edits composed byte for byte — the forms SPEC
+// 6.5's `refused-invalid-rewrite` judges and every P-5 draw must derive
+// (S-9): the origin as its deletion leaves it, an existing target as its
+// parent rewrite and insertion leave it, the one file both leave when
+// origin and target coincide, and a created target needing no declaration.
+// The composer and the oracle make each judgement they share through one
+// function — the deletion's range and drop (`deletionExtent`), the
+// insertion point and its line start, the paired form, and the identity
+// mapping — and S-6 vets the composer against every vector's hand-derived
+// after texts. Reference respellings and import additions are outside it,
+// as they are outside the after side (its doc says why).
+//
+// Staged-scope contracts (guarded where checkable, documented where not):
+// a self-closing section has an empty body; a section tag may span lines
+// (a terminator among a tag's own characters is deleted with the construct,
+// joining the lines it spanned — 3 — which the delegated compile handles as
+// any multi-line removal); multi-line in-line sections with agreeing
+// boundary lines (T6.2-3's stagings) need no position knowledge — the
+// oracle never parses MDX, and the drop rule consults 1.4 whitespace alone,
+// whatever the tag's position at the destination; an embedding's
+// `expansion` is emptiness-stable across the move — only
+// emptiness enters the drop decision (a non-empty expansion keeps its line
+// regardless of content), and the P-5 generator stages no empty subtree
+// texts, so the before-side expansion decides both sides.
+//
+// Each of its evaluations — `sectionMoveSourceText`,
+// `predictSectionMoveImpact`, and `composeSectionMoveTexts` — is a harness
+// step under its own guard (TEST-SPEC S-3, helpers/step-guards.ts):
+// synchronous, bounded by construction over the staged input it evaluates, and
+// measured.
+
+import { compileMarkdown } from "./markdown.js";
+import type { MarkdownPiece } from "./markdown.js";
+import { guardSyncStep } from "../step-guards.js";
+
+// ---------------------------------------------------------------------------
+// Input model
+
+/** One own-content token: a text run, or a child/embedding reference. */
+export type SectionMoveOwnToken = readonly [
+  kind: "run" | "child" | "embed",
+  value: string,
+];
+
+/** One piece of a document, in document order (nested for sections). */
+export type SectionMovePiece =
+  | {
+      /** Plain source content: preserved, subject only to the drop rule. */
+      readonly kind: "content";
+      readonly text: string;
+    }
+  | {
+      /**
+       * A non-section removed construct's own characters — a spec module
+       * import declaration or an MDX comment (SPEC.md 3). May contain line
+       * terminators (a multi-line comment merges its lines when removed).
+       */
+      readonly kind: "removal";
+      readonly text: string;
+    }
+  | {
+      /**
+       * A `text(...)` embedding: `text` is the expression's own characters
+       * (the braced container included), `expansion` the target's compiled
+       * subtree text (caller-computed, the markdown oracle's contract), and
+       * `target` the referenced node's identity in baseline space.
+       */
+      readonly kind: "embedding";
+      readonly text: string;
+      readonly expansion: string;
+      readonly target: string;
+    }
+  | SectionMoveSection;
+
+/** A requirement-section construct (SPEC 1.1) with its nested body. */
+export interface SectionMoveSection {
+  readonly kind: "section";
+  /** The section's dotted id exactly as spelled (SPEC 1.3). */
+  readonly id: string;
+  /** Opening tag's own characters (the whole tag when self-closing). */
+  readonly open: string;
+  /** Closing tag's own characters; `null` = self-closing (empty body). */
+  readonly close: string | null;
+  readonly body: readonly SectionMovePiece[];
+  /** The section's `d`-declared target identities, baseline space. */
+  readonly depends: readonly string[];
+}
+
+/** A document: its workspace-relative path plus its pieces. */
+export interface SectionMoveDocument {
+  readonly path: string;
+  readonly pieces: readonly SectionMovePiece[];
+}
+
+/**
+ * A node of a file the move does not textually touch, carried for the 5.6
+ * cascade computation (dependents live anywhere). Everything in baseline
+ * identities; the oracle maps reference targets through the move's mapping.
+ */
+export interface SectionMoveGraphNode {
+  readonly identity: string;
+  /** Direct child identities in document order. */
+  readonly children: readonly string[];
+  /** Dependency-edge target identities (`depends` and `embeds` union). */
+  readonly edgeTargets: readonly string[];
+}
+
+export interface SectionMoveInput {
+  /** The origin document, before the move; contains the moved section. */
+  readonly origin: SectionMoveDocument;
+  /**
+   * The target document before the move, or `{ createdPath }` when the
+   * move creates the target file. A same-file move passes the identical
+   * document object as both `origin` and `target`.
+   */
+  readonly target: SectionMoveDocument | { readonly createdPath: string };
+  /** Dotted id of the moved section in the origin document. */
+  readonly movedId: string;
+  /** Dotted new id (SPEC 6.5); its parent chain locates the target parent. */
+  readonly newId: string;
+  /** Nodes of every file not textually involved in the move. */
+  readonly otherNodes?: readonly SectionMoveGraphNode[];
+}
+
+// ---------------------------------------------------------------------------
+// Output model
+
+export type SectionMoveCategoryName =
+  "changed" | "descendant-changed" | "upstream-changed";
+
+/** The prediction for one category of one node. */
+export interface SectionMoveCategoryPrediction {
+  /**
+   * True: the category must be reported. False: tolerated-optional — its
+   * only cause is a relocated one-side-only member (the T6.2-3 tolerance),
+   * so it is accepted present or absent.
+   */
+  readonly required: boolean;
+  /** Sorted bound: the reported attribution must be a subset. */
+  readonly attributionWithin: readonly string[];
+  /** Sorted; a reported category's attribution must include these. */
+  readonly attributionMustInclude: readonly string[];
+}
+
+/** Per-node prediction: absent category name = must not be reported. */
+export interface SectionMoveNodePrediction {
+  readonly categories: ReadonlyMap<
+    SectionMoveCategoryName,
+    SectionMoveCategoryPrediction
+  >;
+}
+
+export interface SectionMovePrediction {
+  /** Baseline → current identities of the moved subtree (others map to themselves). */
+  readonly identityMap: ReadonlyMap<string, string>;
+  /** Every current-graph node's prediction (one entry per node, possibly empty). */
+  readonly nodes: ReadonlyMap<string, SectionMoveNodePrediction>;
+  /** The `changed` set — the originating nodes (added created-root included). */
+  readonly changed: ReadonlySet<string>;
+  /** Current identities added by the move: the created target root, if any. */
+  readonly added: ReadonlySet<string>;
+  /** Per-node own-content token sequences, baseline side, baseline identities. */
+  readonly beforeOwnTokens: ReadonlyMap<string, readonly SectionMoveOwnToken[]>;
+  /** Per-node own-content token sequences, current side, current identities. */
+  readonly afterOwnTokens: ReadonlyMap<string, readonly SectionMoveOwnToken[]>;
+}
+
+// ---------------------------------------------------------------------------
+// Guards
+
+function misuse(message: string): never {
+  throw new Error(`section-move oracle misuse: ${message}`);
+}
+
+function defect(message: string): never {
+  throw new Error(`section-move oracle defect: ${message}`);
+}
+
+function isTerminatorCode(code: number): boolean {
+  return code === 0x0a || code === 0x0d;
+}
+
+/** SPEC 1.4 whitespace-only (the classes P-2's oracle pins). */
+function isWhitespaceOnly(text: string): boolean {
+  return /^[\t\n\v\f\r ]*$/.test(text);
+}
+
+// ---------------------------------------------------------------------------
+// Piece-tree utilities
+
+/** The source text a piece list concatenates to (tags and bodies included). */
+export function sectionMoveSourceText(
+  pieces: readonly SectionMovePiece[],
+): string {
+  return guardSyncStep("the section-move oracle (sectionMoveSourceText)", () =>
+    sectionMoveSourceTextUnguarded(pieces),
+  );
+}
+
+/** {@link sectionMoveSourceText}'s evaluation, under its guard. */
+function sectionMoveSourceTextUnguarded(
+  pieces: readonly SectionMovePiece[],
+): string {
+  let text = "";
+  for (const piece of pieces) {
+    if (piece.kind === "section") {
+      text +=
+        piece.open + sectionMoveSourceText(piece.body) + (piece.close ?? "");
+    } else {
+      text += piece.text;
+    }
+  }
+  return text;
+}
+
+interface LocatedSection {
+  readonly section: SectionMoveSection;
+  /** Construct-range string indices into the document's source text. */
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Locate the section spelling `id`, with its source-text range. */
+function locateSection(
+  pieces: readonly SectionMovePiece[],
+  id: string,
+  offset: number,
+): LocatedSection | null {
+  let cursor = offset;
+  for (const piece of pieces) {
+    if (piece.kind === "section") {
+      const length =
+        piece.open.length +
+        sectionMoveSourceText(piece.body).length +
+        (piece.close ?? "").length;
+      if (piece.id === id) {
+        return { section: piece, start: cursor, end: cursor + length };
+      }
+      const inner = locateSection(piece.body, id, cursor + piece.open.length);
+      if (inner !== null) return inner;
+      cursor += length;
+    } else {
+      cursor += piece.text.length;
+    }
+  }
+  return null;
+}
+
+/**
+ * Replace the section spelling `id` with one removal piece holding its full
+ * source text — 6.5's origin deletion as a rule-of-3 removal: the merged
+ * straddling line enters the compile with the construct's characters
+ * counting as source non-whitespace and is dropped exactly when the
+ * deletion leaves it empty or whitespace-only.
+ */
+function replaceWithRemoval(
+  pieces: readonly SectionMovePiece[],
+  id: string,
+): { readonly pieces: SectionMovePiece[]; readonly found: boolean } {
+  const out: SectionMovePiece[] = [];
+  let found = false;
+  for (const piece of pieces) {
+    if (!found && piece.kind === "section") {
+      if (piece.id === id) {
+        out.push({
+          kind: "removal",
+          text:
+            piece.open +
+            sectionMoveSourceText(piece.body) +
+            (piece.close ?? ""),
+        });
+        found = true;
+        continue;
+      }
+      const inner = replaceWithRemoval(piece.body, id);
+      if (inner.found) {
+        out.push({ ...piece, body: inner.pieces });
+        found = true;
+        continue;
+      }
+    }
+    out.push(piece);
+  }
+  return { pieces: out, found };
+}
+
+/** Rewrite the moved subtree's section ids by prefix replacement. */
+function mapMovedIds(
+  section: SectionMoveSection,
+  mapDotted: (dotted: string) => string,
+): SectionMoveSection {
+  const mapPieces = (pieces: readonly SectionMovePiece[]): SectionMovePiece[] =>
+    pieces.map((piece) =>
+      piece.kind === "section"
+        ? { ...piece, id: mapDotted(piece.id), body: mapPieces(piece.body) }
+        : piece,
+    );
+  return {
+    ...section,
+    id: mapDotted(section.id),
+    body: mapPieces(section.body),
+  };
+}
+
+/** Map every reference (embedding target, `d` target) through `mapIdentity`. */
+function mapReferencesDeep(
+  pieces: readonly SectionMovePiece[],
+  mapIdentity: (identity: string) => string,
+): SectionMovePiece[] {
+  return pieces.map((piece) => {
+    if (piece.kind === "section") {
+      return {
+        ...piece,
+        depends: piece.depends.map(mapIdentity),
+        body: mapReferencesDeep(piece.body, mapIdentity),
+      };
+    }
+    if (piece.kind === "embedding") {
+      return { ...piece, target: mapIdentity(piece.target) };
+    }
+    return piece;
+  });
+}
+
+/**
+ * The paired form of a self-closing target parent (SPEC 6.5, T6.5-2): the
+ * `/` and any whitespace immediately before or after it deleted from the
+ * tag, and the closing tag matching the opening tag's name appended.
+ */
+function pairSelfClosing(open: string): {
+  readonly open: string;
+  readonly close: string;
+} {
+  const nameMatch = /^<\s*(Spec|S)\b/.exec(open);
+  if (nameMatch === null) {
+    misuse(
+      `a section's open tag must begin <S or <Spec (SPEC 1.1); got ${JSON.stringify(open)}`,
+    );
+  }
+  if (!open.endsWith(">")) {
+    misuse(`a tag's own characters end with ">"; got ${JSON.stringify(open)}`);
+  }
+  const inner = open.slice(0, -1);
+  const stripped = inner.replace(/[\t\n\v\f\r ]*\/[\t\n\v\f\r ]*$/, "");
+  if (stripped === inner) {
+    misuse(
+      `pairSelfClosing called on a non-self-closing tag ${JSON.stringify(open)}`,
+    );
+  }
+  return { open: `${stripped}>`, close: `</${nameMatch[1]}>` };
+}
+
+/**
+ * Insert `moved` as the last child of the section spelling `parentId`
+ * (`null` = the document root): appended to the parent's body immediately
+ * before its closing tag (at the end of the piece list for the root),
+ * followed by a U+000A content piece and preceded by one when the insertion
+ * point is not at a line start (`atLineStart`, judged over the
+ * post-deletion file bytes). A self-closing parent is first rewritten to
+ * paired form, the insertion point then following its opening tag's `>` —
+ * never at a line start (T6.5-2's worked bytes).
+ */
+function insertMoved(
+  pieces: readonly SectionMovePiece[],
+  parentId: string | null,
+  moved: SectionMoveSection,
+  atLineStart: boolean,
+): { readonly pieces: SectionMovePiece[]; readonly found: boolean } {
+  const newline: SectionMovePiece = { kind: "content", text: "\n" };
+  const splice = (lineStart: boolean): SectionMovePiece[] => [
+    ...(lineStart ? [] : [newline]),
+    moved,
+    newline,
+  ];
+  if (parentId === null) {
+    return { pieces: [...pieces, ...splice(atLineStart)], found: true };
+  }
+  const out: SectionMovePiece[] = [];
+  let found = false;
+  for (const piece of pieces) {
+    if (!found && piece.kind === "section") {
+      if (piece.id === parentId) {
+        found = true;
+        if (piece.close === null) {
+          const paired = pairSelfClosing(piece.open);
+          out.push({
+            ...piece,
+            open: paired.open,
+            close: paired.close,
+            body: splice(false),
+          });
+        } else {
+          out.push({ ...piece, body: [...piece.body, ...splice(atLineStart)] });
+        }
+        continue;
+      }
+      const inner = insertMoved(piece.body, parentId, moved, atLineStart);
+      if (inner.found) {
+        out.push({ ...piece, body: inner.pieces });
+        found = true;
+        continue;
+      }
+    }
+    out.push(piece);
+  }
+  return { pieces: out, found };
+}
+
+// ---------------------------------------------------------------------------
+// Edit-stage file bytes (for the insertion's line-start decision)
+//
+// 6.5's insertion is "preceded by [a U+000A] when the insertion point is
+// not at the start of a line" — a fact about the file bytes the insertion
+// edits: the target document as staged, or (same-file move) the
+// post-deletion origin bytes, where the deletion has removed the
+// construct's characters and dropped its merged straddling line when the
+// deletion left it empty or whitespace-only.
+
+interface EditStageDeletion {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The range 6.5's origin deletion removes from `source`: the construct's
+ * own characters, `deletion`, or — when the deletion alone leaves its
+ * merged line (the opening line's lead joined to the closing line's
+ * remainder) empty or whitespace-only under 1.4 — that whole line, dropped
+ * with its terminator (SPEC 6.5, 3); an unterminated last line drops
+ * without one. The one judgement of the merged line's range and drop
+ * decision, shared by the oracle's line-start decision
+ * (`atLineStartAfterDeletion`) and the would-be-text composer
+ * (`composeSectionMoveTexts`).
+ */
+function deletionExtent(
+  source: string,
+  deletion: EditStageDeletion,
+): EditStageDeletion {
+  // The deletion's merged line over the original bytes (SPEC 3's line
+  // model; CRLF pairs never straddle the construct, whose own characters
+  // begin `<` and end `>`).
+  let lineStart = deletion.start;
+  while (lineStart > 0 && !isTerminatorCode(source.charCodeAt(lineStart - 1))) {
+    lineStart -= 1;
+  }
+  let residueEnd = deletion.end;
+  while (
+    residueEnd < source.length &&
+    !isTerminatorCode(source.charCodeAt(residueEnd))
+  ) {
+    residueEnd += 1;
+  }
+  let lineEnd = residueEnd;
+  if (lineEnd < source.length) {
+    lineEnd +=
+      source.charCodeAt(lineEnd) === 0x0d &&
+      source.charCodeAt(lineEnd + 1) === 0x0a
+        ? 2
+        : 1;
+  }
+  const residue =
+    source.slice(lineStart, deletion.start) +
+    source.slice(deletion.end, residueEnd);
+  // A merged line left empty or whitespace-only drops with its terminator
+  // (SPEC 6.5, 3); otherwise the construct's characters alone go.
+  return isWhitespaceOnly(residue)
+    ? { start: lineStart, end: lineEnd }
+    : { start: deletion.start, end: deletion.end };
+}
+
+/**
+ * Whether `position` in `source` starts a line after applying `deletion`
+ * (its range as `deletionExtent` judges it) — the insertion's line-start
+ * decision, judged over the composed text with the insertion's own result
+ * absent (SPEC 6.5), shared by the oracle and the composer.
+ */
+function atLineStartAfterDeletion(
+  source: string,
+  position: number,
+  deletion: EditStageDeletion | null,
+): boolean {
+  const removed: [number, number][] = [];
+  if (deletion !== null) {
+    const extent = deletionExtent(source, deletion);
+    removed.push([extent.start, extent.end]);
+  }
+  // Walk backwards from `position` over the post-deletion bytes.
+  let i = position;
+  for (;;) {
+    const skip = removed.find(([from, to]) => i > from && i <= to);
+    if (skip !== undefined) {
+      i = skip[0];
+      continue;
+    }
+    if (i === 0) return true;
+    return isTerminatorCode(source.charCodeAt(i - 1));
+  }
+}
+
+/**
+ * String index of the insertion point in the concatenation of `pieces`:
+ * the first character of the target parent's closing tag, or the end of
+ * the document for a top-level new id.
+ */
+function insertionPoint(
+  pieces: readonly SectionMovePiece[],
+  parentDotted: string | null,
+  sourceLength: number,
+): number {
+  if (parentDotted === null) return sourceLength;
+  const parent = locateSection(pieces, parentDotted, 0);
+  if (parent === null) {
+    misuse(
+      `the target document spells no section ${JSON.stringify(parentDotted)} ` +
+        `(a refused move; the oracle predicts successful moves only)`,
+    );
+  }
+  return parent.end - (parent.section.close ?? "").length;
+}
+
+// ---------------------------------------------------------------------------
+// Attributed compilation: piece tree → per-node own-content sequences
+//
+// Mirrors the structure of P-2's oracle but delegates every logical line's
+// keep/drop decision to it: the line's pieces (content chunks, tag/import/
+// comment removals, embeddings with their expansions) plus its terminator
+// are handed to `compileMarkdown`, whose empty output is exactly "dropped"
+// (a kept line always retains its terminator and an all-whitespace source
+// line is kept; the terminator-less final line borrows a sentinel
+// terminator, which cannot change the decision).
+
+/** One logical line of a compiled document (SPEC 3's line model). */
+interface LineRecord {
+  /** Source-text span of the line, its terminator (if any) included. */
+  readonly start: number;
+  readonly end: number;
+  readonly terminated: boolean;
+  /**
+   * The nodes owning own-content bytes on the line — content bytes, the
+   * terminator included — whether the line is kept or dropped.
+   */
+  readonly owners: ReadonlySet<string>;
+}
+
+interface DocumentStructure {
+  /** Identity → own-content token sequence, this document's nodes. */
+  readonly sequences: Map<string, SectionMoveOwnToken[]>;
+  /** Identity → declared `d` targets, this document's sections. */
+  readonly depends: Map<string, readonly string[]>;
+  /**
+   * The logical lines in source order — a removed construct's internal
+   * terminators join the lines it spans into one (SPEC 3) — for 6.2's
+   * enumeration of the nodes with bytes on a line the move's edits touch.
+   */
+  readonly lines: readonly LineRecord[];
+}
+
+/**
+ * The owners of own-content bytes on the line holding source offset
+ * `offset` (the end of an unterminated last line included); none at the
+ * file's end after a final terminator, where no line stands.
+ */
+function ownersOnLineAt(
+  structure: DocumentStructure,
+  offset: number,
+): ReadonlySet<string> {
+  for (const line of structure.lines) {
+    if (
+      offset >= line.start &&
+      (offset < line.end || (offset === line.end && !line.terminated))
+    ) {
+      return line.owners;
+    }
+  }
+  return new Set<string>();
+}
+
+type FlatEntry =
+  | { readonly kind: "content"; readonly owner: string; readonly text: string }
+  | { readonly kind: "construct"; readonly piece: MarkdownPiece }
+  | {
+      readonly kind: "token";
+      readonly owner: string;
+      readonly token: SectionMoveOwnToken;
+    };
+
+function flattenInto(
+  pieces: readonly SectionMovePiece[],
+  path: string,
+  owner: string,
+  entries: FlatEntry[],
+  register: (identity: string, depends: readonly string[]) => void,
+): void {
+  for (const piece of pieces) {
+    switch (piece.kind) {
+      case "content":
+        if (piece.text.length > 0) {
+          entries.push({ kind: "content", owner, text: piece.text });
+        }
+        break;
+      case "removal":
+        entries.push({
+          kind: "construct",
+          piece: { kind: "removal", text: piece.text },
+        });
+        break;
+      case "embedding":
+        entries.push({ kind: "token", owner, token: ["embed", piece.target] });
+        entries.push({
+          kind: "construct",
+          piece: {
+            kind: "embedding",
+            text: piece.text,
+            expansion: piece.expansion,
+          },
+        });
+        break;
+      case "section": {
+        // A tag's own characters may hold terminators (a multi-line tag):
+        // they are deleted with the construct, joining its lines (SPEC 3),
+        // exactly as the delegated compile treats any multi-line removal.
+        const identity = `${path}#${piece.id}`;
+        register(identity, piece.depends);
+        entries.push({ kind: "token", owner, token: ["child", identity] });
+        entries.push({
+          kind: "construct",
+          piece: { kind: "removal", text: piece.open },
+        });
+        if (piece.close === null) {
+          if (piece.body.length > 0) {
+            misuse(
+              `a self-closing section has no body (SPEC 1.1); ` +
+                `${identity} declares ${String(piece.body.length)} piece(s)`,
+            );
+          }
+        } else {
+          flattenInto(piece.body, path, identity, entries, register);
+          entries.push({
+            kind: "construct",
+            piece: { kind: "removal", text: piece.close },
+          });
+        }
+        break;
+      }
+    }
+  }
+}
+
+/** Merge strictly-adjacent content entries (always same-owner by grammar). */
+function coalesceEntries(entries: readonly FlatEntry[]): FlatEntry[] {
+  const out: FlatEntry[] = [];
+  for (const entry of entries) {
+    const last = out[out.length - 1];
+    if (
+      entry.kind === "content" &&
+      last !== undefined &&
+      last.kind === "content"
+    ) {
+      if (last.owner !== entry.owner) {
+        defect(
+          "adjacent content with distinct owners — a section boundary " +
+            "always interposes a tag",
+        );
+      }
+      out[out.length - 1] = {
+        kind: "content",
+        owner: last.owner,
+        text: last.text + entry.text,
+      };
+      continue;
+    }
+    out.push(entry);
+  }
+  return out;
+}
+
+function compileDocument(document: SectionMoveDocument): DocumentStructure {
+  const sequences = new Map<string, SectionMoveOwnToken[]>();
+  const depends = new Map<string, readonly string[]>();
+  const runs = new Map<string, string>();
+  const register = (identity: string, deps: readonly string[]): void => {
+    if (sequences.has(identity)) {
+      misuse(`duplicate section identity ${identity} in ${document.path}`);
+    }
+    sequences.set(identity, []);
+    depends.set(identity, deps);
+    runs.set(identity, "");
+  };
+  // The implicit root (SPEC 1.2): no `d` targets (5.5).
+  register(document.path, []);
+
+  const entries: FlatEntry[] = [];
+  flattenInto(document.pieces, document.path, document.path, entries, register);
+
+  const appendRun = (owner: string, text: string): void => {
+    runs.set(owner, (runs.get(owner) ?? "") + text);
+  };
+  const flushToken = (owner: string, token: SectionMoveOwnToken): void => {
+    const sequence = sequences.get(owner);
+    if (sequence === undefined) defect(`no stream for ${owner}`);
+    sequence.push(["run", runs.get(owner) ?? ""], token);
+    runs.set(owner, "");
+  };
+
+  type LineEvent =
+    | { readonly kind: "bytes"; readonly owner: string; readonly text: string }
+    | {
+        readonly kind: "token";
+        readonly owner: string;
+        readonly token: SectionMoveOwnToken;
+      };
+  let linePieces: MarkdownPiece[] = [];
+  let lineEvents: LineEvent[] = [];
+  const lines: LineRecord[] = [];
+  // Source-text offsets: the consumed prefix and the current line's start.
+  let offset = 0;
+  let lineStart = 0;
+
+  // `offset` already stands past `terminator` when this is called.
+  const finalizeLine = (terminator: string, owner: string | null): void => {
+    if (
+      linePieces.length === 0 &&
+      lineEvents.length === 0 &&
+      terminator === ""
+    ) {
+      return; // nothing pending at end of input
+    }
+    const probe: MarkdownPiece[] = [
+      ...linePieces,
+      { kind: "content", text: terminator === "" ? "\n" : terminator },
+    ];
+    const dropped = compileMarkdown(probe) === "";
+    const owners = new Set<string>();
+    for (const event of lineEvents) {
+      if (event.kind === "token") {
+        flushToken(event.owner, event.token);
+        continue;
+      }
+      owners.add(event.owner);
+      if (!dropped) appendRun(event.owner, event.text);
+    }
+    if (terminator !== "" && owner !== null) {
+      owners.add(owner);
+      if (!dropped) appendRun(owner, terminator);
+    }
+    lines.push({
+      start: lineStart,
+      end: offset,
+      terminated: terminator !== "",
+      owners,
+    });
+    lineStart = offset;
+    linePieces = [];
+    lineEvents = [];
+  };
+
+  for (const entry of coalesceEntries(entries)) {
+    if (entry.kind === "construct") {
+      linePieces.push(entry.piece);
+      offset += entry.piece.text.length;
+      continue;
+    }
+    if (entry.kind === "token") {
+      lineEvents.push({
+        kind: "token",
+        owner: entry.owner,
+        token: entry.token,
+      });
+      continue;
+    }
+    const text = entry.text;
+    let start = 0;
+    let i = 0;
+    while (i < text.length) {
+      const code = text.charCodeAt(i);
+      if (!isTerminatorCode(code)) {
+        i += 1;
+        continue;
+      }
+      // A CR ending the entry is a lone CR: adjacent content was coalesced,
+      // so the next source character (if any) is a construct's first own
+      // character — never the LF of a CRLF pair (the markdown oracle's
+      // rule).
+      const terminator =
+        code === 0x0d && text.charCodeAt(i + 1) === 0x0a ? "\r\n" : text[i];
+      const chunk = text.slice(start, i);
+      if (chunk.length > 0) {
+        linePieces.push({ kind: "content", text: chunk });
+        lineEvents.push({ kind: "bytes", owner: entry.owner, text: chunk });
+      }
+      offset += chunk.length + terminator.length;
+      finalizeLine(terminator, entry.owner);
+      i += terminator.length;
+      start = i;
+    }
+    const tail = text.slice(start);
+    if (tail.length > 0) {
+      linePieces.push({ kind: "content", text: tail });
+      lineEvents.push({ kind: "bytes", owner: entry.owner, text: tail });
+      offset += tail.length;
+    }
+  }
+  finalizeLine("", null);
+
+  for (const [identity, sequence] of sequences) {
+    sequence.push(["run", runs.get(identity) ?? ""]);
+  }
+  return { sequences, depends, lines };
+}
+
+// ---------------------------------------------------------------------------
+// Graph derivation and the 5.6 cascade computation
+
+interface GraphNode {
+  readonly children: readonly string[];
+  readonly edgeTargets: readonly string[];
+}
+
+function dedupSorted(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+function tokensJson(tokens: readonly SectionMoveOwnToken[]): string {
+  return JSON.stringify(tokens);
+}
+
+function mapTokens(
+  tokens: readonly SectionMoveOwnToken[],
+  mapIdentity: (identity: string) => string,
+): SectionMoveOwnToken[] {
+  return tokens.map(([kind, value]) =>
+    kind === "run" ? [kind, value] : [kind, mapIdentity(value)],
+  );
+}
+
+function graphNodeOf(
+  tokens: readonly SectionMoveOwnToken[],
+  deps: readonly string[],
+): GraphNode {
+  const children: string[] = [];
+  const embeds: string[] = [];
+  for (const [kind, value] of tokens) {
+    if (kind === "child") children.push(value);
+    else if (kind === "embed") embeds.push(value);
+  }
+  return { children, edgeTargets: dedupSorted([...deps, ...embeds]) };
+}
+
+/** Memoized strict-descendant sets over one side's `children` lists. */
+function strictDescendants(
+  graph: ReadonlyMap<string, GraphNode>,
+): Map<string, Set<string>> {
+  const memo = new Map<string, Set<string>>();
+  const visiting = new Set<string>();
+  const resolve = (identity: string): Set<string> => {
+    const cached = memo.get(identity);
+    if (cached !== undefined) return cached;
+    if (visiting.has(identity)) {
+      defect(`contains-cycle through ${identity}`);
+    }
+    visiting.add(identity);
+    const node = graph.get(identity);
+    if (node === undefined) {
+      misuse(
+        `${identity} is a child of some node but has no node of its own — ` +
+          `otherNodes must cover every node of every untouched file`,
+      );
+    }
+    const descendants = new Set<string>();
+    for (const child of node.children) {
+      descendants.add(child);
+      for (const inner of resolve(child)) descendants.add(inner);
+    }
+    visiting.delete(identity);
+    memo.set(identity, descendants);
+    return descendants;
+  };
+  for (const identity of graph.keys()) resolve(identity);
+  return memo;
+}
+
+// ---------------------------------------------------------------------------
+// The oracle
+
+/** The move's files as its input states them, misuse guarded. */
+interface MoveFiles {
+  /** The existing target document; `null` when the move creates it. */
+  readonly targetDocument: SectionMoveDocument | null;
+  readonly targetPath: string;
+  /** Origin and target one file (the identical document object). */
+  readonly coincident: boolean;
+}
+
+function moveFilesOf(input: SectionMoveInput): MoveFiles {
+  const { origin } = input;
+  let targetDocument: SectionMoveDocument | null;
+  let targetPath: string;
+  if ("pieces" in input.target) {
+    targetDocument = input.target;
+    targetPath = input.target.path;
+  } else {
+    targetDocument = null;
+    targetPath = input.target.createdPath;
+  }
+  const coincident =
+    targetDocument !== null && targetDocument.path === origin.path;
+  if (coincident && targetDocument !== origin) {
+    misuse(
+      "a same-file move passes the identical document object as origin and target",
+    );
+  }
+  if (targetDocument === null && targetPath === origin.path) {
+    misuse("the created target path collides with the origin document");
+  }
+  return { targetDocument, targetPath, coincident };
+}
+
+/**
+ * SPEC 6.5's prefix replacement of `movedId` with `newId` over the moved
+ * subtree's dotted ids — the one identity mapping of the oracle
+ * (`mapMovedIds`, the identity map) and the composer (the moved text's
+ * `id` attributes).
+ */
+function prefixReplacement(
+  movedId: string,
+  newId: string,
+): (dotted: string) => string {
+  return (dotted: string): string => {
+    if (dotted === movedId) return newId;
+    if (dotted.startsWith(`${movedId}.`)) {
+      return newId + dotted.slice(movedId.length);
+    }
+    misuse(
+      `section ${JSON.stringify(dotted)} inside the moved subtree does not ` +
+        `extend the moved id ${JSON.stringify(movedId)} (SPEC 1.3)`,
+    );
+  };
+}
+
+/** The dotted id of a section's parent; `null` at top level (SPEC 1.3). */
+function parentDottedOf(dotted: string): string | null {
+  const lastDot = dotted.lastIndexOf(".");
+  return lastDot === -1 ? null : dotted.slice(0, lastDot);
+}
+
+export function predictSectionMoveImpact(
+  input: SectionMoveInput,
+): SectionMovePrediction {
+  return guardSyncStep(
+    "the section-move oracle (predictSectionMoveImpact)",
+    () => predictSectionMoveImpactUnguarded(input),
+  );
+}
+
+/** {@link predictSectionMoveImpact}'s evaluation, under its guard. */
+function predictSectionMoveImpactUnguarded(
+  input: SectionMoveInput,
+): SectionMovePrediction {
+  const { origin, movedId, newId } = input;
+  const { targetDocument, targetPath, coincident } = moveFilesOf(input);
+  const created = targetDocument === null;
+
+  // --- The identity mapping (prefix replacement, SPEC 6.5) ---
+  const located = locateSection(origin.pieces, movedId, 0);
+  if (located === null) {
+    misuse(`the origin document spells no section ${JSON.stringify(movedId)}`);
+  }
+  const mapDotted = prefixReplacement(movedId, newId);
+  const identityMap = new Map<string, string>();
+  const collectMapping = (section: SectionMoveSection): void => {
+    identityMap.set(
+      `${origin.path}#${section.id}`,
+      `${targetPath}#${mapDotted(section.id)}`,
+    );
+    for (const piece of section.body) {
+      if (piece.kind === "section") collectMapping(piece);
+    }
+  };
+  collectMapping(located.section);
+  const mapIdentity = (identity: string): string =>
+    identityMap.get(identity) ?? identity;
+
+  // --- Parents ---
+  const originParentDotted = parentDottedOf(movedId);
+  const originParent =
+    originParentDotted === null
+      ? origin.path
+      : `${origin.path}#${originParentDotted}`;
+  const targetParentDotted = parentDottedOf(newId);
+  if (created && targetParentDotted !== null) {
+    misuse(
+      "a created target file holds no sections, so a move creating it " +
+        "carries a single-segment new id (SPEC 6.5: the target parent must " +
+        "exist)",
+    );
+  }
+  // The created root is `changed` by addition, not comparison (P-5).
+  const targetParent = created
+    ? null
+    : targetParentDotted === null
+      ? targetPath
+      : `${targetPath}#${targetParentDotted}`;
+
+  // --- The insertion point (6.5), an offset into the pre-move target
+  // bytes: the target parent's closing tag, or the end of the document for
+  // a top-level new id; none when the move creates the target file ---
+  const targetInsertAt =
+    targetDocument === null
+      ? null
+      : insertionPoint(
+          targetDocument.pieces,
+          targetParentDotted,
+          sectionMoveSourceText(targetDocument.pieces).length,
+        );
+
+  // --- Before-side compilation ---
+  const originBefore = compileDocument(origin);
+  const targetBefore =
+    coincident || targetDocument === null
+      ? null
+      : compileDocument(targetDocument);
+  const beforeDocs: DocumentStructure[] =
+    targetBefore === null ? [originBefore] : [originBefore, targetBefore];
+
+  // --- 6.2's enumeration of what a successful move leaves `changed`: the
+  // parents, the moved subtree's nodes, and each other node with
+  // own-content bytes on a line the deletion joins or drops (the
+  // construct's boundary lines at the origin) or the insertion splits (the
+  // insertion point's line at the destination) — in current identities ---
+  const enumerated = new Set<string>(identityMap.values());
+  enumerated.add(originParent);
+  if (targetParent !== null) enumerated.add(targetParent);
+  const enumerateOwners = (owners: ReadonlySet<string>): void => {
+    for (const owner of owners) enumerated.add(mapIdentity(owner));
+  };
+  enumerateOwners(ownersOnLineAt(originBefore, located.start));
+  enumerateOwners(ownersOnLineAt(originBefore, located.end - 1));
+  const destinationBefore = coincident ? originBefore : targetBefore;
+  if (targetInsertAt !== null && destinationBefore !== null) {
+    enumerateOwners(ownersOnLineAt(destinationBefore, targetInsertAt));
+  }
+
+  // --- After-side trees (6.5's edits at the piece level) ---
+  const movedMapped = mapMovedIds(located.section, mapDotted);
+  const removedOrigin = replaceWithRemoval(origin.pieces, movedId);
+  if (!removedOrigin.found) {
+    defect("located section not found by the removal pass");
+  }
+  const afterDocs: DocumentStructure[] = [];
+  if (coincident) {
+    const source = sectionMoveSourceText(origin.pieces);
+    const insertAt =
+      targetInsertAt ?? defect("a same-file move has an insertion point");
+    const atLineStart = atLineStartAfterDeletion(source, insertAt, {
+      start: located.start,
+      end: located.end,
+    });
+    const spliced = insertMoved(
+      removedOrigin.pieces,
+      targetParentDotted,
+      movedMapped,
+      atLineStart,
+    );
+    if (!spliced.found) {
+      misuse(
+        `the target parent ${JSON.stringify(targetParentDotted)} is missing ` +
+          `after the removal — absent or within the moved subtree (a ` +
+          `refused move; the oracle predicts successful moves only)`,
+      );
+    }
+    afterDocs.push(
+      compileDocument({
+        path: origin.path,
+        pieces: mapReferencesDeep(spliced.pieces, mapIdentity),
+      }),
+    );
+  } else {
+    afterDocs.push(
+      compileDocument({
+        path: origin.path,
+        pieces: mapReferencesDeep(removedOrigin.pieces, mapIdentity),
+      }),
+    );
+    if (targetDocument === null) {
+      afterDocs.push(
+        compileDocument({
+          path: targetPath,
+          pieces: mapReferencesDeep(
+            [movedMapped, { kind: "content", text: "\n" }],
+            mapIdentity,
+          ),
+        }),
+      );
+    } else {
+      const source = sectionMoveSourceText(targetDocument.pieces);
+      const insertAt =
+        targetInsertAt ??
+        defect("a move into an existing file has an insertion point");
+      const atLineStart = atLineStartAfterDeletion(source, insertAt, null);
+      const spliced = insertMoved(
+        targetDocument.pieces,
+        targetParentDotted,
+        movedMapped,
+        atLineStart,
+      );
+      if (!spliced.found) {
+        misuse(
+          `the target document spells no section ` +
+            `${JSON.stringify(targetParentDotted)} (a refused move; the ` +
+            `oracle predicts successful moves only)`,
+        );
+      }
+      afterDocs.push(
+        compileDocument({
+          path: targetPath,
+          pieces: mapReferencesDeep(spliced.pieces, mapIdentity),
+        }),
+      );
+    }
+  }
+
+  // --- Merge sides; bring the baseline into current identities ---
+  const beforeRaw = new Map<string, readonly SectionMoveOwnToken[]>();
+  const mappedBefore = new Map<string, readonly SectionMoveOwnToken[]>();
+  const mappedBeforeGraph = new Map<string, GraphNode>();
+  for (const doc of beforeDocs) {
+    for (const [identity, tokens] of doc.sequences) {
+      if (beforeRaw.has(identity)) {
+        misuse(`identity ${identity} appears in two documents`);
+      }
+      beforeRaw.set(identity, tokens);
+      const mapped = mapIdentity(identity);
+      const mappedTokens = mapTokens(tokens, mapIdentity);
+      if (mappedBefore.has(mapped)) {
+        defect(`the identity map collapsed ${mapped}`);
+      }
+      mappedBefore.set(mapped, mappedTokens);
+      mappedBeforeGraph.set(
+        mapped,
+        graphNodeOf(
+          mappedTokens,
+          (doc.depends.get(identity) ?? []).map(mapIdentity),
+        ),
+      );
+    }
+  }
+  const after = new Map<string, readonly SectionMoveOwnToken[]>();
+  const afterGraph = new Map<string, GraphNode>();
+  for (const doc of afterDocs) {
+    for (const [identity, tokens] of doc.sequences) {
+      if (after.has(identity)) {
+        misuse(`identity ${identity} appears in two after-side documents`);
+      }
+      after.set(identity, tokens);
+      afterGraph.set(
+        identity,
+        graphNodeOf(tokens, doc.depends.get(identity) ?? []),
+      );
+    }
+  }
+  for (const node of input.otherNodes ?? []) {
+    if (mappedBefore.has(node.identity) || identityMap.has(node.identity)) {
+      misuse(
+        `otherNodes entry ${node.identity} belongs to a document of the move`,
+      );
+    }
+    if (afterGraph.has(node.identity)) {
+      misuse(`duplicate otherNodes entry ${node.identity}`);
+    }
+    const graphNode: GraphNode = {
+      children: node.children.map(mapIdentity),
+      edgeTargets: dedupSorted(node.edgeTargets.map(mapIdentity)),
+    };
+    mappedBeforeGraph.set(node.identity, graphNode);
+    afterGraph.set(node.identity, graphNode);
+  }
+  for (const [identity, node] of afterGraph) {
+    for (const target of node.edgeTargets) {
+      if (!afterGraph.has(target)) {
+        misuse(
+          `${identity} has a dependency-edge target ${target} that is no ` +
+            `node — otherNodes must cover every node of every untouched file`,
+        );
+      }
+    }
+  }
+
+  // --- Kept/added bookkeeping ---
+  for (const identity of mappedBefore.keys()) {
+    if (!after.has(identity)) {
+      defect(
+        `${identity} is missing on the after side — a section move deletes ` +
+          `no node`,
+      );
+    }
+  }
+  const added = new Set<string>();
+  for (const identity of after.keys()) {
+    if (!mappedBefore.has(identity)) added.add(identity);
+  }
+  const expectedAdded = created ? [targetPath] : [];
+  if (JSON.stringify([...added].sort()) !== JSON.stringify(expectedAdded)) {
+    defect(
+      `added identities ${JSON.stringify([...added].sort())}; expected ` +
+        `exactly ${JSON.stringify(expectedAdded)}`,
+    );
+  }
+
+  // --- The changed set: each enumerated node iff its own-content
+  // sequence differs across the move (P-5); a differing node outside the
+  // enumeration contradicts 6.2's completeness — an oracle defect ---
+  const changed = new Set<string>();
+  for (const [identity, beforeTokens] of mappedBefore) {
+    const afterTokens = after.get(identity);
+    if (afterTokens === undefined) continue; // unreachable: guarded above
+    if (tokensJson(beforeTokens) === tokensJson(afterTokens)) continue;
+    if (!enumerated.has(identity)) {
+      defect(
+        `the own-content sequence of ${identity} differs across the move, ` +
+          `but the node is outside 6.2's enumeration of what a successful ` +
+          `move leaves changed — the parents, the moved subtree's nodes, ` +
+          `and each node with own-content bytes on a line the deletion ` +
+          `joins or drops or the insertion splits — so the oracle's edit ` +
+          `model contradicts SPEC 6.2 (TEST-SPEC 16 P-5)`,
+      );
+    }
+    changed.add(identity);
+  }
+  for (const identity of added) changed.add(identity);
+
+  // Dependency-edge sets are identity-stable across a section move
+  // (canonical identities, SPEC 5.4): guard that the two derivations agree.
+  for (const [identity, beforeNode] of mappedBeforeGraph) {
+    const afterNode = afterGraph.get(identity);
+    if (afterNode === undefined) continue; // unreachable: guarded above
+    if (
+      JSON.stringify(beforeNode.edgeTargets) !==
+      JSON.stringify(afterNode.edgeTargets)
+    ) {
+      misuse(
+        `the dependency-edge target set of ${identity} differs across the ` +
+          `move (${JSON.stringify([...beforeNode.edgeTargets])} vs ` +
+          `${JSON.stringify([...afterNode.edgeTargets])}) — a section move ` +
+          `retargets spellings, never edges (SPEC 5.4, 6.5)`,
+      );
+    }
+  }
+
+  // --- 5.6 cascades from the changed nodes ---
+  const keptSet = new Set(mappedBeforeGraph.keys());
+  const descBefore = strictDescendants(mappedBeforeGraph);
+  const descAfter = strictDescendants(afterGraph);
+  const descAt = (
+    memo: Map<string, Set<string>>,
+    identity: string,
+  ): Set<string> => memo.get(identity) ?? new Set<string>();
+  const commonChildren = (identity: string): string[] => {
+    const beforeNode = mappedBeforeGraph.get(identity);
+    const afterNode = afterGraph.get(identity);
+    if (beforeNode === undefined || afterNode === undefined) return [];
+    return beforeNode.children.filter(
+      (child) => keptSet.has(child) && afterNode.children.includes(child),
+    );
+  };
+  const edgeTargetsOf = (identity: string): readonly string[] =>
+    (afterGraph.get(identity)?.edgeTargets ?? []).filter((target) =>
+      keptSet.has(target),
+    );
+
+  // effCauses(n): the changed originators whose edits the SPEC 5.5
+  // effectiveHash recursion propagates to n — n itself when changed, plus
+  // the causes of its both-sides children and of its dependency-edge
+  // targets (edge sets are identity-stable, guarded above).
+  const effCausesMemo = new Map<string, ReadonlySet<string>>();
+  const effVisiting = new Set<string>();
+  const effCauses = (identity: string): ReadonlySet<string> => {
+    const cached = effCausesMemo.get(identity);
+    if (cached !== undefined) return cached;
+    if (effVisiting.has(identity)) {
+      defect(
+        `dependency/contains cycle through ${identity} — staged graphs are ` +
+          `acyclic (SPEC 5.3)`,
+      );
+    }
+    effVisiting.add(identity);
+    const causes = new Set<string>();
+    if (changed.has(identity)) causes.add(identity);
+    for (const child of commonChildren(identity)) {
+      for (const cause of effCauses(child)) causes.add(cause);
+    }
+    for (const target of edgeTargetsOf(identity)) {
+      for (const cause of effCauses(target)) causes.add(cause);
+    }
+    effVisiting.delete(identity);
+    effCausesMemo.set(identity, causes);
+    return causes;
+  };
+
+  // directCauses(n): originators reaching n through a dependency edge of
+  // n's own — the 5.6 upstream-changed trigger at one node.
+  const directCauses = (identity: string): ReadonlySet<string> => {
+    const causes = new Set<string>();
+    for (const target of edgeTargetsOf(identity)) {
+      for (const cause of effCauses(target)) causes.add(cause);
+    }
+    return causes;
+  };
+
+  const changedSorted = [...changed].sort();
+  const changedEntry: SectionMoveCategoryPrediction = {
+    required: true,
+    attributionWithin: changedSorted,
+    attributionMustInclude: [],
+  };
+  const nodes = new Map<string, SectionMoveNodePrediction>();
+  for (const identity of [...afterGraph.keys()].sort()) {
+    const categories = new Map<
+      SectionMoveCategoryName,
+      SectionMoveCategoryPrediction
+    >();
+    if (added.has(identity)) {
+      // An added node is `changed` and receives no category through its own
+      // hashes (SPEC 5.6; P-5: by addition, not comparison).
+      categories.set("changed", changedEntry);
+      nodes.set(identity, { categories });
+      continue;
+    }
+    if (changed.has(identity)) categories.set("changed", changedEntry);
+
+    const beforeDesc = descAt(descBefore, identity);
+    const afterDesc = descAt(descAfter, identity);
+    const bothDesc = [...beforeDesc].filter((d) => afterDesc.has(d));
+    const oneSidedDesc = [...new Set([...beforeDesc, ...afterDesc])].filter(
+      (d) => keptSet.has(d) && !(beforeDesc.has(d) && afterDesc.has(d)),
+    );
+
+    // descendant-changed (SPEC 5.6): a changed descendant present on both
+    // sides makes it required; a changed relocated (one-side-only)
+    // descendant alone makes it tolerated-optional (T6.2-3's documented
+    // two-sided ambiguity), the attribution bounded by those descendants.
+    const changedBoth = bothDesc.filter((d) => changed.has(d)).sort();
+    const changedOneSided = oneSidedDesc.filter((d) => changed.has(d)).sort();
+    if (changedBoth.length > 0 || changedOneSided.length > 0) {
+      categories.set("descendant-changed", {
+        required: changedBoth.length > 0,
+        attributionWithin: dedupSorted([...changedBoth, ...changedOneSided]),
+        attributionMustInclude: changedBoth,
+      });
+    }
+
+    // upstream-changed (SPEC 5.6): a dependency-edge cause at the node
+    // itself or at a both-sides subtree member is required; a cause carried
+    // only by a relocated one-side-only member is tolerated-optional.
+    const requiredCauses = new Set<string>(directCauses(identity));
+    for (const member of bothDesc) {
+      if (!keptSet.has(member)) continue;
+      for (const cause of directCauses(member)) requiredCauses.add(cause);
+    }
+    const optionalCauses = new Set<string>();
+    for (const member of oneSidedDesc) {
+      for (const cause of directCauses(member)) {
+        if (!requiredCauses.has(cause)) optionalCauses.add(cause);
+      }
+    }
+    if (requiredCauses.size > 0 || optionalCauses.size > 0) {
+      categories.set("upstream-changed", {
+        required: requiredCauses.size > 0,
+        attributionWithin: dedupSorted([...requiredCauses, ...optionalCauses]),
+        attributionMustInclude: [...requiredCauses].sort(),
+      });
+    }
+    nodes.set(identity, { categories });
+  }
+
+  return {
+    identityMap,
+    nodes,
+    changed,
+    added,
+    beforeOwnTokens: beforeRaw,
+    afterOwnTokens: after,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Would-be texts: 6.5's structural edits composed byte for byte
+//
+// `refused-invalid-rewrite` (SPEC 6.5) judges "the origin file as its
+// deletion leaves it, or the target file as its parent rewrite and
+// insertion leave it or as its creation composes it (the one file as
+// deletion and insertion both leave it, when origin and target coincide)",
+// and TEST-SPEC 16 P-5 and 17 S-9 have every draw's form derive before the
+// product is driven on it. The composer renders those texts from the piece
+// trees the oracle reads, by 6.5's byte rules, through the oracle's own
+// judgements: the deletion's range and drop (`deletionExtent`), the
+// insertion's line start (`atLineStartAfterDeletion`), the insertion point
+// (`insertionPoint`), the paired form (`pairSelfClosing`), and the
+// identity mapping (`prefixReplacement`).
+
+/** Which of 6.5's would-be forms a composed file is. */
+export type SectionMoveComposedRole =
+  "origin" | "target" | "coincident" | "created";
+
+/** One file as the move's structural edits leave it (SPEC 6.5). */
+export interface SectionMoveComposedFile {
+  /** Workspace-relative path (the created path for a created target). */
+  readonly path: string;
+  /**
+   * `origin`: the origin as its deletion leaves it, the target another
+   * file or created; `target`: an existing other target file as its parent
+   * rewrite and insertion leave it; `coincident`: the one file as deletion
+   * and insertion both leave it; `created`: a created target file as its
+   * creation composes it when it needs no declaration (T6.5-14).
+   */
+  readonly role: SectionMoveComposedRole;
+  /** The would-be text. */
+  readonly text: string;
+}
+
+/** One replacement in pre-operation coordinates (an insertion: start = end). */
+interface SourceEdit {
+  readonly start: number;
+  readonly end: number;
+  readonly text: string;
+}
+
+/**
+ * `source` with `edits` composed in pre-operation coordinates (SPEC 6.5's
+ * composition): each range replaced whole; an insertion where a range ends
+ * stands after its result, and where one begins, before it. Overlapping
+ * ranges, or an insertion strictly inside a range, are a defect.
+ */
+function composeEdits(source: string, edits: readonly SourceEdit[]): string {
+  const ordered = [...edits].sort(
+    (a, b) => a.start - b.start || a.end - a.start - (b.end - b.start),
+  );
+  let text = "";
+  let cursor = 0;
+  for (const edit of ordered) {
+    if (
+      edit.start < cursor ||
+      edit.end < edit.start ||
+      edit.end > source.length
+    ) {
+      defect(
+        `edit ${String(edit.start)}..${String(edit.end)} overlaps another ` +
+          `or leaves the source (length ${String(source.length)})`,
+      );
+    }
+    text += source.slice(cursor, edit.start) + edit.text;
+    cursor = edit.end;
+  }
+  return text + source.slice(cursor);
+}
+
+/**
+ * `open` with its `id` attribute respelled from `from` to `to` (SPEC 6.5's
+ * prefix replacement): the tag must spell it exactly once as `id="<from>"`
+ * after whitespace, as the S-6 vectors and P-5's generator spell it; any
+ * other spelling is misuse.
+ */
+function respellIdAttribute(open: string, from: string, to: string): string {
+  const spelled = `id="${from}"`;
+  const hits: number[] = [];
+  for (
+    let index = open.indexOf(spelled);
+    index !== -1;
+    index = open.indexOf(spelled, index + 1)
+  ) {
+    if (index > 0 && /[\t\n\v\f\r ]/.test(open.charAt(index - 1))) {
+      hits.push(index);
+    }
+  }
+  if (hits.length !== 1) {
+    misuse(
+      `a moved section's opening tag spells its id exactly once as ` +
+        `id="<dotted>" (the composer respells that attribute); ` +
+        `${JSON.stringify(open)} spells ${JSON.stringify(spelled)} ` +
+        `${String(hits.length)} times`,
+    );
+  }
+  const at = hits[0];
+  return `${open.slice(0, at)}id="${to}"${open.slice(at + spelled.length)}`;
+}
+
+/**
+ * The moved text (SPEC 6.5): the construct's own characters, each section
+ * of the moved subtree with its `id` attribute respelled by `mapDotted`.
+ */
+function movedTextOf(
+  section: SectionMoveSection,
+  mapDotted: (dotted: string) => string,
+): string {
+  const render = (piece: SectionMovePiece): string => {
+    if (piece.kind !== "section") return piece.text;
+    const open = respellIdAttribute(piece.open, piece.id, mapDotted(piece.id));
+    if (piece.close === null) {
+      if (piece.body.length > 0) {
+        misuse(
+          `a self-closing section has no body (SPEC 1.1); ${piece.id} ` +
+            `declares ${String(piece.body.length)} piece(s)`,
+        );
+      }
+      return open;
+    }
+    return open + piece.body.map(render).join("") + piece.close;
+  };
+  return render(section);
+}
+
+/**
+ * The would-be texts of a section-form move — SPEC 6.5's "Moved text and
+ * insertion" and "Composition and admissibility", and a created file's
+ * fixed content (T6.5-14) — one per file the move's structural edits
+ * rewrite: the `origin` then the `target` or `created` file, or the one
+ * `coincident` file.
+ *
+ * * Origin: the moved construct's own characters (`locateSection`'s range)
+ *   deleted in place, and the line that deletion alone leaves empty or
+ *   whitespace-only under 1.4 dropped with its terminator, an unterminated
+ *   last line without one (`deletionExtent`).
+ * * Existing other target: a self-closing target parent first rewritten to
+ *   paired form (`pairSelfClosing`), then the moved text inserted
+ *   immediately before the parent's closing tag — at the end of the file
+ *   for a top-level new id (`insertionPoint`) — followed by U+000A, and
+ *   preceded by one when the insertion point is not at a line start,
+ *   judged over the composed text with the insertion's own result absent
+ *   (`atLineStartAfterDeletion`; a self-closing parent's point, after its
+ *   `>`, never is).
+ * * Coincident: the deletion and the insertion, with a self-closing target
+ *   parent's rewrite, composed in pre-operation coordinates — an insertion
+ *   where the deletion's range ends standing after its result, and where
+ *   it begins, before it — the line-start judgement made over the
+ *   post-deletion text.
+ * * Created: the moved text followed by U+000A — T6.5-14's form for a
+ *   file needing no declaration.
+ *
+ * In the moved text each section's `id` attribute is respelled by prefix
+ * replacement (`prefixReplacement`, the mapping `mapMovedIds` applies to
+ * the pieces' `id` fields); an opening tag that does not spell its `id`
+ * exactly once as `id="<dotted>"` is misuse. Reference respellings and
+ * import additions are outside the composer, as they are outside the
+ * oracle's after side: a respelling exchanges one static reference
+ * spelling (SPEC 2.4) for another inside the same expression container or
+ * `d` value, which no derivability verdict distinguishes, and the
+ * declarations a move adds — a created target's (T6.5-14) and those of the
+ * files referencing into the moved subtree — are the caller's to compose
+ * over these texts. Like the oracle, the composer serves successful moves
+ * only: a missing target parent, or one within the moved subtree, is
+ * misuse. S-6 vets it against every vector's hand-derived after texts
+ * (test/self/s6-section-move-oracle.test.ts).
+ */
+export function composeSectionMoveTexts(
+  input: SectionMoveInput,
+): SectionMoveComposedFile[] {
+  return guardSyncStep(
+    "the section-move oracle (composeSectionMoveTexts)",
+    () => composeSectionMoveTextsUnguarded(input),
+  );
+}
+
+/** {@link composeSectionMoveTexts}'s evaluation, under its guard. */
+function composeSectionMoveTextsUnguarded(
+  input: SectionMoveInput,
+): SectionMoveComposedFile[] {
+  const { origin, movedId, newId } = input;
+  const { targetDocument, targetPath, coincident } = moveFilesOf(input);
+  const source = sectionMoveSourceText(origin.pieces);
+  const located = locateSection(origin.pieces, movedId, 0);
+  if (located === null) {
+    misuse(`the origin document spells no section ${JSON.stringify(movedId)}`);
+  }
+  const movedText = movedTextOf(
+    located.section,
+    prefixReplacement(movedId, newId),
+  );
+  const deletion: EditStageDeletion = {
+    start: located.start,
+    end: located.end,
+  };
+  const removed = deletionExtent(source, deletion);
+  const deletionEdit: SourceEdit = {
+    start: removed.start,
+    end: removed.end,
+    text: "",
+  };
+  const targetParentDotted = parentDottedOf(newId);
+
+  if (targetDocument === null) {
+    if (targetParentDotted !== null) {
+      misuse(
+        "a created target file holds no sections, so a move creating it " +
+          "carries a single-segment new id (SPEC 6.5: the target parent " +
+          "must exist)",
+      );
+    }
+    return [
+      {
+        path: origin.path,
+        role: "origin",
+        text: composeEdits(source, [deletionEdit]),
+      },
+      { path: targetPath, role: "created", text: `${movedText}\n` },
+    ];
+  }
+
+  const targetSource = coincident
+    ? source
+    : sectionMoveSourceText(targetDocument.pieces);
+  const insertAt = insertionPoint(
+    targetDocument.pieces,
+    targetParentDotted,
+    targetSource.length,
+  );
+  const parent =
+    targetParentDotted === null
+      ? null
+      : locateSection(targetDocument.pieces, targetParentDotted, 0);
+  if (
+    coincident &&
+    parent !== null &&
+    parent.start >= located.start &&
+    parent.end <= located.end
+  ) {
+    misuse(
+      `the target parent ${JSON.stringify(targetParentDotted)} lies within ` +
+        `the moved subtree (a refused move; the composer composes ` +
+        `successful moves only)`,
+    );
+  }
+  let insertion: SourceEdit;
+  if (parent !== null && parent.section.close === null) {
+    // The paired form, the moved text before the appended closing tag:
+    // after the opening tag's `>`, never a line start (SPEC 6.5).
+    const paired = pairSelfClosing(parent.section.open);
+    insertion = {
+      start: parent.start,
+      end: parent.end,
+      text: `${paired.open}\n${movedText}\n${paired.close}`,
+    };
+  } else {
+    const lineStart = atLineStartAfterDeletion(
+      targetSource,
+      insertAt,
+      coincident ? deletion : null,
+    );
+    insertion = {
+      start: insertAt,
+      end: insertAt,
+      text: `${lineStart ? "" : "\n"}${movedText}\n`,
+    };
+  }
+  if (coincident) {
+    return [
+      {
+        path: origin.path,
+        role: "coincident",
+        text: composeEdits(source, [deletionEdit, insertion]),
+      },
+    ];
+  }
+  return [
+    {
+      path: origin.path,
+      role: "origin",
+      text: composeEdits(source, [deletionEdit]),
+    },
+    {
+      path: targetPath,
+      role: "target",
+      text: composeEdits(targetSource, [insertion]),
+    },
+  ];
+}

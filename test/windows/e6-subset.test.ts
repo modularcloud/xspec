@@ -1,7 +1,8 @@
-// E-6 platform-sensitive subset, part 1 of 2 (TEST-SPEC §18 E-6; CI-01) —
+// E-6 platform-sensitive subset, part 1 of 3 (TEST-SPEC §18 E-6; CI-01) —
 // the path/identity assertions and the single-casing case-mismatch probes.
-// Run by the suite-windows CI job (`npm run test:windows`); the byte-identity
-// comparison lives in e6-byte-identity.test.ts.
+// Run by the suite-windows CI job (`npm run test:windows`); the T11.6-1
+// drive-mismatch anchoring arm lives in e6-drive-mismatch.test.ts and the
+// byte-identity comparison in e6-byte-identity.test.ts.
 //
 // One code path with the suite leg (C-2):
 //
@@ -9,24 +10,31 @@
 //   declared here against the built product exactly as test/suite/ declares
 //   them. A Linux runner cannot discriminate a product emitting native path
 //   separators (`/` is native there); on Windows these same assertions do.
-//   T12.0-5's non-UTF-8 arm gates itself to the Linux leg inside the shared
-//   body ("less its Linux-leg arm", E-6), so no arm is skipped here — it is
-//   simply not part of this platform's staging.
+//   T12.0-5's Linux-leg arms — the non-UTF-8 argument value and the
+//   positive side of the backslash (`specs/a`, backslash, `b.mdx` and
+//   `src/a`, backslash, `b.ts`, names no Windows filesystem admits) — gate
+//   themselves to the Linux leg inside the shared body ("less its Linux-leg
+//   arms", E-6), so no arm is skipped here — they are simply not part of
+//   this platform's staging.
 //
-// - The four single-casing probes are the exact probe functions the
+// - The five single-casing probes are the exact probe functions the
 //   registered bodies call on the suite leg, re-invoked here: each stages one
 //   casing and probes another, so the fixture stages identically on any
 //   filesystem, and on a case-insensitive one it exposes a product resolving
-//   session names (T10.1-2), session file paths (T10.1-3), path arguments
-//   (T12.0-6), or glob matches (T7-4) through case-insensitive filesystem
-//   lookups. On Linux the case-sensitive filesystem masks such products;
-//   here nothing does.
+//   the configuration file in the upward search (T7-1), glob matches (T7-4),
+//   session names (T10.1-2), session file paths (T10.1-3), or path arguments
+//   (T12.0-6) through case-insensitive filesystem lookups. On Linux the
+//   case-sensitive filesystem masks such products; here nothing does.
 //
 // Expected red against the stub product, as diagnosed assertion failures
 // (H-8) — on this leg and on any platform this project is run on locally.
+// S-7's sweep holds the five probes to that against the empty stub
+// (test/self/s7-red-green-sweep.test.ts, which runs them by name — a probe
+// added here joins that list too); the three registered entries are swept
+// with the rest of the registry.
 
 import { test } from "vitest";
-import { DEFAULT_PRODUCT_TEST_TIMEOUT_MS } from "../helpers/registry.js";
+import { NO_SPAN_GUARD } from "../helpers/hang-guards.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 import { declareProductTests } from "../suite/declare.js";
@@ -36,6 +44,7 @@ import {
   runT1013WrongCaseExtensionProbe,
 } from "../suite/registry/section-10.1.js";
 import { runT1206SingleCasingPathProbe } from "../suite/registry/section-12.0-i.js";
+import { runT71ConfigNameCasingProbe } from "../suite/registry/section-7-basics.js";
 import { runT74SingleCasingGlobProbe } from "../suite/registry/section-7-discovery.js";
 
 // The full registered entries rerun on this leg (E-6), resolved from the
@@ -48,6 +57,10 @@ const PROBES: readonly (readonly [
   string,
   (product: ProductBinding) => Promise<void>,
 ])[] = [
+  [
+    "T7-1 single-casing probe: a plain file XSPEC.config.ts holding `)` in a working directory beneath a valid root configuration is no configuration — the upward search passes it and loads the root's, `build` and then `check` run from there exiting 0 — the configuration file's name compares byte-wise, case-sensitively (SPEC 7, 12.0; E-6)",
+    runT71ConfigNameCasingProbe,
+  ],
   [
     "T7-4 single-casing probe: the glob SPECS/*.mdx over directory specs/ (and specs2/b.mdx over specs2/B.mdx) discovers zero sources — glob matching is case-sensitive on every platform (SPEC 7, 12.0; E-6)",
     runT74SingleCasingGlobProbe,
@@ -67,7 +80,7 @@ const PROBES: readonly (readonly [
 ];
 
 for (const [title, probe] of PROBES) {
-  test(title, { timeout: DEFAULT_PRODUCT_TEST_TIMEOUT_MS }, async () => {
+  test(title, { timeout: NO_SPAN_GUARD }, async () => {
     await probe(builtProductBinding());
   });
 }

@@ -1,0 +1,3233 @@
+// TEST-SPEC §5.7 (reference occurrences) — SUITE-51: T5.7-1 through T5.7-4.
+//
+// Registered product-facing bodies (C-2 "one code path"): each builds its own
+// fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
+// asserts exact exit codes (H-5), decodes output through the H-3 adapters —
+// the `occurrences` document (SPEC 11.3) is a form-exact 12.7 surface decoded
+// literally with no adapter in the path and, being JSON-only (SPEC 11), no
+// `--json` flag — and rejects a product only via diagnosed assertion failures
+// (H-8).
+//
+// SPEC 5.7: a reference occurrence is one textual spelling of a
+// dependency-kind reference whose target resolves — one `d` reference (each
+// entry of a `d` array separately, never the array or the prop, 2.2), one MDX
+// `{text(...)}` embedding (2.3), one TypeScript `text(...)` call (4.3), or
+// one TypeScript dependency marker (4.5). Edges are sets; occurrences are the
+// positions behind them: duplicate references that collapse to a single edge
+// each remain distinct occurrences at distinct ranges. Byte-precise
+// occurrence spans are T5.7-2's subject; full record data — the source graph
+// node as one identity-plus-range datum — and the total deterministic order
+// are T5.7-3's; T5.7-1 asserts the units — record cardinality per staged
+// construct, each record's edge kind — and the duplicate contrast, so its
+// occurrence-record assertions compare complete (file, kind, source, target)
+// multisets, order-free, with ranges consulted only for the duplicates'
+// distinctness.
+//
+// Fixture sharing: four workspaces staged here — T5.7-1's, T5.7-2's span
+// fixture, T5.7-3's, and T5.7-4's first (its collision and nested-scope
+// workspaces, and T5.7-2's token-bound ones, are this module's alone) —
+// are ALSO T11.3-1's ground (TEST-SPEC §11.3 "over the T5.7-* fixtures";
+// registry/section-11.3.ts imports the exported staging constants and
+// expectation tables, never copies them, so the two sections cannot drift
+// apart). The exported unit tables carry an order contract stated at each
+// table.
+
+import { Buffer } from "node:buffer";
+import type {
+  DependencyEdgeKind,
+  Finding,
+  GraphEdge,
+  OccurrenceRecord,
+  OccurrenceSourceNode,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
+import {
+  decodeEdgesReport,
+  decodeOccurrencesReport,
+  renderPathValue,
+} from "../../helpers/adapters/index.js";
+import {
+  assertBytesEqual,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
+import { defineProductTest } from "../../helpers/registry.js";
+import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
+import type { ProductBinding } from "../../helpers/subprocess.js";
+import { TestWorkspace } from "../../helpers/workspace.js";
+import { t4510StagedText, t4511StagedText } from "./section-4.5-ii.js";
+import {
+  assertConditionCounts,
+  assertEdgeSetEqual,
+  assertFindingIdentities,
+  assertFindingLocated,
+  assertFindingLocatesExactly,
+  assertSameJson,
+  buildFindings,
+  buildOk,
+  byteWindow,
+  expectExit,
+  findingsInSourceOrder,
+  runJson,
+} from "./support.js";
+
+// One spec group plus one code group (SPEC 7.2): TypeScript files under
+// `src/` are discovered code sources, so `build` analyzes their spec-module
+// usage (4.3, 4.5) — the TS half of the occurrence kinds. T5.7-4's collision
+// workspace and T11.3-1's later fixture workspaces (section-11.3.ts) stage it
+// after a product invocation, so it is a staged-source record (S-9's timing
+// clause; test/self/s9-staged-sources.test.ts).
+export const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T5.7-4/T11.3-1 xspec.config.ts — one spec group and one code group",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`,
+);
+
+// ---------------------------------------------------------------------------
+// T5.7-1 — units and duplicates
+// ---------------------------------------------------------------------------
+
+// The imported spec source: `a` with child `a.b` (the duplicate pair's
+// target, TEST-SPEC's literal `d={[BASE.a.b, BASE.a.b]}` spelling) and
+// `other`, so the three-entry array has distinct external targets.
+export const T5_7_1_BASE_SOURCE = [
+  '<S id="a">',
+  "Alpha text.",
+  "",
+  '<S id="a.b">',
+  "Alpha B text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="other">',
+  "Other text.",
+  "</S>",
+  "",
+].join("\n");
+
+// The main spec source, one section per staged MDX occurrence unit:
+// - `tri`: a three-entry `d` array mixing the external chain and local
+//   string forms (2.2 permits mixing) — one occurrence per ENTRY, so a
+//   product recording one occurrence for the array or for the prop reports
+//   1 where 3 are expected;
+// - `solo`: a single-reference `d` (no array) — exactly one occurrence;
+// - `emb`: an MDX `{text(...)}` embedding — exactly one occurrence, kind
+//   `embeds`;
+// - `dup`: TEST-SPEC's duplicate pair `d={[BASE.a.b, BASE.a.b]}` — one
+//   edge, two occurrences at distinct ranges.
+export const T5_7_1_MAIN_SOURCE = [
+  'import BASE from "./BASE.xspec"',
+  "",
+  '<S id="peer">',
+  "Peer text.",
+  "</S>",
+  "",
+  '<S id="tri" d={[BASE.a, "peer", BASE.other]}>',
+  "Tri text.",
+  "</S>",
+  "",
+  '<S id="solo" d={"peer"}>',
+  "Solo text.",
+  "</S>",
+  "",
+  '<S id="emb">',
+  "Emb: {text(BASE.a.b)}",
+  "</S>",
+  "",
+  '<S id="dup" d={[BASE.a.b, BASE.a.b]}>',
+  "Dup text.",
+  "</S>",
+  "",
+].join("\n");
+
+// The TypeScript side, one named function per staged unit (SPEC 4.6 makes
+// the source attribution determinate): a `text(...)` call (kind `embeds`),
+// a single marker (kind `references`), and the twice-spelled marker — one
+// edge, two occurrences at distinct ranges. The import declaration records
+// no edge and no occurrence (SPEC 2.1, 5.7).
+export const T5_7_1_APP_SOURCE = [
+  'import SPEC, { text } from "../specs/MAIN.xspec";',
+  "",
+  "export function useText(): string {",
+  "  return text(SPEC.emb);",
+  "}",
+  "",
+  "export function once(): void {",
+  "  SPEC.tri;",
+  "}",
+  "",
+  "export function twice(): void {",
+  "  SPEC.dup;",
+  "  SPEC.dup;",
+  "}",
+  "",
+].join("\n");
+
+export const BASE_FILE = "specs/BASE.mdx";
+export const MAIN_FILE = "specs/MAIN.mdx";
+export const APP_FILE = "src/app.ts";
+const A_ID = "specs/BASE.mdx#a";
+const AB_ID = "specs/BASE.mdx#a.b";
+const OTHER_ID = "specs/BASE.mdx#other";
+const PEER_ID = "specs/MAIN.mdx#peer";
+const TRI_ID = "specs/MAIN.mdx#tri";
+const SOLO_ID = "specs/MAIN.mdx#solo";
+const EMB_ID = "specs/MAIN.mdx#emb";
+const DUP_ID = "specs/MAIN.mdx#dup";
+const USE_TEXT_LOCATION = "src/app.ts#useText";
+const ONCE_LOCATION = "src/app.ts#once";
+const TWICE_LOCATION = "src/app.ts#twice";
+
+/** One expected occurrence unit: its identifying data and record count. */
+export interface OccurrenceUnit {
+  readonly what: string;
+  readonly file: string;
+  readonly kind: DependencyEdgeKind;
+  readonly source: string;
+  readonly target: string;
+  /** How many records the staged spelling(s) of this unit produce. */
+  readonly count: number;
+}
+
+// The workspace's complete expected occurrence multiset — 11 records. Every
+// record's (file, kind, source, target) tuple is determinate from the staging
+// (SPEC 5.7, 4.6, 5.4), and no two staged units share a tuple, so the
+// order-free multiset comparison individuates every unit: a missing,
+// phantom, per-array, per-prop, uncollapsed-edge-shaped, or mis-kinded
+// record fails with the offending tuple named.
+//
+// ORDER CONTRACT (exported; T11.3-1 relies on it): the table lists the units
+// in occurrence order (SPEC 5.7 — file path bytes, `specs/MAIN.mdx` before
+// `src/app.ts`, then range start, i.e. each file's spellings in source
+// order), each duplicate pair's records adjacent. T5.7-1 itself compares
+// order-free; section-11.3.ts expands the table BY POSITION into its
+// per-index expected sequence, so keep the table position-sorted when
+// restaging.
+export const T5_7_1_UNITS: readonly OccurrenceUnit[] = [
+  {
+    what: "three-entry `d` array, entry 1 (external chain `BASE.a`)",
+    file: MAIN_FILE,
+    kind: "depends",
+    source: TRI_ID,
+    target: A_ID,
+    count: 1,
+  },
+  {
+    what: 'three-entry `d` array, entry 2 (local string `"peer"`)',
+    file: MAIN_FILE,
+    kind: "depends",
+    source: TRI_ID,
+    target: PEER_ID,
+    count: 1,
+  },
+  {
+    what: "three-entry `d` array, entry 3 (external chain `BASE.other`)",
+    file: MAIN_FILE,
+    kind: "depends",
+    source: TRI_ID,
+    target: OTHER_ID,
+    count: 1,
+  },
+  {
+    what: "single-reference `d` (no array)",
+    file: MAIN_FILE,
+    kind: "depends",
+    source: SOLO_ID,
+    target: PEER_ID,
+    count: 1,
+  },
+  {
+    what: "MDX `{text(...)}` embedding",
+    file: MAIN_FILE,
+    kind: "embeds",
+    source: EMB_ID,
+    target: AB_ID,
+    count: 1,
+  },
+  {
+    what: "duplicate `d={[BASE.a.b, BASE.a.b]}` — two entries, one edge",
+    file: MAIN_FILE,
+    kind: "depends",
+    source: DUP_ID,
+    target: AB_ID,
+    count: 2,
+  },
+  {
+    what: "TS `text(...)` call",
+    file: APP_FILE,
+    kind: "embeds",
+    source: USE_TEXT_LOCATION,
+    target: EMB_ID,
+    count: 1,
+  },
+  {
+    what: "TS marker, spelled once",
+    file: APP_FILE,
+    kind: "references",
+    source: ONCE_LOCATION,
+    target: TRI_ID,
+    count: 1,
+  },
+  {
+    what: "twice-spelled TS marker — two spellings, one edge",
+    file: APP_FILE,
+    kind: "references",
+    source: TWICE_LOCATION,
+    target: DUP_ID,
+    count: 2,
+  },
+];
+
+// The workspace's complete edge set (SPEC 5.2): document structure gives the
+// `contains` edges, and each dependency-kind unit above gives exactly ONE
+// edge — the duplicate `d` pair and the twice-spelled marker collapsed
+// (edges are sets), so the exact-set comparison pins the collapse side of
+// the duplicate contrast (T2.2-3's and T5.2-1's home subject, asserted here
+// against the same staging the occurrence records answer over).
+const T5_7_1_EXPECTED_EDGES: readonly GraphEdge[] = [
+  { from: BASE_FILE, to: A_ID, kind: "contains" },
+  { from: A_ID, to: AB_ID, kind: "contains" },
+  { from: BASE_FILE, to: OTHER_ID, kind: "contains" },
+  { from: MAIN_FILE, to: PEER_ID, kind: "contains" },
+  { from: MAIN_FILE, to: TRI_ID, kind: "contains" },
+  { from: MAIN_FILE, to: SOLO_ID, kind: "contains" },
+  { from: MAIN_FILE, to: EMB_ID, kind: "contains" },
+  { from: MAIN_FILE, to: DUP_ID, kind: "contains" },
+  { from: TRI_ID, to: A_ID, kind: "depends" },
+  { from: TRI_ID, to: PEER_ID, kind: "depends" },
+  { from: TRI_ID, to: OTHER_ID, kind: "depends" },
+  { from: SOLO_ID, to: PEER_ID, kind: "depends" },
+  { from: DUP_ID, to: AB_ID, kind: "depends" },
+  { from: EMB_ID, to: AB_ID, kind: "embeds" },
+  { from: USE_TEXT_LOCATION, to: EMB_ID, kind: "embeds" },
+  { from: ONCE_LOCATION, to: TRI_ID, kind: "references" },
+  { from: TWICE_LOCATION, to: DUP_ID, kind: "references" },
+];
+
+/**
+ * Render one decoded record's identifying tuple for the order-free multiset
+ * comparison. Every staged path is valid UTF-8 and every source identity is
+ * defined (11.2), so a marked byte-form file or an unavailable source renders
+ * to a value no expected tuple matches and fails the comparison visibly.
+ */
+export function renderOccurrenceUnit(record: OccurrenceRecord): string {
+  const source =
+    "unavailable" in record.source
+      ? "(source unavailable)"
+      : record.source.identity;
+  return `${renderPathValue(record.file)} [${record.kind}] ${source} -> ${record.target}`;
+}
+
+/** The expected multiset, each unit expanded to its count, sorted. */
+export function expectedUnitMultiset(
+  units: readonly OccurrenceUnit[],
+): string[] {
+  return units
+    .flatMap((unit) =>
+      Array<string>(unit.count).fill(
+        `${unit.file} [${unit.kind}] ${unit.source} -> ${unit.target}`,
+      ),
+    )
+    .sort();
+}
+
+/**
+ * A duplicate pair's occurrence side: exactly two records carry the unit's
+ * (file, kind, source, target) tuple, and their ranges are distinct — the
+ * two spellings collapse to one edge yet remain two distinct occurrences at
+ * distinct ranges (SPEC 5.7). Distinct-span totality over the whole document
+ * is already decode-enforced (12.7 occurrence order); this assertion names
+ * the duplicate subject when a product merges the pair's positions.
+ */
+function assertDuplicateOccurrencePair(
+  records: readonly OccurrenceRecord[],
+  unit: OccurrenceUnit,
+  context: string,
+): void {
+  const pair = records.filter(
+    (record) =>
+      renderPathValue(record.file) === unit.file &&
+      record.kind === unit.kind &&
+      !("unavailable" in record.source) &&
+      record.source.identity === unit.source &&
+      record.target === unit.target,
+  );
+  if (pair.length !== 2) {
+    fail(
+      `${context}: the ${unit.what} must yield exactly two occurrence ` +
+        `records for ${unit.file} [${unit.kind}] ${unit.source} -> ` +
+        `${unit.target} (SPEC 5.7: duplicates collapse to one edge yet ` +
+        `remain distinct occurrences); got ${String(pair.length)}: ` +
+        JSON.stringify(pair),
+    );
+  }
+  const [first, second] = pair as [OccurrenceRecord, OccurrenceRecord];
+  if (
+    first.range.start === second.range.start &&
+    first.range.end === second.range.end
+  ) {
+    fail(
+      `${context}: the ${unit.what}'s two occurrence records must lie at ` +
+        `distinct ranges — distinct spellings occupy distinct spans (SPEC ` +
+        `5.7); both report ${JSON.stringify(first.range)}`,
+    );
+  }
+}
+
+const T5_7_1 = defineProductTest({
+  id: "T5.7-1",
+  title:
+    "one workspace spells every occurrence kind — a three-entry `d` array, a single-reference `d`, an MDX `{text(...)}`, a TS `text(...)` call, a TS marker — and `occurrences` reports one occurrence per `d` array entry (never one for the array or the prop) and one per embedding, call, and marker, each carrying its edge kind; the duplicate `d={[BASE.a.b, BASE.a.b]}` and a twice-spelled marker collapse to one edge each yet remain two distinct occurrences each, at distinct ranges (SPEC 5.7, 2.2, 5.2, 11.3)",
+  run: async (product) => {
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/BASE.mdx": T5_7_1_BASE_SOURCE,
+        "specs/MAIN.mdx": T5_7_1_MAIN_SOURCE,
+        "src/app.ts": T5_7_1_APP_SOURCE,
+      },
+    });
+    try {
+      // Premise: the workspace is valid — every staged reference is a
+      // sanctioned spelling that resolves — so the enumeration below is
+      // complete and finding-free (11.2, 11.3).
+      await buildOk(
+        product,
+        workspace,
+        "T5.7-1 `build` (premise: every staged reference resolves and the workspace is valid)",
+      );
+
+      const context = "T5.7-1 `occurrences`";
+      const report = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], context),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: the consulted domain (the entire discovered set, no ` +
+          `\`--file\`) carries no finding (SPEC 11.2, 11.3)`,
+      );
+
+      // The complete record multiset: one record per `d` array entry —
+      // never one for the array or the prop (2.2) — one per embedding,
+      // call, and marker, each carrying its edge kind, and exactly two for
+      // each duplicate pair. Order-free (the occurrence ORDER is T5.7-3's
+      // subject; the decode already enforces it as 12.7 form).
+      assertSameJson(
+        report.occurrences.map(renderOccurrenceUnit).sort(),
+        expectedUnitMultiset(T5_7_1_UNITS),
+        `${context}: the complete (file, [kind], source -> target) record ` +
+          `multiset — one occurrence per \`d\` array entry, never one for ` +
+          `the array or the prop (SPEC 2.2, 5.7); one per MDX embedding, ` +
+          `TS call, and marker, each carrying its edge kind (5.2); two per ` +
+          `duplicate pair — so 1-per-array, 1-per-prop, dropped-duplicate, ` +
+          `phantom-import, or mis-kinded reporting all fail`,
+      );
+
+      // The duplicate contrast's occurrence side: two distinct records at
+      // distinct ranges for each collapsed pair.
+      const dupUnit = T5_7_1_UNITS.find((unit) => unit.source === DUP_ID)!;
+      const twiceUnit = T5_7_1_UNITS.find(
+        (unit) => unit.source === TWICE_LOCATION,
+      )!;
+      assertDuplicateOccurrencePair(report.occurrences, dupUnit, context);
+      assertDuplicateOccurrencePair(report.occurrences, twiceUnit, context);
+
+      // The duplicate contrast's edge side: the same staging's complete
+      // edge set, the duplicate `d` pair and the twice-spelled marker each
+      // collapsed to a single edge (SPEC 5.2: edges are sets; occurrences
+      // are the positions behind them).
+      const edgesContext = "T5.7-1 unfiltered `query edges`";
+      assertEdgeSetEqual(
+        decodeEdgesReport(
+          await runJson(product, workspace, ["query", "edges"], edgesContext),
+          edgesContext,
+        ),
+        T5_7_1_EXPECTED_EDGES,
+        `${edgesContext}: the workspace's complete edge set — the duplicate ` +
+          `\`d\` entries and the twice-spelled marker collapse to one edge ` +
+          `each while remaining two occurrences each (SPEC 2.2, 5.2, 5.7)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T5.7-2 — byte-precise spans per kind
+// ---------------------------------------------------------------------------
+
+// Occurrence spans are exact per kind (SPEC 5.7): a `d` occurrence spans that
+// one reference's own expression; an MDX embedding occurrence spans the
+// entire `{text(...)}` expression container, brace through brace; a TS
+// `text(...)` occurrence spans the whole call expression, callee through
+// closing parenthesis; a marker occurrence spans the bare reference chain
+// alone, exclusive of any statement terminator. Every expected range below is
+// composed from the same string parts the staged files are — never measured
+// from product output — and a fixture self-check slices each claimed range
+// back out of the staged bytes before the product is invoked (the T1.7-2
+// discipline), so a staging-arithmetic error fails as a harness-side
+// diagnosis, never as a wrong-but-satisfiable expectation. Both referencing
+// files put multi-byte UTF-8 (é: 1 code point, 2 bytes; 🦄: 1 code point / 2
+// UTF-16 units / 4 bytes) before every asserted construct, so byte offsets
+// diverge from code-point and UTF-16 offsets and a product counting either
+// fails (SPEC 1.7).
+
+/** UTF-8 byte length of a composed fixture part. */
+function utf8Length(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/** Byte range of `span` where it follows exactly `prefix` in a file. */
+function rangeAfter(prefix: string, span: string): SourceRange {
+  const start = utf8Length(prefix);
+  return { start, end: start + utf8Length(span) };
+}
+
+// The referenced spec source: three top-level targets plus a nested child, so
+// the marker's chain is multi-segment (`SPEC.y.leaf`) and every staged
+// occurrence resolves to its own distinct target.
+export const SPAN_BASE_SOURCE = [
+  '<S id="x">',
+  "X text.",
+  "</S>",
+  "",
+  '<S id="mid">',
+  "Mid text.",
+  "</S>",
+  "",
+  '<S id="y">',
+  "Y text.",
+  "",
+  '<S id="y.leaf">',
+  "Leaf text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// specs/MAIN.mdx, composed from the exact parts the expected ranges cite. The
+// `pre` section's multi-byte text shifts every later byte offset. `arr`'s
+// three-entry `d` array spells whitespace on BOTH sides of each comma
+// (` , `), so an entry span including any bracket, comma, or neighboring
+// whitespace misses byte-precisely; `emb` holds the braced embedding.
+const SPAN_MAIN_HEAD =
+  'import BASE from "./BASE.xspec"\n\n<S id="pre">\nPrélude 🦄 text.\n</S>\n\n';
+const SPAN_ARR_TAG_PRE = '<S id="arr" d={[';
+const SPAN_ARR_ENTRY_1 = "BASE.x";
+const SPAN_ARR_SEP = " , ";
+const SPAN_ARR_ENTRY_2 = "BASE.mid";
+const SPAN_ARR_ENTRY_3 = '"pre"';
+const SPAN_ARR_TAG_POST = "]}>\nArr text.\n</S>\n\n";
+const SPAN_EMB_PRE = '<S id="emb">\nEmb: ';
+const SPAN_EMB_CONTAINER = "{text(BASE.y)}";
+const SPAN_EMB_POST = "\n</S>\n";
+export const SPAN_MAIN_SOURCE =
+  SPAN_MAIN_HEAD +
+  SPAN_ARR_TAG_PRE +
+  SPAN_ARR_ENTRY_1 +
+  SPAN_ARR_SEP +
+  SPAN_ARR_ENTRY_2 +
+  SPAN_ARR_SEP +
+  SPAN_ARR_ENTRY_3 +
+  SPAN_ARR_TAG_POST +
+  SPAN_EMB_PRE +
+  SPAN_EMB_CONTAINER +
+  SPAN_EMB_POST;
+
+// T11.3-1 restages this fixture after its first product invocation, so
+// S-7's sweep never reaches those stagings against the stub: staged-source
+// records (helpers/staged-mdx.ts; S-9's before-any-product clause) made
+// from the strings the expectation tables keep, staged here and there.
+export const SPAN_BASE_STAGED = stagedMdx(
+  "T5.7-2/T11.3-1 specs/BASE.mdx (the spans fixture)",
+  SPAN_BASE_SOURCE,
+);
+export const SPAN_MAIN_STAGED = stagedMdx(
+  "T5.7-2/T11.3-1 specs/MAIN.mdx (the spans fixture)",
+  SPAN_MAIN_SOURCE,
+);
+
+// src/app.ts: the `text` export is aliased ON IMPORT (SPEC 4.4's sanctioned
+// aliasing — TEST-SPEC's aliased callee `t(...)`), and each reference
+// statement wears the trivia its span must exclude — leading indentation, a
+// terminating `;`, and (for the marker) a trailing comment.
+const SPAN_APP_HEAD =
+  '// prélude 🦄 spans\nimport SPEC, { text as t } from "../specs/BASE.xspec";\n\n';
+const SPAN_CALL_PRE = "export function call(): string {\n  return ";
+const SPAN_CALL_EXPR = "t(SPEC.x)";
+const SPAN_CALL_POST = ";\n}\n\n";
+const SPAN_MARK_PRE = "export function mark(): void {\n  ";
+const SPAN_MARK_CHAIN = "SPEC.y.leaf";
+const SPAN_MARK_POST = "; // trailing trivia\n}\n";
+export const SPAN_APP_SOURCE =
+  SPAN_APP_HEAD +
+  SPAN_CALL_PRE +
+  SPAN_CALL_EXPR +
+  SPAN_CALL_POST +
+  SPAN_MARK_PRE +
+  SPAN_MARK_CHAIN +
+  SPAN_MARK_POST;
+
+const SPAN_X_ID = "specs/BASE.mdx#x";
+const SPAN_MID_ID = "specs/BASE.mdx#mid";
+const SPAN_Y_ID = "specs/BASE.mdx#y";
+const SPAN_LEAF_ID = "specs/BASE.mdx#y.leaf";
+const SPAN_PRE_ID = "specs/MAIN.mdx#pre";
+const SPAN_ARR_ID = "specs/MAIN.mdx#arr";
+const SPAN_EMB_ID = "specs/MAIN.mdx#emb";
+const SPAN_CALL_LOCATION = "src/app.ts#call";
+const SPAN_MARK_LOCATION = "src/app.ts#mark";
+
+/**
+ * One staged occurrence and the exact span its record must carry. The
+ * (file, kind, source, target) tuple is unique per arm in this staging, so it
+ * identifies the arm's record without leaning on the report order (T5.7-3's
+ * subject, decode-enforced as 12.7 form meanwhile); the source node's own
+ * range datum is likewise T5.7-3's subject, consulted here only as identity.
+ */
+export interface SpanArm {
+  readonly what: string;
+  /** The staged file's full content (fixture self-check ground). */
+  readonly fileSource: string;
+  /** The exact characters the occurrence's own range must slice to. */
+  readonly span: string;
+  readonly file: string;
+  readonly kind: DependencyEdgeKind;
+  readonly source: string;
+  readonly target: string;
+  /** Precomputed byte range: zero-based, start-inclusive end-exclusive. */
+  readonly range: SourceRange;
+}
+
+// The complete expected enumeration — the staged references are the
+// workspace's only occurrences (import declarations record none, SPEC 5.7),
+// one record each, every span byte-precise.
+//
+// ORDER CONTRACT (exported; T11.3-1 relies on it): the arms are listed in
+// occurrence order (file path bytes, then range start — section-11.3.ts
+// additionally self-checks this sortedness against the claimed ranges
+// before any product invocation), so keep the list position-sorted when
+// restaging.
+export const SPAN_ARMS: readonly SpanArm[] = [
+  {
+    what:
+      "`d` array entry 1 (`BASE.x`) — the reference's own expression, the " +
+      "opening `[` and the following ` , ` excluded (SPEC 5.7, 2.2)",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_ARR_ENTRY_1,
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: SPAN_ARR_ID,
+    target: SPAN_X_ID,
+    range: rangeAfter(SPAN_MAIN_HEAD + SPAN_ARR_TAG_PRE, SPAN_ARR_ENTRY_1),
+  },
+  {
+    what:
+      "`d` array MIDDLE entry (`BASE.mid`) alone — no brackets, no commas, " +
+      "no surrounding whitespace: the ` , ` on each side lies outside the " +
+      "span (SPEC 5.7, 2.2)",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_ARR_ENTRY_2,
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: SPAN_ARR_ID,
+    target: SPAN_MID_ID,
+    range: rangeAfter(
+      SPAN_MAIN_HEAD + SPAN_ARR_TAG_PRE + SPAN_ARR_ENTRY_1 + SPAN_ARR_SEP,
+      SPAN_ARR_ENTRY_2,
+    ),
+  },
+  {
+    what:
+      '`d` array entry 3 (the local string `"pre"`) — the string literal ' +
+      "expression's own characters, quotes included, the preceding ` , ` " +
+      "and the closing `]}` excluded (SPEC 5.7, 2.2)",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_ARR_ENTRY_3,
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: SPAN_ARR_ID,
+    target: SPAN_PRE_ID,
+    range: rangeAfter(
+      SPAN_MAIN_HEAD +
+        SPAN_ARR_TAG_PRE +
+        SPAN_ARR_ENTRY_1 +
+        SPAN_ARR_SEP +
+        SPAN_ARR_ENTRY_2 +
+        SPAN_ARR_SEP,
+      SPAN_ARR_ENTRY_3,
+    ),
+  },
+  {
+    what:
+      "MDX embedding — the ENTIRE braced container `{text(BASE.y)}`, " +
+      "opening brace through closing brace, the whole construct Markdown " +
+      "compilation replaces (SPEC 5.7, 3): a call-only span missing either " +
+      "brace fails",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_EMB_CONTAINER,
+    file: "specs/MAIN.mdx",
+    kind: "embeds",
+    source: SPAN_EMB_ID,
+    target: SPAN_Y_ID,
+    range: rangeAfter(
+      SPAN_MAIN_HEAD +
+        SPAN_ARR_TAG_PRE +
+        SPAN_ARR_ENTRY_1 +
+        SPAN_ARR_SEP +
+        SPAN_ARR_ENTRY_2 +
+        SPAN_ARR_SEP +
+        SPAN_ARR_ENTRY_3 +
+        SPAN_ARR_TAG_POST +
+        SPAN_EMB_PRE,
+      SPAN_EMB_CONTAINER,
+    ),
+  },
+  {
+    what:
+      "TS `text(...)` call with an ALIASED callee — `t(SPEC.x)` from its " +
+      "`t` through the closing parenthesis, argument included, the " +
+      "terminating `;` excluded (SPEC 5.7, 4.3, 4.4)",
+    fileSource: SPAN_APP_SOURCE,
+    span: SPAN_CALL_EXPR,
+    file: "src/app.ts",
+    kind: "embeds",
+    source: SPAN_CALL_LOCATION,
+    target: SPAN_X_ID,
+    range: rangeAfter(SPAN_APP_HEAD + SPAN_CALL_PRE, SPAN_CALL_EXPR),
+  },
+  {
+    what:
+      "TS marker — the bare reference chain `SPEC.y.leaf` alone, every " +
+      "segment included, the leading indentation, terminating `;`, and " +
+      "trailing comment all excluded (SPEC 5.7, 4.5)",
+    fileSource: SPAN_APP_SOURCE,
+    span: SPAN_MARK_CHAIN,
+    file: "src/app.ts",
+    kind: "references",
+    source: SPAN_MARK_LOCATION,
+    target: SPAN_LEAF_ID,
+    range: rangeAfter(
+      SPAN_APP_HEAD +
+        SPAN_CALL_PRE +
+        SPAN_CALL_EXPR +
+        SPAN_CALL_POST +
+        SPAN_MARK_PRE,
+      SPAN_MARK_CHAIN,
+    ),
+  },
+];
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed range must slice the staged file's bytes to exactly the span it
+ * claims. A failure here is a staging-arithmetic defect of this test, never a
+ * product failure.
+ */
+function assertStagedSpan(arm: SpanArm): void {
+  const actual = Buffer.from(arm.fileSource, "utf8")
+    .subarray(arm.range.start, arm.range.end)
+    .toString("utf8");
+  if (actual !== arm.span) {
+    fail(
+      `T5.7-2 fixture self-check — ${arm.what}: the precomputed byte range ` +
+        `[${String(arm.range.start)}, ${String(arm.range.end)}) slices the ` +
+        `staged bytes to ${JSON.stringify(actual)}, expected ` +
+        `${JSON.stringify(arm.span)} (a harness-side staging error, not a ` +
+        `product failure)`,
+    );
+  }
+}
+
+// Token bounds inside a `d` value (TEST-SPEC T5.7-2's second staging). A `d`
+// occurrence's bounds are ECMAScript tokens' (SPEC 1.4, 14): the span is the
+// reference's own expression, whatever whitespace and comments its braces
+// hold beside it — a product excluding ASCII whitespace alone spans into a
+// U+00A0, U+FEFF, or U+3000 neighbor and fails the first three arms, and one
+// whose class is ASCII's plus the code points SPEC 14.20 names (U+00A0,
+// U+FEFF, U+2028, U+2029) spans into the third arm's U+3000 and U+202F —
+// Unicode 15.1 space separators ECMAScript's whitespace takes (SPEC 14.20)
+// that 14.20 does not name — and fails it (T2.7-4). Line comments inside
+// the value take 14.20's deletion judgement and run-on rule as a container's
+// (2.7, T2.7-4): `d={// c` U+000A `BASE.a}` ends its comment at the
+// terminator, and in the run-on twin `d={// c}` U+000A `BASE.a}` the first
+// `}` lies on the commented-out line and closes nothing, the value running to
+// the second `}` — each a well-formed `d` (no 14.20, no 14.8, `build` exit 0)
+// whose one occurrence spans `BASE.a` alone; a product scanning an attribute
+// value to its first `}` reports 14.8 or 14.20 there and fails. Each form is
+// staged in a workspace of its own, so a form the product mishandles is
+// diagnosed by name without masking the others. The first staging's
+// multi-byte `pre` section precedes the value, so byte offsets diverge from
+// code-point and UTF-16 counting for every form, and the U+00A0 (2 bytes),
+// U+FEFF (3 bytes), and U+3000 (3 bytes) spellings shift the span's own start
+// as well. The four code points are composed from their values, never spelled
+// as escapes, so the staged bytes are exactly those the entry names.
+const NBSP = String.fromCodePoint(0xa0); // U+00A0 — no-break space
+const ZWNBSP = String.fromCodePoint(0xfeff); // U+FEFF — inside the file, so no byte-order mark
+const IDEOGRAPHIC_SPACE = String.fromCodePoint(0x3000); // U+3000 — a Unicode 15.1 space separator (Zs)
+const NARROW_NBSP = String.fromCodePoint(0x202f); // U+202F — narrow no-break space, a Unicode 15.1 space separator (Zs)
+const LF = "\n"; // U+000A — the line terminator that ends a line comment
+
+interface TokenBoundArm {
+  readonly what: string;
+  /** The characters between `d={` and `BASE.a`. */
+  readonly before: string;
+  /** The characters between `BASE.a` and the value's closing `}`. */
+  readonly after: string;
+}
+
+const TOKEN_BOUND_ARMS: readonly TokenBoundArm[] = [
+  {
+    what:
+      "U+00A0 on each side of the reference — `d={` U+00A0 `BASE.a` U+00A0 " +
+      "`}` (ECMAScript whitespace, not ASCII; SPEC 1.4)",
+    before: NBSP,
+    after: NBSP,
+  },
+  {
+    what:
+      "U+FEFF before the reference — `d={` U+FEFF `BASE.a` `}` (ECMAScript " +
+      "whitespace inside the file, no byte-order mark; SPEC 1.4)",
+    before: ZWNBSP,
+    after: "",
+  },
+  {
+    what:
+      "U+3000 before and U+202F after the reference — `d={` U+3000 " +
+      "`BASE.a` U+202F `}` (Unicode 15.1 space separators ECMAScript's " +
+      "whitespace takes and SPEC 14.20 does not name; SPEC 1.4, 14.20)",
+    before: IDEOGRAPHIC_SPACE,
+    after: NARROW_NBSP,
+  },
+  {
+    what: "a block comment before the reference — `d={ /* c */ BASE.a }`",
+    before: " /* c */ ",
+    after: " ",
+  },
+  {
+    what:
+      "a line comment ended by the terminator — `d={// c` U+000A `BASE.a}` " +
+      "(14.20's deletion judgement)",
+    before: "// c" + LF,
+    after: "",
+  },
+  {
+    what:
+      "the run-on twin — `d={// c}` U+000A `BASE.a}`, its first `}` on the " +
+      "commented-out line closing nothing, the value running to the second " +
+      "`}` (14.20's run-on rule, SPEC 2.7)",
+    before: "// c}" + LF,
+    after: "",
+  },
+];
+
+// One spec group and no code group: the stagings hold no code source. Every
+// token-bound workspace is created after the body's first `build`, so the
+// configuration is a staged-source record too (S-9's timing clause).
+const SPEC_ONLY_CONFIG = stagedTs(
+  "T5.7-2 xspec.config.ts — one spec group and no code group, the token-bound arms'",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+
+// The referencing source is composed from the exact parts the expected range
+// cites: the first staging's multi-byte head, the tag up to `d={`, the arm's
+// leading characters, the reference, the arm's trailing characters, and the
+// value's closing `}`.
+// Every token-bound workspace is created after the body's first `build`
+// (the span workspace's): the base source and each arm's composed source
+// are staged-source records (S-9, test/self/s9-staged-sources.test.ts).
+const TOKEN_BASE_SOURCE = stagedMdx(
+  "T5.7-2/T5.7-4/T11.3-1 specs/BASE.mdx (the token-bounds fixture's base; the no-occurrence fixture's specs/BASE.mdx spells the same bytes)",
+  '<S id="a">\nA text.\n</S>\n',
+);
+const TOKEN_TAG_PRE = '<S id="s" d={';
+const TOKEN_REF = "BASE.a";
+const TOKEN_TAG_POST = "}>\nS text.\n</S>\n";
+const TOKEN_S_ID = "specs/MAIN.mdx#s";
+const TOKEN_A_ID = "specs/BASE.mdx#a";
+
+function tokenBoundSource(arm: TokenBoundArm): string {
+  return (
+    SPAN_MAIN_HEAD +
+    TOKEN_TAG_PRE +
+    arm.before +
+    TOKEN_REF +
+    arm.after +
+    TOKEN_TAG_POST
+  );
+}
+
+function tokenBoundRange(arm: TokenBoundArm): SourceRange {
+  return rangeAfter(SPAN_MAIN_HEAD + TOKEN_TAG_PRE + arm.before, TOKEN_REF);
+}
+
+/** One token-bound arm with its composed `specs/MAIN.mdx` bytes and record. */
+interface TokenBoundStaging {
+  readonly arm: TokenBoundArm;
+  /** The composed bytes — the range self-check slices them. */
+  readonly source: string;
+  /** The same bytes as the staged-source record `create()` stages (S-9). */
+  readonly main: StagedMdx;
+}
+
+// The template calls evaluated once at module load, in arm order.
+const TOKEN_BOUND_STAGINGS: readonly TokenBoundStaging[] = TOKEN_BOUND_ARMS.map(
+  (arm) => {
+    const source = tokenBoundSource(arm);
+    return {
+      arm,
+      source,
+      main: stagedMdx(
+        `T5.7-2 token bounds: ${arm.what} specs/MAIN.mdx`,
+        source,
+      ),
+    };
+  },
+);
+
+// The workspace's complete edge set (SPEC 5.2): each file's `contains` edges
+// and the one `depends` edge the occurrence stands behind.
+const TOKEN_EXPECTED_EDGES: readonly GraphEdge[] = [
+  { from: "specs/BASE.mdx", to: TOKEN_A_ID, kind: "contains" },
+  { from: "specs/MAIN.mdx", to: SPAN_PRE_ID, kind: "contains" },
+  { from: "specs/MAIN.mdx", to: TOKEN_S_ID, kind: "contains" },
+  { from: TOKEN_S_ID, to: TOKEN_A_ID, kind: "depends" },
+];
+
+async function assertTokenBoundArm(
+  product: ProductBinding,
+  staging: TokenBoundStaging,
+): Promise<void> {
+  const { arm, source, main } = staging;
+  const range = tokenBoundRange(arm);
+  const label = `T5.7-2 token bounds — ${arm.what}`;
+  // Fixture self-check (harness-side, before any product invocation): the
+  // precomputed range slices the staged bytes to exactly `BASE.a`.
+  const sliced = Buffer.from(source, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (sliced !== TOKEN_REF) {
+    fail(
+      `${label}: fixture self-check — the precomputed byte range ` +
+        `[${String(range.start)}, ${String(range.end)}) slices the staged ` +
+        `bytes to ${JSON.stringify(sliced)}, expected ` +
+        `${JSON.stringify(TOKEN_REF)} (a harness-side staging error, not a ` +
+        `product failure)`,
+    );
+  }
+
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": SPEC_ONLY_CONFIG,
+      "specs/BASE.mdx": TOKEN_BASE_SOURCE,
+      "specs/MAIN.mdx": main,
+    },
+  });
+  try {
+    await buildOk(
+      product,
+      workspace,
+      `${label}: \`build\` exit 0 — the value is a well-formed \`d\` holding ` +
+        `one static reference beside ECMAScript whitespace and comments, ` +
+        `never 14.20 and never 14.8 (SPEC 2.7, 1.4, 14)`,
+    );
+
+    const edgesContext = `${label}: \`query edges\``;
+    assertEdgeSetEqual(
+      decodeEdgesReport(
+        await runJson(product, workspace, ["query", "edges"], edgesContext),
+        edgesContext,
+      ),
+      TOKEN_EXPECTED_EDGES,
+      `${edgesContext}: the workspace's complete edge set — the reference ` +
+        `records its \`depends\` edge (SPEC 2.2, 5.2)`,
+    );
+
+    const context = `${label}: \`occurrences\``;
+    const report = decodeOccurrencesReport(
+      await runJson(product, workspace, ["occurrences"], context),
+      context,
+    );
+    assertSameJson(
+      report.findings,
+      [],
+      `${context}: the consulted domain carries no finding (SPEC 11.2, 11.3)`,
+    );
+    if (report.occurrences.length !== 1) {
+      fail(
+        `${context}: expected exactly one occurrence record — the staged ` +
+          `reference's; the import declaration records none (SPEC 5.7) — ` +
+          `got ${String(report.occurrences.length)}: ` +
+          JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+      );
+    }
+    const record = report.occurrences[0]!;
+    if (
+      renderPathValue(record.file) !== "specs/MAIN.mdx" ||
+      record.kind !== "depends" ||
+      "unavailable" in record.source ||
+      record.source.identity !== TOKEN_S_ID ||
+      record.target !== TOKEN_A_ID
+    ) {
+      fail(
+        `${context}: expected the one record to be specs/MAIN.mdx [depends] ` +
+          `${TOKEN_S_ID} -> ${TOKEN_A_ID}; got ${renderOccurrenceUnit(record)}`,
+      );
+    }
+    assertSameJson(
+      record.range,
+      range,
+      `${context}: the occurrence spans \`BASE.a\` alone — the brace-side ` +
+        `whitespace and comments excluded as ASCII whitespace is — against ` +
+        `precomputed byte offsets (SPEC 5.7, 1.4, 1.7)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+const T5_7_2 = defineProductTest({
+  id: "T5.7-2",
+  title:
+    "byte-precise occurrence spans per kind against precomputed offsets: a `d` occurrence spans exactly that one reference's own expression — an array's middle entry alone, no brackets, commas, or surrounding whitespace; an MDX embedding occurrence spans the entire braced container `{text(...)}`, opening brace through closing brace — the whole construct compilation replaces; a TS call occurrence spans callee through closing parenthesis, argument included — an aliased callee `t(SPEC.x)` from its `t`; a marker occurrence spans the bare reference chain alone, exclusive of the statement's terminating `;` and surrounding trivia; token bounds inside a `d` value take ECMAScript's whitespace — its space separators Unicode 15.1's — and comments — `d={` U+00A0 `BASE.a` U+00A0 `}`, `d={` U+FEFF `BASE.a` `}`, `d={` U+3000 `BASE.a` U+202F `}`, `d={ /* c */ BASE.a }`, and the line-comment forms `d={// c` U+000A `BASE.a}` and its run-on twin `d={// c}` U+000A `BASE.a}` (14.20's deletion judgement and run-on rule) are each a well-formed `d` recording one occurrence spanning `BASE.a` alone (SPEC 5.7, 1.4, 1.7, 2.7, 3, 4.4, 11.3, 14)",
+  run: async (product) => {
+    for (const arm of SPAN_ARMS) assertStagedSpan(arm);
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/BASE.mdx": SPAN_BASE_STAGED,
+        "specs/MAIN.mdx": SPAN_MAIN_STAGED,
+        "src/app.ts": SPAN_APP_SOURCE,
+      },
+    });
+    try {
+      // Premise: the workspace is valid — every staged reference is a
+      // sanctioned spelling that resolves (the import-aliased `t` callee
+      // included, SPEC 4.4) — so the enumeration below is complete and
+      // finding-free (11.2, 11.3).
+      await buildOk(
+        product,
+        workspace,
+        "T5.7-2 `build` (premise: every staged reference is a sanctioned spelling that resolves)",
+      );
+
+      const context = "T5.7-2 `occurrences`";
+      const report = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], context),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: the consulted domain (the entire discovered set, no ` +
+          `\`--file\`) carries no finding (SPEC 11.2, 11.3)`,
+      );
+      if (report.occurrences.length !== SPAN_ARMS.length) {
+        fail(
+          `${context}: expected exactly ${String(SPAN_ARMS.length)} ` +
+            `occurrence records — one per staged reference; the import ` +
+            `declarations record none (SPEC 5.7) — got ` +
+            `${String(report.occurrences.length)}: ` +
+            JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+        );
+      }
+      for (const arm of SPAN_ARMS) {
+        const matches = report.occurrences.filter(
+          (record) =>
+            renderPathValue(record.file) === arm.file &&
+            record.kind === arm.kind &&
+            !("unavailable" in record.source) &&
+            record.source.identity === arm.source &&
+            record.target === arm.target,
+        );
+        if (matches.length !== 1) {
+          fail(
+            `${context}: expected exactly one record for the ${arm.what} — ` +
+              `${arm.file} [${arm.kind}] ${arm.source} -> ${arm.target}; ` +
+              `got ${String(matches.length)} among ` +
+              JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+          );
+        }
+        assertSameJson(
+          matches[0]!.range,
+          arm.range,
+          `${context} — ${arm.what}: the occurrence's own range against ` +
+            `precomputed byte offsets — zero-based, start-inclusive ` +
+            `end-exclusive, so code-point, UTF-16, line/column, or 1-based ` +
+            `counting all fail (SPEC 1.7, 5.7)`,
+        );
+      }
+    } finally {
+      await workspace.dispose();
+    }
+
+    for (const staging of TOKEN_BOUND_STAGINGS)
+      await assertTokenBoundArm(product, staging);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T5.7-3 — record data and total deterministic order
+// ---------------------------------------------------------------------------
+
+// Each record carries the referencing file, its own range, its edge kind, its
+// source graph node as ONE identity-plus-range datum — for MDX the containing
+// section with its construct range (opening tag's first character through
+// closing tag's last, 1.7; the ROOT with the whole-file range for a top-level
+// embedding — the T8-5 shape, SPEC 1.2/2.3), for TS the innermost enclosing
+// named unit with the construct binding its name, or the file (SPEC 4.6;
+// T1.7-2 owns the full unit-shape matrix) — and the resolved target's
+// identity. Order is total and deterministic (SPEC 5.7): by referencing file
+// path BYTES, then range start, then range end. The three referencing files
+// give the byte-order clause teeth: `specs/Zed.mdx` (`Z` = 0x5A) sorts before
+// `specs/alpha.mdx` (`a` = 0x61) in byte order while any case-folding or
+// locale collation reverses the pair, and `specs/...` sorts before `src/...`
+// (`p` = 0x70 < `r` = 0x72). The complete six-record document is asserted
+// per-index — every member, byte-precise ranges — against offsets composed
+// from the same string parts the staged files are (the T1.7-2/T5.7-2
+// discipline: multi-byte UTF-8 before every asserted construct so byte
+// offsets diverge from code-point and UTF-16 counts; fixture self-checks
+// slice every claimed range back out of the staged bytes AND re-derive the
+// claimed sequence under the pinned comparator before the product is
+// invoked). H-6: the identical command runs twice, byte-identical stdout. No
+// two records share a range: the six expected ranges are pairwise distinct
+// (distinct spellings occupy distinct spans, and no two sanctioned constructs
+// share a span start, so the comparator's range-end leg decides no stageable
+// pair — the decode enforces both the sharing rejection and the full
+// comparator, range-end leg included, as 12.7 form over whatever a product
+// emits).
+
+export const ORD_ZED_FILE = "specs/Zed.mdx";
+export const ORD_ALPHA_FILE = "specs/alpha.mdx";
+export const ORD_APP_FILE = "src/app.ts";
+const ORD_ZIN_ID = "specs/Zed.mdx#zout.zin";
+const ORD_ZLOC_ID = "specs/Zed.mdx#zloc";
+const ORD_T_ID = "specs/alpha.mdx#t";
+const ORD_U_ID = "specs/alpha.mdx#u";
+const ORD_MID_ID = "specs/alpha.mdx#mid";
+const ORD_DEEP_ID = "src/app.ts#wrap.deep";
+
+// specs/Zed.mdx — byte-FIRST referencing file (`Z` < `a`), three occurrences
+// at increasing starts: a `d` on the NESTED section `zout.zin` (the
+// containing section is the innermost, its construct range strictly inside
+// the parent `zout`'s), an embedding in that same nested section's content
+// (same source datum), and a top-level embedding outside any section (source
+// the ROOT: identity the path alone, range the entire file).
+const ORD_ZED_IMPORT = 'import ALPHA from "./alpha.xspec"\n\n';
+const ORD_ZED_PRELUDE = "Prélude 🦄 Zed.\n\n";
+const ORD_ZED_ZOUT_OPEN = '<S id="zout">\nOuter text.\n\n';
+const ORD_ZED_ZIN_TAG_PRE = '<S id="zout.zin" d={';
+const ORD_ZED_ZIN_DEP = "ALPHA.t";
+const ORD_ZED_ZIN_TAG_POST = "}>\nInner: ";
+const ORD_ZED_ZIN_EMB = '{text("zloc")}';
+const ORD_ZED_ZIN_CLOSE = "\n</S>";
+const ORD_ZED_ZIN_CONSTRUCT =
+  ORD_ZED_ZIN_TAG_PRE +
+  ORD_ZED_ZIN_DEP +
+  ORD_ZED_ZIN_TAG_POST +
+  ORD_ZED_ZIN_EMB +
+  ORD_ZED_ZIN_CLOSE;
+const ORD_ZED_ZOUT_CLOSE = "\n</S>\n\n";
+const ORD_ZED_ZLOC = '<S id="zloc">\nLocal target text.\n</S>\n\n';
+const ORD_ZED_TAIL_PRE = "Tail text.\n\n";
+const ORD_ZED_TAIL_EMB = "{text(ALPHA.u)}";
+export const ORD_ZED_SOURCE =
+  ORD_ZED_IMPORT +
+  ORD_ZED_PRELUDE +
+  ORD_ZED_ZOUT_OPEN +
+  ORD_ZED_ZIN_CONSTRUCT +
+  ORD_ZED_ZOUT_CLOSE +
+  ORD_ZED_ZLOC +
+  ORD_ZED_TAIL_PRE +
+  ORD_ZED_TAIL_EMB +
+  "\n";
+
+// specs/alpha.mdx — byte-SECOND (under a case-folding collation it would sort
+// FIRST and its record would lead the enumeration): the two external targets
+// `t` and `u`, plus one local-string `d` occurrence on `mid`.
+const ORD_ALPHA_PRELUDE = "Prélude 🦄 alpha.\n\n";
+const ORD_ALPHA_TARGETS =
+  '<S id="t">\nT text.\n</S>\n\n<S id="u">\nU text.\n</S>\n\n';
+const ORD_ALPHA_MID_TAG_PRE = '<S id="mid" d={';
+const ORD_ALPHA_MID_DEP = '"u"';
+const ORD_ALPHA_MID_TAG_POST = "}>\nMid text.\n";
+const ORD_ALPHA_MID_CLOSE = "</S>";
+const ORD_ALPHA_MID_CONSTRUCT =
+  ORD_ALPHA_MID_TAG_PRE +
+  ORD_ALPHA_MID_DEP +
+  ORD_ALPHA_MID_TAG_POST +
+  ORD_ALPHA_MID_CLOSE;
+export const ORD_ALPHA_SOURCE =
+  ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS + ORD_ALPHA_MID_CONSTRUCT + "\n";
+
+// T11.3-1 restages this fixture after its first product invocation (S-9's
+// before-any-product clause): records made from the strings the pins use.
+export const ORD_ZED_STAGED = stagedMdx(
+  "T5.7-3/T11.3-1 specs/Zed.mdx (the order fixture)",
+  ORD_ZED_SOURCE,
+);
+export const ORD_ALPHA_STAGED = stagedMdx(
+  "T5.7-3/T11.3-1 specs/alpha.mdx (the order fixture)",
+  ORD_ALPHA_SOURCE,
+);
+
+// src/app.ts — byte-LAST (`src/` after `specs/`): a top-level marker (no
+// named unit encloses it — the source is the whole-file location, identity
+// the path alone, range 0..byte length) and a marker inside the NESTED
+// function `deep` (the innermost enclosing named unit, chain `wrap.deep`,
+// with the inner declaration's own construct range — not the enclosing
+// `wrap`'s; SPEC 4.6, 1.7).
+const ORD_APP_HEAD =
+  '// prélude 🦄 app\nimport SPEC from "../specs/alpha.xspec";\n\n';
+const ORD_APP_TOP_MARKER = "SPEC.t";
+const ORD_APP_TOP_POST = ";\n\n";
+const ORD_APP_WRAP_PRE = "function wrap(): void {\n  ";
+const ORD_APP_DEEP_PRE = "function deep(): void {\n    ";
+const ORD_APP_DEEP_MARKER = "SPEC.u";
+const ORD_APP_DEEP_POST = ";\n  }";
+const ORD_APP_DEEP_CONSTRUCT =
+  ORD_APP_DEEP_PRE + ORD_APP_DEEP_MARKER + ORD_APP_DEEP_POST;
+const ORD_APP_WRAP_POST = "\n  deep();\n}\n";
+export const ORD_APP_SOURCE =
+  ORD_APP_HEAD +
+  ORD_APP_TOP_MARKER +
+  ORD_APP_TOP_POST +
+  ORD_APP_WRAP_PRE +
+  ORD_APP_DEEP_CONSTRUCT +
+  ORD_APP_WRAP_POST;
+
+/** One staged occurrence: its complete expected record plus self-check data. */
+export interface OrderArm {
+  readonly what: string;
+  /** The staged file's full content (self-check ground). */
+  readonly fileSource: string;
+  /** The exact characters the occurrence's own range must slice to. */
+  readonly occurrenceSpan: string;
+  /** The exact characters the source node's range must slice to. */
+  readonly sourceSpan: string;
+  readonly record: OccurrenceRecord & {
+    readonly source: OccurrenceSourceNode;
+  };
+}
+
+// The complete expected document, in occurrence order (SPEC 5.7): file path
+// bytes — Zed.mdx, then alpha.mdx, then src/app.ts — then range start. The
+// staged references are the workspace's only occurrences (plain sections,
+// prose, and import declarations record none). Exported: T11.3-1 asserts the
+// identical full-record sequence through the same surface (section-11.3.ts),
+// re-running the slice and sortedness self-checks below in its own body.
+export const ORD_EXPECTED: readonly OrderArm[] = [
+  {
+    what:
+      "`d={ALPHA.t}` on the NESTED section `zout.zin` — the source datum is " +
+      "the containing section itself: its identity plus its construct " +
+      "range, opening tag through closing tag, strictly inside the parent " +
+      "`zout`'s construct, so an outer-section attribution fails identity " +
+      "AND range (SPEC 5.7, 1.7, 2.2)",
+    fileSource: ORD_ZED_SOURCE,
+    occurrenceSpan: ORD_ZED_ZIN_DEP,
+    sourceSpan: ORD_ZED_ZIN_CONSTRUCT,
+    record: {
+      file: ORD_ZED_FILE,
+      range: rangeAfter(
+        ORD_ZED_IMPORT +
+          ORD_ZED_PRELUDE +
+          ORD_ZED_ZOUT_OPEN +
+          ORD_ZED_ZIN_TAG_PRE,
+        ORD_ZED_ZIN_DEP,
+      ),
+      kind: "depends",
+      source: {
+        identity: ORD_ZIN_ID,
+        range: rangeAfter(
+          ORD_ZED_IMPORT + ORD_ZED_PRELUDE + ORD_ZED_ZOUT_OPEN,
+          ORD_ZED_ZIN_CONSTRUCT,
+        ),
+      },
+      target: ORD_T_ID,
+    },
+  },
+  {
+    what:
+      '`{text("zloc")}` inside the nested section\'s content — the INNERMOST ' +
+      "containing section (`zout.zin`, never `zout`) sources it, carrying " +
+      "the identical identity-plus-range datum as the sibling `d` " +
+      "occurrence (SPEC 5.7, 1.7, 2.3)",
+    fileSource: ORD_ZED_SOURCE,
+    occurrenceSpan: ORD_ZED_ZIN_EMB,
+    sourceSpan: ORD_ZED_ZIN_CONSTRUCT,
+    record: {
+      file: ORD_ZED_FILE,
+      range: rangeAfter(
+        ORD_ZED_IMPORT +
+          ORD_ZED_PRELUDE +
+          ORD_ZED_ZOUT_OPEN +
+          ORD_ZED_ZIN_TAG_PRE +
+          ORD_ZED_ZIN_DEP +
+          ORD_ZED_ZIN_TAG_POST,
+        ORD_ZED_ZIN_EMB,
+      ),
+      kind: "embeds",
+      source: {
+        identity: ORD_ZIN_ID,
+        range: rangeAfter(
+          ORD_ZED_IMPORT + ORD_ZED_PRELUDE + ORD_ZED_ZOUT_OPEN,
+          ORD_ZED_ZIN_CONSTRUCT,
+        ),
+      },
+      target: ORD_ZLOC_ID,
+    },
+  },
+  {
+    what:
+      "top-level `{text(ALPHA.u)}` outside any section — the containing " +
+      "node is the ROOT: identity the file's path alone, range the entire " +
+      "file, start 0, end the byte length (SPEC 5.7, 1.2, 1.7, 2.3 — the " +
+      "T8-5 root-sourced shape)",
+    fileSource: ORD_ZED_SOURCE,
+    occurrenceSpan: ORD_ZED_TAIL_EMB,
+    sourceSpan: ORD_ZED_SOURCE,
+    record: {
+      file: ORD_ZED_FILE,
+      range: rangeAfter(
+        ORD_ZED_IMPORT +
+          ORD_ZED_PRELUDE +
+          ORD_ZED_ZOUT_OPEN +
+          ORD_ZED_ZIN_CONSTRUCT +
+          ORD_ZED_ZOUT_CLOSE +
+          ORD_ZED_ZLOC +
+          ORD_ZED_TAIL_PRE,
+        ORD_ZED_TAIL_EMB,
+      ),
+      kind: "embeds",
+      source: {
+        identity: ORD_ZED_FILE,
+        range: { start: 0, end: utf8Length(ORD_ZED_SOURCE) },
+      },
+      target: ORD_U_ID,
+    },
+  },
+  {
+    what:
+      '`d={"u"}` (local string form) on `mid` in the byte-SECOND file — ' +
+      "under a case-folding or locale collation `specs/alpha.mdx` would " +
+      "sort before `specs/Zed.mdx` and this record would lead the " +
+      "enumeration; file-path BYTE order places it fourth (SPEC 5.7)",
+    fileSource: ORD_ALPHA_SOURCE,
+    occurrenceSpan: ORD_ALPHA_MID_DEP,
+    sourceSpan: ORD_ALPHA_MID_CONSTRUCT,
+    record: {
+      file: ORD_ALPHA_FILE,
+      range: rangeAfter(
+        ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS + ORD_ALPHA_MID_TAG_PRE,
+        ORD_ALPHA_MID_DEP,
+      ),
+      kind: "depends",
+      source: {
+        identity: ORD_MID_ID,
+        range: rangeAfter(
+          ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS,
+          ORD_ALPHA_MID_CONSTRUCT,
+        ),
+      },
+      target: ORD_U_ID,
+    },
+  },
+  {
+    what:
+      "top-level TS marker `SPEC.t` — no named unit encloses it, so the " +
+      "source is the whole-file location: identity the path alone, range " +
+      "the entire file (SPEC 4.6, 1.7; T1.7-2)",
+    fileSource: ORD_APP_SOURCE,
+    occurrenceSpan: ORD_APP_TOP_MARKER,
+    sourceSpan: ORD_APP_SOURCE,
+    record: {
+      file: ORD_APP_FILE,
+      range: rangeAfter(ORD_APP_HEAD, ORD_APP_TOP_MARKER),
+      kind: "references",
+      source: {
+        identity: ORD_APP_FILE,
+        range: { start: 0, end: utf8Length(ORD_APP_SOURCE) },
+      },
+      target: ORD_T_ID,
+    },
+  },
+  {
+    what:
+      "marker inside the nested function `deep` — the INNERMOST enclosing " +
+      "named unit sources it: identity `src/app.ts#wrap.deep` (the " +
+      "dot-joined chain, outermost first) with the inner declaration's own " +
+      "construct range, not the enclosing `wrap`'s (SPEC 4.6, 1.7; T1.7-2)",
+    fileSource: ORD_APP_SOURCE,
+    occurrenceSpan: ORD_APP_DEEP_MARKER,
+    sourceSpan: ORD_APP_DEEP_CONSTRUCT,
+    record: {
+      file: ORD_APP_FILE,
+      range: rangeAfter(
+        ORD_APP_HEAD +
+          ORD_APP_TOP_MARKER +
+          ORD_APP_TOP_POST +
+          ORD_APP_WRAP_PRE +
+          ORD_APP_DEEP_PRE,
+        ORD_APP_DEEP_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: ORD_DEEP_ID,
+        range: rangeAfter(
+          ORD_APP_HEAD +
+            ORD_APP_TOP_MARKER +
+            ORD_APP_TOP_POST +
+            ORD_APP_WRAP_PRE,
+          ORD_APP_DEEP_CONSTRUCT,
+        ),
+      },
+      target: ORD_U_ID,
+    },
+  },
+];
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed range must slice the staged file's bytes to exactly the span it
+ * claims. A failure here is a staging-arithmetic defect of this test, never a
+ * product failure.
+ */
+function assertOrdSpan(
+  fileSource: string,
+  range: SourceRange,
+  span: string,
+  what: string,
+): void {
+  const actual = Buffer.from(fileSource, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (actual !== span) {
+    fail(
+      `T5.7-3 fixture self-check — ${what}: the precomputed byte range ` +
+        `[${String(range.start)}, ${String(range.end)}) slices the staged ` +
+        `bytes to ${JSON.stringify(actual)}, expected ${JSON.stringify(span)} ` +
+        `(a harness-side staging error, not a product failure)`,
+    );
+  }
+}
+
+/**
+ * Fixture self-check: the claimed expected sequence must be strictly
+ * increasing under the pinned occurrence comparator — file path bytes, then
+ * range start, then range end (SPEC 5.7). This protects the ORDER the arms
+ * claim exactly as the span self-checks protect their offsets: a mis-ordered
+ * expectation fails harness-side, never as a wrong-but-satisfiable one.
+ */
+function assertOrdSequenceSorted(arms: readonly OrderArm[]): void {
+  for (let i = 1; i < arms.length; i += 1) {
+    const a = arms[i - 1]!.record;
+    const b = arms[i]!.record;
+    const byFile = Buffer.compare(
+      Buffer.from(renderPathValue(a.file), "utf8"),
+      Buffer.from(renderPathValue(b.file), "utf8"),
+    );
+    const order =
+      byFile !== 0
+        ? byFile
+        : a.range.start !== b.range.start
+          ? a.range.start - b.range.start
+          : a.range.end - b.range.end;
+    if (order >= 0) {
+      fail(
+        `T5.7-3 fixture self-check — the expected sequence is not strictly ` +
+          `increasing under the pinned occurrence comparator at index ` +
+          `${String(i)}: ${JSON.stringify(a)} vs ${JSON.stringify(b)} ` +
+          `(a harness-side staging error, not a product failure)`,
+      );
+    }
+  }
+}
+
+const T5_7_3 = defineProductTest({
+  id: "T5.7-3",
+  title:
+    "each occurrence record carries the referencing file, its own range, its edge kind, its source graph node as one identity-plus-range datum — the containing section for MDX with its construct range (the root with the whole-file range for a top-level embedding), the innermost enclosing named unit or the file for TS — and the resolved target's identity; order is total and deterministic: a multi-file fixture asserts file-path BYTE order (`specs/Zed.mdx` before `specs/alpha.mdx`), then range start, then range end, byte-identical across repeated runs; no two records share a range (SPEC 5.7, 1.7, 4.6, 11.3; H-6)",
+  run: async (product) => {
+    for (const arm of ORD_EXPECTED) {
+      assertOrdSpan(
+        arm.fileSource,
+        arm.record.range,
+        arm.occurrenceSpan,
+        `${arm.what} — the occurrence's own span`,
+      );
+      assertOrdSpan(
+        arm.fileSource,
+        arm.record.source.range,
+        arm.sourceSpan,
+        `${arm.what} — the source node's construct range`,
+      );
+    }
+    assertOrdSequenceSorted(ORD_EXPECTED);
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        [ORD_ZED_FILE]: ORD_ZED_STAGED,
+        [ORD_ALPHA_FILE]: ORD_ALPHA_STAGED,
+        [ORD_APP_FILE]: ORD_APP_SOURCE,
+      },
+    });
+    try {
+      // Premise: the workspace is valid — every staged reference is a
+      // sanctioned spelling that resolves (the top-level embedding and the
+      // nested-function marker included) — so the enumeration below is
+      // complete and finding-free (11.2, 11.3). A product disputing any
+      // staging judgment fails loudly here.
+      await buildOk(
+        product,
+        workspace,
+        "T5.7-3 `build` (premise: every staged reference is sanctioned and resolves)",
+      );
+
+      const context = "T5.7-3 `occurrences`";
+      const first = await expectExit(
+        product,
+        workspace,
+        ["occurrences"],
+        0,
+        `${context} (first run)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(first, `${context} (first run)`),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: the consulted domain (the entire discovered set, no ` +
+          `\`--file\`) carries no finding (SPEC 11.2, 11.3)`,
+      );
+      if (report.occurrences.length !== ORD_EXPECTED.length) {
+        fail(
+          `${context}: expected exactly ${String(ORD_EXPECTED.length)} ` +
+            `occurrence records — one per staged reference; plain sections, ` +
+            `prose, and import declarations record none (SPEC 5.7) — got ` +
+            `${String(report.occurrences.length)}: ` +
+            JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+        );
+      }
+      // Per-index equality over the length-checked enumeration pins the
+      // total order — file path BYTES, then range start, then range end
+      // (SPEC 5.7: a case-folding collation surfaces alpha.mdx's record
+      // first and fails at index 0) — along with every record member: file,
+      // own range, kind, the source node's identity-plus-range datum, and
+      // the target identity.
+      ORD_EXPECTED.forEach((arm, index) => {
+        assertSameJson(
+          report.occurrences[index],
+          arm.record,
+          `${context} record [${String(index)}] — ${arm.what}; zero-based ` +
+            `byte offsets, start-inclusive end-exclusive (SPEC 1.7)`,
+        );
+      });
+
+      // H-6 determinism: the identical invocation again, byte-identical
+      // stdout — order and every datum stable across repeated runs.
+      const second = await expectExit(
+        product,
+        workspace,
+        ["occurrences"],
+        0,
+        `${context} (second run, H-6)`,
+      );
+      assertBytesEqual(
+        second.stdoutBytes,
+        first.stdoutBytes,
+        `${context}: stdout of the second run vs the first — the ` +
+          `enumeration is total and deterministic, byte-identical across ` +
+          `repeated runs (SPEC 5.7, H-6)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T5.7-4 — no-occurrence constructs; the exit-1 answer carries the findings
+// ---------------------------------------------------------------------------
+
+// A construct that records no edge records no occurrence (SPEC 5.7): an
+// import declaration (its binding used or not, 2.1), a binding introduced
+// type-only, a chain rooted at a shadowing local declaration (4.5), and a
+// reference spelling that is dynamic or does not resolve (11.2) record none.
+// One workspace stages every class beside three resolving spellings — one per
+// dependency-kind surface — so the complete record multiset individuates
+// "records for exactly the resolving spellings": any phantom record (for an
+// import, a type-only use, a shadowed chain, the dynamic spelling, or an
+// unresolved one) is an extra tuple and fails the exact comparison, and a
+// record carrying an unavailable TARGET is rejected by the form-exact decode
+// itself (SPEC 5.7/11.2: occurrence existence turns on target resolution — an
+// unresolved spelling never reports as a record with an unavailable target;
+// 12.7: `target` is an identity string). The dynamic and unresolving
+// spellings each carry their finding instead (14.8, 14.5–14.7), the
+// unresolved spelling's position reaching consumers only through its
+// finding's range — for the MDX embedding form, pinned to the FULL braced
+// container, the span its occurrence would occupy (SPEC 14, T14-8's rule) —
+// and the consulted domain's findings accompany the answer, exit 1 with the
+// full answer document still emitted (11.2). The dynamic template literal
+// spells an EXISTING id (`` `ok` ``), so a product that evaluates it instead
+// of classifying it dynamic both drops the 14.8 finding and emits a phantom
+// resolved record — failing twice, visibly.
+//
+// The entry's finding-bearing classes — a call through a type-only `text`
+// binding, its condition-18 finding beside it (T4-4's mixed combination), a
+// chain rooted at an identifier an import and a same-scope value-level
+// declaration both bind (T4.5-8), a chain rooted at an identifier two
+// imports bind, type-only or not (T2.1-3, T4-5), a call through a
+// colliding `text` identifier (T4.5-9), and a cross-module call whose
+// argument does not resolve or is not static beside the resolving one
+// that records its occurrence (T4.4-1) — are staged in a second workspace
+// of their own (below the expected table), and its nested-scope classes —
+// which binding of which scope roots a chain or binds a callee (4.5), each
+// staging a cited arm's of T4.5-10 or T4.5-11 — in a third (below the
+// second), so the exported table this workspace pins, which T11.3-1
+// expands by position, is untouched. The nested-scope classes that record
+// nothing: a chain rooted at an identifier an import and a value-level
+// declaration of the import's own scope both bind, a parameter included
+// where that scope is a function's (T4.5-11 (a), (b)); a chain rooted at
+// an identifier two imports of one scope bind (T4.5-11 (c)); a chain
+// spelled where no binding of its identifier is visible, outside a nested
+// import's scope (T4.5-10 (c)) or the importing file (T4.5-10 (f)); a call
+// whose callee no visible `text` binding binds (T4.5-10 (g)); a call
+// through a `text` identifier colliding in the import's own scope
+// (T4.5-11 (e)) — each beside the findings its arm gives it. Those that
+// record: a nested import rooting its own scope's chain though a
+// declaration of an enclosing scope binds the identifier too (T4.5-11
+// (h)); an inner scope's import rooting that scope's chain though an outer
+// scope's import binds it too (T4.5-10 (d)); imports of distinct scopes,
+// each rooting its own (T4.5-11 (d)); and a `text` binding a declaration
+// or import of another scope also binds, each call left to its own
+// scope's binding — a spec module's `text` call recording its occurrence
+// beside any collision finding (T4.5-11 (h), (i)).
+
+export const NO_OCC_SPARE_SOURCE = '<S id="sp">\nSpare text.\n</S>\n';
+export const NO_OCC_SPARE_FILE = "specs/SPARE.mdx";
+
+// specs/MAIN.mdx, composed from the exact parts the expected offsets cite
+// (the T5.7-2/T5.7-3 discipline): the used import (BASE — its references
+// resolve), the never-used import (SPARE — valid, records no edges, 2.1),
+// multi-byte UTF-8 in `ok` shifting every later byte offset, then one
+// resolving `d`, the dynamic `d` (a template literal is not static, 2.4 →
+// 14.8), the unresolving local-string `d` (14.5), the unresolving embedding
+// (14.6), and the resolving embedding.
+const NO_OCC_MAIN_HEAD =
+  'import BASE from "./BASE.xspec"\n' +
+  'import SPARE from "./SPARE.xspec"\n\n' +
+  '<S id="ok">\nPrélude 🦄 ok text.\n</S>\n\n';
+const NO_OCC_MAIN_USE = '<S id="use" d={BASE.a}>\nUse text.\n</S>\n\n';
+const NO_OCC_DYN_CONSTRUCT = '<S id="dyn" d={`ok`}>';
+const NO_OCC_DYN_POST = "\nDyn text.\n</S>\n\n";
+const NO_OCC_UN_CONSTRUCT = '<S id="un" d={"nope"}>';
+const NO_OCC_UN_POST = "\nUn text.\n</S>\n\n";
+const NO_OCC_BAD_PRE = '<S id="bad">\nBad: ';
+const NO_OCC_BAD_CONTAINER = "{text(BASE.gone)}";
+const NO_OCC_BAD_POST = "\n</S>\n\n";
+const NO_OCC_EMB_PRE = '<S id="emb">\nEmb: ';
+const NO_OCC_EMB_CONTAINER = "{text(BASE.a)}";
+const NO_OCC_EMB_POST = "\n</S>\n";
+export const NO_OCC_MAIN_SOURCE =
+  NO_OCC_MAIN_HEAD +
+  NO_OCC_MAIN_USE +
+  NO_OCC_DYN_CONSTRUCT +
+  NO_OCC_DYN_POST +
+  NO_OCC_UN_CONSTRUCT +
+  NO_OCC_UN_POST +
+  NO_OCC_BAD_PRE +
+  NO_OCC_BAD_CONTAINER +
+  NO_OCC_BAD_POST +
+  NO_OCC_EMB_PRE +
+  NO_OCC_EMB_CONTAINER +
+  NO_OCC_EMB_POST;
+
+// T11.3-1 restages this fixture after its first product invocation (S-9's
+// before-any-product clause): records made from the strings the pins use.
+// specs/BASE.mdx spells the token-bounds fixture's base byte for byte, so it
+// is that record (one record per byte sequence, staged at every site; an
+// alias placed after the record, never a second spelling of its bytes).
+export const NO_OCC_BASE_STAGED = TOKEN_BASE_SOURCE;
+export const NO_OCC_SPARE_STAGED = stagedMdx(
+  "T5.7-4/T11.3-1 specs/SPARE.mdx (the no-occurrence fixture)",
+  NO_OCC_SPARE_SOURCE,
+);
+export const NO_OCC_MAIN_STAGED = stagedMdx(
+  "T5.7-4/T11.3-1 specs/MAIN.mdx (the no-occurrence fixture)",
+  NO_OCC_MAIN_SOURCE,
+);
+
+// src/app.ts: the used ordinary import, both T4-4 type-only forms (a `type`
+// modifier on the declaration and on a named binding), a resolving marker in
+// `keeper`, the unresolving marker in `stray` (14.7), the T4.5-4 shadowing
+// function — the IDENTICAL statement texts `SPEC.ok;` and `SPEC.absent;`
+// rooted at the local, recording nothing and triggering nothing — and the
+// T4-4 marker-shaped/call-shaped uses of the type-only bindings (no edge, no
+// occurrence, no finding: such value-level uses fall under no condition,
+// SPEC 4.5). The call `tt(TSPEC.a)` is T4-4's named-binding arm, callee and
+// argument both rooted at type-only bindings, so it raises nothing; a call
+// through a type-only `text` binding receiving an ordinary node — the mixed
+// combination, its 14.18 beside it — fails its workspace, so it is the
+// second workspace's.
+const NO_OCC_APP_HEAD =
+  "// prélude 🦄 no-occurrence\n" +
+  'import SPEC from "../specs/MAIN.xspec";\n' +
+  'import type TSPEC from "../specs/BASE.xspec";\n' +
+  'import { type text as tt } from "../specs/BASE.xspec";\n\n';
+const NO_OCC_APP_KEEPER = "export function keeper(): void {\n  SPEC.ok;\n}\n\n";
+const NO_OCC_STRAY_PRE = "export function stray(): void {\n  ";
+const NO_OCC_STRAY_CONSTRUCT = "SPEC.absent;";
+const NO_OCC_STRAY_POST = "\n}\n\n";
+const NO_OCC_APP_TAIL =
+  "export function shadowScope(): string {\n" +
+  '  const SPEC = { ok: "shadow value", absent: "also local" };\n' +
+  "  SPEC.ok;\n" +
+  "  SPEC.absent;\n" +
+  "  return SPEC.ok;\n" +
+  "}\n\n" +
+  "TSPEC.a;\ntt(TSPEC.a);\n";
+export const NO_OCC_APP_SOURCE =
+  NO_OCC_APP_HEAD +
+  NO_OCC_APP_KEEPER +
+  NO_OCC_STRAY_PRE +
+  NO_OCC_STRAY_CONSTRUCT +
+  NO_OCC_STRAY_POST +
+  NO_OCC_APP_TAIL;
+
+// The complete expected record multiset: the three resolving spellings and
+// nothing else — no record for any import declaration (binding used or
+// unused), type-only use, shadowed chain, dynamic spelling, or unresolved
+// spelling.
+//
+// ORDER CONTRACT (exported; T11.3-1 relies on it): listed in occurrence
+// order — `specs/MAIN.mdx` before `src/app.ts`, and within MAIN the `use`
+// reference precedes the `emb` container in source order — so keep the
+// table position-sorted when restaging (T5.7-4 itself compares order-free;
+// section-11.3.ts expands the table by position).
+export const NO_OCC_UNITS: readonly OccurrenceUnit[] = [
+  {
+    what: "resolving `d={BASE.a}` on `use`",
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: "specs/MAIN.mdx#use",
+    target: "specs/BASE.mdx#a",
+    count: 1,
+  },
+  {
+    what: "resolving MDX embedding `{text(BASE.a)}` in `emb`",
+    file: "specs/MAIN.mdx",
+    kind: "embeds",
+    source: "specs/MAIN.mdx#emb",
+    target: "specs/BASE.mdx#a",
+    count: 1,
+  },
+  {
+    what: "resolving TS marker `SPEC.ok` in `keeper`",
+    file: "src/app.ts",
+    kind: "references",
+    source: "src/app.ts#keeper",
+    target: "specs/MAIN.mdx#ok",
+    count: 1,
+  },
+];
+
+// The staged defects, exactly one finding each (SPEC 14: every condition
+// reported, and nothing else — so the type-only uses, the shadowed chains,
+// and the unused import provably trigger NO finding beside these four).
+export const NO_OCC_EXPECTED_CONDITIONS = {
+  "14.5": 1,
+  "14.6": 1,
+  "14.7": 1,
+  "14.8": 1,
+} as const;
+
+// The unresolved MDX embedding's finding range: the FULL braced container,
+// opening brace through closing brace — the span its occurrence would occupy
+// (SPEC 14, 5.7; T14-8's cardinality rule cross-cited by T5.7-4). Exact, not
+// windowed: a chain-only or call-only range fails.
+const NO_OCC_BAD_RANGE = rangeAfter(
+  NO_OCC_MAIN_HEAD +
+    NO_OCC_MAIN_USE +
+    NO_OCC_DYN_CONSTRUCT +
+    NO_OCC_DYN_POST +
+    NO_OCC_UN_CONSTRUCT +
+    NO_OCC_UN_POST +
+    NO_OCC_BAD_PRE,
+  NO_OCC_BAD_CONTAINER,
+);
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed container range must slice the staged file's bytes to exactly
+ * the braced container. A failure here is a staging-arithmetic defect of this
+ * test, never a product failure.
+ */
+function assertNoOccContainerRange(): void {
+  const actual = Buffer.from(NO_OCC_MAIN_SOURCE, "utf8")
+    .subarray(NO_OCC_BAD_RANGE.start, NO_OCC_BAD_RANGE.end)
+    .toString("utf8");
+  if (actual !== NO_OCC_BAD_CONTAINER) {
+    fail(
+      `T5.7-4 fixture self-check: the precomputed byte range ` +
+        `[${String(NO_OCC_BAD_RANGE.start)}, ${String(NO_OCC_BAD_RANGE.end)}) ` +
+        `slices the staged bytes to ${JSON.stringify(actual)}, expected ` +
+        `${JSON.stringify(NO_OCC_BAD_CONTAINER)} (a harness-side staging ` +
+        `error, not a product failure)`,
+    );
+  }
+}
+
+/**
+ * Resolve the unique finding carrying `condition` (the caller has already
+ * pinned the condition multiset, so a miss here is a diagnosed count defect).
+ */
+function findingWithCondition(
+  findings: readonly Finding[],
+  condition: string,
+  context: string,
+): Finding {
+  const matching = findings.filter(
+    (finding) => finding.condition === condition,
+  );
+  if (matching.length !== 1) {
+    fail(
+      `${context}: expected exactly one condition-${condition} finding ` +
+        `(SPEC 14); got ${String(matching.length)} among ` +
+        JSON.stringify(findings.map((finding) => finding.condition)),
+    );
+  }
+  return matching[0]!;
+}
+
+/** The four staged findings: counts, files, and ranges (shared by surfaces). */
+function assertNoOccFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    NO_OCC_EXPECTED_CONDITIONS,
+    `${context}: exactly the staged defects are reported — one 14.8 (the ` +
+      `dynamic template-literal \`d\` reference), one 14.5 (the unresolving ` +
+      `local \`d\`), one 14.6 (the unresolving embedding), one 14.7 (the ` +
+      `unresolving marker) — and NOTHING for the import declarations ` +
+      `(binding used and unused, SPEC 2.1), the type-only uses, or the ` +
+      `shadowed chains (such value-level uses fall under no condition, ` +
+      `SPEC 4.5)`,
+  );
+  assertFindingLocated(
+    findingWithCondition(findings, "14.8", context),
+    {
+      file: "specs/MAIN.mdx",
+      window: byteWindow(
+        NO_OCC_MAIN_HEAD + NO_OCC_MAIN_USE,
+        NO_OCC_DYN_CONSTRUCT,
+      ),
+    },
+    `${context}: the 14.8 finding locates the dynamic \`d\` spelling (SPEC 14, 2.4)`,
+  );
+  assertFindingLocated(
+    findingWithCondition(findings, "14.5", context),
+    {
+      file: "specs/MAIN.mdx",
+      window: byteWindow(
+        NO_OCC_MAIN_HEAD +
+          NO_OCC_MAIN_USE +
+          NO_OCC_DYN_CONSTRUCT +
+          NO_OCC_DYN_POST,
+        NO_OCC_UN_CONSTRUCT,
+      ),
+    },
+    `${context}: the 14.5 finding locates the unresolving \`d\` spelling (SPEC 14)`,
+  );
+  assertFindingLocated(
+    findingWithCondition(findings, "14.7", context),
+    {
+      file: "src/app.ts",
+      window: byteWindow(
+        NO_OCC_APP_HEAD + NO_OCC_APP_KEEPER + NO_OCC_STRAY_PRE,
+        NO_OCC_STRAY_CONSTRUCT,
+      ),
+    },
+    `${context}: the 14.7 finding locates the unresolving marker (SPEC 14, 4.5)`,
+  );
+  // The MDX embedding form's finding range is pinned exactly: the full
+  // braced container, opening brace through closing brace — the span its
+  // occurrence would occupy (SPEC 14, 5.7). One offending spelling, one
+  // location; the unresolved spelling's position reaches consumers only
+  // through this range, never as an occurrence record.
+  const bad = findingWithCondition(findings, "14.6", context);
+  assertFindingLocated(
+    bad,
+    { file: "specs/MAIN.mdx" },
+    `${context}: the 14.6 finding locates in the embedding's file (SPEC 14)`,
+  );
+  if (bad.locations.length !== 1) {
+    fail(
+      `${context}: the 14.6 finding has exactly one offending spelling, so ` +
+        `exactly one location (SPEC 14 location cardinality); got ` +
+        `${String(bad.locations.length)}: ${JSON.stringify(bad.locations)}`,
+    );
+  }
+  assertSameJson(
+    bad.locations[0]!.range,
+    NO_OCC_BAD_RANGE,
+    `${context}: the 14.6 finding's range is the FULL braced container ` +
+      `\`{text(BASE.gone)}\`, opening brace through closing brace — the ` +
+      `span its occurrence would occupy (SPEC 14, 5.7): a chain-only or ` +
+      `call-only range fails; zero-based byte offsets, start-inclusive ` +
+      `end-exclusive (SPEC 1.7)`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T5.7-4 (second workspace) — the type-only-callee, collision, and
+// cross-module classes
+// ---------------------------------------------------------------------------
+
+// The entry's further no-occurrence classes (SPEC 5.7, 2.1, 2.4, 4, 4.4,
+// 4.5), staged in one workspace beside two resolving control spellings so
+// the complete record multiset individuates each class:
+//
+// - `src/mixed.ts` and `src/mixed-decl.ts` (T4-4's mixed combination): an
+//   ordinary `import SPEC from "../specs/A.xspec"` beside `t` bound
+//   type-only — by a `type` modifier on the named binding
+//   (`import { type text as t } from "../specs/A.xspec"`) and, separately,
+//   on the declaration (`import type { text as t } from "../specs/A.xspec"`),
+//   two declarations of one module binding distinct identifiers, valid
+//   under 4 — and the call `t(SPEC.a)`: a binding introduced type-only is
+//   no spec module reference (4.5), so the call is no spec module's `text`
+//   call and the ordinary node it receives is used outside the sanctioned
+//   uses — one 14.18 at `SPEC.a` in each file — while the callee's own
+//   value use falls under no condition (4.5, 14.18); no record, never the
+//   `embeds` record of a product taking the call for a sanctioned one.
+// - `src/collide.ts` (T4.5-8's class): an identifier the spec module import
+//   and a same-scope value-level declaration (`const SPEC = 1`) both bind
+//   roots no resolving chain — the marker `SPEC.a` and the call
+//   `text(SPEC.b)` are condition 7 each, beside the one condition-15
+//   collision locating both declarations; no edge, no occurrence.
+// - `specs/C.mdx` (T2.1-3's class) and `src/twoimports.ts` (T4-5's first
+//   value-level pairing): `import X from "./A.xspec"` beside
+//   `import X from "./B.xspec"` (spelled `../specs/A.xspec` and
+//   `../specs/B.xspec` from `src/`), neither type-only — an identifier two
+//   imports bind roots no chain (2.1, 2.4), and with `specs/A.mdx` and
+//   `specs/B.mdx` each holding `a` and `b` either binding alone would
+//   resolve every chain rooted at it. In the spec source the two
+//   declarations stand in separate ESM blocks (a blank line between, 2.7)
+//   beside `<S id="s" d={X.a}>` holding `{text(X.a)}`: 14.15 locating both
+//   declarations, 14.5 for the `d` entry, 14.6 for the embedding. In the
+//   code source, beside `text` bound by a separate import of A, the marker
+//   `X.a` and the call `text(X.b)`: 14.15 locating both imports, 14.7 for
+//   each chain. No record for any of the four spellings — never the records
+//   of a product rooting the chain at either declaration.
+// - `src/typed.ts` (T4-5's type-only class): the value import beside a
+//   type-only `import type SPEC from "../specs/B.xspec"` — a colliding
+//   identifier roots a chain at no binding whether or not either import is
+//   type-only (4): 14.15 locating both imports, 14.7 for each chain, no
+//   record — never the type-only exemption's silence (T4-4), which a
+//   product rooting the chain at whichever binding TypeScript's own
+//   resolution prefers exhibits instead.
+// - `src/calltext.ts` (T4.5-9's class): `text` bound by the import and by a
+//   same-scope `function text(x: unknown) {}` — the call `text(SPEC.a)` is
+//   no spec module's `text` call: 14.15 locating both declarations, 14.18
+//   at `SPEC.a` (no 14.6, 14.7, 14.8, or 14.11), no record.
+// - `src/cross.ts` (T4.4-1's class): `textB(A.missing)` is condition 7
+//   alone and `textB(A.a!)` condition 8 alone — no record for either — while
+//   the resolving cross-module call `textB(A.a)` records its `embeds`
+//   occurrence beside its condition-11 finding (`identities` exactly the
+//   called module), 5.7's one occurrence-bearing finding.
+// - `src/ctrl.ts` (the positive control): the same import, marker, and call
+//   colliding with nothing, recording their two edges — so a product that
+//   answers no records at all fails by count, and one that roots a colliding
+//   chain at one of its bindings emits a phantom tuple the exact comparison
+//   rejects.
+//
+// Every file holding a pinned construct is pure ASCII and composed from
+// exact parts, so each pinned construct's window is the UTF-8 byte length
+// of the parts before it (`partWindow`): a 14.15 finding is pinned to
+// exactly two locations, one per colliding declaration, and every spelling
+// finding to one location within its construct's window (the byte-exact
+// spans are T4-4's, T2.1-3's, T4-5's, T4.5-8's, T4.5-9's, and T4.4-1's own
+// business).
+
+// The collision workspace is created after the entry workspace's
+// invocations: its three spec sources are staged-source records (S-9,
+// test/self/s9-staged-sources.test.ts). `specs/B.mdx` holds `a` and `b` as
+// `specs/A.mdx` does, so that either binding of a doubly-imported
+// identifier alone would resolve every chain rooted at it (T2.1-3, T4-5).
+const COLLISION_A_SOURCE = stagedMdx(
+  "T5.7-4 collision workspace specs/A.mdx",
+  '<S id="a">\nAlpha text.\n</S>\n\n<S id="b">\nBeta text.\n</S>\n',
+);
+const COLLISION_B_SOURCE = stagedMdx(
+  "T5.7-4 collision workspace specs/B.mdx",
+  '<S id="a">\nBravo alpha text.\n</S>\n\n<S id="b">\nBravo beta text.\n</S>\n',
+);
+
+/** The positive control: the import roots both chains (SPEC 2.4, 4.5). */
+const COLLISION_CTRL_SOURCE =
+  'import SPEC, { text } from "../specs/A.xspec";\n\nSPEC.a;\ntext(SPEC.b);\n';
+
+// T4-4's mixed combination, `t` bound type-only by a `type` modifier on the
+// named binding — parts: [0] the ordinary default import, [2] the type-only
+// `text` import, [4] the argument chain `SPEC.a` the 14.18 locates (the
+// binding's identifier extended by the longest static chain it roots at
+// the use, SPEC 14).
+const MIXED_PARTS: readonly string[] = [
+  'import SPEC from "../specs/A.xspec";',
+  "\n",
+  'import { type text as t } from "../specs/A.xspec";',
+  "\n\nt(",
+  "SPEC.a",
+  ");\n",
+];
+
+// The same with `t` bound type-only by a `type` modifier on the
+// declaration — parts as in `MIXED_PARTS`.
+const MIXED_DECL_PARTS: readonly string[] = [
+  'import SPEC from "../specs/A.xspec";',
+  "\n",
+  'import type { text as t } from "../specs/A.xspec";',
+  "\n\nt(",
+  "SPEC.a",
+  ");\n",
+];
+
+// T4.5-8's class — parts: [0] the import, [2] the declarator `SPEC = 1`
+// (the located construct, the `const` statement excluded, SPEC 14), [4]
+// the marker chain, [6] the `text(...)` call.
+const COLLIDE_PARTS: readonly string[] = [
+  'import SPEC, { text } from "../specs/A.xspec";',
+  "\n\nconst ",
+  "SPEC = 1",
+  ";\n\n",
+  "SPEC.a",
+  ";\n",
+  "text(SPEC.b)",
+  ";\n",
+];
+
+// T2.1-3's class — parts: [0] and [2] the two declarations binding `X`, in
+// separate ESM blocks (a blank line between, 2.7), [4] the `d` entry `X.a`
+// (14.5), [6] the embedding's braced container `{text(X.a)}` (14.6).
+const TWO_IMPORTS_MDX_PARTS: readonly string[] = [
+  'import X from "./A.xspec"',
+  "\n\n",
+  'import X from "./B.xspec"',
+  '\n\n<S id="s" d={',
+  "X.a",
+  "}>\n",
+  "{text(X.a)}",
+  "\n</S>\n",
+];
+
+// The spec source is staged after the entry workspace's invocations too: a
+// record carrying S-9's `duplicate-import-binding` allowance — two imports
+// binding one identifier are an ECMAScript early error 14.20 admits, and
+// the stock parser judges every ESM block of a file as one module, so the
+// separate-blocks staging relies on it as well (T2.1-3's
+// `duplicateBindingArm`).
+const COLLISION_C_SOURCE = stagedMdx(
+  "T5.7-4 collision workspace specs/C.mdx",
+  TWO_IMPORTS_MDX_PARTS.join(""),
+  { allowances: ["duplicate-import-binding"] },
+);
+
+// T4-5's first value-level pairing — parts: [0] and [2] the two imports
+// binding `X`, then `text` bound by a separate import of A (two
+// declarations of one module binding distinct identifiers, valid under 4),
+// [4] the marker chain, [6] the `text(...)` call.
+const TWO_IMPORTS_TS_PARTS: readonly string[] = [
+  'import X from "../specs/A.xspec";',
+  "\n",
+  'import X from "../specs/B.xspec";',
+  '\nimport { text } from "../specs/A.xspec";\n\n',
+  "X.a",
+  ";\n",
+  "text(X.b)",
+  ";\n",
+];
+
+// T4-5's type-only class — parts: [0] the value import, [2] the type-only
+// import of a second spec module, then `text` bound by a separate import of
+// A (two declarations of one module binding distinct identifiers, valid
+// under 4), [4] the marker chain, [6] the `text(...)` call.
+const TYPED_PARTS: readonly string[] = [
+  'import SPEC from "../specs/A.xspec";',
+  "\n",
+  'import type SPEC from "../specs/B.xspec";',
+  '\nimport { text } from "../specs/A.xspec";\n\n',
+  "SPEC.a",
+  ";\n",
+  "text(SPEC.b)",
+  ";\n",
+];
+
+// T4.5-9's class — parts: [0] the import binding `text`, [2] the same-scope
+// function declaration binding it too, [4] the argument chain `SPEC.a` the
+// 14.18 locates (the identifier extended by its longest static chain).
+const CALLTEXT_PARTS: readonly string[] = [
+  'import SPEC, { text } from "../specs/A.xspec";',
+  "\n\n",
+  "function text(x: unknown) {}",
+  "\n\ntext(",
+  "SPEC.a",
+  ");\n",
+];
+
+// T4.4-1's class — parts: [1] the unresolved-argument call (14.7 alone),
+// [3] the non-static-argument call (14.8 alone), [5] the resolving
+// cross-module call (14.11, its occurrence recorded beside it).
+const CROSS_PARTS: readonly string[] = [
+  'import A from "../specs/A.xspec";\n' +
+    'import { text as textB } from "../specs/B.xspec";\n\n',
+  "textB(A.missing)",
+  ";\n",
+  "textB(A.a!)",
+  ";\n",
+  "textB(A.a)",
+  ";\n",
+];
+
+// The eight code files are staged in the collision workspace too, after the
+// entry workspace's invocations: staged-source records, the same
+// expressions wrapped in place (S-9's timing clause).
+const COLLISION_CODE_FILES = {
+  "src/calltext.ts": stagedTs(
+    "T5.7-4 collision workspace src/calltext.ts",
+    CALLTEXT_PARTS.join(""),
+  ),
+  "src/collide.ts": stagedTs(
+    "T5.7-4 collision workspace src/collide.ts",
+    COLLIDE_PARTS.join(""),
+  ),
+  "src/cross.ts": stagedTs(
+    "T5.7-4 collision workspace src/cross.ts",
+    CROSS_PARTS.join(""),
+  ),
+  "src/ctrl.ts": stagedTs(
+    "T5.7-4 collision workspace src/ctrl.ts",
+    COLLISION_CTRL_SOURCE,
+  ),
+  "src/mixed-decl.ts": stagedTs(
+    "T5.7-4 collision workspace src/mixed-decl.ts",
+    MIXED_DECL_PARTS.join(""),
+  ),
+  "src/mixed.ts": stagedTs(
+    "T5.7-4 collision workspace src/mixed.ts",
+    MIXED_PARTS.join(""),
+  ),
+  "src/twoimports.ts": stagedTs(
+    "T5.7-4 collision workspace src/twoimports.ts",
+    TWO_IMPORTS_TS_PARTS.join(""),
+  ),
+  "src/typed.ts": stagedTs(
+    "T5.7-4 collision workspace src/typed.ts",
+    TYPED_PARTS.join(""),
+  ),
+} as const;
+
+/** A part's end-widened byte window from the exact parts before it. */
+function partWindow(
+  parts: readonly string[],
+  index: number,
+): { readonly start: number; readonly end: number } {
+  return byteWindow(parts.slice(0, index).join(""), parts[index]!);
+}
+
+// The complete expected record multiset: the control's two spellings and the
+// resolving cross-module call — nothing for the other classes' spellings
+// (the two calls through a type-only `text` binding; eight chains rooted at
+// a colliding identifier — two in each of `src/collide.ts`,
+// `src/twoimports.ts`, and `src/typed.ts`, and `specs/C.mdx`'s `d` entry
+// and embedding; the call through the colliding `text`; the two
+// non-resolving cross-module calls). Every source is the whole file — no
+// named unit encloses a top-level statement (SPEC 4.6) — so a record's
+// source identity is the file's own path.
+const COLLISION_UNITS: readonly OccurrenceUnit[] = [
+  {
+    what: "control marker `SPEC.a` in src/ctrl.ts",
+    file: "src/ctrl.ts",
+    kind: "references",
+    source: "src/ctrl.ts",
+    target: "specs/A.mdx#a",
+    count: 1,
+  },
+  {
+    what: "control call `text(SPEC.b)` in src/ctrl.ts",
+    file: "src/ctrl.ts",
+    kind: "embeds",
+    source: "src/ctrl.ts",
+    target: "specs/A.mdx#b",
+    count: 1,
+  },
+  {
+    what: "resolving cross-module call `textB(A.a)` in src/cross.ts",
+    file: "src/cross.ts",
+    kind: "embeds",
+    source: "src/cross.ts",
+    target: "specs/A.mdx#a",
+    count: 1,
+  },
+];
+
+// The staged defects, exactly (SPEC 14: every condition reported and nothing
+// else — so the control file, the resolving cross-module call's argument,
+// and the type-only callees' own value uses provably trigger nothing beside
+// these).
+const COLLISION_EXPECTED_CONDITIONS = {
+  "14.5": 1,
+  "14.6": 1,
+  "14.7": 7,
+  "14.8": 1,
+  "14.11": 1,
+  "14.15": 5,
+  "14.18": 3,
+} as const;
+
+/** One expected finding: its file and, in location order, its bearers' windows. */
+interface CollisionFindingExpectation {
+  /** What the finding reports (failure diagnostics). */
+  readonly what: string;
+  /** The workspace-relative file every location names. */
+  readonly file: string;
+  /** One window per expected location, in 12.7 location order. */
+  readonly windows: readonly { readonly start: number; readonly end: number }[];
+}
+
+// Per condition, the expected findings in (file, first-location start) order
+// — `findingsInSourceOrder`'s — each pinned to exactly one location per
+// bearer within the bearer's window. File order is byte order:
+// `specs/C.mdx` < `src/calltext.ts` < `src/collide.ts` < `src/cross.ts` <
+// `src/mixed-decl.ts` < `src/mixed.ts` < `src/twoimports.ts` <
+// `src/typed.ts`.
+const COLLISION_EXPECTED_FINDINGS: Readonly<
+  Record<
+    keyof typeof COLLISION_EXPECTED_CONDITIONS,
+    readonly CollisionFindingExpectation[]
+  >
+> = {
+  "14.5": [
+    {
+      what: "the `d` entry `X.a` rooted at the doubly-imported `X`",
+      file: "specs/C.mdx",
+      windows: [partWindow(TWO_IMPORTS_MDX_PARTS, 4)],
+    },
+  ],
+  "14.6": [
+    {
+      what: "the embedding `{text(X.a)}` rooted at the doubly-imported `X`",
+      file: "specs/C.mdx",
+      windows: [partWindow(TWO_IMPORTS_MDX_PARTS, 6)],
+    },
+  ],
+  "14.7": [
+    {
+      what: "the marker `SPEC.a` rooted at the doubly-bound `SPEC`",
+      file: "src/collide.ts",
+      windows: [partWindow(COLLIDE_PARTS, 4)],
+    },
+    {
+      what: "the call `text(SPEC.b)` rooted at the doubly-bound `SPEC`",
+      file: "src/collide.ts",
+      windows: [partWindow(COLLIDE_PARTS, 6)],
+    },
+    {
+      what: "the cross-module call `textB(A.missing)`, its argument unresolved (condition 7 alone, SPEC 14.11)",
+      file: "src/cross.ts",
+      windows: [partWindow(CROSS_PARTS, 1)],
+    },
+    {
+      what: "the marker `X.a` rooted at the doubly-imported `X`",
+      file: "src/twoimports.ts",
+      windows: [partWindow(TWO_IMPORTS_TS_PARTS, 4)],
+    },
+    {
+      what: "the call `text(X.b)` rooted at the doubly-imported `X`",
+      file: "src/twoimports.ts",
+      windows: [partWindow(TWO_IMPORTS_TS_PARTS, 6)],
+    },
+    {
+      what: "the marker `SPEC.a` rooted at the type-only-collided `SPEC`",
+      file: "src/typed.ts",
+      windows: [partWindow(TYPED_PARTS, 4)],
+    },
+    {
+      what: "the call `text(SPEC.b)` rooted at the type-only-collided `SPEC`",
+      file: "src/typed.ts",
+      windows: [partWindow(TYPED_PARTS, 6)],
+    },
+  ],
+  "14.8": [
+    {
+      what: "the cross-module call `textB(A.a!)`, its argument not static (condition 8 alone, SPEC 14.11)",
+      file: "src/cross.ts",
+      windows: [partWindow(CROSS_PARTS, 3)],
+    },
+  ],
+  "14.11": [
+    {
+      what: "the resolving cross-module call `textB(A.a)`",
+      file: "src/cross.ts",
+      windows: [partWindow(CROSS_PARTS, 5)],
+    },
+  ],
+  "14.15": [
+    {
+      what: "`X` bound by the spec source's two value-level imports",
+      file: "specs/C.mdx",
+      windows: [
+        partWindow(TWO_IMPORTS_MDX_PARTS, 0),
+        partWindow(TWO_IMPORTS_MDX_PARTS, 2),
+      ],
+    },
+    {
+      what: "`text` bound by the import and by `function text(x: unknown) {}`",
+      file: "src/calltext.ts",
+      windows: [partWindow(CALLTEXT_PARTS, 0), partWindow(CALLTEXT_PARTS, 2)],
+    },
+    {
+      what: "`SPEC` bound by the import and by the declarator `SPEC = 1`",
+      file: "src/collide.ts",
+      windows: [partWindow(COLLIDE_PARTS, 0), partWindow(COLLIDE_PARTS, 2)],
+    },
+    {
+      what: "`X` bound by the code source's two value-level imports",
+      file: "src/twoimports.ts",
+      windows: [
+        partWindow(TWO_IMPORTS_TS_PARTS, 0),
+        partWindow(TWO_IMPORTS_TS_PARTS, 2),
+      ],
+    },
+    {
+      what: "`SPEC` bound by the value import and by the type-only import",
+      file: "src/typed.ts",
+      windows: [partWindow(TYPED_PARTS, 0), partWindow(TYPED_PARTS, 2)],
+    },
+  ],
+  "14.18": [
+    {
+      what: "`SPEC.a` passed to the call through the colliding `text` identifier (no `text` call)",
+      file: "src/calltext.ts",
+      windows: [partWindow(CALLTEXT_PARTS, 4)],
+    },
+    {
+      what: "`SPEC.a` passed to the call through `t`, bound type-only by a `type` modifier on its declaration (no `text` call)",
+      file: "src/mixed-decl.ts",
+      windows: [partWindow(MIXED_DECL_PARTS, 4)],
+    },
+    {
+      what: "`SPEC.a` passed to the call through `t`, bound type-only by a `type` modifier on the named binding (no `text` call)",
+      file: "src/mixed.ts",
+      windows: [partWindow(MIXED_PARTS, 4)],
+    },
+  ],
+};
+
+/**
+ * The collision workspace's findings: the condition multiset exact, then
+ * every finding pinned to its file and, in location order, to exactly one
+ * location per bearer within the bearer's window — a 14.15 locating every
+ * colliding declaration, a spelling finding its one construct — and the
+ * 14.11's `identities` exactly the called module.
+ */
+function assertCollisionFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    COLLISION_EXPECTED_CONDITIONS,
+    `${context}: exactly the staged defects are reported — one 14.5 and ` +
+      `one 14.6 (the spec source's \`d\` entry and embedding rooted at the ` +
+      `doubly-imported \`X\`), seven condition-7 chains (two rooted at the ` +
+      `doubly-bound \`SPEC\`, two at the code source's doubly-imported ` +
+      `\`X\`, two at the type-only-collided \`SPEC\`, the ` +
+      `unresolved-argument cross-module call), one 14.8 (the non-static ` +
+      `cross-module argument), one 14.11 (the resolving cross-module call), ` +
+      `five 14.15 collisions, three 14.18 (the arguments of the two calls ` +
+      `through a type-only \`text\` binding and of the call through the ` +
+      `colliding \`text\`) — and NOTHING for the control file, the type-only ` +
+      `callees' own value uses, or beside them (SPEC 14, 2.1, 2.4, 4, 4.4, ` +
+      `4.5)`,
+  );
+  for (const [condition, expectations] of Object.entries(
+    COLLISION_EXPECTED_FINDINGS,
+  )) {
+    // The count is pinned above, so each expectation has its finding.
+    const actual = findingsInSourceOrder(findings, condition);
+    expectations.forEach((expectation, index) => {
+      assertFindingLocatesExactly(
+        actual[index]!,
+        expectation.windows.map((window) => ({
+          file: expectation.file,
+          window,
+        })),
+        `${context}: the ${condition} finding for ${expectation.what} locates ` +
+          (expectation.windows.length === 1
+            ? "its one construct"
+            : "every colliding declaration, one location each,") +
+          ` within the construct's window and nothing else (SPEC 14, 1.7)`,
+      );
+    });
+  }
+  assertFindingIdentities(
+    findingsInSourceOrder(findings, "14.11")[0]!,
+    ["specs/B.mdx"],
+    `${context}: the 14.11's \`identities\` hold exactly the called module's ` +
+      `root identity (SPEC 14.11, 12.7)`,
+  );
+}
+
+/**
+ * The second workspace: `build --json` pins the staging premise, then a bare
+ * `occurrences` (exit 1, the domain's findings accompanying, SPEC 11.2)
+ * reports records for exactly the three resolving spellings — none for a
+ * call through a type-only `text` binding, a chain rooted at a colliding
+ * identifier, the call through a colliding `text`, or a non-resolving
+ * cross-module call, while the resolving cross-module call's record stands
+ * beside its finding (5.7).
+ */
+async function assertCollisionClassesRecordNothing(
+  product: ProductBinding,
+): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+      "specs/A.mdx": COLLISION_A_SOURCE,
+      "specs/B.mdx": COLLISION_B_SOURCE,
+      "specs/C.mdx": COLLISION_C_SOURCE,
+      ...COLLISION_CODE_FILES,
+    },
+  });
+  try {
+    const buildContext =
+      "T5.7-4 collision workspace `build --json` (staging premise)";
+    assertCollisionFindings(
+      await buildFindings(product, workspace, buildContext),
+      buildContext,
+    );
+
+    const context = "T5.7-4 collision workspace `occurrences`";
+    const result = await expectExit(
+      product,
+      workspace,
+      ["occurrences"],
+      1,
+      `${context} — an answer carrying any finding exits 1, the full ` +
+        `answer document still emitted (SPEC 11.2, 11.3)`,
+    );
+    const report = decodeOccurrencesReport(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertCollisionFindings(report.findings, context);
+    assertSameJson(
+      report.occurrences.map(renderOccurrenceUnit).sort(),
+      expectedUnitMultiset(COLLISION_UNITS),
+      `${context}: the complete (file, [kind], source -> target) record ` +
+        `multiset — exactly the control's marker and call and the resolving ` +
+        `cross-module call (SPEC 5.7, 11.2): no record for a call through a ` +
+        `type-only \`text\` binding (T4-4), a chain rooted at an identifier ` +
+        `an import and a same-scope value-level declaration both bind ` +
+        `(T4.5-8), a chain rooted at an identifier two imports bind, ` +
+        `type-only or not (T2.1-3, T4-5), a call through a colliding ` +
+        `\`text\` identifier (T4.5-9), or a cross-module call whose argument ` +
+        `does not resolve or is not static (T4.4-1) — each reaching ` +
+        `consumers only through its finding's range — while the resolving ` +
+        `cross-module call records its occurrence beside its condition-11 ` +
+        `finding`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T5.7-4 (third workspace) — the nested-scope classes
+// ---------------------------------------------------------------------------
+
+// The entry's nested-scope classes (SPEC 5.7, 2.4, 4.5, 11.2, 14), staged in
+// one workspace, one code file per staging. Each file's text is a cited
+// arm's staging of T4.5-10 or T4.5-11 exactly — read from section-4.5-ii.ts
+// (`t4510StagedText`, `t4511StagedText`), never re-spelled — under a path of
+// its own: most of those arms name their file `src/c.ts`, while T4.5-10
+// (c)'s `src/after-function.ts`, (d)'s `src/x.ts`, and (f)'s `src/p.ts` and
+// `src/q.ts` keep the names their arms give them.
+//
+// - Recording nothing, each beside the findings its arm gives it:
+//   `src/param.ts` (T4.5-11 (a), the parameter `SPEC: number` of the
+//   function whose body holds the import: 14.15 locating the parameter and
+//   the import, 14.7 for `SPEC.a` and for `text(SPEC.b)`, its callee the
+//   top-level `text`, its argument rooted at the colliding identifier);
+//   `src/body-const.ts` (T4.5-11 (b), `const SPEC = 1` of the function's
+//   body beside the block-nested import, which declares its binding in the
+//   function's scope: 14.15 locating the declarator and the import, 14.7
+//   for `SPEC.a`); `src/blocks.ts` (T4.5-11 (c), two imports nested in
+//   separate blocks of one function, sharing its scope: 14.15 locating
+//   both, 14.7 for `SPEC.a`); `src/after-function.ts` (T4.5-10 (c), the
+//   chain after the function holding the import, outside the import's
+//   scope: no finding); `src/p.ts` and `src/q.ts` (T4.5-10 (f), scripts
+//   both, `q.ts`'s chain outside the file whose bare block holds the
+//   import: no finding); `src/hidden-text.ts` (T4.5-10 (g), the top-level
+//   `text(SPEC.a)` beside `g`'s nested `text` import, whose binding is
+//   `g`'s: 14.18 at `SPEC.a`); and `src/text-param.ts` and
+//   `src/text-local.ts` (T4.5-11 (e)'s two stagings, `text` bound by `g`'s
+//   import and by its parameter `text: unknown` or a function declaration
+//   of its body: 14.15 locating both declarations, 14.18 at `SPEC.a`).
+// - Recording: `src/enclosing.ts` (T4.5-11 (h), `g`'s import beside the
+//   top-level `const SPEC = 1`: no finding, `SPEC.a`'s record from
+//   `src/enclosing.ts#g`, and none for the top-level `SPEC.b`, rooted at the
+//   `const`); `src/x.ts` (T4.5-10 (d), a top-level import and one nested in
+//   a block of `g` binding `A`: 14.15 locating both, `g`'s marker's record
+//   from `src/x.ts#g` to `specs/A.mdx#a.b` and the top-level one's from
+//   `src/x.ts` to `specs/B.mdx#a.b`); `src/siblings.ts` (T4.5-11 (d), the
+//   imports of sibling functions: 14.15 locating both, one record from each
+//   function); `src/text-enclosing.ts` (T4.5-11 (h)'s callee side, `g`'s
+//   import of A's `text` beside a top-level `function text`: no finding,
+//   the call's `embeds` record from `src/text-enclosing.ts#g`); and
+//   `src/text-pair.ts` and `src/text-mirror.ts` (T4.5-11 (i)'s two
+//   stagings, a spec module import and a non-spec import binding `text` in
+//   different scopes: 14.15 locating both, the spec module's `text` call
+//   recording its `embeds` occurrence — `g`'s in the first, the top-level
+//   one in the mirror, whose call in `g`, the non-spec `text`'s, records
+//   nothing beside its 14.18 at `SPEC.a`).
+//
+// `specs/A.mdx` and `specs/B.mdx` — one staged-source record staged at both
+// paths — each hold `a`, its child `a.b`, and `b`, so every chain a staging
+// spells names a node of either module (T4.5-10's `a.b`, T4.5-11's `a` and
+// `b`): a spelling that records nothing does so for how it is rooted or
+// called alone. As in T4.5-10 and T4.5-11, no file is compiled under H-2's
+// channel (TypeScript's checker rejects a nested import declaration after
+// parsing), and no `src/t.ts` is staged: T4.5-11 (i)'s `"./t"` names no
+// staged module. The three scripts — `src/after-function.ts`, `src/p.ts`,
+// and `src/q.ts` — declare no file-level name in common, and
+// `src/after-function.ts`'s top-level `A.a.b` lies outside `p.ts`'s
+// import's scope as `src/q.ts`'s does (4.5: an import's scope at widest its
+// own file's).
+//
+// The findings are asserted file by file first — each file's condition
+// multiset exact, every deviating file named at once, so a product failing
+// a class names that class's file — then each finding is pinned to its file
+// and, in location order, to exactly one location per construct it
+// locates, within the construct's window (`byteWindow`, as the collision
+// workspace pins its findings; the byte-exact ranges are T4.5-10's and
+// T4.5-11's own business). Every construct is found in its file's text at
+// module load, spelled there exactly once, each finding's windows disjoint
+// and in 12.7's location order — a mismatch a harness defect thrown at
+// load, never a product verdict.
+
+/** One finding a nested-scope staging gives: its condition and constructs. */
+interface NestedScopeFinding {
+  readonly condition: "14.7" | "14.15" | "14.18";
+  /**
+   * The constructs the finding locates, in 12.7's location order, each
+   * spelled exactly once in the staging's text: a colliding declaration by
+   * its own characters (14, T14-11), an unresolved chain or call at the
+   * span its occurrence would occupy (5.7), a node passed to another
+   * function as the binding's identifier extended by its chain (14).
+   */
+  readonly at: readonly string[];
+}
+
+/** One code file of the nested-scope workspace, and what it gives. */
+interface NestedScopeStaging {
+  /** The workspace-relative path the text is staged at, under `src/`. */
+  readonly file: string;
+  /** The arm whose staging the text is (record names and diagnostics). */
+  readonly cited: string;
+  /** The class the file stages (record names and diagnostics). */
+  readonly what: string;
+  /** The cited staging's text, exactly. */
+  readonly text: string;
+  /** Every finding the file gives, in 12.7's order. */
+  readonly findings: readonly NestedScopeFinding[];
+  /** Every record the file's spellings give. */
+  readonly units: readonly OccurrenceUnit[];
+}
+
+/** The import nested in a function's body or block, spelled with no `;`. */
+const NESTED_IMPORT = 'import SPEC from "../specs/A.xspec"';
+/** T4.5-11 (c)'s and (d)'s second import of `SPEC`, from `specs/B.mdx`. */
+const NESTED_IMPORT_B = 'import SPEC from "../specs/B.xspec"';
+/** The import of A's default binding and its `text` (T4.5-11 (e), (h), (i)). */
+const NESTED_TEXT_IMPORT = 'import SPEC, { text } from "../specs/A.xspec"';
+/** T4.5-11 (i)'s non-spec import of `text`. */
+const NESTED_NON_SPEC_TEXT_IMPORT = 'import { text } from "./t"';
+
+const NESTED_SCOPE_STAGINGS: readonly NestedScopeStaging[] = [
+  {
+    file: "src/param.ts",
+    cited: "T4.5-11 (a)",
+    what: "chains rooted at `SPEC`, which the nested import and its function's parameter `SPEC: number` both bind",
+    text: t4511StagedText("(a) `SPEC: number`"),
+    findings: [
+      { condition: "14.7", at: ["SPEC.a"] },
+      { condition: "14.7", at: ["text(SPEC.b)"] },
+      { condition: "14.15", at: ["SPEC: number", NESTED_IMPORT] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/body-const.ts",
+    cited: "T4.5-11 (b)",
+    what: "a chain rooted at `SPEC`, which the block-nested import and `const SPEC = 1` of its function's body both bind",
+    text: t4511StagedText("(b) `const SPEC = 1`"),
+    findings: [
+      { condition: "14.7", at: ["SPEC.a"] },
+      { condition: "14.15", at: ["SPEC = 1", NESTED_IMPORT] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/blocks.ts",
+    cited: "T4.5-11 (c)",
+    what: "a chain rooted at `SPEC`, which imports nested in two blocks of one function both bind",
+    text: t4511StagedText("(c)"),
+    findings: [
+      { condition: "14.7", at: ["SPEC.a"] },
+      { condition: "14.15", at: [NESTED_IMPORT, NESTED_IMPORT_B] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/after-function.ts",
+    cited: "T4.5-10 (c)",
+    what: "a chain after the function whose body holds the import, outside the import's scope",
+    text: t4510StagedText("(c)", "src/after-function.ts"),
+    findings: [],
+    units: [],
+  },
+  {
+    file: "src/p.ts",
+    cited: "T4.5-10 (f)",
+    what: "a script whose bare block holds the import of `A`, binding in its own file's scope alone",
+    text: t4510StagedText("(f)", "src/p.ts"),
+    findings: [],
+    units: [],
+  },
+  {
+    file: "src/q.ts",
+    cited: "T4.5-10 (f)",
+    what: "a script's chain, outside the file whose import binds `A`",
+    text: t4510StagedText("(f)", "src/q.ts"),
+    findings: [],
+    units: [],
+  },
+  {
+    file: "src/hidden-text.ts",
+    cited: "T4.5-10 (g)",
+    what: "a top-level call whose callee no visible `text` binding binds, `g`'s nested `text` import being `g`'s",
+    text: t4510StagedText("(g)", "src/c.ts"),
+    findings: [{ condition: "14.18", at: ["SPEC.a"] }],
+    units: [],
+  },
+  {
+    file: "src/text-param.ts",
+    cited: "T4.5-11 (e)",
+    what: "a call through `text`, which `g`'s import and its parameter `text: unknown` both bind",
+    text: t4511StagedText("(e) parameter `text: unknown`"),
+    findings: [
+      { condition: "14.15", at: ["text: unknown", NESTED_TEXT_IMPORT] },
+      { condition: "14.18", at: ["SPEC.a"] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/text-local.ts",
+    cited: "T4.5-11 (e)",
+    what: "a call through `text`, which `g`'s import and `function text(x: unknown) {}` of its body both bind",
+    text: t4511StagedText("(e) `function text(x: unknown) {}`"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [NESTED_TEXT_IMPORT, "function text(x: unknown) {}"],
+      },
+      { condition: "14.18", at: ["SPEC.a"] },
+    ],
+    units: [],
+  },
+  {
+    file: "src/enclosing.ts",
+    cited: "T4.5-11 (h)",
+    what: "`g`'s import rooting `g`'s chain though the top-level `const SPEC = 1` binds `SPEC` too",
+    text: t4511StagedText("(h) top-level `const SPEC = 1`"),
+    findings: [],
+    units: [
+      {
+        what: "`SPEC.a` in `g`, rooted at `g`'s import (T4.5-11 (h))",
+        file: "src/enclosing.ts",
+        kind: "references",
+        source: "src/enclosing.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/x.ts",
+    cited: "T4.5-10 (d)",
+    what: "the import nested in a block of `g` rooting `g`'s chain though the top-level import binds `A` too",
+    text: t4510StagedText("(d)", "src/x.ts"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [
+          'import A from "../specs/B.xspec"',
+          'import A from "../specs/A.xspec"',
+        ],
+      },
+    ],
+    units: [
+      {
+        what: "`A.a.b` in `g`, rooted at `g`'s nested import (T4.5-10 (d))",
+        file: "src/x.ts",
+        kind: "references",
+        source: "src/x.ts#g",
+        target: "specs/A.mdx#a.b",
+        count: 1,
+      },
+      {
+        what: "the top-level `A.a.b`, rooted at the top-level import (T4.5-10 (d))",
+        file: "src/x.ts",
+        kind: "references",
+        source: "src/x.ts",
+        target: "specs/B.mdx#a.b",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/siblings.ts",
+    cited: "T4.5-11 (d)",
+    what: "the imports of the sibling functions `g` and `h`, each rooting its own function's chain",
+    text: t4511StagedText("(d)"),
+    findings: [{ condition: "14.15", at: [NESTED_IMPORT, NESTED_IMPORT_B] }],
+    units: [
+      {
+        what: "`SPEC.a` in `g`, rooted at `g`'s import (T4.5-11 (d))",
+        file: "src/siblings.ts",
+        kind: "references",
+        source: "src/siblings.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+      {
+        what: "`SPEC.b` in `h`, rooted at `h`'s import (T4.5-11 (d))",
+        file: "src/siblings.ts",
+        kind: "references",
+        source: "src/siblings.ts#h",
+        target: "specs/B.mdx#b",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/text-enclosing.ts",
+    cited: "T4.5-11 (h)",
+    what: "`g`'s import binding its call's callee though the top-level `function text(x: unknown) {}` binds `text` too",
+    text: t4511StagedText("(h) callee side"),
+    findings: [],
+    units: [
+      {
+        what: "`text(SPEC.a)` in `g`, A's `text` call (T4.5-11 (h))",
+        file: "src/text-enclosing.ts",
+        kind: "embeds",
+        source: "src/text-enclosing.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/text-pair.ts",
+    cited: "T4.5-11 (i)",
+    what: "`g`'s import of A's `text` binding its call's callee though the top-level non-spec import binds `text` too",
+    text: t4511StagedText("(i) top-level non-spec `text`"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [NESTED_NON_SPEC_TEXT_IMPORT, NESTED_TEXT_IMPORT],
+      },
+    ],
+    units: [
+      {
+        what: "`text(SPEC.a)` in `g`, A's `text` call (T4.5-11 (i))",
+        file: "src/text-pair.ts",
+        kind: "embeds",
+        source: "src/text-pair.ts#g",
+        target: "specs/A.mdx#a",
+        count: 1,
+      },
+    ],
+  },
+  {
+    file: "src/text-mirror.ts",
+    cited: "T4.5-11 (i)",
+    what: "the top-level import of A's `text` binding the top-level call's callee, `g`'s non-spec import the callee of `g`'s call",
+    text: t4511StagedText("(i) mirror"),
+    findings: [
+      {
+        condition: "14.15",
+        at: [NESTED_TEXT_IMPORT, NESTED_NON_SPEC_TEXT_IMPORT],
+      },
+      { condition: "14.18", at: ["SPEC.a"] },
+    ],
+    units: [
+      {
+        what: "the top-level `text(SPEC.b)`, A's `text` call (T4.5-11 (i))",
+        file: "src/text-mirror.ts",
+        kind: "embeds",
+        source: "src/text-mirror.ts",
+        target: "specs/A.mdx#b",
+        count: 1,
+      },
+    ],
+  },
+];
+
+/** One expected finding of the nested-scope workspace, located from the bytes. */
+interface LaidOutNestedScopeFinding {
+  readonly condition: string;
+  readonly file: string;
+  /** What the finding reports (failure diagnostics). */
+  readonly what: string;
+  /** One window per located construct, in 12.7's location order. */
+  readonly windows: readonly { readonly start: number; readonly end: number }[];
+}
+
+/**
+ * A construct's end-widened byte window (`byteWindow`) in a staging's text,
+ * which must spell it exactly once — thrown otherwise, a harness defect of
+ * the table above, never a product verdict.
+ */
+function nestedScopeWindow(
+  staging: NestedScopeStaging,
+  construct: string,
+): { readonly start: number; readonly end: number } {
+  const at = staging.text.indexOf(construct);
+  if (at === -1 || staging.text.lastIndexOf(construct) !== at) {
+    throw new Error(
+      `T5.7-4 fixture self-check: the nested-scope workspace's ` +
+        `${staging.file} (${staging.cited}) must spell \`${construct}\` ` +
+        `exactly once (harness bug)`,
+    );
+  }
+  return byteWindow(staging.text.slice(0, at), construct);
+}
+
+// The table's module-load self-check (a mismatch is a harness defect — fix
+// the table — never a product verdict): each path its own under `src/`,
+// none `src/t.ts` (T4.5-11 (i)'s `"./t"` names no staged module), each
+// file's findings in 12.7's order (conditions in numeric order), each
+// unit's file the staging's own and its source that file or a unit within
+// it.
+{
+  const files = NESTED_SCOPE_STAGINGS.map((staging) => staging.file);
+  const conditionNumber = (condition: string): number =>
+    Number(condition.slice("14.".length));
+  const broken = NESTED_SCOPE_STAGINGS.filter(
+    (staging) =>
+      !staging.file.startsWith("src/") ||
+      staging.file === "src/t.ts" ||
+      staging.findings.some(
+        (finding, index) =>
+          index > 0 &&
+          conditionNumber(finding.condition) <
+            conditionNumber(staging.findings[index - 1]!.condition),
+      ) ||
+      staging.units.some(
+        (unit) =>
+          unit.file !== staging.file ||
+          (unit.source !== staging.file &&
+            !unit.source.startsWith(`${staging.file}#`)),
+      ),
+  );
+  if (new Set(files).size !== files.length || broken.length > 0) {
+    throw new Error(
+      `T5.7-4 fixture self-check: the nested-scope workspace's files must ` +
+        `be distinct paths under src/, none src/t.ts, each listing its ` +
+        `findings in 12.7's order and its units from its own file; the ` +
+        `table gives ${JSON.stringify(files)}, the stagings at ` +
+        `${JSON.stringify(broken.map((staging) => staging.file))} broken ` +
+        `(harness bug)`,
+    );
+  }
+}
+
+/**
+ * Every expected finding, located from the exact bytes at module load: each
+ * construct's window found in its staging's text, the windows of one
+ * finding disjoint and in 12.7's location order (file bytes, then start,
+ * then end; one file here).
+ */
+const NESTED_SCOPE_FINDINGS: readonly LaidOutNestedScopeFinding[] =
+  NESTED_SCOPE_STAGINGS.flatMap((staging) =>
+    staging.findings.map((finding): LaidOutNestedScopeFinding => {
+      const windows = finding.at.map((construct) =>
+        nestedScopeWindow(staging, construct),
+      );
+      if (
+        windows.some(
+          (window, index) =>
+            index > 0 && window.start < windows[index - 1]!.end,
+        )
+      ) {
+        throw new Error(
+          `T5.7-4 fixture self-check: the nested-scope workspace's ` +
+            `${staging.file} must list the constructs its ` +
+            `${finding.condition} locates in 12.7's location order, their ` +
+            `windows disjoint — ${JSON.stringify(finding.at)} give ` +
+            `${JSON.stringify(windows)} (harness bug)`,
+        );
+      }
+      return {
+        condition: finding.condition,
+        file: staging.file,
+        what:
+          `${finding.condition} at ` +
+          finding.at.map((construct) => `\`${construct}\``).join(" and ") +
+          ` in ${staging.file} (${staging.cited}: ${staging.what})`,
+        windows,
+      };
+    }),
+  );
+
+/** Each staged code file's expected condition multiset, sorted. */
+const NESTED_SCOPE_CONDITIONS_BY_FILE: ReadonlyMap<string, readonly string[]> =
+  new Map(
+    NESTED_SCOPE_STAGINGS.map((staging) => [
+      staging.file,
+      staging.findings.map((finding) => finding.condition).sort(),
+    ]),
+  );
+
+/**
+ * Per condition, the expected findings in (file, first-location start)
+ * order — `findingsInSourceOrder`'s.
+ */
+const NESTED_SCOPE_FINDINGS_BY_CONDITION: ReadonlyMap<
+  string,
+  readonly LaidOutNestedScopeFinding[]
+> = new Map(
+  [...new Set(NESTED_SCOPE_FINDINGS.map((finding) => finding.condition))].map(
+    (condition) => [
+      condition,
+      NESTED_SCOPE_FINDINGS.filter(
+        (finding) => finding.condition === condition,
+      ).sort((a, b) =>
+        a.file !== b.file
+          ? a.file < b.file
+            ? -1
+            : 1
+          : a.windows[0]!.start - b.windows[0]!.start,
+      ),
+    ],
+  ),
+);
+
+/**
+ * The complete expected record multiset: the recording classes' eight
+ * records — `src/enclosing.ts`'s one, `src/x.ts`'s two, `src/siblings.ts`'s
+ * two, and the `text` calls of `src/text-enclosing.ts`, `src/text-pair.ts`,
+ * and `src/text-mirror.ts` (its top-level call's alone) — and nothing for
+ * any other spelling.
+ */
+const NESTED_SCOPE_UNITS: readonly OccurrenceUnit[] =
+  NESTED_SCOPE_STAGINGS.flatMap((staging) => staging.units);
+
+// The nested-scope workspace is created after the entry workspace's
+// invocations: every file is a staged-source record (S-9's timing clause),
+// each code file's the cited staging's text exactly, and `specs/A.mdx` and
+// `specs/B.mdx` one record staged at both paths.
+const NESTED_SCOPE_SPEC_SOURCE = stagedMdx(
+  "T5.7-4 nested-scope workspace specs/A.mdx and specs/B.mdx — `a`, its child `a.b`, and `b`",
+  '<S id="a">\nAlpha behavior.\n<S id="a.b">\nBeta behavior.\n</S>\n</S>\n\n<S id="b">\nGamma behavior.\n</S>\n',
+);
+const NESTED_SCOPE_CODE_FILES: Readonly<Record<string, StagedTs>> =
+  Object.fromEntries(
+    NESTED_SCOPE_STAGINGS.map((staging) => [
+      staging.file,
+      stagedTs(
+        `T5.7-4 nested-scope workspace ${staging.file} — ${staging.cited}'s staging: ${staging.what}`,
+        staging.text,
+      ),
+    ]),
+  );
+
+/** A decoded finding's condition and locations (failure diagnostics). */
+function renderNestedScopeFinding(finding: Finding): string {
+  const condition = finding.condition ?? finding.code ?? "(code-less)";
+  const locations = finding.locations.map(
+    (location) =>
+      `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+      `${String(location.range.end)})`,
+  );
+  return `${condition} at ${locations.length === 0 ? "no location" : locations.join(" and ")}`;
+}
+
+/**
+ * The nested-scope workspace's findings: file by file first — each file's
+ * condition multiset exact (a file no staging gives a finding, a spec
+ * source among them, holding none), every deviating file named at once
+ * with its class and the findings it got — then every finding pinned to
+ * its file and, in location order, to exactly one location per construct
+ * it locates, within the construct's window (as `assertCollisionFindings`
+ * pins its findings).
+ */
+function assertNestedScopeFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  const byFile = new Map<string, Finding[]>();
+  for (const finding of findings) {
+    const first = finding.locations[0];
+    const file =
+      first === undefined ? "(no location)" : renderPathValue(first.file);
+    byFile.set(file, [...(byFile.get(file) ?? []), finding]);
+  }
+  const deviations: string[] = [];
+  for (const file of [
+    ...new Set([...NESTED_SCOPE_CONDITIONS_BY_FILE.keys(), ...byFile.keys()]),
+  ].sort()) {
+    const expected = NESTED_SCOPE_CONDITIONS_BY_FILE.get(file) ?? [];
+    const got = byFile.get(file) ?? [];
+    const gotConditions = got
+      .map((finding) => finding.condition ?? finding.code ?? "(code-less)")
+      .sort();
+    if (JSON.stringify(gotConditions) !== JSON.stringify(expected)) {
+      const staging = NESTED_SCOPE_STAGINGS.find(
+        (candidate) => candidate.file === file,
+      );
+      deviations.push(
+        `${file} (${
+          staging === undefined
+            ? "no staging gives it a finding"
+            : `${staging.cited}: ${staging.what}`
+        }) — expected [${expected.join(", ")}], got [${
+          got.length === 0
+            ? "none"
+            : got.map(renderNestedScopeFinding).join("; ")
+        }]`,
+      );
+    }
+  }
+  if (deviations.length > 0) {
+    fail(
+      `${context}: each file's findings are exactly those its class gives ` +
+        `(SPEC 14, 2.4, 4.5) — 14.15 for every pair of declarations binding ` +
+        `one identifier in an import's own scope and for every two imports ` +
+        `binding one identifier whatever their scopes, 14.7 for a chain ` +
+        `rooted at an identifier colliding in its scope, 14.18 for a node ` +
+        `passed to a call no visible spec module \`text\` binding binds — ` +
+        `and nothing else; deviating: ${deviations.join(" | ")}`,
+    );
+  }
+  for (const [condition, expectations] of NESTED_SCOPE_FINDINGS_BY_CONDITION) {
+    // Each file's condition multiset is pinned above, so each expectation
+    // has its finding.
+    const actual = findingsInSourceOrder(findings, condition);
+    expectations.forEach((expectation, index) => {
+      assertFindingLocatesExactly(
+        actual[index]!,
+        expectation.windows.map((window) => ({
+          file: expectation.file,
+          window,
+        })),
+        `${context}: the ${expectation.what} locates ` +
+          (expectation.windows.length === 1
+            ? "its one construct"
+            : "every colliding declaration, one location each,") +
+          ` within the construct's window and nothing else (SPEC 14, 1.7)`,
+      );
+    });
+  }
+}
+
+/**
+ * The third workspace: `build --json` pins the staging premise, then a bare
+ * `occurrences` (exit 1, the domain's findings accompanying, SPEC 11.2)
+ * reports records for exactly the recording classes' spellings — a chain
+ * rooted at its own scope's import though another scope's declaration or
+ * import binds the identifier too, and a spec module's `text` call left to
+ * its own scope's binding — and none for a chain rooted at an identifier
+ * colliding in an import's own scope, a chain or call where no binding of
+ * its identifier is visible, or a call through a colliding `text`.
+ */
+async function assertNestedScopeClassesRecord(
+  product: ProductBinding,
+): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+      "specs/A.mdx": NESTED_SCOPE_SPEC_SOURCE,
+      "specs/B.mdx": NESTED_SCOPE_SPEC_SOURCE,
+      ...NESTED_SCOPE_CODE_FILES,
+    },
+  });
+  try {
+    const buildContext =
+      "T5.7-4 nested-scope workspace `build --json` (staging premise)";
+    assertNestedScopeFindings(
+      await buildFindings(product, workspace, buildContext),
+      buildContext,
+    );
+
+    const context = "T5.7-4 nested-scope workspace `occurrences`";
+    const result = await expectExit(
+      product,
+      workspace,
+      ["occurrences"],
+      1,
+      `${context} — an answer carrying any finding exits 1, the full ` +
+        `answer document still emitted (SPEC 11.2, 11.3)`,
+    );
+    const report = decodeOccurrencesReport(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertNestedScopeFindings(report.findings, context);
+    assertSameJson(
+      report.occurrences.map(renderOccurrenceUnit).sort(),
+      expectedUnitMultiset(NESTED_SCOPE_UNITS),
+      `${context}: the complete (file, [kind], source -> target) record ` +
+        `multiset — exactly the recording classes' eight records (SPEC 5.7, ` +
+        `4.5, 11.2): \`src/enclosing.ts\`'s marker in \`g\`, rooted at ` +
+        `\`g\`'s import though a declaration of an enclosing scope binds ` +
+        `\`SPEC\` too (T4.5-11 (h)); \`src/x.ts\`'s marker in \`g\`, rooted ` +
+        `at \`g\`'s nested import, and its top-level marker, rooted at the ` +
+        `top-level import (T4.5-10 (d)); \`src/siblings.ts\`'s markers, each ` +
+        `rooted at its own function's import (T4.5-11 (d)); and the spec ` +
+        `module \`text\` calls each left to its own scope's binding — ` +
+        `\`src/text-enclosing.ts\`'s and \`src/text-pair.ts\`'s in \`g\`, ` +
+        `\`src/text-mirror.ts\`'s at top level (T4.5-11 (h), (i)) — and no ` +
+        `record for a chain rooted at an identifier an import and a ` +
+        `value-level declaration of its own scope both bind, a parameter ` +
+        `included (T4.5-11 (a), (b)), or two imports of one scope bind ` +
+        `(T4.5-11 (c)), a chain spelled outside a nested import's scope or ` +
+        `the importing file (T4.5-10 (c), (f)), a call whose callee no ` +
+        `visible \`text\` binding binds (T4.5-10 (g)) or the non-spec ` +
+        `\`text\` binds (T4.5-11 (i)), or a call through a \`text\` ` +
+        `identifier colliding in the import's own scope (T4.5-11 (e))`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+const T5_7_4 = defineProductTest({
+  id: "T5.7-4",
+  title:
+    "constructs that record no edge record no occurrence — an import declaration (binding used and unused), a type-only binding's marker-shaped uses and a call through a type-only `text` binding (its condition-18 finding beside it; a `type` modifier on the named binding and, separately, on the declaration), a chain rooted at a shadowing local declaration, a chain rooted at an identifier an import and a value-level declaration of the import's own scope both bind (at top level, and a nested import beside its function's parameter or a declaration of its function's body; its collision and unresolved findings beside it), a chain rooted at an identifier two imports of one scope bind, type-only or not (both value-level, in a spec source, in a code source, and nested in two blocks of one function, and one type-only; its collision and unresolved findings beside it), a chain spelled where no binding of its identifier is visible (after the function holding a nested import, and in a script beside another script's block-nested import), a call whose callee no visible `text` binding binds (a nested import's `text` called at top level; its condition-18 finding beside it), a call through a colliding `text` identifier (at top level, and in a function beside its parameter or a function declaration of its body binding `text`), a cross-module call whose argument does not resolve or is not static (the resolving cross-module call recording its occurrence beside its condition-11 finding), a dynamic reference spelling and unresolving ones (each also its finding, 14.8/14.5–14.7) — while a nested import roots its own scope's chain though a declaration of an enclosing scope binds the identifier too, an inner scope's import roots that scope's chain though an outer scope's import binds it too, and imports of sibling functions each root their own (each pair's collision finding beside the records), and a `text` binding another scope's declaration or import also binds leaves each call to its own scope's binding, a spec module's `text` call recording its occurrence beside any collision finding — so `occurrences` reports records for exactly the resolving spellings, never a record with an unavailable target, the unresolved spelling's position reaching consumers only through its finding's range (the MDX embedding form's spanning its full braced container), the answer carrying the domain's findings, exit 1 (SPEC 5.7, 2.1, 2.4, 4, 4.4, 4.5, 11.2, 11.3, 14)",
+  run: async (product) => {
+    assertNoOccContainerRange();
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/BASE.mdx": NO_OCC_BASE_STAGED,
+        "specs/SPARE.mdx": NO_OCC_SPARE_STAGED,
+        "specs/MAIN.mdx": NO_OCC_MAIN_STAGED,
+        "src/app.ts": NO_OCC_APP_SOURCE,
+      },
+    });
+    try {
+      // Staging premise, pinned first: `build --json` reports EXACTLY the
+      // four staged defects — so the resolving spellings provably resolve,
+      // and the no-occurrence constructs that are also no-finding constructs
+      // (imports, type-only uses, shadowed chains) provably trigger nothing.
+      const buildContext = "T5.7-4 `build --json` (staging premise)";
+      assertNoOccFindings(
+        await buildFindings(product, workspace, buildContext),
+        buildContext,
+      );
+
+      // The enumeration over the imperfect workspace: the answer carries the
+      // consulted domain's findings, so the invocation exits 1 — with the
+      // full answer document still emitted (SPEC 11.2; 11.3 is JSON-only).
+      const context = "T5.7-4 `occurrences`";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["occurrences"],
+        1,
+        `${context} — an answer carrying any finding exits 1, the full ` +
+          `answer document still emitted (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(result, context),
+        context,
+      );
+
+      // The domain's findings accompany the answer (the entire discovered
+      // set — no `--file`), each locating its spelling.
+      assertNoOccFindings(report.findings, context);
+
+      // Records for exactly the resolving spellings. The form-exact decode
+      // has already rejected any record with an unavailable target (12.7:
+      // `target` is an identity string; SPEC 5.7/11.2 — an unresolved
+      // spelling is never a record), so the exact multiset comparison is the
+      // remaining edge: an extra record for an import declaration, a
+      // type-only use, a shadowed chain, the dynamic spelling, or an
+      // unresolved spelling fails by count and tuple.
+      assertSameJson(
+        report.occurrences.map(renderOccurrenceUnit).sort(),
+        expectedUnitMultiset(NO_OCC_UNITS),
+        `${context}: the complete (file, [kind], source -> target) record ` +
+          `multiset — exactly the three resolving spellings (SPEC 5.7, ` +
+          `11.2): no record for an import declaration (binding used or ` +
+          `unused, 2.1), a type-only binding's marker-shaped uses, a chain ` +
+          `rooted at a shadowing local declaration (4.5), the dynamic ` +
+          `spelling, or the unresolved spellings — each of the latter ` +
+          `reaching consumers only through its finding's range`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+
+    // The second workspace: the entry's type-only-callee, collision, and
+    // cross-module classes beside resolving controls (SPEC 5.7, 2.1, 2.4,
+    // 4, 4.4, 4.5).
+    await assertCollisionClassesRecordNothing(product);
+
+    // The third workspace: the entry's nested-scope classes, each file a
+    // cited staging of T4.5-10 or T4.5-11 (SPEC 5.7, 2.4, 4.5, 11.2, 14).
+    await assertNestedScopeClassesRecord(product);
+  },
+});
+
+/** TEST-SPEC §5.7, in canonical ID order (SUITE-51). */
+export const section57Tests: readonly ProductTestEntry[] = [
+  T5_7_1,
+  T5_7_2,
+  T5_7_3,
+  T5_7_4,
+];

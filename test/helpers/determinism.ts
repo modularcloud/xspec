@@ -23,8 +23,23 @@
 //   repositories, and the product never writes them (T12.0-11). A fixture
 //   factory that fails to rebuild identical non-`.git` content is a harness
 //   bug and is reported as a plain `Error`, not an assertion failure.
+// - `assertWriteDeltasEqual`: that written-file compare on its own, over
+//   two runs' before/after snapshots the caller took — exported for the
+//   twin comparisons whose runs' written files must be byte-equal to a
+//   twin's (TEST-SPEC T7-8, section-7-discovery.ts: each command on a
+//   staged workspace against the same command on its unstaged twin), its
+//   diagnoses naming the two runs as the caller labels them.
+//
+// Both forms leave the lock path `.xspec/lock` and everything under it out
+// of every snapshot they take (`EXCLUDE_LOCK_PATH`, helpers/lock-path.ts),
+// whatever the command: H-6 excludes it from every comparison of written
+// files across runs or workspaces — determinism comparisons alike — its
+// entries' names and content lying outside 12.0's determinism (13.4), which
+// matters only where a leftover survives a run (a kill, a refused release
+// deletion: T13.5-3, T13.5-11).
 
 import { assertBytesEqual, fail, HarnessAssertionError } from "./assertions.js";
+import { EXCLUDE_LOCK_PATH } from "./lock-path.js";
 import type {
   DirectorySnapshot,
   SnapshotChange,
@@ -66,9 +81,9 @@ export async function assertRunTwiceDeterministic(
   const context =
     options.context ?? `H-6 run-twice determinism of ${options.binding.label}`;
   const first = await runProduct(options.binding, options.run);
-  const afterFirst = await snapshotDirectory(workspaceDir);
+  const afterFirst = await snapshotDirectory(workspaceDir, EXCLUDE_LOCK_PATH);
   const second = await runProduct(options.binding, options.run);
-  const afterSecond = await snapshotDirectory(workspaceDir);
+  const afterSecond = await snapshotDirectory(workspaceDir, EXCLUDE_LOCK_PATH);
   assertRunOutcomesEqual(second, first, context, "run 2", "run 1");
   assertSnapshotsEqual(
     afterFirst,
@@ -115,8 +130,14 @@ export async function assertAcrossDirectoriesDeterministic(
       `${context}: makeWorkspace() returned the same root twice (${firstWorkspace.root}) — the protocol needs two separate directories`,
     );
   }
-  const preFirst = await snapshotDirectory(firstWorkspace.root);
-  const preSecond = await snapshotDirectory(secondWorkspace.root);
+  const preFirst = await snapshotDirectory(
+    firstWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
+  const preSecond = await snapshotDirectory(
+    secondWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
   const fixtureDrift = diffSnapshots(preFirst, preSecond).filter(
     (change) => !isGitInternal(change.key),
   );
@@ -135,8 +156,14 @@ export async function assertAcrossDirectoriesDeterministic(
     options.binding,
     options.makeRun(secondWorkspace),
   );
-  const postFirst = await snapshotDirectory(firstWorkspace.root);
-  const postSecond = await snapshotDirectory(secondWorkspace.root);
+  const postFirst = await snapshotDirectory(
+    firstWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
+  const postSecond = await snapshotDirectory(
+    secondWorkspace.root,
+    EXCLUDE_LOCK_PATH,
+  );
   assertRunOutcomesEqual(
     second,
     first,
@@ -189,12 +216,48 @@ function isGitInternal(key: string): boolean {
   return key === ".git" || key.startsWith(".git/");
 }
 
-function assertWriteDeltasEqual(
+/**
+ * How a written-file compare names its two runs in its diagnoses
+ * ({@link assertWriteDeltasEqual}).
+ */
+export interface WriteDeltaLabels {
+  /** Where the first run ran, e.g. "directory 1". */
+  readonly first: string;
+  /** Where the second run ran, e.g. "directory 2". */
+  readonly second: string;
+  /** The two together, e.g. "the two directories". */
+  readonly pair: string;
+}
+
+/** The two-directory form's labels (the default). */
+const DIRECTORY_LABELS: WriteDeltaLabels = {
+  first: "directory 1",
+  second: "directory 2",
+  pair: "the two directories",
+};
+
+/**
+ * Assert two runs wrote the same files (H-6's written-file compare,
+ * normalizing nothing): each run's delta — `diffSnapshots` of its own
+ * directory before and after it — the same set of paths, each changed the
+ * same way ("added", "removed", or "changed"), every resulting state
+ * byte-identical across the two (`postFirst`, `postSecond`: the directories
+ * after the runs). The two-directory determinism form's compare, shared with
+ * the twin comparisons whose runs' written files must be byte-equal to a
+ * twin's (TEST-SPEC T7-8: a run on a staged workspace against the same
+ * command on its unstaged twin). The deltas' snapshots leave out whatever
+ * the caller pruned — the lock path, `EXCLUDE_LOCK_PATH`, which H-6 excludes
+ * from every comparison of written files across workspaces. Fails as a
+ * `HarnessAssertionError` naming each differing path, the runs named by
+ * `labels`.
+ */
+export function assertWriteDeltasEqual(
   deltaFirst: readonly SnapshotChange[],
   postFirst: DirectorySnapshot,
   deltaSecond: readonly SnapshotChange[],
   postSecond: DirectorySnapshot,
   context: string,
+  labels: WriteDeltaLabels = DIRECTORY_LABELS,
 ): void {
   const firstByKey = new Map(deltaFirst.map((change) => [change.key, change]));
   const secondByKey = new Map(
@@ -209,20 +272,20 @@ function assertWriteDeltasEqual(
     const changeSecond = secondByKey.get(key);
     if (changeFirst !== undefined && changeSecond === undefined) {
       problems.push(
-        `  - ${changeFirst.path}: ${changeFirst.change} by the run in directory 1 (${firstLine(changeFirst.detail)}) but untouched in directory 2`,
+        `  - ${changeFirst.path}: ${changeFirst.change} by the run in ${labels.first} (${firstLine(changeFirst.detail)}) but untouched in ${labels.second}`,
       );
       continue;
     }
     if (changeFirst === undefined && changeSecond !== undefined) {
       problems.push(
-        `  - ${changeSecond.path}: ${changeSecond.change} by the run in directory 2 (${firstLine(changeSecond.detail)}) but untouched in directory 1`,
+        `  - ${changeSecond.path}: ${changeSecond.change} by the run in ${labels.second} (${firstLine(changeSecond.detail)}) but untouched in ${labels.first}`,
       );
       continue;
     }
     if (changeFirst === undefined || changeSecond === undefined) continue;
     if (changeFirst.change !== changeSecond.change) {
       problems.push(
-        `  - ${changeFirst.path}: ${changeFirst.change} in directory 1 but ${changeSecond.change} in directory 2`,
+        `  - ${changeFirst.path}: ${changeFirst.change} in ${labels.first} but ${changeSecond.change} in ${labels.second}`,
       );
       continue;
     }
@@ -233,13 +296,13 @@ function assertWriteDeltasEqual(
     );
     if (difference !== undefined) {
       problems.push(
-        `  - ${changeFirst.path}: written state differs between the two directories: ${difference.split("\n").join("\n    ")}`,
+        `  - ${changeFirst.path}: written state differs between ${labels.pair}: ${difference.split("\n").join("\n    ")}`,
       );
     }
   }
   if (problems.length > 0) {
     throw new HarnessAssertionError(
-      `${context}: written files are not byte-identical across the two directories (H-6, normalizing nothing):\n${problems.join("\n")}`,
+      `${context}: written files are not byte-identical across ${labels.pair} (H-6, normalizing nothing):\n${problems.join("\n")}`,
     );
   }
 }
@@ -252,7 +315,7 @@ function writtenStateDifference(
   // against internal inconsistency all the same.
   if (first === undefined || second === undefined) {
     throw new Error(
-      "determinism protocol internal error: a non-removed delta entry is missing from its post-run snapshot",
+      "written-file compare internal error (H-6): a non-removed delta entry is missing from its post-run snapshot",
     );
   }
   return describeEntryDifference(first, second);

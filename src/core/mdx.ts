@@ -18,41 +18,71 @@
 // conditions inside it go unreported. Within a parsed file, every detectable
 // condition is reported, with 14.2's own masking rule (14.2) applied.
 //
-// Grammar widenings (SPEC 14.20): "well-formed MDX" is remark-mdx's grammar
-// *as extended here* — the toolchain stays remark-mdx (IMPLEMENTATION Key
-// libraries); each widening is a surgical, documented extension preserving
-// exact source offsets, admitting source shapes that are valid xspec sources
-// (SPEC 1–3) but that the stock grammar rejects:
-//   1. Expression grammar (acorn): `xspecAcornExtension` below.
-//   2. ESM block boundary: the stock ESM construct ends only at a blank line
-//      or EOF, so an import directly followed by a non-blank line feeds both
-//      lines to acorn and fails; `widenedEsmConstruct` below ends the block
-//      at the first line boundary where the accumulated text is a complete
-//      valid program.
-//   3. Section-tag pairing: stock MDX pairs JSX tags inside one construct,
-//      so an opening tag with trailing same-line content whose closing tag
-//      sits on a later line ("Expected a closing tag … before the end of
-//      `paragraph`"), and content directly preceding a closing tag on its
-//      line, are rejected; `flatJsxTagExtension` below turns each tag token
-//      into a leaf node and the document builder pairs tags itself across
-//      construct boundaries. Genuinely malformed sources — unclosed or
-//      mismatched elements, bad expressions — still fail the parse (14.20).
+// Braces and ESM blocks (SPEC 14.20): their content derives by ECMAScript
+// 2024 with JSX alone, "decided by derivability alone" — the acorn remark-mdx
+// is handed (`mdxAcorn`, ./mdx-acorn.ts) excludes every early error, so a
+// file failing only such a rule is well-formed and reaches its ordinary
+// outcome (`export { nope }` 14.16, `{1 = 2}` 14.16, `d={010}` 14.8), while
+// TypeScript-only syntax (`BASE.a!`, `BASE.a as X`) is a derivation failure
+// (SPEC 2.4). The static-reference analyzer reads each brace's content as MDX
+// 3 derives it (`derivedContent` below), never the raw document slice.
+// Whitespace and comments alone are judged as SPEC 14.20 judges them: where
+// remark-mdx refuses an attribute's content as empty before calling acorn,
+// though it holds a token the comment deletions hide, the refusal is undone
+// by respelling the content's leading comments (`parseAsJudged`,
+// ./mdx-syntax-failure.ts) and the collected content restored.
+//
+// Section tags are not widened: they pair exactly as stock MDX 3 pairs them
+// (SPEC 14.20; 6.5 "Validation and refusals" spells the consequences out).
+// remark-mdx's stock handlers build `mdxJsxFlowElement` and
+// `mdxJsxTextElement` nodes, and an element opened inside a construct must
+// close inside that same construct: a text-position tag closes within its
+// paragraph ("Expected a closing tag for `<S>` … before the end of
+// `paragraph`"), and a flow-position opening tag closes at a flow-position
+// closing tag beside it, never inside a paragraph line or any other
+// construct opened after it — otherwise the file is unparseable (14.20). The one addition beside those
+// handlers records each tag token's exact span (`tagSpanExtension` below),
+// which the stock nodes do not carry (SPEC 1.7: a section's opening and
+// closing tags are its own characters); it changes no verdict.
+//
+// ESM blocks are not widened: remark-mdx's stock `mdxjsEsm` construct bounds
+// them exactly as MDX 3 does (SPEC 14.20; 6.5 "Import edits" spells the
+// bounds out). A block begins with `import` or `export` at a line's start,
+// interrupts no paragraph (the line after a paragraph line is paragraph
+// text), and runs to the next blank line or the file's end — so a line
+// directly following a block's line joins the block — and the whole block
+// must derive as one ECMAScript module holding import and export
+// declarations only, else the file is unparseable (14.20). A block may
+// therefore hold several declarations and JavaScript comments beside them;
+// the comments are the block's, never MDX comments (SPEC 2.7, 3).
 
-import type { Comment, Program } from "acorn";
-import { Parser, tokTypes } from "acorn";
-import acornJsx from "acorn-jsx";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import type { ByteRange } from "./bytes.js";
-import { Utf8Offsets } from "./bytes.js";
+import { sortByBytes, Utf8Offsets } from "./bytes.js";
 import type { ConditionNumber, Finding } from "./findings.js";
+import { compareFindings, locatedFinding } from "./findings.js";
+import type { PathText } from "./path-text.js";
+import { isEmptyExpression, MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
+import { restoreNameSpelling } from "./mdx-jsx-names.js";
+import type { NameStandIns } from "./mdx-jsx-names.js";
+import {
+  mdxSyntaxFailureOffset,
+  parseAsJudged,
+  parserFile,
+} from "./mdx-syntax-failure.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
-  containsControl,
-  containsWhitespace,
-  FORBIDDEN_SEGMENT_NAMES,
+  isStackOverflow,
+  propagateNotedOverflow,
+  propagateWhileRerunPossible,
+} from "./stack-exhaustion.js";
+import {
+  describeSegmentViolation,
+  idSegmentViolations,
   isWhitespaceCodePoint,
+  segmentViolation,
 } from "./text.js";
 
 // ---------------------------------------------------------------------------
@@ -66,9 +96,10 @@ import {
  */
 export interface SpecAttributeValue {
   /**
-   * The attribute's value — the decoded characters of the quoted form
-   * (MDX decodes character references in attribute values; the declared ID
-   * and tag values are these decoded characters).
+   * The attribute's value: the characters between its quotes exactly as
+   * spelled in the source (SPEC 2.4) — no character reference or escape
+   * sequence is interpreted, so `id="a&#46;b"` declares the segment
+   * `a&#46;b`, never `a.b`. The parser's decoded value is never read.
    */
   readonly value: string;
   /** Byte range of the value's characters, between (excluding) the quotes. */
@@ -86,12 +117,33 @@ export interface SpecAttributeValue {
  * spans and TypeScript sources), not here.
  */
 export interface SpecDependencyAttribute {
-  /** Exact source characters between (excluding) the braces. */
+  /**
+   * The content between (excluding) the braces as MDX 3 derives it
+   * (SPEC 14.20): the source characters, each Markdown container line
+   * prefix the expression spans (a block quote's `>`, a list item's
+   * indentation) blanked to spaces, so offsets are the document's own.
+   */
   readonly expressionText: string;
   /** Byte range of `expressionText` within the file. */
   readonly expressionRange: ByteRange;
   /** Byte range of the whole attribute, name through closing brace. */
   readonly attributeRange: ByteRange;
+}
+
+/**
+ * One raw attribute spelling as parsed (SPEC 11.4): every attribute the
+ * tag spells appears — repeated, unknown, and spread attributes included,
+ * their invalidity a located finding, never an omission. `name` is the
+ * attribute's name as spelled, structurally absent (null) for a spread
+ * attribute; `range` the attribute's own characters (SPEC 1.7) — for a
+ * named attribute its name through the last character of its value, or the
+ * bare name where it spells no value; for a spread attribute its entire
+ * braced construct — and `text` those exact source characters.
+ */
+export interface SpecRawAttribute {
+  readonly name: string | null;
+  readonly range: ByteRange;
+  readonly text: string;
 }
 
 /**
@@ -101,10 +153,11 @@ export interface SpecDependencyAttribute {
  */
 export interface SpecSection {
   /**
-   * The declared ID (SPEC 1.3), decoded — or null for the implicit root and
-   * for a section whose ID is unusable: missing (14.1) or declared in an
-   * invalid form (14.17, repeated or not a quoted string). A null ID on a
-   * non-root section always has a finding accounting for it.
+   * The declared ID (SPEC 1.3), as spelled between the `id` attribute's
+   * quotes (SPEC 2.4: no character reference interpreted) — or null for the
+   * implicit root and for a section whose ID is unusable: missing (14.1) or
+   * declared in an invalid form (14.17, repeated or not a quoted string). A
+   * null ID on a non-root section always has a finding accounting for it.
    */
   readonly id: string | null;
   /**
@@ -140,14 +193,45 @@ export interface SpecSection {
   readonly coverage: "required" | "none" | null;
   /**
    * The node's tags (SPEC 2.6): the whitespace-split tokens of the `tags`
-   * value with duplicates collapsed, in first-occurrence order; empty when
-   * the prop is absent or yields no tags.
+   * value as a tag set (SPEC 12.7) — byte order (SPEC 12.0), duplicates
+   * collapsed — on every surface that reports them and in graph data;
+   * empty when the prop is absent or yields no tags.
    */
   readonly tags: readonly string[];
   /** The `id` attribute's recorded value/spans, when usably declared. */
   readonly idAttribute: SpecAttributeValue | null;
-  /** The `d` attribute's recorded expression span, when validly braced. */
-  readonly dependency: SpecDependencyAttribute | null;
+  /**
+   * Every validly braced `d` attribute's recorded expression span, in tag
+   * order — empty where the tag spells none. SPEC 11.2 "Resolution":
+   * resolution is per spelling, whatever the validity of the attribute
+   * holding it, so each entry of every `d` attribute of a section that
+   * repeats the prop (14.17) resolves or not on its own, exactly as the
+   * entries of a single `d` do; a quoted or valueless `d` holds no entries.
+   */
+  readonly dependencies: readonly SpecDependencyAttribute[];
+  /**
+   * The raw attribute spellings as parsed, one entry per attribute the tag
+   * spells, in tag order (SPEC 11.4). Empty for the root, which has no tag.
+   */
+  readonly attributes: readonly SpecRawAttribute[];
+  /**
+   * SPEC 11.2: whether the interpreted `tags` value is defined — an absent
+   * prop defines the default (no tags), while a repeated, malformed
+   * (braced or valueless), or invalid-valued (SPEC 1.4 → 14.4) `tags` prop
+   * leaves the interpreted value undefined, its raw spelling still listed
+   * in `attributes`. `tags` holds the interpreted value only where this is
+   * true. The root's `tags` is structurally absent, not undefined
+   * (SPEC 11.4): true there.
+   */
+  readonly tagsDefined: boolean;
+  /**
+   * SPEC 11.2: whether the interpreted coverage value is defined — the
+   * `tags` rule's coverage counterpart (absent → the default "required";
+   * repeated, braced, valueless, or a value other than "required"/"none" →
+   * undefined). `coverage` holds the interpreted value only where this is
+   * true; structurally absent (null) for the root, which is not undefined.
+   */
+  readonly coverageDefined: boolean;
 }
 
 /** One `{text(...)}` embedding occurrence (SPEC 2.3). */
@@ -156,13 +240,21 @@ export interface SpecEmbedding {
   readonly section: SpecSection;
   /** The whole expression container, braces included. */
   readonly range: ByteRange;
-  /** Exact source characters between (excluding) the braces. */
+  /**
+   * The content between (excluding) the braces as MDX 3 derives it
+   * (SPEC 14.20): the source characters, each Markdown container line
+   * prefix the expression spans (a block quote's `>`, a list item's
+   * indentation) blanked to spaces, so offsets are the document's own.
+   */
   readonly expressionText: string;
   /** Byte range of `expressionText` within the file. */
   readonly expressionRange: ByteRange;
 }
 
-/** One MDX comment — an expression container holding only block comments (SPEC 2.7). */
+/**
+ * One MDX comment — the empty expression: an expression container whose
+ * content is whitespace and comments alone (SPEC 2.7, 14.20).
+ */
 export interface SpecComment {
   /** The innermost section containing the comment (the root included). */
   readonly section: SpecSection;
@@ -179,19 +271,54 @@ export interface SpecImportStatement {
 }
 
 /**
- * One top-level ESM block (imports; export statements are invalid and
- * reported, SPEC 2.7 → 14.16). The block's range is what Markdown
- * compilation removes (SPEC 3: imports are removed).
+ * One top-level ESM block as MDX 3 bounds it (SPEC 14.20): from a line
+ * start through the last line before the next blank line or the file's
+ * end, one ECMAScript module holding one or more import and export
+ * declarations and any JavaScript comments beside them. `imports` lists
+ * its import declarations in document order; an export statement is
+ * invalid and reported (SPEC 2.7 → 14.16). Markdown compilation removes
+ * each import declaration's own characters alone — the block's comments
+ * and whitespace stay as content (SPEC 3). `exportedBindings` lists, in
+ * document order, the identifiers the block's export statements declare —
+ * an import sharing one collides with it (SPEC 2.1, 2.4 → 14.15).
  */
 export interface SpecEsmBlock {
   readonly range: ByteRange;
   readonly imports: readonly SpecImportStatement[];
+  readonly exportedBindings: readonly SpecExportedBinding[];
+}
+
+/**
+ * One identifier a declaration held by an export statement binds (SPEC
+ * 2.1, 2.4, 2.7), with the construct binding it, as SPEC 14 locates a
+ * colliding declaration (1.7): a variable declarator by its own
+ * characters, its name or binding pattern through its initializer; a
+ * function or class declaration by its own characters, the leading
+ * `export` or `export default` excluded.
+ */
+export interface SpecExportedBinding {
+  readonly name: string;
+  readonly range: ByteRange;
 }
 
 /** The parsed per-file document model. */
 export interface SpecDocument {
-  /** Workspace-relative `/`-separated path (SPEC 1.5). */
+  /**
+   * Workspace-relative `/`-separated path (SPEC 1.5) — the identity-space
+   * name. For a discovered file whose own path is invalid (SPEC 14.19,
+   * 11.2) this is a deterministic stand-in (the lossily decoded spelling
+   * of the path bytes): no identity is ever formed over it, nothing
+   * resolves against it, and it is never rendered — `file` carries the
+   * real path. For every valid discovered source, `path` equals `file`.
+   */
   readonly path: string;
+  /**
+   * The file's real path as data (SPEC 12.0, 12.7): equal to `path`
+   * except for a file whose path is invalid (SPEC 14.19), where it holds
+   * the exact path — the marked byte form for a non-UTF-8 path. Every
+   * finding location and output-facing path of this file renders from it.
+   */
+  readonly file: PathText;
   /** The decoded UTF-8 content (SPEC 1.6). */
   readonly text: string;
   /** UTF-16 index ↔ UTF-8 byte offset conversion for `text` (SPEC 1.7). */
@@ -243,11 +370,43 @@ interface EstreeNode {
   readonly expression?: EstreeNode;
   readonly callee?: EstreeNode;
   readonly name?: string;
+  /** A `CallExpression`'s optional-call flag (`text?.(…)`). */
+  readonly optional?: boolean;
+}
+
+/** A JavaScript comment acorn records beside an expression's nodes. */
+interface EstreeComment {
+  /** "Block" or "Line". */
+  readonly type: string;
+  /** Document-absolute UTF-16 offsets, as for `EstreeNode`. */
+  readonly start?: number;
+  readonly end?: number;
 }
 
 interface EstreeProgram {
   readonly body?: readonly EstreeNode[];
-  readonly comments?: readonly unknown[];
+  readonly comments?: readonly EstreeComment[];
+}
+
+/**
+ * The estree shape of an ESM statement's declarations and binding
+ * patterns, as acorn builds them (SPEC 2.1, 2.4): identifiers carry the
+ * name the language reads.
+ */
+interface EstreeDeclarationNode {
+  readonly type: string;
+  readonly start?: number;
+  readonly end?: number;
+  readonly name?: string;
+  readonly id?: EstreeDeclarationNode | null;
+  readonly declaration?: EstreeDeclarationNode | null;
+  readonly declarations?: readonly EstreeDeclarationNode[];
+  readonly properties?: readonly EstreeDeclarationNode[];
+  readonly elements?: readonly (EstreeDeclarationNode | null)[];
+  readonly left?: EstreeDeclarationNode;
+  readonly argument?: EstreeDeclarationNode;
+  /** A pattern property's value (a pattern node). */
+  readonly value?: unknown;
 }
 
 interface MdxAttributeNode {
@@ -263,631 +422,182 @@ interface MdxTreeNode {
   readonly type: string;
   readonly position?: MdxPosition;
   readonly children?: readonly MdxTreeNode[];
+  /**
+   * An expression container's content as remark-mdx collected it: the
+   * characters between its braces, less the Markdown container line
+   * prefixes (`derivedContent`).
+   */
+  readonly value?: string;
   /** JSX element name; null for a fragment. */
   readonly name?: string | null;
   readonly attributes?: readonly MdxAttributeNode[];
-  readonly data?: { readonly estree?: EstreeProgram };
-  /** `xspecJsxTag` only: this leaf is a closing tag (`</…>`). */
-  readonly close?: boolean;
-  /** `xspecJsxTag` only: this leaf is a self-closing tag (`<…/>`). */
-  readonly selfClosing?: boolean;
+  readonly data?: {
+    readonly estree?: EstreeProgram;
+    /** The root only: every JSX tag token's span (`tagSpanExtension`). */
+    readonly xspecTagSpans?: TagSpans;
+  };
+}
+
+/**
+ * The exact span of every JSX tag token in one parsed file — `<` through
+ * `>`, in UTF-16 indices — recorded by `tagSpanExtension` below. Tag
+ * tokens never overlap, so a tag is identified by its start as by its end.
+ * An element node spans its opening tag's start through its closing tag's
+ * end (a self-closing element: its one tag), so these maps give each
+ * element's tags (SPEC 1.7).
+ */
+interface TagSpans {
+  /** A tag's end, by its start. */
+  readonly endByStart: Map<number, number>;
+  /** A tag's start, by its end. */
+  readonly startByEnd: Map<number, number>;
 }
 
 /** The thrown parse failure's observed shape (a unified VFileMessage). */
 interface ParseFailureLike {
+  /** The grammar component that raised it (absent on any other throw). */
+  readonly source?: unknown;
   readonly reason?: unknown;
   readonly message?: unknown;
-  readonly line?: unknown;
-  readonly column?: unknown;
   readonly place?: unknown;
 }
 
-/**
- * Structural view of acorn's internal parser surface (not in its public
- * types), verified against acorn 8: the two overridden methods below and
- * the state they touch. `parseSubscript` is acorn's per-access step in a
- * member/call chain; `declareName` records one declared binding and
- * raises on redeclaration after recording it.
- */
-interface AcornInternalParser {
-  /** The current token's type and value. */
-  type: unknown;
-  value: unknown;
-  /** True when a newline precedes the current token. */
-  canInsertSemicolon(): boolean;
-  startNodeAt(pos: number, loc: unknown): { expression?: unknown };
-  finishNode(node: object, type: string): unknown;
-  next(): void;
-  scopeStack: readonly unknown[];
-  parseSubscript(...args: unknown[]): unknown;
-  declareName(name: string, bindingType: unknown, pos: number): void;
-}
-
-/**
- * SPEC 2.1/2.4 require certain files to parse so their defects report as
- * import or reference findings rather than as parse failures: a postfix
- * non-null assertion (`BASE!.auth`) is a *dynamic reference* (SPEC 2.4 →
- * 14.8), and two imports binding one identifier are an *invalid import*
- * (SPEC 2.1 → 14.15) — both conditions of a parsed file. Stock acorn
- * rejects both outright, so the expression grammar is widened by exactly
- * these two rules and nothing else; remark-mdx's grammar, so extended,
- * defines well-formed MDX (IMPLEMENTATION; SPEC 14.20):
- *
- * - a postfix `!` with no preceding newline parses as a
- *   `TSNonNullExpression` chain node (the shared static-reference
- *   analyzer then classifies the reference dynamic, SPEC 2.4);
- * - a module-scope redeclaration — duplicate import bindings — does not
- *   abort the parse (import validation reports 14.15, SPEC 2.1); acorn
- *   records the binding before raising, so swallowing the raise leaves
- *   consistent parser state. Redeclarations in inner scopes still fail.
- */
-function xspecAcornExtension(BaseParser: typeof Parser): typeof Parser {
-  // One more derivation level, so the class handed in stays untouched.
-  const Extended = class extends (BaseParser as unknown as new () => object) {};
-  const prototype = Extended.prototype as AcornInternalParser;
-  const superParseSubscript = prototype.parseSubscript;
-  const superDeclareName = prototype.declareName;
-
-  prototype.parseSubscript = function (
-    this: AcornInternalParser,
-    ...args: unknown[]
-  ): unknown {
-    if (
-      this.type === tokTypes.prefix &&
-      this.value === "!" &&
-      !this.canInsertSemicolon()
-    ) {
-      const node = this.startNodeAt(args[1] as number, args[2]);
-      node.expression = args[0];
-      this.next();
-      return this.finishNode(node, "TSNonNullExpression");
-    }
-    return superParseSubscript.apply(this, args);
-  };
-
-  prototype.declareName = function (
-    this: AcornInternalParser,
-    name: string,
-    bindingType: unknown,
-    pos: number,
-  ): void {
-    try {
-      superDeclareName.call(this, name, bindingType, pos);
-    } catch (error) {
-      if (
-        this.scopeStack.length === 1 &&
-        error instanceof SyntaxError &&
-        error.message.includes("has already been declared")
-      ) {
-        return;
-      }
-      throw error;
-    }
-  };
-
-  return Extended as unknown as typeof Parser;
-}
-
-/** The extended acorn: JSX plus the two SPEC-required widenings above. */
-const specAcorn = Parser.extend(acornJsx(), xspecAcornExtension);
-
 // ---------------------------------------------------------------------------
-// Grammar widening 2: the ESM block boundary (SPEC 2.1, 3 → 14.20)
-// ---------------------------------------------------------------------------
-
-/**
- * A parse failure raised by the widened grammar layers below, shaped like
- * the unified `VFileMessage`s the stock toolchain throws so
- * `parseFailureFinding` locates it the same way: `reason` plus a `place`
- * that is either a point (`{line, column, offset}`) or a position
- * (`{start, end}`), offsets in UTF-16 indices.
- */
-class MdxGrammarError extends Error {
-  readonly reason: string;
-  readonly place: object;
-  readonly line?: number;
-  readonly column?: number;
-
-  constructor(
-    reason: string,
-    place: { line: number; column: number; offset: number } | MdxPosition,
-  ) {
-    super(reason);
-    this.reason = reason;
-    this.place = place;
-    if ("line" in place) {
-      this.line = place.line;
-      this.column = place.column;
-    }
-  }
-}
-
-/**
- * Structural view of micromark's tokenizer surface (not a declared
- * dependency's public API), verified against micromark 4: the code
- * classes, effects, and context members the widened ESM construct uses.
- * Micromark represents line endings as the virtual codes CR −5, LF −4,
- * CRLF −3, a tab as −2 followed by virtual spaces −1, and EOF as null.
- */
-type MicromarkCode = number | null;
-type MicromarkState = (code: MicromarkCode) => MicromarkState | undefined;
-
-interface MicromarkPoint {
-  readonly line: number;
-  readonly column: number;
-  readonly offset: number;
-}
-
-interface MicromarkEffects {
-  enter(type: string): unknown;
-  exit(type: string): object;
-  consume(code: MicromarkCode): void;
-  check(
-    construct: object,
-    ok: MicromarkState,
-    nok: MicromarkState,
-  ): MicromarkState;
-}
-
-interface MicromarkTokenizeContext {
-  readonly interrupt?: boolean;
-  readonly parser: { definedModuleSpecifiers?: string[] };
-  now(): MicromarkPoint;
-  sliceSerialize(
-    range: { start: MicromarkPoint; end: MicromarkPoint },
-    expandTabs?: boolean,
-  ): string;
-}
-
-const isLineEnding = (code: MicromarkCode): boolean =>
-  code !== null && code >= -5 && code <= -3;
-const isAsciiAlpha = (code: MicromarkCode): boolean =>
-  code !== null && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122));
-const isMarkdownSpace = (code: MicromarkCode): boolean =>
-  code === -2 || code === -1 || code === 32;
-
-/**
- * Partial construct mirroring the stock extension's next-line-blank check
- * (micromark-core-commonmark `blankLine` behind one consumed line ending):
- * used only under `effects.check`, so everything it consumes is unwound.
- */
-const blankLineBefore = { tokenize: tokenizeNextBlank, partial: true };
-
-function tokenizeNextBlank(
-  effects: MicromarkEffects,
-  ok: MicromarkState,
-  nok: MicromarkState,
-): MicromarkState {
-  return start;
-
-  function start(code: MicromarkCode): MicromarkState | undefined {
-    effects.enter("lineEndingBlank");
-    effects.consume(code);
-    effects.exit("lineEndingBlank");
-    return inside;
-  }
-  function inside(code: MicromarkCode): MicromarkState | undefined {
-    if (isMarkdownSpace(code)) {
-      effects.enter("linePrefix");
-      effects.consume(code);
-      return prefix;
-    }
-    return after(code);
-  }
-  function prefix(code: MicromarkCode): MicromarkState | undefined {
-    if (isMarkdownSpace(code)) {
-      effects.consume(code);
-      return prefix;
-    }
-    effects.exit("linePrefix");
-    return after(code);
-  }
-  function after(code: MicromarkCode): MicromarkState | undefined {
-    return code === null || isLineEnding(code) ? ok(code) : nok(code);
-  }
-}
-
-/** The acorn options the stock ESM construct uses (micromark-extension-mdxjs). */
-const ESM_ACORN_OPTIONS = {
-  ecmaVersion: 2024,
-  sourceType: "module",
-  locations: true,
-} as const;
-
-/** The statement kinds the stock ESM construct admits in a block. */
-const ALLOWED_ESM_TYPES: ReadonlySet<string> = new Set([
-  "ExportAllDeclaration",
-  "ExportDefaultDeclaration",
-  "ExportNamedDeclaration",
-  "ImportDeclaration",
-]);
-
-/** The structural shape of an acorn parse failure (verified against acorn 8). */
-interface AcornFailureLike {
-  readonly message?: unknown;
-  readonly pos?: unknown;
-  readonly raisedAt?: unknown;
-  readonly loc?: { readonly line?: unknown; readonly column?: unknown };
-}
-
-type EsmParseAttempt =
-  | {
-      readonly ok: true;
-      readonly program: Program;
-      readonly comments: Comment[];
-      readonly prefix: string;
-      readonly source: string;
-    }
-  | {
-      readonly ok: false;
-      readonly failure: AcornFailureLike;
-      readonly swallow: boolean;
-      readonly prefix: string;
-    };
-
-/**
- * Rebase an estree fragment parsed from a document slice onto document
- * positions: every numeric `start`/`end` shifts by `offsetDelta`, every
- * `loc` line by `lineDelta` (the slice is contiguous document text, so a
- * plain shift is exact; the construct starts at column 1, so columns
- * never shift).
- */
-function rebaseEstree(
-  value: unknown,
-  offsetDelta: number,
-  lineDelta: number,
-): void {
-  if (typeof value !== "object" || value === null) {
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      rebaseEstree(item, offsetDelta, lineDelta);
-    }
-    return;
-  }
-  const node = value as Record<string, unknown>;
-  if (typeof node["start"] === "number") {
-    node["start"] = node["start"] + offsetDelta;
-  }
-  if (typeof node["end"] === "number") {
-    node["end"] = node["end"] + offsetDelta;
-  }
-  const loc = node["loc"];
-  if (typeof loc === "object" && loc !== null) {
-    for (const key of ["start", "end"]) {
-      const point = (loc as Record<string, unknown>)[key];
-      if (typeof point === "object" && point !== null) {
-        const record = point as Record<string, unknown>;
-        if (typeof record["line"] === "number") {
-          record["line"] = record["line"] + lineDelta;
-        }
-      }
-    }
-  }
-  for (const [key, child] of Object.entries(node)) {
-    if (key !== "loc") {
-      rebaseEstree(child, offsetDelta, lineDelta);
-    }
-  }
-}
-
-/**
- * Grammar widening 2 (SPEC 14.20; SPEC 2.1/3 fix the accepted shape): a
- * clone of the stock `mdxjsEsm` tokenizer (micromark-extension-mdxjs-esm,
- * verified against its source) whose one behavioral change is in
- * `lineStart` — at each line boundary the accumulated text is tried as a
- * program, and a complete valid one ends the block there, so an import
- * line directly followed by a non-blank line parses. The stock construct
- * ends a block only before a blank line or EOF, feeding the follow-on
- * lines to acorn; every other behavior — swallowing incomplete
- * statements across lines, the blank-line check, the import/export-only
- * rule, `definedModuleSpecifiers`, the `addResult` estree (rebased to
- * document positions) — is mirrored. Registered before the stock
- * construct, which therefore never runs. Adjacent import lines become
- * one block per line rather than one shared block; every consumer of
- * `SpecEsmBlock` is per-statement, so the observable model is unchanged.
- */
-const widenedEsmConstruct = {
-  tokenize: tokenizeWidenedEsm,
-  concrete: true,
-};
-
-function tokenizeWidenedEsm(
-  this: MicromarkTokenizeContext,
-  effects: MicromarkEffects,
-  ok: MicromarkState,
-  nok: MicromarkState,
-): MicromarkState {
-  const self = this;
-  const defined =
-    self.parser.definedModuleSpecifiers ??
-    (self.parser.definedModuleSpecifiers = []);
-  // Re-captured in `start`; initialized here only for definite assignment.
-  let startPoint: MicromarkPoint = self.now();
-  let keyword = "";
-  return self.interrupt === true ? nok : start;
-
-  function start(code: MicromarkCode): MicromarkState | undefined {
-    // Only at the start of a line, not in a container (as stock).
-    if (self.now().column > 1) {
-      return nok(code);
-    }
-    startPoint = self.now();
-    effects.enter("mdxjsEsm");
-    effects.enter("mdxjsEsmData");
-    effects.consume(code);
-    keyword += String.fromCharCode(code as number);
-    return word;
-  }
-
-  function word(code: MicromarkCode): MicromarkState | undefined {
-    if (isAsciiAlpha(code)) {
-      effects.consume(code);
-      keyword += String.fromCharCode(code as number);
-      return word;
-    }
-    if ((keyword === "import" || keyword === "export") && code === 32) {
-      effects.consume(code);
-      return inside;
-    }
-    return nok(code);
-  }
-
-  function inside(code: MicromarkCode): MicromarkState | undefined {
-    if (code === null || isLineEnding(code)) {
-      effects.exit("mdxjsEsmData");
-      return lineStart(code);
-    }
-    effects.consume(code);
-    return inside;
-  }
-
-  function lineStart(code: MicromarkCode): MicromarkState | undefined {
-    if (code === null) {
-      return atEnd(code);
-    }
-    // The widening: a complete valid program ends the block at this line
-    // boundary (before the pending line ending). Otherwise exactly the
-    // stock path: end before a blank line, else continue accumulating.
-    if (parseAccumulated().ok) {
-      return atEnd(code);
-    }
-    return effects.check(blankLineBefore, atEnd, continuationStart)(code);
-  }
-
-  function continuationStart(code: MicromarkCode): MicromarkState | undefined {
-    effects.enter("lineEnding");
-    effects.consume(code);
-    effects.exit("lineEnding");
-    return lineStart;
-  }
-
-  /**
-   * Parse the accumulated block text — the contiguous document slice from
-   * the construct's start to the current point, prefixed (as stock) with
-   * `var` declarations of previously imported bindings so later blocks
-   * referencing them parse. `swallow` mirrors
-   * micromark-util-events-to-acorn: the failure is at the accumulated
-   * text's end, so more content may complete it.
-   */
-  function parseAccumulated(): EsmParseAttempt {
-    const source = self.sliceSerialize(
-      { start: startPoint, end: self.now() },
-      false,
-    );
-    const prefix = defined.length > 0 ? "var " + defined.join(",") + "\n" : "";
-    const comments: Comment[] = [];
-    try {
-      const program = specAcorn.parse(prefix + source, {
-        ...ESM_ACORN_OPTIONS,
-        onComment: comments,
-      });
-      return { ok: true, program, comments, prefix, source };
-    } catch (error) {
-      const failure = (
-        typeof error === "object" && error !== null ? error : {}
-      ) as AcornFailureLike;
-      if (typeof failure.pos !== "number" || failure.loc === undefined) {
-        throw error; // not an acorn parse failure — a genuine crash
-      }
-      const swallow =
-        (typeof failure.raisedAt === "number" &&
-          failure.raisedAt >= prefix.length + source.length) ||
-        (typeof failure.message === "string" &&
-          failure.message.startsWith("Unterminated comment"));
-      return { ok: false, failure, swallow, prefix };
-    }
-  }
-
-  function atEnd(code: MicromarkCode): MicromarkState | undefined {
-    const attempt = parseAccumulated();
-    const prefixLines = attempt.prefix.length > 0 ? 1 : 0;
-    if (!attempt.ok) {
-      if (code !== null && attempt.swallow) {
-        return continuationStart(code);
-      }
-      // Mirror the stock failure message and its document-rebased place.
-      const failure = attempt.failure;
-      const pos = failure.pos as number;
-      const relLine = (failure.loc?.line as number) - prefixLines;
-      const relColumn = failure.loc?.column as number;
-      throw new MdxGrammarError("Could not parse import/exports with acorn", {
-        line: startPoint.line + relLine - 1,
-        column: (relLine === 1 ? startPoint.column - 1 : 0) + relColumn + 1,
-        offset: startPoint.offset + (pos - attempt.prefix.length),
-      });
-    }
-    const program = attempt.program;
-    const delta = startPoint.offset - attempt.prefix.length;
-    const lineDelta = startPoint.line - 1 - prefixLines;
-    rebaseEstree(program, delta, lineDelta);
-    rebaseEstree(attempt.comments, delta, lineDelta);
-    if (attempt.prefix.length > 0) {
-      program.body.shift(); // drop the `var` prefix declaration (as stock)
-    }
-    program.start = startPoint.offset;
-    program.end = startPoint.offset + attempt.source.length;
-    (program as Program & { comments: Comment[] }).comments = attempt.comments;
-    for (const statement of program.body) {
-      if (!ALLOWED_ESM_TYPES.has(statement.type)) {
-        throw new MdxGrammarError(
-          "Unexpected `" +
-            statement.type +
-            "` in code: only import/exports are supported",
-          {
-            start: {
-              line: statement.loc?.start.line,
-              column:
-                statement.loc === undefined || statement.loc === null
-                  ? undefined
-                  : statement.loc.start.column + 1,
-              offset: statement.start,
-            },
-            end: {
-              line: statement.loc?.end.line,
-              column:
-                statement.loc === undefined || statement.loc === null
-                  ? undefined
-                  : statement.loc.end.column + 1,
-              offset: statement.end,
-            },
-          },
-        );
-      }
-      if (statement.type === "ImportDeclaration" && self.interrupt !== true) {
-        for (const specifier of statement.specifiers) {
-          defined.push(specifier.local.name);
-        }
-      }
-    }
-    Object.assign(effects.exit("mdxjsEsm"), { estree: program });
-    return ok(code);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Grammar widening 3: flat section-tag pairing (SPEC 1.1, 3, 6.5 → 14.20)
+// Tag spans beside the stock JSX handlers (SPEC 1.7; no verdict changes)
 // ---------------------------------------------------------------------------
 
 /**
  * Structural view of mdast-util-from-markdown's compile context (verified
- * against mdast-util-from-markdown 2): the members the flat-tag handlers
- * use. `data.mdxJsxTag` is the tag snapshot the stock mdast-util-mdx-jsx
- * handlers (which stay registered) accumulate per tag token.
+ * against mdast-util-from-markdown 2): the members the tag-span handler
+ * uses. `data.mdxJsxTag` is the tag state the stock mdast-util-mdx-jsx
+ * handlers keep while a tag token is open — its `start` and `end` are the
+ * whole tag token's points — and `stack[0]` is the tree's root.
  */
 interface FromMarkdownContextLike {
   readonly data: {
     mdxJsxTag?: {
-      readonly name?: string | null;
-      readonly close?: boolean;
-      readonly selfClosing?: boolean;
-      readonly attributes?: readonly MdxAttributeNode[];
+      readonly start?: MdxPoint;
+      readonly end?: MdxPoint;
     };
   };
-  resume(): unknown;
-  enter(node: object, token: object): unknown;
-  exit(token: object): unknown;
+  readonly stack: readonly { data?: { xspecTagSpans?: TagSpans } }[];
 }
 
 /**
- * Replacement for the stock `exitMdxJsxTag`: instead of pairing tags into
- * `mdxJsxFlowElement`/`mdxJsxTextElement` nodes within one construct —
- * which rejects a section opened with trailing same-line content and
- * closed on a later line, and content directly preceding a closing tag —
- * every tag token becomes one `xspecJsxTag` leaf node carrying the tag's
- * name, kind, and attributes at the token's exact source positions. The
- * document builder pairs the leaves across construct boundaries
- * (SPEC 14.20 widening 3) and reports unclosed or mismatched tags as
- * parse failures.
+ * Record the current tag token's span on the root (`TagSpans`). Registered
+ * for the tag's `<` and `>` marker tokens, which no stock handler reads, so
+ * every stock handler — tag names, attributes, and the element pairing
+ * that decides well-formedness (SPEC 14.20) — stays in place; the second
+ * call per tag records the same span again.
  */
-function exitFlatJsxTag(this: FromMarkdownContextLike, token: object): void {
-  const tag = this.data.mdxJsxTag;
-  if (tag === undefined) {
-    throw new Error("xspec internal error: JSX tag exit without tag state");
+function recordTagSpan(this: FromMarkdownContextLike): void {
+  const start = this.data.mdxJsxTag?.start?.offset;
+  const end = this.data.mdxJsxTag?.end?.offset;
+  const root = this.stack[0];
+  if (typeof start !== "number" || typeof end !== "number" || !root) {
+    throw new Error("xspec internal error: JSX tag marker without tag state");
   }
-  this.resume(); // drop the tag's text buffer, as the stock handler does
-  this.enter(
-    {
-      type: "xspecJsxTag",
-      name: tag.name ?? null,
-      close: tag.close === true,
-      selfClosing: tag.selfClosing === true,
-      attributes: tag.attributes ?? [],
-      children: [],
-    },
-    token,
-  );
-  this.exit(token);
+  const data = (root.data ??= {});
+  const spans = (data.xspecTagSpans ??= {
+    endByStart: new Map<number, number>(),
+    startByEnd: new Map<number, number>(),
+  });
+  spans.endByStart.set(start, end);
+  spans.startByEnd.set(end, start);
 }
 
 /**
- * Replacement for the stock `enterMdxJsxTagClosingMarker`, which throws on
- * a closing tag with no same-construct open element; pairing (and the
- * corresponding failure) is the document builder's.
+ * The fromMarkdown addition: handlers for token types the stock
+ * extensions leave unhandled (mdast-util-from-markdown merges handler
+ * maps by assignment per token type, so no stock handler is replaced).
  */
-function ignoreClosingMarker(): void {
-  // Intentionally empty.
-}
-
-/**
- * The fromMarkdown override. Registered after mdast-util-mdx-jsx's
- * extension, so these handlers replace the stock ones per token type
- * (mdast-util-from-markdown merges `enter`/`exit` maps by assignment,
- * later extensions winning) while every other stock handler — tag names,
- * attributes and their decoded values, expression attributes — stays.
- * Handlers that reject genuinely malformed tags (attributes or a
- * self-closing slash in a closing tag) also stay, so those remain parse
- * failures (SPEC 14.20).
- */
-const flatJsxTagExtension = {
-  enter: {
-    mdxJsxFlowTagClosingMarker: ignoreClosingMarker,
-    mdxJsxTextTagClosingMarker: ignoreClosingMarker,
-  },
+const tagSpanExtension = {
   exit: {
-    mdxJsxFlowTag: exitFlatJsxTag,
-    mdxJsxTextTag: exitFlatJsxTag,
+    mdxJsxFlowTagMarker: recordTagSpan,
+    mdxJsxTextTagMarker: recordTagSpan,
   },
 };
 
 /**
- * Register the grammar widenings. Placed after `remarkMdx` deliberately:
- * micromark's `combineExtensions` splices a later extension's constructs
- * *before* earlier ones at the same character (verified against
- * micromark 4), so `widenedEsmConstruct` is attempted before — and fully
- * shadows — the stock ESM construct at `e`/`i`, and the fromMarkdown
- * merge above replaces the stock tag handlers.
+ * Register the tag-span recorder. No micromark construct is added and no
+ * stock handler replaced: every construct is tokenized, and every JSX
+ * element paired, by remark-mdx's stock grammar (SPEC 14.20).
  */
-function xspecGrammarWidenings(this: { data(): unknown }): void {
+function xspecTagSpans(this: { data(): unknown }): void {
   const data = this.data() as {
-    micromarkExtensions?: unknown[];
     fromMarkdownExtensions?: unknown[];
   };
-  (data.micromarkExtensions ??= []).push({
-    flow: {
-      101: widenedEsmConstruct, // `e`
-      105: widenedEsmConstruct, // `i`
-    },
-  });
-  (data.fromMarkdownExtensions ??= []).push(flatJsxTagExtension);
+  (data.fromMarkdownExtensions ??= []).push(tagSpanExtension);
 }
 
 /**
  * The MDX parser (IMPLEMENTATION: remark-mdx defines well-formed MDX,
- * SPEC 14.20 — with the grammar widened per `xspecAcornExtension`,
- * `widenedEsmConstruct`, and `flatJsxTagExtension` above). Frozen once;
- * `parse` is pure.
+ * SPEC 14.20): MDX 3's grammar, its braces and ESM blocks derived by
+ * ECMAScript 2024 alone, early errors excluded (`mdxAcorn`). Frozen once;
+ * `parse` is pure, given its file through `parserFile` (which keeps the
+ * file it builds from reading the process's working directory).
  */
 const mdxParser = unified()
   .use(remarkParse)
-  .use(remarkMdx, { acorn: specAcorn })
-  .use(xspecGrammarWidenings)
+  .use(remarkMdx, { acorn: mdxAcorn, acornOptions: MDX_ACORN_OPTIONS })
+  .use(xspecTagSpans)
   .freeze();
 
 // ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
+
+/** A spec source's parse: its decoded text and MDX tree, or its 14.20. */
+type MdxParse =
+  | {
+      readonly kind: "tree";
+      readonly text: string;
+      readonly offsets: Utf8Offsets;
+      readonly tree: MdxTreeNode;
+    }
+  | { readonly kind: "unparseable"; readonly finding: Finding };
+
+/**
+ * Decode and parse one spec source (SPEC 1.6, 14.20): valid UTF-8 with no
+ * byte-order mark, then MDX 3's grammar — the whole verdict on
+ * well-formedness, which the document builder never revises. A call-stack
+ * overflow is no verdict (SPEC 14.20: derivability alone decides): while a
+ * rerun on a larger stack is possible it propagates there, thrown or noted
+ * on its way through the grammar (core/stack-exhaustion.ts, ./mdx-acorn.ts),
+ * whether the parse then failed or not; only the invocation's last
+ * attempt, or one past its first effect, answers from it.
+ */
+function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
+  const decoded = decodeSourceBytes(file, bytes);
+  if (!decoded.ok) {
+    return { kind: "unparseable", finding: decoded.finding };
+  }
+  const text = decoded.text;
+  const offsets = new Utf8Offsets(text);
+  let tree: MdxTreeNode;
+  try {
+    // SPEC 14.20: remark-mdx's grammar defines well-formed MDX, its refusal
+    // of an attribute's content as empty undone where that content holds
+    // a token (`parseAsJudged`).
+    const { result, originals, names } = parseAsJudged(
+      text,
+      (spelled) =>
+        mdxParser.parse(parserFile(spelled)) as unknown as MdxTreeNode,
+    );
+    if (originals.size > 0) restoreRespelledContent(result, text, originals);
+    if (names.units.size > 0) restoreJsxNames(result, names);
+    tree = result;
+  } catch (error) {
+    propagateWhileRerunPossible(error);
+    propagateNotedOverflow();
+    return {
+      kind: "unparseable",
+      finding: parseFailureFinding(file, error, text, offsets),
+    };
+  }
+  propagateNotedOverflow();
+  return { kind: "tree", text, offsets, tree };
+}
 
 /**
  * Parse one discovered spec source into its document model (SPEC 1, 2).
@@ -899,66 +609,50 @@ const mdxParser = unified()
 export function parseSpecSource(
   path: string,
   bytes: Uint8Array,
+  file: PathText = path,
 ): SpecSourceResult {
-  const decoded = decodeSourceBytes(path, bytes);
-  if (!decoded.ok) {
-    return { kind: "unparseable", finding: decoded.finding };
+  const parsed = parseMdx(file, bytes);
+  if (parsed.kind === "unparseable") {
+    return parsed;
   }
-  const text = decoded.text;
-  const offsets = new Utf8Offsets(text);
-
-  let tree: MdxTreeNode;
-  try {
-    // SPEC 14.20: remark-mdx's grammar defines well-formed MDX.
-    tree = mdxParser.parse(text) as unknown as MdxTreeNode;
-  } catch (error) {
-    return {
-      kind: "unparseable",
-      finding: parseFailureFinding(path, error, text, offsets),
-    };
-  }
-
-  const builder = new DocumentBuilder(path, text, offsets);
-  try {
-    builder.walk(tree);
-    builder.finishTags();
-  } catch (error) {
-    if (error instanceof MdxGrammarError) {
-      // A tag-pairing failure (SPEC 14.20 widening 3): unclosed or
-      // mismatched tags make the file unparseable, masking its contents.
-      return {
-        kind: "unparseable",
-        finding: parseFailureFinding(path, error, text, offsets),
-      };
-    }
-    if (error instanceof RangeError) {
-      // SPEC 14.20: nesting beyond what the recursive walk can process (a
-      // call-stack overflow surfaces as a RangeError) makes the file
-      // unparseable — a finding, never a crash (SPEC 12.0: exit codes
-      // partition all outcomes). `mdxParser.parse` above is guarded the
-      // same way by its own catch-all.
-      return {
-        kind: "unparseable",
-        finding: {
-          condition: 20,
-          file: path,
-          range: { start: 0, end: 0 },
-          message:
-            `unparseable source: not well-formed MDX — the file's nesting ` +
-            `exceeds what the parser can process, so no location inside ` +
-            `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-        },
-      };
-    }
-    throw error;
-  }
+  const builder = new DocumentBuilder(path, file, parsed.text, parsed.offsets);
+  builder.walk(parsed.tree);
   builder.validateStructure();
   return { kind: "document", document: builder.finish() };
 }
 
+/**
+ * SPEC 14.20: whether a spec source's bytes are well-formed — exactly when
+ * `parseSpecSource` reaches a document rather than the 14.20 finding. The
+ * verdict is reached without locating a failure or building the document
+ * model: a pure judgement over a file's bytes, for texts no discovered file
+ * holds yet — a move's would-be files (SPEC 6.5 "Validation and refusals",
+ * `refused-invalid-rewrite`), whose refusal locates the moved construct
+ * rather than the failure. As in `parseMdx`, a call-stack overflow is no
+ * verdict while a rerun on a larger stack is possible: it propagates there.
+ */
+export function isWellFormedSpecSource(bytes: Uint8Array): boolean {
+  // The path only labels a finding this verdict never reports.
+  const decoded = decodeSourceBytes("", bytes);
+  if (!decoded.ok) {
+    return false;
+  }
+  try {
+    parseAsJudged(decoded.text, (spelled) =>
+      mdxParser.parse(parserFile(spelled)),
+    );
+  } catch (error) {
+    propagateWhileRerunPossible(error);
+    propagateNotedOverflow();
+    return false;
+  }
+  propagateNotedOverflow();
+  return true;
+}
+
 /** The 14.20 finding for a thrown MDX parse failure, with its location. */
 function parseFailureFinding(
-  path: string,
+  file: PathText,
   error: unknown,
   text: string,
   offsets: Utf8Offsets,
@@ -973,71 +667,315 @@ function parseFailureFinding(
         ? failure.message
         : String(error);
 
-  // A VFileMessage's `place` is a point ({line, column, offset}) or a
-  // position ({start, end}); either way the offsets are UTF-16 indices.
-  let range: ByteRange | undefined;
-  let line: number | undefined;
-  let column: number | undefined;
-  const place = failure.place as
-    (MdxPoint & Partial<MdxPosition>) | null | undefined;
-  const startPoint: MdxPoint | undefined =
-    place == null ? undefined : (place.start ?? place);
-  const endPoint: MdxPoint | undefined =
-    place == null ? undefined : (place.end ?? place);
-  if (startPoint !== undefined && typeof startPoint.offset === "number") {
-    range = pointRange(startPoint.offset, endPoint?.offset, text, offsets);
+  // SPEC 14: one zero-length range at the failure's offset — the byte
+  // length of the longest prefix with which some well-formed file begins
+  // (mdx-syntax-failure.ts). In the invocation's last attempt, or one past
+  // its first effect — the only ones that answer from a call-stack overflow
+  // (`parseMdx`) — a throw that is not the grammar's own failure (a
+  // VFileMessage, carrying its source) — nesting too deep to parse even
+  // there — locates at the file start, and the grammar's failure carrying
+  // such an overflow as its cause stays at the place the grammar gave it:
+  // locating it would parse the same nesting again on the same stack, every
+  // probe exhausting it anew before the analysis falls back on that place.
+  let at = 0;
+  if (typeof failure.source === "string") {
+    const place = failure.place as
+      (MdxPoint & Partial<MdxPosition>) | null | undefined;
+    const placed = place == null ? undefined : (place.start ?? place).offset;
+    const fallback =
+      typeof placed === "number"
+        ? Math.max(0, Math.min(text.length, placed))
+        : 0;
+    at = isStackOverflow(error)
+      ? fallback
+      : mdxSyntaxFailureOffset(text, fallback);
   }
-  if (typeof failure.line === "number") {
-    line = failure.line;
-  } else if (startPoint !== undefined && typeof startPoint.line === "number") {
-    line = startPoint.line;
-  }
-  if (typeof failure.column === "number") {
-    column = failure.column;
-  } else if (
-    startPoint !== undefined &&
-    typeof startPoint.column === "number"
-  ) {
-    column = startPoint.column;
-  }
-
-  const where =
-    line !== undefined
-      ? ` at line ${String(line)}${column !== undefined ? `, column ${String(column)}` : ""}`
-      : "";
-  const finding: Finding = {
-    condition: 20,
-    file: path,
-    message:
-      `unparseable source: not well-formed MDX${where} — ${reason}. ` +
-      `Correct the syntax at the reported location (SPEC 14.20)`,
-    ...(range !== undefined ? { range } : {}),
-    ...(line !== undefined ? { line } : {}),
-    ...(column !== undefined ? { column } : {}),
-  };
-  return finding;
+  const byte = offsets.byteOffset(at);
+  const { line, column } = lineAndColumn(text, at);
+  return locatedFinding(
+    20,
+    `unparseable source: not well-formed MDX at line ${String(line)}, ` +
+      `column ${String(column)} — ${reason}. Correct the syntax at the ` +
+      `reported location (SPEC 14.20)`,
+    [{ file, range: { start: byte, end: byte } }],
+  );
 }
 
-/** A byte range from a parse failure's UTF-16 point (and optional end). */
-function pointRange(
-  startIndex: number,
-  endIndex: number | undefined,
+/**
+ * The 1-based line and column (in code points) of a UTF-16 index, lines
+ * ended by CR, LF, or CRLF — for a finding's message text.
+ */
+function lineAndColumn(
   text: string,
-  offsets: Utf8Offsets,
-): ByteRange {
-  const clamp = (index: number): number =>
-    Math.max(0, Math.min(text.length, index));
-  const start = clamp(startIndex);
-  let end: number;
-  if (endIndex !== undefined && clamp(endIndex) > start) {
-    end = clamp(endIndex);
-  } else if (start < text.length) {
-    const codePoint = text.codePointAt(start)!;
-    end = start + (codePoint > 0xffff ? 2 : 1);
-  } else {
-    end = start;
+  index: number,
+): { readonly line: number; readonly column: number } {
+  let line = 1;
+  let lineStart = 0;
+  for (let at = 0; at < index; at += 1) {
+    const code = text.charCodeAt(at);
+    if (code === 0x0a || (code === 0x0d && text.charCodeAt(at + 1) !== 0x0a)) {
+      line += 1;
+      lineStart = at + 1;
+    }
   }
-  return { start: offsets.byteOffset(start), end: offsets.byteOffset(end) };
+  let column = 1;
+  for (let at = lineStart; at < index; at += 1) {
+    const code = text.charCodeAt(at);
+    if (code < 0xdc00 || code > 0xdfff) column += 1;
+  }
+  return { line, column };
+}
+
+/**
+ * SPEC 14.20, 2.3, 2.4: the content between an expression's braces as MDX 3
+ * derives it, at the document's own offsets. `raw` is the document text
+ * between the braces; `collected` the content remark-mdx gathered for the
+ * expression (the node's `value`): the same characters less each
+ * continuation line's Markdown container prefix — a block quote's `>`, a
+ * list item's indentation — which the expression does not hold (a tab the
+ * prefix splits leaves its remaining columns as spaces, and micromark reads
+ * U+0000 as U+FFFD). On each line after the first, what precedes the
+ * longest ending it shares with the collected line is that prefix, and is
+ * blanked to spaces: prefixes are ASCII, so UTF-16 indices and byte offsets
+ * stay put for every span the analyzer reports — `> {text("a")` over `> }`
+ * is the call `text("a")`, never `text("a") >`.
+ */
+function derivedContent(raw: string, collected: unknown): string {
+  if (typeof collected !== "string" || collected === raw) {
+    return raw;
+  }
+  // Markdown line endings (CommonMark): the parts alternate line, ending.
+  const rawParts = raw.split(/(\r\n|\r|\n)/u);
+  const collectedParts = collected.split(/(\r\n|\r|\n)/u);
+  if (rawParts.length !== collectedParts.length) {
+    return raw;
+  }
+  for (let index = 2; index < rawParts.length; index += 2) {
+    const line = rawParts[index];
+    const prefix = line.length - sharedEnding(line, collectedParts[index]);
+    if (prefix > 0 && /^[\t >]+$/u.test(line.slice(0, prefix))) {
+      rawParts[index] = " ".repeat(prefix) + line.slice(prefix);
+    }
+  }
+  return rawParts.join("");
+}
+
+/** The length of the longest ending `line` and `collected` share. */
+function sharedEnding(line: string, collected: string): number {
+  let count = 0;
+  while (count < line.length && count < collected.length) {
+    const spelled = line.charCodeAt(line.length - 1 - count);
+    const read = collected.charCodeAt(collected.length - 1 - count);
+    if (spelled !== read && !(spelled === 0 && read === 0xfffd)) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * SPEC 14.20: on each attribute a respelling touched (`parseAsJudged`: the
+ * leading comments of an attribute's content, blanked where the stock
+ * grammar refused that content as empty although it holds a token), the
+ * content remark-mdx collected — its `value`, which `derivedContent` reads
+ * — as collected from `text`, the original. The respelled content's estree
+ * (which nothing here reads) keeps the respelled spelling: those comments
+ * are whitespace there.
+ */
+function restoreRespelledContent(
+  node: MdxTreeNode,
+  text: string,
+  originals: ReadonlyMap<number, string>,
+): void {
+  for (const attribute of node.attributes ?? []) {
+    const start = attribute.position?.start.offset;
+    const end = attribute.position?.end.offset;
+    if (typeof start !== "number" || typeof end !== "number") continue;
+    if (![...originals.keys()].some((at) => at >= start && at < end)) {
+      continue;
+    }
+    // The content's last line ends at the closing brace, `end - 1`.
+    const holder = (
+      attribute.type === "mdxJsxExpressionAttribute"
+        ? attribute
+        : attribute.value
+    ) as { value?: unknown } | null | undefined;
+    if (typeof holder === "object" && typeof holder?.value === "string") {
+      holder.value = restoredContent(holder.value, text, end - 1, originals);
+    }
+  }
+  for (const child of node.children ?? []) {
+    restoreRespelledContent(child, text, originals);
+  }
+}
+
+/**
+ * SPEC 14.20: each JSX element's and attribute's name as spelled, where the
+ * text was parsed with its supplementary-plane name characters respelled
+ * (`judgingNamesByCodePoint`, ./mdx-jsx-names.ts) — names are read as
+ * spelled (SPEC 1.1, 2.7, 11.4). Only a name can hold a stand-in: the
+ * respelling touches characters the JSX tokenizer read as a name's.
+ */
+function restoreJsxNames(node: MdxTreeNode, names: NameStandIns): void {
+  if (
+    (node.type === "mdxJsxFlowElement" || node.type === "mdxJsxTextElement") &&
+    typeof node.name === "string"
+  ) {
+    (node as { name?: string | null }).name = restoreNameSpelling(
+      node.name,
+      names,
+    );
+  }
+  for (const attribute of node.attributes ?? []) {
+    if (
+      attribute.type === "mdxJsxAttribute" &&
+      typeof attribute.name === "string"
+    ) {
+      (attribute as { name?: string }).name = restoreNameSpelling(
+        attribute.name,
+        names,
+      );
+    }
+  }
+  for (const child of node.children ?? []) {
+    restoreJsxNames(child, names);
+  }
+}
+
+/**
+ * `collected` — content remark-mdx collected from a respelled text, its last
+ * line ending at `end` — with each respelled character restored from
+ * `originals` (micromark reads U+0000 as U+FFFD). Each content line is a
+ * suffix of its file line (the Markdown container prefix and indentation
+ * not collected), so characters correspond from the end, a content line
+ * ending passing the file line's uncollected prefix to its own ending.
+ */
+function restoredContent(
+  collected: string,
+  text: string,
+  end: number,
+  originals: ReadonlyMap<number, string>,
+): string {
+  const units = collected.split("");
+  let at = end;
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    const code = collected.charCodeAt(index);
+    if (code === 0x0a || code === 0x0d) {
+      while (at > 0 && text.charCodeAt(at - 1) !== code) at -= 1;
+    }
+    at -= 1;
+    const original = originals.get(at);
+    if (original !== undefined) {
+      units[index] = original === "\0" ? "\ufffd" : original;
+    }
+  }
+  return units.join("");
+}
+
+/** An estree node's or comment's document-absolute UTF-16 offsets. */
+function positionsOf(node: {
+  readonly start?: number;
+  readonly end?: number;
+}): {
+  readonly start: number;
+  readonly end: number;
+} {
+  const { start, end } = node;
+  if (typeof start !== "number" || typeof end !== "number") {
+    throw new Error("xspec internal error: estree node without a position");
+  }
+  return { start, end };
+}
+
+/**
+ * SPEC 2.1, 2.4: each identifier a declaration held by an export
+ * statement binds, with the UTF-16 span of the construct binding it — a
+ * variable declarator, or the function or class declaration itself, whose
+ * own characters exclude the leading `export` or `export default` (SPEC
+ * 14, 1.7). A statement holding no declaration — an export list, a
+ * re-export, a default-exported expression or anonymous construct — binds
+ * nothing.
+ */
+function exportedDeclarationBindings(
+  statement: EstreeDeclarationNode,
+): { readonly name: string; readonly start: number; readonly end: number }[] {
+  const declaration =
+    statement.type === "ExportNamedDeclaration" ||
+    statement.type === "ExportDefaultDeclaration"
+      ? statement.declaration
+      : null;
+  if (declaration === null || declaration === undefined) return [];
+  if (declaration.type === "VariableDeclaration") {
+    const held: { name: string; start: number; end: number }[] = [];
+    for (const declarator of declaration.declarations ?? []) {
+      const { start, end } = positionsOf(declarator);
+      const names: string[] = [];
+      patternNames(declarator.id, names);
+      for (const name of names) held.push({ name, start, end });
+    }
+    return held;
+  }
+  const name = declaration.id?.name;
+  if (
+    (declaration.type === "FunctionDeclaration" ||
+      declaration.type === "ClassDeclaration") &&
+    name !== undefined
+  ) {
+    return [{ name, ...positionsOf(declaration) }];
+  }
+  return [];
+}
+
+/** Every identifier an ECMAScript binding pattern binds, in source order. */
+function patternNames(
+  pattern: EstreeDeclarationNode | null | undefined,
+  into: string[],
+): void {
+  if (pattern === null || pattern === undefined) return;
+  switch (pattern.type) {
+    case "Identifier":
+      if (pattern.name !== undefined) into.push(pattern.name);
+      return;
+    case "ObjectPattern":
+      for (const property of pattern.properties ?? []) {
+        if (property.type === "RestElement") {
+          patternNames(property.argument, into);
+        } else if (typeof property.value === "object") {
+          patternNames(property.value as EstreeDeclarationNode | null, into);
+        }
+      }
+      return;
+    case "ArrayPattern":
+      for (const element of pattern.elements ?? []) {
+        patternNames(element, into);
+      }
+      return;
+    case "AssignmentPattern":
+      patternNames(pattern.left, into);
+      return;
+    case "RestElement":
+      patternNames(pattern.argument, into);
+      return;
+  }
+}
+
+/**
+ * Whether an expression is a call — optional or not — whose callee acorn
+ * reads as the identifier `text`, parenthesized or escape-spelled alike:
+ * the near misses of an embedding (SPEC 2.3), whose 14.16 finding names
+ * the plain spelling.
+ */
+function callsCookedText(expression: EstreeNode): boolean {
+  const call =
+    expression.type === "ChainExpression" ? expression.expression : expression;
+  return (
+    call !== undefined &&
+    call.type === "CallExpression" &&
+    call.callee !== undefined &&
+    call.callee.type === "Identifier" &&
+    call.callee.name === "text"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1045,37 +983,112 @@ function pointRange(
 // ---------------------------------------------------------------------------
 
 /**
- * Why `value` violates SPEC 1.4 as an ID segment or a tag (`"."` allowed in
- * tags only), or null when valid. Segments arrive from splitting an ID on
- * `"."`, so the segment path never sees a `"."`.
+ * The SPEC 1.4 problems of one `id` or `tags` value, as phrases for its
+ * attribute's one 14.4 finding (SPEC 14.4: one finding per `id` or `tags`
+ * attribute whose value violates 1.4, however many of its segments or tags
+ * do), judged by the shared validator (text.ts). `values` are the value's
+ * segments (split on `"."`, SPEC 1.3) or tags (split per 2.6), taken from
+ * the characters between the attribute's quotes exactly as spelled
+ * (SPEC 2.4) — so an authored U+0000 is judged as the control character it
+ * is, and a character reference as the `&` it contains.
  */
-function valueViolation(value: string, kind: "segment" | "tag"): string | null {
-  if (value.length === 0) {
-    return "it is empty (SPEC 1.4: segments are non-empty)";
+function attributeProblems(
+  kind: "segment" | "tag",
+  values: readonly string[],
+): string[] {
+  const problems: string[] = [];
+  for (const value of values) {
+    const violation = segmentViolation(value, kind);
+    if (violation !== null) {
+      problems.push(
+        `the ${kind} ${JSON.stringify(value)} ` +
+          describeSegmentViolation(violation),
+      );
+    }
   }
-  if (FORBIDDEN_SEGMENT_NAMES.has(value)) {
-    return `${JSON.stringify(value)} is a forbidden name (SPEC 1.4)`;
+  return problems;
+}
+
+/**
+ * SPEC 11.2: the sections of a parsed document whose node identities are
+ * defined, over a valid file path (an invalid-path file defines no identity
+ * whatever this returns — the caller's concern, SPEC 14.19). A section's
+ * node identity is defined exactly when it and each enclosing section spell
+ * an identity, each spelled identity in the chain is well-formed (SPEC 1.4)
+ * and satisfies the structural rules (SPEC 1.3), and no other section of
+ * the file spells the same identity as it does. The chain conditions are
+ * inherited — a descendant of a section that spells no identity, or whose
+ * spelled identity is malformed or structurally invalid, has no defined
+ * identity — but uniqueness is not: it constrains the section's own spelled
+ * identity alone, so duplicate spellings leave every bearer undefined (no
+ * winner picked) while a uniquely spelled descendant of duplicate-`id`
+ * ancestors keeps its defined identity. Parse-local (SPEC 11.2): shared by
+ * graph node construction (core/graph.ts) — only defined identities are
+ * formed, emitted, or resolved against (SPEC 1.5) — and the availability
+ * surfaces (SPEC 11.3–11.5).
+ */
+export function definedIdentitySections(
+  document: SpecDocument,
+): ReadonlySet<SpecSection> {
+  // Uniqueness compares spelled identities only (SPEC 11.2): a section
+  // spelling no identity (`id` absent, repeated, or in invalid value form —
+  // SpecSection.id null) contests no other section's.
+  const spelled = new Map<string, number>();
+  for (const section of document.sections) {
+    if (section.id !== null) {
+      spelled.set(section.id, (spelled.get(section.id) ?? 0) + 1);
+    }
   }
-  if (kind === "segment" && value.includes(".")) {
-    return 'it contains "." (SPEC 1.4)';
+
+  // The chain conditions (own and inherited; uniqueness excluded): spells
+  // an identity, well-formed per SPEC 1.4, structurally valid per SPEC 1.3
+  // against the parent's spelled identity — a top-level section against the
+  // empty prefix (exactly one segment).
+  const wellFormed = (id: string): boolean =>
+    idSegmentViolations(id).length === 0;
+  const chain = new Map<SpecSection, boolean>();
+  const chainOk = (section: SpecSection): boolean => {
+    if (section.parent === null) return true; // the root spells no identity
+    const memo = chain.get(section);
+    if (memo !== undefined) return memo;
+    let ok = false;
+    if (section.id !== null && wellFormed(section.id)) {
+      const segments = section.id.split(".");
+      const parent = section.parent;
+      if (parent.parent === null) {
+        // SPEC 1.3: a top-level section's ID is exactly one segment.
+        ok = segments.length === 1;
+      } else if (parent.id !== null) {
+        // SPEC 1.3: the parent's spelled ID plus exactly one segment. A
+        // parent spelling no identity fails the chain regardless.
+        const parentSegments = parent.id.split(".");
+        ok =
+          segments.length === parentSegments.length + 1 &&
+          parentSegments.every((segment, index) => segments[index] === segment);
+      }
+      ok = ok && chainOk(parent);
+    }
+    chain.set(section, ok);
+    return ok;
+  };
+
+  const defined = new Set<SpecSection>();
+  for (const section of document.sections) {
+    if (section.id === null) continue;
+    if (spelled.get(section.id) !== 1) continue;
+    if (!chainOk(section)) continue;
+    defined.add(section);
   }
-  if (value.includes("#")) {
-    return 'it contains "#" (SPEC 1.4)';
-  }
-  if (containsWhitespace(value)) {
-    return "it contains whitespace (SPEC 1.4)";
-  }
-  if (containsControl(value)) {
-    return "it contains a control character (SPEC 1.4)";
-  }
-  return null;
+  return defined;
 }
 
 /**
  * SPEC 2.6: split a `tags` value on runs of SPEC 1.4 whitespace, ignoring
  * leading and trailing whitespace, and collapse duplicates keeping
- * first-occurrence order. A value yielding no tags is equivalent to an
- * omitted prop.
+ * first-occurrence order — the order the value spells them, which the
+ * 14.4 finding's problem list follows; the interpreted tags recorded on
+ * the section are these tokens as a byte-ordered set (SPEC 12.7). A value
+ * yielding no tags is equivalent to an omitted prop.
  */
 export function splitTags(value: string): string[] {
   const tokens: string[] = [];
@@ -1116,22 +1129,38 @@ interface MutableSection {
   coverage: "required" | "none" | null;
   tags: readonly string[];
   idAttribute: SpecAttributeValue | null;
-  dependency: SpecDependencyAttribute | null;
+  dependencies: SpecDependencyAttribute[];
+  attributes: SpecRawAttribute[];
+  tagsDefined: boolean;
+  coverageDefined: boolean;
   /** Whether an `id` prop occurred at all (14.1 is only for absence). */
   idPresent: boolean;
 }
 
-/** One open tag awaiting its closing tag during the walk. */
-interface OpenTagFrame {
-  /** The tag's name — null for a fragment. */
-  readonly name: string | null;
-  /** UTF-16 span of the opening tag. */
-  readonly span: { readonly start: number; readonly end: number };
-  /** The opening tag's position (failure reporting). */
-  readonly position: MdxPosition;
-  /** The section the tag opened, or null for a non-section element. */
+/**
+ * One quoted `id`, `coverage`, or `tags` spelling judged on its own
+ * (SPEC 2.7): its value exactly as spelled (SPEC 2.4) and whether that value
+ * satisfies the prop's value rule — SPEC 1.4 for `id` and `tags` (else
+ * 14.4), 2.5 for `coverage` (else 14.17).
+ */
+interface JudgedStringProp extends SpecAttributeValue {
+  readonly valid: boolean;
+}
+
+/** The props whose value is a quoted static string literal (SPEC 2.7). */
+function isStringPropName(name: string): name is "id" | "coverage" | "tags" {
+  return name === "id" || name === "coverage" || name === "tags";
+}
+
+/** One element whose children the walk is visiting. */
+interface OpenElementFrame {
+  /** The section the element is, or null for a non-section element. */
   readonly section: MutableSection | null;
 }
+
+/** The walk's pending work: a node to visit, or an element to leave. */
+type WalkItem =
+  { readonly visit: MdxTreeNode } | { readonly leave: OpenElementFrame };
 
 class DocumentBuilder {
   readonly root: MutableSection;
@@ -1140,10 +1169,14 @@ class DocumentBuilder {
   private readonly embeddings: SpecEmbedding[] = [];
   private readonly comments: SpecComment[] = [];
   private readonly findings: Finding[] = [];
-  private readonly tagStack: OpenTagFrame[] = [];
+  /** The elements enclosing the node being visited, outermost first. */
+  private readonly elementStack: OpenElementFrame[] = [];
+  /** The file's tag spans; set by `walk` from the tree's root. */
+  private tagSpans: TagSpans | undefined;
 
   constructor(
     private readonly path: string,
+    private readonly file: PathText,
     private readonly text: string,
     private readonly offsets: Utf8Offsets,
   ) {
@@ -1161,7 +1194,10 @@ class DocumentBuilder {
       coverage: null,
       tags: [],
       idAttribute: null,
-      dependency: null,
+      dependencies: [],
+      attributes: [],
+      tagsDefined: true,
+      coverageDefined: true,
       idPresent: false,
     };
   }
@@ -1179,7 +1215,9 @@ class DocumentBuilder {
     range: ByteRange,
     message: string,
   ): void {
-    this.findings.push({ condition, message, file: this.path, range });
+    this.findings.push(
+      locatedFinding(condition, message, [{ file: this.file, range }]),
+    );
   }
 
   /** The node's UTF-16 span; every parsed mdast node carries one. */
@@ -1198,47 +1236,57 @@ class DocumentBuilder {
   /**
    * Walk the mdast tree in document order: requirement sections nest by
    * document containment, whatever Markdown structure lies between (SPEC
-   * 1.1–1.3). Under grammar widening 3 every `<S>`/`<Spec>` (and other
-   * JSX) tag arrives as a flat `xspecJsxTag` leaf; this walk pairs them
-   * on a stack, so a section opened with trailing same-line content may
-   * close on a later line, and content may directly precede a closing
-   * tag on its line (SPEC 14.20).
+   * 1.1–1.3). Every JSX element arrives as the stock grammar paired it
+   * (SPEC 14.20) — an `mdxJsxFlowElement` or `mdxJsxTextElement` spanning
+   * its opening tag through its closing tag, its content as its children —
+   * so the section tree follows the element tree. The walk keeps its own
+   * stack of pending work instead of recursing: sections nest as deep as a
+   * file stacks them (the suite stages towers 4096 deep), and each level
+   * must cost heap, never call stack.
    */
-  walk(node: MdxTreeNode): void {
-    switch (node.type) {
-      case "xspecJsxTag": {
-        this.handleTag(node);
-        return;
-      }
-      case "mdxJsxFlowElement":
-      case "mdxJsxTextElement": {
-        // flatJsxTagExtension replaces element construction wholesale.
-        throw new Error(
-          "xspec internal error: unflattened JSX element in the MDX tree",
-        );
-      }
-      case "mdxFlowExpression":
-      case "mdxTextExpression": {
-        this.classifyExpression(node, this.currentSection());
-        return;
-      }
-      case "mdxjsEsm": {
-        this.processEsm(node);
-        return;
-      }
-      default: {
-        for (const child of node.children ?? []) {
-          this.walk(child);
+  walk(tree: MdxTreeNode): void {
+    this.tagSpans = tree.data?.xspecTagSpans;
+    const pending: WalkItem[] = [{ visit: tree }];
+    for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+      if ("leave" in item) {
+        if (this.elementStack.pop() !== item.leave) {
+          throw new Error("xspec internal error: unbalanced element walk");
         }
-        return;
+        continue;
+      }
+      const node = item.visit;
+      switch (node.type) {
+        case "mdxJsxFlowElement":
+        case "mdxJsxTextElement": {
+          const frame = this.enterElement(node);
+          this.elementStack.push(frame);
+          pending.push({ leave: frame });
+          break;
+        }
+        case "mdxFlowExpression":
+        case "mdxTextExpression": {
+          this.classifyExpression(node, this.currentSection());
+          continue;
+        }
+        case "mdxjsEsm": {
+          this.processEsm(node);
+          continue;
+        }
+        default: {
+          break;
+        }
+      }
+      const children = node.children ?? [];
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        pending.push({ visit: children[index] });
       }
     }
   }
 
-  /** The innermost section whose opening tag is still open (SPEC 1.1). */
+  /** The innermost section whose element encloses the walk (SPEC 1.1). */
   private currentSection(): MutableSection {
-    for (let index = this.tagStack.length - 1; index >= 0; index -= 1) {
-      const section = this.tagStack[index].section;
+    for (let index = this.elementStack.length - 1; index >= 0; index -= 1) {
+      const section = this.elementStack[index].section;
       if (section !== null) {
         return section;
       }
@@ -1246,77 +1294,40 @@ class DocumentBuilder {
     return this.root;
   }
 
-  /** The node's position; every parsed mdast node carries one. */
-  private positionOf(node: MdxTreeNode): MdxPosition {
-    const position = node.position;
-    if (position === undefined) {
-      throw new Error("xspec internal error: MDX node without a position");
-    }
-    return position;
-  }
-
   /**
-   * One flat tag leaf (SPEC 14.20 widening 3): `<S>`/`<Spec>` tags build
-   * the section tree (SPEC 1.1); any other element is invalid (SPEC 2.7
-   * → 14.16) but participates in pairing all the same. An unmatched or
-   * mismatched tag is a parse failure, keeping genuinely malformed
-   * sources 14.20-unparseable exactly as under the stock grammar.
+   * One JSX element as the stock grammar paired it (SPEC 14.20):
+   * `<S>`/`<Spec>` builds a section (SPEC 1.1); any other element is
+   * invalid (SPEC 2.7 → 14.16), reported once over its whole construct,
+   * while the sections inside it nest by containment all the same. The
+   * element's tags are the recorded tag tokens at its two ends (SPEC 1.7):
+   * a self-closing element is its one tag.
    */
-  private handleTag(node: MdxTreeNode): void {
+  private enterElement(node: MdxTreeNode): OpenElementFrame {
     const span = this.spanOf(node);
-    const name = node.name ?? null;
-    if (node.close === true) {
-      const frame = this.tagStack.pop();
-      if (frame === undefined) {
-        throw new MdxGrammarError(
-          `Unexpected closing tag \`</${name ?? ""}>\`, expected an open ` +
-            `tag first`,
-          this.positionOf(node),
-        );
-      }
-      if (frame.name !== name) {
-        throw new MdxGrammarError(
-          `Unexpected closing tag \`</${name ?? ""}>\`, expected ` +
-            `corresponding closing tag for \`<${frame.name ?? ""}>\``,
-          this.positionOf(node),
-        );
-      }
-      if (frame.section !== null) {
-        // SPEC 1.7: the construct's own characters end with the last
-        // character of its closing tag.
-        frame.section.closingTagRange = this.byteRange(span.start, span.end);
-        frame.section.range = this.byteRange(frame.span.start, span.end);
-      } else {
-        this.reportForeignElement(frame.name, frame.span.start, span.end);
-      }
-      return;
+    const openingEnd = this.tagSpans?.endByStart.get(span.start);
+    const selfClosing = openingEnd === span.end;
+    const closingStart = selfClosing
+      ? span.start
+      : this.tagSpans?.startByEnd.get(span.end);
+    if (openingEnd === undefined || closingStart === undefined) {
+      throw new Error("xspec internal error: JSX element without tag spans");
     }
+    const name = node.name ?? null;
     if (name === "S" || name === "Spec") {
       // SPEC 1.1: `<S>` and `<Spec>` are equivalent requirement sections
       // (compared byte-wise, SPEC 12.0 — no other casing).
-      const section = this.buildSection(node, span);
-      if (node.selfClosing !== true) {
-        this.tagStack.push({
-          name,
-          span,
-          position: this.positionOf(node),
-          section,
-        });
-      }
-      return;
+      return {
+        section: this.buildSection(node, {
+          start: span.start,
+          openingEnd,
+          closingStart,
+          end: span.end,
+          selfClosing,
+        }),
+      };
     }
-    // SPEC 2.7 → 14.16: any other JSX element is invalid — reported once
-    // per element when it pairs (or immediately when self-closing).
-    if (node.selfClosing === true) {
-      this.reportForeignElement(name, span.start, span.end);
-      return;
-    }
-    this.tagStack.push({
-      name,
-      span,
-      position: this.positionOf(node),
-      section: null,
-    });
+    this.reportForeignElement(name, span.start, span.end);
+    return { section: null };
   }
 
   /** SPEC 2.7 → 14.16: a JSX element other than `<S>`/`<Spec>`. */
@@ -1337,21 +1348,6 @@ class DocumentBuilder {
   }
 
   /**
-   * After the walk: every opened tag must have closed — an unclosed
-   * element is a parse failure (SPEC 14.20), as under the stock grammar.
-   */
-  finishTags(): void {
-    const frame = this.tagStack[this.tagStack.length - 1];
-    if (frame !== undefined) {
-      throw new MdxGrammarError(
-        `Expected a closing tag for \`<${frame.name ?? ""}>\` before the ` +
-          `end of the file`,
-        frame.position,
-      );
-    }
-  }
-
-  /**
    * SPEC 2.7: an expression container is a `{text(...)}` embedding (2.3),
    * an MDX comment, or invalid (14.16).
    */
@@ -1360,20 +1356,22 @@ class DocumentBuilder {
     const range = this.byteRange(span.start, span.end);
     const program = node.data?.estree;
     const body = program?.body ?? [];
-    if (program !== undefined && body.length === 0) {
-      if ((program.comments ?? []).length > 0) {
-        // An MDX comment (`{/* … */}`): a pure annotation (SPEC 2.7).
-        this.comments.push({ section, range });
-        return;
-      }
-      this.addFinding(
-        16,
-        range,
-        `invalid construct: an empty expression container — beyond ` +
-          `Markdown content, only spec-module imports, <S>/<Spec> ` +
-          `sections, {text(...)} embeddings, and MDX comments are ` +
-          `permitted; remove it (SPEC 2.7, 14.16)`,
-      );
+    if (
+      program !== undefined
+        ? body.length === 0
+        : isEmptyExpression(node.value ?? "")
+    ) {
+      // An MDX comment — the empty expression: content of whitespace and
+      // comments alone (SPEC 2.7, 14.20), whitespace and line terminators
+      // ECMAScript's (U+00A0, U+FEFF, U+2028, U+2029 included), so `{}`,
+      // `{ }`, `{/* … */}`, and line comments ended before the closing
+      // brace alike. A pure annotation (SPEC 2.7, 3), never 14.16.
+      // remark-mdx derives such content as a whole Program (the
+      // empty-expression path of micromark-util-events-to-acorn), its body
+      // empty exactly when the content lexes to no token; acorn is
+      // configured, so an estree is always attached — an absent one is
+      // judged from the content itself.
+      this.comments.push({ section, range });
       return;
     }
     const statement = body.length === 1 ? body[0] : undefined;
@@ -1383,10 +1381,7 @@ class DocumentBuilder {
         : undefined;
     if (
       expression !== undefined &&
-      expression.type === "CallExpression" &&
-      expression.callee !== undefined &&
-      expression.callee.type === "Identifier" &&
-      expression.callee.name === "text"
+      this.isEmbeddingCall(expression, span, program?.comments ?? [])
     ) {
       // A `{text(...)}` embedding (SPEC 2.3). Its argument is analyzed by
       // the static-reference analyzer (SPEC 2.4 → 14.8), not here; `text`
@@ -1395,7 +1390,10 @@ class DocumentBuilder {
       this.embeddings.push({
         section,
         range,
-        expressionText: this.text.slice(span.start + 1, span.end - 1),
+        expressionText: derivedContent(
+          this.text.slice(span.start + 1, span.end - 1),
+          node.value,
+        ),
         expressionRange: this.byteRange(span.start + 1, span.end - 1),
       });
       return;
@@ -1403,20 +1401,100 @@ class DocumentBuilder {
     this.addFinding(
       16,
       range,
-      `invalid construct: an expression container that is neither a ` +
-        `{text(...)} embedding nor an MDX comment — remove it or replace ` +
-        `it with a permitted construct (SPEC 2.7, 14.16)`,
+      expression !== undefined && callsCookedText(expression)
+        ? `invalid construct: an expression container calling text that ` +
+            `is no {text(...)} embedding — an embedding's one expression ` +
+            `is a call of text spelled plainly, beside nothing but ` +
+            `whitespace and comments: its callee neither parenthesized nor ` +
+            `escaped, the call neither optional nor parenthesized; spell ` +
+            `it {text(<reference>)} (SPEC 2.3, 2.4, 14.16)`
+        : `invalid construct: an expression container that is neither a ` +
+            `{text(...)} embedding nor an MDX comment — remove it or ` +
+            `replace it with a permitted construct (SPEC 2.7, 14.16)`,
     );
   }
 
   /**
-   * One top-level ESM block: record import declarations for import
-   * validation and reference analysis (SPEC 2.1); any export statement is
-   * invalid (SPEC 2.7 → 14.16). MDX admits no other statement kind here.
+   * SPEC 2.3: whether a container's one expression is an embedding's call —
+   * a call, optional chaining excluded, whose callee is the identifier
+   * `text` itself, spelled plainly, neither parenthesized nor escaped
+   * (2.4), whatever whitespace and comments stand beside the call. The
+   * estree alone cannot tell: acorn cooks an escape-spelled name to `text`,
+   * and micromark's events-to-acorn removes every `ParenthesizedExpression`
+   * node, leaving the inner node at its inner offsets. So the callee's own
+   * characters must be exactly `text` (2.4: read as spelled), the call must
+   * begin at its callee (`(text)("a")` begins at its `(`), and no
+   * parenthesis may stand beside the call outside a comment (`(text("a"))`)
+   * — the grammar lets nothing else stand there but whitespace, comments,
+   * and a Markdown container's line prefixes (`>`), which the expression
+   * does not hold.
+   */
+  private isEmbeddingCall(
+    expression: EstreeNode,
+    span: { readonly start: number; readonly end: number },
+    comments: readonly EstreeComment[],
+  ): boolean {
+    const callee = expression.callee;
+    if (
+      expression.type !== "CallExpression" ||
+      expression.optional === true ||
+      callee === undefined ||
+      callee.type !== "Identifier"
+    ) {
+      return false;
+    }
+    const call = positionsOf(expression);
+    const name = positionsOf(callee);
+    return (
+      this.text.slice(name.start, name.end) === "text" &&
+      call.start === name.start &&
+      !this.parenthesisBeside(span.start + 1, call.start, comments) &&
+      !this.parenthesisBeside(call.end, span.end - 1, comments)
+    );
+  }
+
+  /**
+   * Whether a parenthesis stands in the document text [from, to) outside
+   * every comment of `comments` (a comment may itself spell one).
+   */
+  private parenthesisBeside(
+    from: number,
+    to: number,
+    comments: readonly EstreeComment[],
+  ): boolean {
+    const spanned = comments
+      .map((comment) => positionsOf(comment))
+      .sort((left, right) => left.start - right.start);
+    let index = from;
+    for (const comment of spanned) {
+      if (comment.start >= to) {
+        break;
+      }
+      if (comment.end <= index) {
+        continue;
+      }
+      if (
+        /[()]/u.test(this.text.slice(index, Math.max(index, comment.start)))
+      ) {
+        return true;
+      }
+      index = Math.max(index, comment.end);
+    }
+    return index < to && /[()]/u.test(this.text.slice(index, to));
+  }
+
+  /**
+   * One top-level ESM block: record each of its import declarations for
+   * import validation and reference analysis (SPEC 2.1); any export
+   * statement is invalid (SPEC 2.7 → 14.16). The stock construct admits no
+   * other statement kind (SPEC 14.20), and its estree carries
+   * document-absolute offsets, so each declaration's range is its own
+   * characters — a spelled `;` included, the comments beside it excluded.
    */
   private processEsm(node: MdxTreeNode): void {
     const span = this.spanOf(node);
     const imports: SpecImportStatement[] = [];
+    const exportedBindings: SpecExportedBinding[] = [];
     for (const statement of node.data?.estree?.body ?? []) {
       const start = statement.start;
       const end = statement.end;
@@ -1437,11 +1515,20 @@ class DocumentBuilder {
           `invalid construct: an export statement — xspec source files ` +
             `export nothing; remove it (SPEC 2.7, 14.16)`,
         );
+        // SPEC 2.1, 2.4: what the statement's declaration binds, which an
+        // import sharing the identifier collides with (14.15).
+        for (const held of exportedDeclarationBindings(statement)) {
+          exportedBindings.push({
+            name: held.name,
+            range: this.byteRange(held.start, held.end),
+          });
+        }
       }
     }
     this.esmBlocks.push({
       range: this.byteRange(span.start, span.end),
       imports,
+      exportedBindings,
     });
   }
 
@@ -1450,34 +1537,43 @@ class DocumentBuilder {
   // -------------------------------------------------------------------------
 
   /**
-   * Build one `<S>`/`<Spec>` section from its opening (or self-closing)
-   * tag leaf, with validated props (SPEC 1.1, 2.5–2.7). The tag token
-   * covers the tag's exact characters, so the opening-tag range is the
-   * leaf's span; for a paired section, the closing-tag range and the
-   * construct range (SPEC 1.7) are completed when its closing tag pairs.
+   * Build one `<S>`/`<Spec>` section from its element, with validated props
+   * (SPEC 1.1, 2.5–2.7). `tags` gives the element's UTF-16 bounds: its
+   * start and end, its opening tag's end, and its closing tag's start — for
+   * a self-closing element, whose one tag is the whole construct, the
+   * element's start (SPEC 1.7).
    */
   private buildSection(
     node: MdxTreeNode,
-    span: { start: number; end: number },
+    tags: {
+      readonly start: number;
+      readonly openingEnd: number;
+      readonly closingStart: number;
+      readonly end: number;
+      readonly selfClosing: boolean;
+    },
   ): MutableSection {
     // SPEC 1.1: a self-closing section element is an empty leaf; its tag
     // is the whole construct (SPEC 1.7).
-    const selfClosing = node.selfClosing === true;
+    const selfClosing = tags.selfClosing;
     const parent = this.currentSection();
     const section: MutableSection = {
       id: null,
       // SPEC 1.7: opening tag through closing tag, or the self-closing
-      // tag's own characters (paired sections are completed above).
-      range: this.byteRange(span.start, span.end),
-      openingTagRange: this.byteRange(span.start, span.end),
-      closingTagRange: this.byteRange(span.start, span.end),
+      // tag's own characters.
+      range: this.byteRange(tags.start, tags.end),
+      openingTagRange: this.byteRange(tags.start, tags.openingEnd),
+      closingTagRange: this.byteRange(tags.closingStart, tags.end),
       selfClosing,
       parent,
       children: [],
       coverage: "required", // SPEC 2.5: the default
       tags: [],
       idAttribute: null,
-      dependency: null,
+      dependencies: [],
+      attributes: [],
+      tagsDefined: true,
+      coverageDefined: true,
       idPresent: false,
     };
     this.processAttributes(node, section);
@@ -1488,12 +1584,28 @@ class DocumentBuilder {
 
   /** Validate and record one section element's props (SPEC 2.5–2.7). */
   private processAttributes(node: MdxTreeNode, section: MutableSection): void {
-    const seen = new Set<string>();
+    /**
+     * Each prop name the tag spells → the attribute range of every
+     * spelling of it, in tag order, the first included (SPEC 14 location
+     * cardinality: a repeated prop locates every attribute spelling the
+     * name).
+     */
+    const spellings = new Map<string, ByteRange[]>();
     let idUnusable = false;
     for (const attribute of node.attributes ?? []) {
       const attrSpan = this.spanOf(attribute);
       const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
-      if (attribute.type !== "mdxJsxAttribute") {
+      const named = attribute.type === "mdxJsxAttribute";
+      // SPEC 11.4: every attribute the tag spells is recorded as a raw
+      // entry, in tag order — repeated, unknown, and spread attributes
+      // included; a spread attribute's name is structurally absent, its
+      // text its entire braced construct.
+      section.attributes.push({
+        name: named ? (attribute.name ?? "") : null,
+        range: attrRange,
+        text: this.text.slice(attrSpan.start, attrSpan.end),
+      });
+      if (!named) {
         // SPEC 2.7 → 14.17: every prop is a named attribute; a spread
         // attribute is invalid.
         this.addFinding(
@@ -1506,31 +1618,64 @@ class DocumentBuilder {
         continue;
       }
       const name = attribute.name ?? "";
-      if (seen.has(name)) {
+      const earlier = spellings.get(name);
+      if (earlier !== undefined) {
         // SPEC 2.7 → 14.17: no prop name may occur more than once on one
-        // element — defined or unknown.
-        this.addFinding(
-          17,
-          attrRange,
-          `invalid prop: the prop ${JSON.stringify(name)} is repeated on ` +
-            `one element — no prop name may occur more than once; remove ` +
-            `the repetition (SPEC 2.7, 14.17)`,
-        );
-        if (name === "id") {
-          idUnusable = true; // ambiguous declaration — no usable ID
-        }
-        continue;
+        // element — defined or unknown. Reported once per name, locating
+        // every spelling, after the loop. The repetition exempts no
+        // spelling from the per-attribute rules (SPEC 2.7, 14.4, 14.17):
+        // each is judged below as if it stood alone.
+        earlier.push(attrRange);
+      } else {
+        spellings.set(name, [attrRange]);
       }
-      seen.add(name);
       if (name === "d") {
+        // SPEC 2.7 → 14.17: a quoted or valueless `d` is invalid, every
+        // spelling judged on its own. SPEC 11.2 "Resolution": resolution
+        // is per spelling, whatever the validity of the attribute holding
+        // it — each entry of every `d` attribute of a section repeating
+        // the prop resolves or not on its own, beside the repetition's one
+        // 14.17 (below), exactly as the entries of a single `d` do — so
+        // every braced spelling is recorded, in tag order.
         this.processDependencyProp(attribute, attrSpan, section);
-      } else if (name === "id" || name === "coverage" || name === "tags") {
-        this.processStringProp(name, attribute, attrSpan, section, () => {
+      } else if (earlier !== undefined && isStringPropName(name)) {
+        // SPEC 2.7, 14.4, 14.17: a later spelling of `id`, `coverage`, or
+        // `tags` reports its own value-form, invalid-value, and 1.4
+        // findings, but records nothing (SPEC 11.2): a repeated `id`
+        // spells no identity — the ambiguous declaration leaves no usable
+        // ID — and a repeated `tags`/`coverage` prop leaves the
+        // interpreted value undefined, no spelling picked.
+        this.judgeStringProp(name, attribute, attrSpan);
+        if (name === "id") {
           idUnusable = true;
-        });
+        } else if (name === "tags") {
+          section.tagsDefined = false;
+        } else {
+          section.coverageDefined = false;
+        }
+      } else if (isStringPropName(name)) {
+        const interpreted = this.processStringProp(
+          name,
+          attribute,
+          attrSpan,
+          section,
+          () => {
+            idUnusable = true;
+          },
+        );
+        // SPEC 11.2: a malformed (braced/valueless) or invalid-valued
+        // `tags`/`coverage` prop leaves the interpreted value undefined,
+        // its raw spelling still listed.
+        if (!interpreted && name === "tags") {
+          section.tagsDefined = false;
+        }
+        if (!interpreted && name === "coverage") {
+          section.coverageDefined = false;
+        }
       } else {
         // SPEC 2.7 → 14.17: the props defined on <S>/<Spec> are id, d,
-        // coverage, and tags.
+        // coverage, and tags — every spelling of an unknown prop is one,
+        // a repeated one beside the repetition's finding.
         this.addFinding(
           17,
           attrRange,
@@ -1540,32 +1685,74 @@ class DocumentBuilder {
         );
       }
     }
+    for (const [name, ranges] of spellings) {
+      if (ranges.length < 2) {
+        continue;
+      }
+      // SPEC 2.7 → 14.17: a repeated prop, defined or unknown, is invalid.
+      // SPEC 14 location cardinality: the spellings jointly violate it, so
+      // it is ONE finding per repeated name carrying a location for every
+      // attribute spelling the name, the first included — no
+      // representative is chosen (12.7 orders the locations).
+      this.findings.push(
+        locatedFinding(
+          17,
+          `invalid prop: the prop ${JSON.stringify(name)} is spelled ` +
+            `${String(ranges.length)} times on one element — no prop name ` +
+            `may occur more than once; keep one spelling and remove the ` +
+            `others (SPEC 2.7, 14.17)`,
+          ranges.map((range) => ({ file: this.file, range })),
+        ),
+      );
+    }
     if (idUnusable) {
       section.id = null;
       section.idAttribute = null;
     }
   }
 
-  /** SPEC 2.7: `d` MUST be a braced expression; record its span for 2.2/2.4. */
+  /**
+   * SPEC 2.7: `d` MUST be a braced expression — every spelling judged on
+   * its own (14.17) — and each braced spelling's span is recorded for
+   * 2.2/2.4 (SPEC 11.2 "Resolution").
+   */
   private processDependencyProp(
     attribute: MdxAttributeNode,
     attrSpan: { start: number; end: number },
     section: MutableSection,
   ): void {
-    const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
-    const value = attribute.value ?? null;
-    if (value === null || typeof value === "string") {
+    const dependency = this.dependencyAttribute(attribute, attrSpan);
+    if (dependency === null) {
       // SPEC 2.7 → 14.17: a quoted or valueless `d` is invalid.
+      const form =
+        (attribute.value ?? null) === null
+          ? "a valueless prop"
+          : "a quoted string";
       this.addFinding(
         17,
-        attrRange,
+        this.byteRange(attrSpan.start, attrSpan.end),
         `invalid prop: the d prop must be a braced expression holding a ` +
           `static reference or an array literal of static references — ` +
-          `e.g. d={BASE.auth.login} or d={["local.id"]} — not ` +
-          `${value === null ? "a valueless prop" : "a quoted string"} ` +
+          `e.g. d={BASE.auth.login} or d={["local.id"]} — not ${form} ` +
           `(SPEC 2.7, 2.2, 14.17)`,
       );
       return;
+    }
+    section.dependencies.push(dependency);
+  }
+
+  /**
+   * The spans of one `d` attribute in the braced-expression form of SPEC
+   * 2.7, for the analyzer of 2.2/2.4 — null for a quoted or valueless `d`,
+   * which holds no entries (its 14.17 is the caller's to report).
+   */
+  private dependencyAttribute(
+    attribute: MdxAttributeNode,
+    attrSpan: { start: number; end: number },
+  ): SpecDependencyAttribute | null {
+    const value = attribute.value ?? null;
+    if (value === null || typeof value === "string") {
+      return null;
     }
     const open = this.valueOpenIndex(attribute, attrSpan);
     if (open === null || this.text[open] !== "{") {
@@ -1573,17 +1760,25 @@ class DocumentBuilder {
         "xspec internal error: braced d value without a brace in source",
       );
     }
-    section.dependency = {
-      expressionText: this.text.slice(open + 1, attrSpan.end - 1),
+    return {
+      expressionText: derivedContent(
+        this.text.slice(open + 1, attrSpan.end - 1),
+        (value as { readonly value?: unknown }).value,
+      ),
       expressionRange: this.byteRange(open + 1, attrSpan.end - 1),
-      attributeRange: attrRange,
+      attributeRange: this.byteRange(attrSpan.start, attrSpan.end),
     };
   }
 
   /**
    * SPEC 2.7: the value of `id`, `coverage`, and `tags` MUST be a static
-   * string literal in quoted attribute form. Validates the value and
-   * records it on the section (SPEC 1.3, 2.5, 2.6 → 14.4, 14.17).
+   * string literal in quoted attribute form. Judges the prop's first
+   * spelling (`judgeStringProp`, SPEC 14.4, 14.17) and records its value on
+   * the section (SPEC 1.3, 2.5, 2.6). Returns whether the prop's
+   * interpreted value is defined (SPEC 11.2): false for a malformed
+   * (braced/valueless) or invalid-valued `tags`/`coverage` occurrence — a
+   * spelled `id`'s definedness is the identity machinery's
+   * (`definedIdentitySections`), not this predicate's.
    */
   private processStringProp(
     name: "id" | "coverage" | "tags",
@@ -1591,13 +1786,70 @@ class DocumentBuilder {
     attrSpan: { start: number; end: number },
     section: MutableSection,
     onIdUnusable: () => void,
-  ): void {
-    const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
+  ): boolean {
     if (name === "id") {
       section.idPresent = true;
     }
-    const value = attribute.value ?? null;
-    if (typeof value !== "string") {
+    const judged = this.judgeStringProp(name, attribute, attrSpan);
+    if (judged === null) {
+      if (name === "id") {
+        onIdUnusable();
+      }
+      return false;
+    }
+    if (name === "coverage") {
+      if (!judged.valid) {
+        return false;
+      }
+      section.coverage = judged.value === "none" ? "none" : "required";
+      return true;
+    }
+    if (name === "tags") {
+      // SPEC 2.6: whitespace splitting, duplicate collapse; a value
+      // yielding no tags is equivalent to omitting the prop. SPEC 12.7:
+      // the interpreted tags are a tag set, in byte order (SPEC 12.0) —
+      // formed here, so every surface and the graph data carry the set.
+      // SPEC 11.2: an invalid-valued prop (14.4) leaves the interpreted
+      // value undefined.
+      section.tags = sortByBytes(splitTags(judged.value), (tag) => tag);
+      return judged.valid;
+    }
+    // name === "id" (SPEC 1.3): record the declared ID; the structural
+    // checks (14.1–14.3) run in validateStructure once the tree is complete.
+    // The spelled identity stays spelled whatever its segments (SPEC 11.2);
+    // its definedness is judged by `definedIdentitySections`.
+    section.id = judged.value;
+    section.idAttribute = {
+      value: judged.value,
+      valueRange: judged.valueRange,
+      quote: judged.quote,
+      attributeRange: judged.attributeRange,
+    };
+    return true;
+  }
+
+  /**
+   * Judge one `id`, `coverage`, or `tags` spelling as if it stood alone
+   * (SPEC 2.7), reporting its own findings and recording nothing: a braced
+   * or valueless value form is 14.17; a `coverage` value other than
+   * "required" or "none" is 14.17 (SPEC 2.5); an `id` or `tags` value
+   * violating 1.4 is 14.4 — one finding per `id` or `tags` attribute whose
+   * value violates it. Every spelling of a repeated prop is judged so,
+   * beside the repetition's one 14.17 (SPEC 14.17). Returns the quoted
+   * value as spelled, or null for a braced or valueless form.
+   */
+  private judgeStringProp(
+    name: "id" | "coverage" | "tags",
+    attribute: MdxAttributeNode,
+    attrSpan: { start: number; end: number },
+  ): JudgedStringProp | null {
+    const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
+    // The parser's value says only which form the attribute takes: a string
+    // for the quoted form, an object for a braced one, null when valueless.
+    // Its characters are never read — they are character-reference decoded,
+    // and SPEC 2.4 reads a quoted value exactly as spelled (below).
+    const form = attribute.value ?? null;
+    if (typeof form !== "string") {
       // SPEC 2.7 → 14.17: braced (e.g. id={"login"}) and valueless forms
       // are invalid for id, coverage, and tags.
       this.addFinding(
@@ -1606,13 +1858,10 @@ class DocumentBuilder {
         `invalid prop: the ${name} value must be a static string literal ` +
           `in quoted attribute form, single- or double-quoted — e.g. ` +
           `${name}="…" — not ` +
-          `${value === null ? "a valueless prop" : "a braced expression"} ` +
+          `${form === null ? "a valueless prop" : "a braced expression"} ` +
           `(SPEC 2.7, 14.17)`,
       );
-      if (name === "id") {
-        onIdUnusable();
-      }
-      return;
+      return null;
     }
     const open = this.valueOpenIndex(attribute, attrSpan);
     const quoteCharacter = open === null ? null : this.text[open];
@@ -1625,12 +1874,16 @@ class DocumentBuilder {
         "xspec internal error: quoted attribute value without quotes",
       );
     }
-    // The raw characters between the quotes. MDX replaces U+0000 with
-    // U+FFFD while decoding, so the control-character rule of SPEC 1.4 is
-    // checked against the raw characters as authored.
-    const rawValue = this.text.slice(open + 1, attrSpan.end - 1);
-    const rawHasNul = rawValue.includes("\u0000");
-
+    // SPEC 2.4: the value of a quoted attribute is the characters between
+    // its delimiters exactly as spelled — no character reference (nor any
+    // escape sequence) is interpreted — for `id`, `coverage`, and `tags`
+    // alike. So `coverage="&#110;one"` is neither "required" nor "none"
+    // (14.17), and `id="a&#46;b"` or `tags="x&#121;"` spells a segment or
+    // tag containing `&`, which SPEC 1.4 forbids (14.4).
+    const valueStart = open + 1;
+    const valueEnd = attrSpan.end - 1;
+    const value = this.text.slice(valueStart, valueEnd);
+    let valid = true;
     if (name === "coverage") {
       // SPEC 2.5/2.7 → 14.17: the only defined values are "required"
       // (the default) and "none".
@@ -1642,74 +1895,43 @@ class DocumentBuilder {
             `only defined values are "required" (the default) and "none" ` +
             `(SPEC 2.5, 2.7, 14.17)`,
         );
-        return;
+        valid = false;
       }
-      section.coverage = value;
-      return;
-    }
-
-    if (name === "tags") {
-      // SPEC 2.6: whitespace splitting, duplicate collapse; a value
-      // yielding no tags is equivalent to omitting the prop.
-      const tags = splitTags(value);
-      section.tags = tags;
-      if (rawHasNul) {
-        // SPEC 1.4 → 14.4: U+0000 is a control character.
+    } else if (name === "tags") {
+      // SPEC 2.6: tags split on runs of whitespace (1.4); SPEC 14.4: one
+      // finding per `tags` attribute whose value violates 1.4.
+      const problems = attributeProblems("tag", splitTags(value));
+      if (problems.length > 0) {
         this.addFinding(
           4,
           attrRange,
-          `invalid tag: the tags value contains the control character ` +
-            `U+0000 — tags contain no control characters; remove it ` +
+          `invalid tag: ${problems.join("; ")} — tags follow the ` +
+            `ID-segment rules with "." allowed; correct or remove the tag ` +
             `(SPEC 1.4, 2.6, 14.4)`,
         );
+        valid = false;
       }
-      for (const tag of tags) {
-        const violation = valueViolation(tag, "tag");
-        if (violation !== null) {
-          this.addFinding(
-            4,
-            attrRange,
-            `invalid tag ${JSON.stringify(tag)}: ${violation} — tags ` +
-              `follow the ID-segment rules with "." allowed; correct or ` +
-              `remove the tag (SPEC 1.4, 2.6, 14.4)`,
-          );
-        }
-      }
-      return;
-    }
-
-    // name === "id" (SPEC 1.3): record the declared ID and validate its
-    // segments (SPEC 1.4 → 14.4); the structural checks (14.1–14.3) run in
-    // validateStructure once the tree is complete.
-    section.id = value;
-    section.idAttribute = {
-      value,
-      valueRange: this.byteRange(open + 1, attrSpan.end - 1),
-      quote: quoteCharacter,
-      attributeRange: attrRange,
-    };
-    if (rawHasNul) {
-      // SPEC 1.4 → 14.4: U+0000 is a control character.
-      this.addFinding(
-        4,
-        attrRange,
-        `invalid segment: the id value contains the control character ` +
-          `U+0000 — segments contain no control characters; remove it ` +
-          `(SPEC 1.4, 14.4)`,
-      );
-    }
-    for (const segment of value.split(".")) {
-      const violation = valueViolation(segment, "segment");
-      if (violation !== null) {
+    } else {
+      // SPEC 1.3: the segments are the value's "."-separated parts; SPEC
+      // 14.4: one finding per `id` attribute whose value violates 1.4.
+      const problems = attributeProblems("segment", value.split("."));
+      if (problems.length > 0) {
         this.addFinding(
           4,
           attrRange,
-          `invalid segment ${JSON.stringify(segment)} in id ` +
-            `${JSON.stringify(value)}: ${violation} — correct the segment ` +
-            `(SPEC 1.4, 14.4)`,
+          `invalid segment in id: ${problems.join("; ")} — correct the ` +
+            `segment (SPEC 1.4, 14.4)`,
         );
+        valid = false;
       }
     }
+    return {
+      value,
+      valueRange: this.byteRange(valueStart, valueEnd),
+      quote: quoteCharacter,
+      attributeRange: attrRange,
+      valid,
+    };
   }
 
   /**
@@ -1755,9 +1977,15 @@ class DocumentBuilder {
    * the immediate children of a section without a usable ID it is masked,
    * while their other conditions, and the check for their own children
    * (against their declared IDs), report normally.
+   *
+   * Location cardinality (SPEC 14): a duplicated ID is one condition the
+   * bearers jointly violate — ONE 14.3 finding per duplicated identity,
+   * carrying a location for every bearer, the first included; no
+   * representative is chosen.
    */
   validateStructure(): void {
-    const seen = new Set<string>();
+    /** Declared ID → the location of every bearer, in document order. */
+    const bearers = new Map<string, ByteRange[]>();
     for (const section of this.sections) {
       if (!section.idPresent) {
         // SPEC 1.3 → 14.1: a non-root section without `id`.
@@ -1801,33 +2029,34 @@ class DocumentBuilder {
           );
         }
       }
-      if (seen.has(section.id)) {
-        // SPEC 1.3 → 14.3: IDs unique within a source file; reported at
-        // each repeated occurrence.
-        this.addFinding(
+      const locations = bearers.get(section.id);
+      if (locations === undefined) bearers.set(section.id, [location]);
+      else locations.push(location);
+    }
+    for (const [id, locations] of bearers) {
+      if (locations.length < 2) continue;
+      // SPEC 1.3 → 14.3: IDs unique within a source file. One finding per
+      // duplicated identity, locating every bearer (SPEC 14 cardinality).
+      this.findings.push(
+        locatedFinding(
           3,
-          location,
-          `duplicate ID ${JSON.stringify(section.id)}: IDs must be unique ` +
-            `within a source file — rename one of the sections ` +
-            `(SPEC 1.3, 14.3)`,
-        );
-      } else {
-        seen.add(section.id);
-      }
+          `duplicate ID ${JSON.stringify(id)}: ` +
+            `${String(locations.length)} sections bear this ID — IDs must ` +
+            `be unique within a source file; rename all but one of the ` +
+            `sections (SPEC 1.3, 14.3)`,
+          locations.map((range) => ({ file: this.file, range })),
+        ),
+      );
     }
   }
 
   /** The completed, deterministic document model. */
   finish(): SpecDocument {
-    // Deterministic report order (SPEC 12.0): by location, then condition.
-    const sorted = [...this.findings].sort(
-      (a, b) =>
-        (a.range?.start ?? 0) - (b.range?.start ?? 0) ||
-        (a.range?.end ?? 0) - (b.range?.end ?? 0) ||
-        a.condition - b.condition,
-    );
+    // Deterministic report order (SPEC 12.0, 12.7).
+    const sorted = [...this.findings].sort(compareFindings);
     return {
       path: this.path,
+      file: this.file,
       text: this.text,
       offsets: this.offsets,
       root: this.root,

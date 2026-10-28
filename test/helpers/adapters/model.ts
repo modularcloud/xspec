@@ -29,6 +29,7 @@ export const DEPENDENCY_EDGE_KINDS = [
   "embeds",
   "references",
 ] as const;
+export type DependencyEdgeKind = (typeof DEPENDENCY_EDGE_KINDS)[number];
 
 /** Change categories of SPEC.md 5.6 (T5.6-*, T9.1-1). */
 export const CHANGE_CATEGORIES = [
@@ -84,6 +85,18 @@ export interface NodeHashes {
   readonly metadataHash: string;
 }
 
+/**
+ * The four hash names of a requirement node (SPEC.md 5.5), as `query node`
+ * reports them and as an item's recorded state names the hashes it holds
+ * (10.2, 10.4; `RecordedNodeEntry`).
+ */
+export const NODE_HASH_NAMES: readonly (keyof NodeHashes)[] = [
+  "ownHash",
+  "subtreeHash",
+  "effectiveHash",
+  "metadataHash",
+];
+
 /** Full node report: `query node` / `show` (T11-1, T12.4-1). */
 export interface NodeReport {
   readonly identity: string;
@@ -91,7 +104,12 @@ export interface NodeReport {
   readonly ownText: string;
   readonly subtreeText: string;
   readonly hashes: NodeHashes;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
   /** Coverage attribute; absent for root nodes (T1.2-3, T11-1). */
   readonly coverage?: string;
   readonly incomingEdges: readonly GraphEdge[];
@@ -102,7 +120,12 @@ export interface NodeReport {
 export interface NodeRow {
   readonly identity: string;
   readonly sourceRange: SourceRange;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
   /** Coverage attribute; absent for root nodes. */
   readonly coverage?: string;
 }
@@ -115,7 +138,12 @@ export interface NodeRow {
  */
 export interface NodeSummary {
   readonly identity: string;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
 }
 
 /**
@@ -127,20 +155,33 @@ export interface NodeSummary {
  */
 export interface NodeMetadataSummary {
   readonly identity: string;
-  readonly tags: readonly string[];
+  /**
+   * The node's tags (12.7 tag set). `null` is absent: a root node's tags,
+   * reported `null` or omitted (SPEC 11.1, 12.4, 5.5) — never an empty set,
+   * which a tagless section reports as `[]` (12.7).
+   */
+  readonly tags: readonly string[] | null;
   readonly metadataHash: string;
 }
 
 /**
- * Own/subtree text summary of a `query node` document — the CONF-MD-scoped
+ * Text-algebra summary of a `query node` document — the four things the
+ * SPEC.md 1.6 algebra reads from one answer (P-3), within the CONF-MD-scoped
  * query surface (CERTIFICATIONS.md §CONF-MD: fixtures within that scope
- * promise `query node` reporting own and subtree text, SPEC.md 1.6), for the
- * text-algebra property (P-2/P-3). Either text MAY be empty (an empty leaf
+ * promise `query node` reporting identity, source range, own and subtree
+ * text, and its `contains` edges). Either text MAY be empty (an empty leaf
  * section, SPEC.md 1.1).
  */
-export interface NodeTextSummary {
+export interface NodeTextAlgebraSummary {
   readonly ownText: string;
   readonly subtreeText: string;
+  readonly sourceRange: SourceRange;
+  /**
+   * The targets of the answer's outgoing `contains` edges — the node's
+   * children (SPEC.md 5.2) — in the answer's own order; ordering them by
+   * their source ranges is the caller's step (P-3).
+   */
+  readonly containsTargets: readonly string[];
 }
 
 /** `query reachable` (T11-5): existence plus one shortest witness path. */
@@ -173,26 +214,521 @@ export interface IdsTreeNode {
 }
 
 /**
- * One validation/check finding (SPEC.md 14; T14-1, T7.5-2, T5.3-1, T6.1-3).
- * `condition` is the SPEC.md 14 condition identity (`"14.2"`); `message` is
- * the correction-oriented text (information presence, never exact wording).
- * The optional fields carry the extra information particular findings must
- * identify: source file and location, the violated policy rule and offending
- * edge (7.5), a full cycle path (5.3).
+ * SPEC.md 14's numbered-condition stable code tokens, in ordinal order:
+ * index N-1 holds condition 14.N's token. The numeral is the condition's
+ * ordinal — it orders findings (SPEC 12.7) and is no part of the code's
+ * value, which is the token string alone (SPEC 14, T14-6). Conditions 1–23
+ * are findings; 24 (write failure), 25 (read failure), and 26 (workspace
+ * busy) are usage errors carried only as the exit-2 error document's
+ * `code`, in no findings array (SPEC 14.24, 14.25, 14.26, 12.7) —
+ * `USAGE_ERROR_CONDITION_CODE_TOKENS` below.
  */
-export interface Finding {
-  readonly condition: string;
-  readonly message: string;
-  readonly file?: string;
-  readonly location?: SourceRange;
-  readonly rule?: string;
-  readonly edge?: GraphEdge;
-  readonly cycle?: readonly string[];
+export const CONDITION_CODE_TOKENS = [
+  "missing-id", // 14.1
+  "invalid-structural-id", // 14.2
+  "duplicate-id", // 14.3
+  "invalid-segment-or-tag", // 14.4
+  "unknown-dependency", // 14.5
+  "unknown-text-target", // 14.6
+  "unknown-ts-reference", // 14.7
+  "invalid-argument", // 14.8
+  "cycle", // 14.9
+  "stale-output", // 14.10
+  "cross-module-text", // 14.11
+  "policy-violation", // 14.12
+  "journal-error", // 14.13
+  "configuration-error", // 14.14
+  "invalid-import", // 14.15
+  "invalid-construct", // 14.16
+  "invalid-prop", // 14.17
+  "unsupported-node-usage", // 14.18
+  "invalid-source-path", // 14.19
+  "unparseable-source", // 14.20
+  "corrupt-session", // 14.21
+  "obstructed-write-path", // 14.22
+  "unreadable-record", // 14.23
+  "write-failure", // 14.24 — a usage error (exit 2), never a finding
+  "read-failure", // 14.25 — a usage error (exit 2), never a finding
+  "workspace-busy", // 14.26 — a usage error (exit 2), never a finding
+] as const;
+export type ConditionCodeToken = (typeof CONDITION_CODE_TOKENS)[number];
+
+/**
+ * The numbered conditions SPEC.md 14 reports as usage errors (12.0): a
+ * write failure (14.24), a read failure (14.25), and a busy workspace
+ * (14.26, a mutating command refused at acquisition, 13.5). Each carries
+ * its stable code only as the exit-2 error document's `code` (12.7, T14-6,
+ * T12.7-3, T14-9, T14-10, T13.5-2) — a finding in a `findings` array never
+ * carries any of them, so the findings-array decode rejects them
+ * (forms.ts).
+ */
+export const USAGE_ERROR_CONDITION_CODE_TOKENS = [
+  "write-failure", // 14.24
+  "read-failure", // 14.25
+  "workspace-busy", // 14.26
+] as const satisfies readonly ConditionCodeToken[];
+
+/**
+ * SPEC.md 14's refusal-reason stable codes, in the order 14 lists them —
+ * the findings order after the numbered conditions (SPEC 12.7, T14-7):
+ * eleven reasons, `refused-exposed-derived-file` (a file move's exposed
+ * emit destination, 6.5; T6.5-21) listed after `refused-invalid-destination`
+ * and before `refused-invalid-rewrite` (T12.7-2).
+ */
+export const REFUSAL_CODE_TOKENS = [
+  "refused-invalid-id",
+  "refused-identity-unchanged",
+  "refused-id-collision",
+  "refused-structural-parent",
+  "refused-cycle",
+  "refused-destination-exists",
+  "refused-missing-target-parent",
+  "refused-invalid-destination",
+  "refused-exposed-derived-file",
+  "refused-invalid-rewrite",
+  "refused-moved-import",
+] as const;
+export type RefusalCodeToken = (typeof REFUSAL_CODE_TOKENS)[number];
+
+/**
+ * The harness-pinned SPEC.md 14 token→condition table: the `14.N` condition
+ * identity of a numbered-condition code token, `null` for refusal reasons
+ * and code-less findings. The `14.N` spelling is harness vocabulary derived
+ * from the token — the reported value is always the token string (12.7) —
+ * so condition-identity assertions are assertions against tokens.
+ */
+export function conditionIdentityOf(code: string | null): string | null {
+  if (code === null) return null;
+  const index = (CONDITION_CODE_TOKENS as readonly string[]).indexOf(code);
+  return index === -1 ? null : `14.${String(index + 1)}`;
 }
 
-/** A failing `build` / `check` findings report (exit 1, stdout). */
+/**
+ * A SPEC.md 12.7 path value: a string where the path's bytes are valid
+ * UTF-8, and otherwise the marked byte form of 12.0 — `{"bytes": "…"}`,
+ * lowercase hexadecimal, two digits per byte, an object equal to no path
+ * string.
+ */
+export type PathValue = string | MarkedBytePath;
+export interface MarkedBytePath {
+  readonly bytes: string;
+}
+
+/** One finding location: an offending construct's file and range (12.7). */
+export interface FindingLocation {
+  readonly file: PathValue;
+  readonly range: SourceRange;
+}
+
+/**
+ * One finding in the literal SPEC.md 12.7 form (a form-exact surface, H-3):
+ * `code` is the stable token 14 assigns (`null` where 14 assigns none);
+ * `message` the human-readable description; `locations` one `{file, range}`
+ * per offending construct, ordered by file path bytes, then range start,
+ * then range end, empty for conditions without in-source locations; `path`
+ * the concerned file or path (`null` for located conditions); `identities`
+ * the identities or other context strings the condition names, empty where
+ * none. `condition` is NOT a document member: it is the derived `14.N`
+ * condition identity of a numbered-condition token (`conditionIdentityOf`),
+ * `null` for refusal reasons and code-less findings, kept so existing
+ * condition-identity assertions are expressed against the decoded token.
+ */
+export interface Finding {
+  readonly code: string | null;
+  readonly message: string;
+  readonly locations: readonly FindingLocation[];
+  readonly path: PathValue | null;
+  readonly identities: readonly string[];
+  /** Derived via the pinned token table — never read from the document. */
+  readonly condition: string | null;
+}
+
+/**
+ * A findings-only report — `{"findings": […]}` exactly (SPEC 12.7): a
+ * failing `build`'s validation errors, `check`'s findings, the findings of
+ * refusing reads (13.3) and refused operations (6.4, 6.5, 10.7).
+ */
 export interface FindingsReport {
   readonly findings: readonly Finding[];
+}
+
+/**
+ * The exit-2 error document — `{"error": …}` exactly, holding one finding
+ * form (SPEC 12.0, 12.7): with JSON output in effect, an invocation failing
+ * with a usage or configuration error emits this document as its entire
+ * stdout. For a configuration error the finding carries the stable code and
+ * concerned path (14); for a plain usage error `code` and `path` are `null`.
+ */
+export interface ErrorDocument {
+  readonly error: Finding;
+}
+
+/**
+ * The information one finding carries in every report form (TEST-SPEC
+ * T12.0-15, H-3; SPEC 12.0, 14): its stable code (`null` for a code-less
+ * finding — a review-operation refusal, 10.7), every location as its file
+ * and its range's two byte offsets (1.7), its concerned path, and its
+ * identities. A finding's `message` is wording, never asked of any form
+ * (H-3, T12.0-15), and the order of a report's findings and of a finding's
+ * locations is the JSON form's alone (12.7) — a human report's is free.
+ * The `--json` side projects a decoded {@link Finding} onto it
+ * (`findingInformation`, adapters/human-reports.ts); the human side's
+ * decoder produces it.
+ */
+export interface FindingInformation {
+  readonly code: string | null;
+  readonly locations: readonly FindingLocation[];
+  readonly path: PathValue | null;
+  readonly identities: readonly string[];
+}
+
+/**
+ * The information an exit-2 error's report carries (TEST-SPEC T12.0-15,
+ * H-5; SPEC 12.0, 14): its stable code and its concerned path, each `null`
+ * where 14 defines none — a plain usage error carries neither. With JSON
+ * output in effect it is the error document's (12.7); without, the
+ * standard-error message, the error's only report, carries it.
+ */
+export interface ErrorInformation {
+  readonly code: string | null;
+  readonly path: PathValue | null;
+}
+
+/**
+ * The `version` document — `{"product", "interface"}` exactly (SPEC.md 12.6,
+ * 12.7): the product version and the machine-interface version, both
+ * strings. The reported machine-interface value is the string form of 12.6's
+ * stated value, `"1"` — a caller value assertion (T12.6-1); the product
+ * version is informational, with no requirement beyond per-build fixedness.
+ */
+export interface VersionDocument {
+  readonly product: string;
+  readonly interface: string;
+}
+
+/**
+ * An occurrence record's source graph node — one datum: the node's identity
+ * together with that node's own source range (SPEC.md 5.7, 1.7, 12.7).
+ */
+export interface OccurrenceSourceNode {
+  readonly identity: string;
+  readonly range: SourceRange;
+}
+
+/**
+ * The source datum of an occurrence record: the node, or explicitly
+ * unavailable as one datum — identity and range withheld together — where
+ * 11.2 leaves the source node's identity undefined. Never `null` (12.7).
+ */
+export type OccurrenceSource =
+  OccurrenceSourceNode | { readonly unavailable: true };
+
+/**
+ * One reference occurrence record in the literal SPEC.md 12.7 form (a
+ * form-exact surface, H-3): `{"file", "range", "kind", "source", "target"}`
+ * — the referencing file (a path value: the marked byte form where the
+ * path's bytes are not valid UTF-8, 12.0); the occurrence's own range; its
+ * edge kind (`"depends"`, `"embeds"`, or `"references"`, 5.2 — `contains`
+ * is no reference kind); its source graph node per 11.2; and the resolved
+ * target's identity (a string — no identity carries a non-UTF-8 path, 12.0).
+ */
+export interface OccurrenceRecord {
+  readonly file: PathValue;
+  readonly range: SourceRange;
+  readonly kind: DependencyEdgeKind;
+  readonly source: OccurrenceSource;
+  readonly target: string;
+}
+
+/**
+ * The `occurrences` document (SPEC.md 11.3) — `{"findings", "occurrences"}`
+ * exactly (12.7): the consulted domain's findings, and one record per
+ * occurrence in occurrence order (5.7: by referencing file path bytes, then
+ * range start, then range end).
+ */
+export interface OccurrencesReport {
+  readonly findings: readonly Finding[];
+  readonly occurrences: readonly OccurrenceRecord[];
+}
+
+/**
+ * The `at` resolution's section member (SPEC.md 11.5, 12.7): the innermost
+ * section construct whose range contains the offset — the root when no
+ * narrower section does — as `{"identity", "range"}` exactly: its construct
+ * range, and its node identity per 11.2 — defined, or explicitly unavailable
+ * as the marker; never `null`.
+ */
+export interface AtSection {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+}
+
+/**
+ * The `at` resolution: `{"section", "occurrence"}` exactly (SPEC.md 12.7) —
+ * the containing occurrence's record, `null` when the offset lies within
+ * none.
+ */
+export interface AtResolution {
+  readonly section: AtSection;
+  readonly occurrence: OccurrenceRecord | null;
+}
+
+/**
+ * The `at` document (SPEC.md 11.5) — `{"findings", "resolution"}` exactly
+ * (12.7): the consulted domain's findings (the named file's), and the
+ * resolution — or, on an unparseable file, explicitly unavailable as one
+ * datum; never `null`.
+ */
+export interface AtReport {
+  readonly findings: readonly Finding[];
+  readonly resolution: AtResolution | { readonly unavailable: true };
+}
+
+/**
+ * Scoped projection of the `view` document (SPEC.md 11.4, 12.7 — decoded by
+ * `decodeViewFilesReport`): the consulted domain's findings, and each
+ * per-file view's `file` member in the reported order (byte order of
+ * workspace-relative path); the per-file `root`, `imports`, `occurrences`,
+ * and `comments` members are presence-checked and left undecoded — the
+ * T11.4-* tests pin the full per-file view.
+ */
+export interface ViewFilesReport {
+  readonly findings: readonly Finding[];
+  readonly files: readonly PathValue[];
+}
+
+/**
+ * The interpreted coverage attribute's defined values (SPEC.md 2.5): a view
+ * node's `coverage` member, where it is a plain value, is one of these — any
+ * other spelled value leaves the interpreted datum unavailable (11.2), so no
+ * other plain value exists.
+ */
+export const COVERAGE_ATTRIBUTE_VALUES = ["required", "none"] as const;
+export type CoverageAttributeValue = (typeof COVERAGE_ATTRIBUTE_VALUES)[number];
+
+/**
+ * One raw attribute entry of a view node — `{"name", "range", "text"}`
+ * exactly (SPEC.md 11.4, 12.7): the attribute's name as spelled (`null` for a
+ * spread attribute), its source range, and its source text — for a named
+ * attribute its name through the last character of its value or the bare name
+ * where it spells no value, for a spread attribute its entire braced
+ * construct. One entry per attribute the tag spells, in tag order; inclusion
+ * is by form (repeated, unknown, and spread attributes included).
+ */
+export interface ViewAttributeEntry {
+  readonly name: string | null;
+  readonly range: SourceRange;
+  readonly text: string;
+}
+
+/**
+ * One node of a view's positional section tree — `{"identity", "range",
+ * "opening", "closing", "attributes", "tags", "coverage", "children"}` plus,
+ * exactly when `--text` is given, `"ownText"` and `"subtreeText"` (SPEC.md
+ * 11.4, 12.7). `identity` is defined or explicitly unavailable per 11.2 —
+ * never `null` (no passage defines structural absence for it); `tags` and
+ * `coverage` are each a plain value, the stated `null` (a root's structural
+ * absence, 11.4), or unavailable; the text members are each a plain string or
+ * unavailable (whole-value poisoning, 11.2). `opening`/`closing` are the tag
+ * ranges, `null` where none exists (self-closing: no closing; root: neither).
+ */
+export interface ViewNode {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+  readonly opening: SourceRange | null;
+  readonly closing: SourceRange | null;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly tags: readonly string[] | null | { readonly unavailable: true };
+  readonly coverage:
+    CoverageAttributeValue | null | { readonly unavailable: true };
+  readonly children: readonly ViewNode[];
+  /** Present exactly when the invocation carried `--text` (12.7). */
+  readonly ownText?: string | { readonly unavailable: true };
+  /** Present exactly when the invocation carried `--text` (12.7). */
+  readonly subtreeText?: string | { readonly unavailable: true };
+}
+
+/**
+ * One import declaration of a per-file view — `{"range", "name", "target"}`
+ * exactly (SPEC.md 11.4, 12.7): its source range; its default binding's
+ * identifier, `null` where the declaration binds no default (the side-effect-
+ * only, named-only, and namespace-only forms — structural absence, never
+ * unavailability); and its resolved target file where specifier form and
+ * discovery define one, explicitly unavailable otherwise — never `null`.
+ */
+export interface ViewImportEntry {
+  readonly range: SourceRange;
+  readonly name: string | null;
+  readonly target: PathValue | { readonly unavailable: true };
+}
+
+/**
+ * One parseable requested file's view — `{"file", "root", "imports",
+ * "occurrences", "comments"}` exactly (SPEC.md 11.4, 12.7): the file (a 12.7
+ * path value), the root node of the positional section tree, every import
+ * declaration in document order, the file's occurrence records in document
+ * order, and every MDX comment's source range in document order.
+ */
+export interface FileView {
+  readonly file: PathValue;
+  readonly root: ViewNode;
+  readonly imports: readonly ViewImportEntry[];
+  readonly occurrences: readonly OccurrenceRecord[];
+  readonly comments: readonly SourceRange[];
+}
+
+/**
+ * The full `view` document (SPEC.md 11.4) — `{"findings", "views"}` exactly
+ * (12.7): the consulted domain's findings, and one per-file view per
+ * parseable requested file, ordered by byte order of workspace-relative path
+ * (an unparseable requested file contributes no entry).
+ */
+export interface ViewReport {
+  readonly findings: readonly Finding[];
+  readonly views: readonly FileView[];
+}
+
+/**
+ * The inventory document's anchoring members (SPEC.md 11.6, 12.7 — decoded
+ * by `decodeInventoryAnchoring`): the workspace root and the configuration
+ * file, each identified relative to the invocation working directory in
+ * 11.6's canonical spelling and carried as a 12.7 path value. The document's
+ * other members are outside this scoped projection (the full inventory form
+ * is T11.6-*'s subject).
+ */
+export interface InventoryAnchoring {
+  readonly root: PathValue;
+  readonly config: PathValue;
+}
+
+/** Group kinds (SPEC.md 7.1, 7.2): every group is a spec or a code group. */
+export const GROUP_KINDS = ["spec", "code"] as const;
+export type GroupKind = (typeof GROUP_KINDS)[number];
+
+/** `targets` values of a coverage profile (SPEC.md 7.4). */
+export const COVERAGE_TARGETS_VALUES = ["leaves", "all"] as const;
+export type CoverageTargetsValue = (typeof COVERAGE_TARGETS_VALUES)[number];
+
+/** `mode` values of a coverage profile (SPEC.md 7.4). */
+export const COVERAGE_MODES = ["direct", "transitive"] as const;
+export type CoverageMode = (typeof COVERAGE_MODES)[number];
+
+/** Policy rule types (SPEC.md 7.5). */
+export const POLICY_RULE_TYPES = ["forbidden", "allowedOnly"] as const;
+export type PolicyRuleType = (typeof POLICY_RULE_TYPES)[number];
+
+/** One group of the resolved configuration view: `{"name", "globs"}` (12.7). */
+export interface InventoryGroupDef {
+  readonly name: string;
+  readonly globs: readonly string[];
+}
+
+/**
+ * The resolved `markdown` view — `{"emit", "outDir"}` exactly: `outDir`
+ * `null` where unset, and an absent configuration key resolving to
+ * `{"emit": false, "outDir": null}` (SPEC.md 7.3, 11.6, 12.7).
+ */
+export interface InventoryMarkdownView {
+  readonly emit: boolean;
+  readonly outDir: PathValue | null;
+}
+
+/**
+ * One resolved coverage profile — every default and inferred kind explicit
+ * (SPEC.md 7.4, 11.6, 12.7): `targetTags` `null` where absent, `targets`
+ * `"leaves"` where defaulted, `boundaryKind` explicit though inferred,
+ * `edgeKinds` all three where defaulted. `target` and `boundary` stay
+ * configured group names, resolving against the view's own group lists.
+ */
+export interface InventoryCoverageProfileView {
+  readonly name: string;
+  readonly target: string;
+  readonly targetTags: readonly string[] | null;
+  readonly targets: CoverageTargetsValue;
+  readonly boundary: string;
+  readonly boundaryKind: GroupKind;
+  readonly mode: CoverageMode;
+  readonly edgeKinds: readonly DependencyEdgeKind[];
+}
+
+/**
+ * A resolved policy selector (SPEC.md 7.5, 12.7): exactly one of the three
+ * forms — a group selector `{"group", "kind"}` with the kind explicit though
+ * inferred, `{"files"}`, or `{"tags"}`.
+ */
+export type InventoryPolicySelector =
+  | { readonly group: string; readonly kind: GroupKind }
+  | { readonly files: string }
+  | { readonly tags: readonly string[] };
+
+/** One resolved policy rule — `kinds` all three where defaulted (7.5, 12.7). */
+export interface InventoryPolicyRuleView {
+  readonly name: string;
+  readonly type: PolicyRuleType;
+  readonly from: InventoryPolicySelector;
+  readonly to: InventoryPolicySelector;
+  readonly kinds: readonly DependencyEdgeKind[];
+}
+
+/**
+ * The inventory document's `configuration` member (SPEC.md 11.6, 12.7): the
+ * resolved configuration view — `{"specs", "code", "markdown", "coverage",
+ * "policy"}` exactly, groups/profiles/rules each carried with its complete
+ * definition, never as a bare name.
+ */
+export interface InventoryConfigurationView {
+  readonly specs: readonly InventoryGroupDef[];
+  readonly code: readonly InventoryGroupDef[];
+  readonly markdown: InventoryMarkdownView;
+  readonly coverage: readonly InventoryCoverageProfileView[];
+  readonly policy: readonly InventoryPolicyRuleView[];
+}
+
+/** One group membership of a discovered source: `{"name", "kind"}` (12.7). */
+export interface InventoryGroupMembership {
+  readonly name: string;
+  readonly kind: GroupKind;
+}
+
+/** One `sources` entry: `{"path", "groups"}` per discovered file (12.7). */
+export interface InventorySourceEntry {
+  readonly path: PathValue;
+  readonly groups: readonly InventoryGroupMembership[];
+}
+
+/**
+ * One `derived` entry — `{"source", "module", "markdown"}` per discovered
+ * spec source (SPEC.md 11.6, 13.1, 12.7): `module` and `markdown` `null` for
+ * a spec-group file without the `.mdx` extension, `markdown` `null` also
+ * while emission is disabled (7.3).
+ */
+export interface InventoryDerivedEntry {
+  readonly source: PathValue;
+  readonly module: PathValue | null;
+  readonly markdown: PathValue | null;
+}
+
+/**
+ * The inventory document's resolved configuration/sources/derived projection
+ * (SPEC.md 11.6, 12.7 — decoded by `decodeInventoryResolvedMap`; T11.6-2's
+ * subject). The document's other members are outside this scoped projection
+ * (the full inventory form is pinned across the T11.6-* tests).
+ */
+export interface InventoryResolvedMap {
+  readonly configuration: InventoryConfigurationView;
+  readonly sources: readonly InventorySourceEntry[];
+  readonly derived: readonly InventoryDerivedEntry[];
+}
+
+/**
+ * The inventory document's `journal` member — `{"path", "occupied"}` exactly
+ * (SPEC.md 11.6, 12.7): the journal path (6.1) and whether anything presently
+ * occupies it. Occupancy is presence alone, whatever kind of filesystem
+ * object occupies the path — the inventory reads no journal content.
+ */
+export interface InventoryJournalStatus {
+  readonly path: PathValue;
+  readonly occupied: boolean;
 }
 
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
@@ -257,9 +793,115 @@ export interface ImpactedCodeEntry {
   readonly path: readonly string[];
 }
 
-/** `review list` (T10.7-5): sessions in byte order of name. */
+/**
+ * One identity pair of a `rename`/`move` mapping — the preview's `mapping`
+ * (SPEC.md 6.6) and the performed operation's applied mapping (6.4, 6.5),
+ * one `{"from", "to"}` per mapped identity, ordered by `from` bytes (12.7;
+ * T6.4-1, T6.5-1): the array's order is part of the pinned form, so tests
+ * assert the ordered array, never a set (adapters/forms.ts).
+ */
+export interface AppliedMappingPair {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * The performed `rename`/`move` document (SPEC.md 6.4, 6.5) — on success
+ * exactly `{"findings", "mapping"}`, a form-exact 12.7 surface (H-3;
+ * T6.4-1, T6.5-1, T6.6-2, T12.7-2): `findings` `[]` — a successful
+ * operation carries none, a refused one reporting the findings-only form
+ * instead — and `mapping` the applied mapping in the preview's `mapping`
+ * form, one `{"from", "to"}` per mapped identity ordered by `from` bytes.
+ */
+export interface PerformedOperationReport {
+  readonly findings: readonly Finding[];
+  readonly mapping: readonly AppliedMappingPair[];
+}
+
+/**
+ * The ten preview edit class names, in the order SPEC.md 12.7 lists them
+ * (6.6 defines the classes; the list order is 12.7's presentation — the edit
+ * ORDER inside a file entry compares class-NAME bytes, not this list's
+ * positions).
+ */
+export const PREVIEW_EDIT_CLASSES = [
+  "reference-rewrite",
+  "id-rewrite",
+  "import-specifier-rewrite",
+  "import-addition",
+  "import-removal",
+  "origin-deletion",
+  "target-insertion",
+  "target-parent-rewrite",
+  "file-relocation",
+  "file-creation",
+] as const;
+export type PreviewEditClass = (typeof PREVIEW_EDIT_CLASSES)[number];
+
+/**
+ * One edit of a preview file entry — `{"class", "range"}` exactly (SPEC.md
+ * 12.7): class plus a source range in current, pre-operation coordinates and
+ * nothing else — an edit is reported without replacement text (6.6).
+ */
+export interface PreviewEdit {
+  readonly class: PreviewEditClass;
+  readonly range: SourceRange;
+}
+
+/**
+ * One file the operation would rewrite, relocate, or create — `{"file",
+ * "edits"}` exactly (SPEC.md 12.7): `file` the file's current, pre-operation
+ * path (for target-file creation, the path the creation would occupy; 6.6),
+ * `edits` in the pinned order — range start, then range end, then class-name
+ * bytes.
+ */
+export interface PreviewFileEntry {
+  readonly file: PathValue;
+  readonly edits: readonly PreviewEdit[];
+}
+
+/**
+ * The derived-file delta, both directions one datum — `{"generated",
+ * "removed"}` exactly, each direction's paths in byte order (SPEC.md 6.6,
+ * 12.7).
+ */
+export interface PreviewDelta {
+  readonly generated: readonly PathValue[];
+  readonly removed: readonly PathValue[];
+}
+
+/**
+ * The delta member's datum: the two-direction value, or explicitly
+ * unavailable as one datum where the recorded state cannot be read (14.23).
+ */
+export type PreviewDeltaDatum = PreviewDelta | { readonly unavailable: true };
+
+/**
+ * The `rename`/`move` preview document (SPEC.md 6.6) — `{"findings",
+ * "mapping", "files", "delta"}` exactly, a form-exact 12.7 surface (H-3):
+ * `mapping` one `{"from", "to"}` per mapped identity ordered by `from`
+ * bytes; `files` one entry per file ordered by file path bytes; `delta` the
+ * two-direction datum or unavailable. On refusal `mapping`, `files`, and
+ * `delta` are `null` — together: a refused preview reports the refusal
+ * findings alone (6.6), so mixed nullity is no 12.7 form.
+ */
+export interface PreviewReport {
+  readonly findings: readonly Finding[];
+  readonly mapping: readonly AppliedMappingPair[] | null;
+  readonly files: readonly PreviewFileEntry[] | null;
+  readonly delta: PreviewDeltaDatum | null;
+}
+
+/**
+ * `review list` (T10.7-5): sessions in byte order of name, plus the
+ * listing's findings — the 12.7 findings array of the document's
+ * `"findings"` member, which the document must carry while any session is
+ * listed corrupt (SPEC 14.21, 14, 12.7; H-3) and may omit otherwise.
+ */
 export interface SessionListReport {
   readonly sessions: readonly SessionListEntry[];
+  /** Present exactly when the document carries the member (review.ts). */
+  readonly findings?: readonly Finding[];
 }
 export type SessionListEntry =
   | { readonly name: string; readonly corrupt: true }
@@ -278,6 +920,7 @@ export interface SessionStatusReport {
   readonly totals: Readonly<Record<string, number>>;
 }
 export interface SessionStatusRow {
+  /** An item ID: a well-formed argument value (SPEC.md 10.2, 12.0; T10.2-1). */
   readonly id: string;
   readonly kind: ItemKind;
   readonly scope: string;
@@ -305,30 +948,119 @@ export type OriginTextSide =
   | { readonly present: false }
   | { readonly present: true; readonly text: string };
 
-/** One origin entry: a node's own text before and after (T10.7-12). */
+/**
+ * One origin entry: a node's own text before and after (T10.7-12). The after
+ * side is read from the current graph, so its presence is the node's current
+ * presence (SPEC.md 10.7) — and like every payload node, a currently-present
+ * origin node carries its current source range while a currently-absent one
+ * carries none (SPEC.md 10.7, 1.7; T10.7-7).
+ */
 export interface OriginEntry {
   readonly node: string;
   readonly before: OriginTextSide;
   readonly after: OriginTextSide;
+  readonly sourceRange?: SourceRange;
+}
+
+/**
+ * One side of a `metadata-consistency` item's metadata pair (SPEC.md 10.7;
+ * T10.7-13): the scope node's metadata (5.5) in that side's graph state — the
+ * item's baseline state before, the current graph after — or, where that
+ * state lacks the node, the absent side, carrying no metadata (10.7: under
+ * the origin-text rule).
+ */
+export type MetadataSide =
+  | { readonly present: false }
+  | {
+      readonly present: true;
+      /**
+       * The node's `d` targets, each under its current identity (10.4), in
+       * the order the product lists them: 10.7 fixes none, so tests compare
+       * them as a set (T10.7-13).
+       */
+      readonly d: readonly string[];
+      /** The coverage attribute in 12.7's value form (2.5, 12.7). */
+      readonly coverage: CoverageAttributeValue;
+      /** The tags: a 12.7 tag set — byte order, duplicates collapsed. */
+      readonly tags: readonly string[];
+    };
+
+/**
+ * A `metadata-consistency` item's metadata pair (SPEC.md 10.7; T10.7-13):
+ * a before/after pair of its scope node's `d` targets, coverage attribute,
+ * and tags.
+ */
+export interface MetadataPair {
+  readonly before: MetadataSide;
+  readonly after: MetadataSide;
+}
+
+/**
+ * One node's entry in an item's recorded state — its `baseline` or its
+ * `current` (SPEC.md 10.2, 10.4) — as `decodeRecordedState` (review.ts)
+ * reads it: the node under its current identity (10.4: reads present every
+ * recorded node so), whether the state records it present, and the hashes
+ * the state records for it under 5.5's names — the item's relevant hashes
+ * (10.4's list per kind), none for a node whose presence alone is recorded —
+ * or, in their place, the explicit absent marker an absent node's hashes are
+ * recorded as (10.4). Value-blind: which nodes have entries, their presence,
+ * and their hashes or marker are the tests' to assert (T10.5-8).
+ */
+export interface RecordedNodeEntry {
+  /** The node's identity (a string, 12.7), its current identity (10.4). */
+  readonly node: string;
+  readonly present: boolean;
+  /**
+   * True where the entry records the explicit absent marker in place of
+   * hashes (SPEC.md 10.4: an absent node's hashes are recorded as an
+   * explicit absent marker); `hashes` is then empty.
+   */
+  readonly absentMarker: boolean;
+  /** The recorded hashes by name (5.5); empty where the marker stands. */
+  readonly hashes: Readonly<Partial<NodeHashes>>;
 }
 
 /**
  * A full review item as presented by `next --json`, `show`, and `export`
- * (SPEC.md 10.2, 10.7; T10.2-1, T10.7-7/8/12). `baseline` and `current` carry
- * the recorded relevant state; their inner structure is product-shaped and
- * compared whole (as decoded JSON) by the tests that assert them.
+ * (SPEC.md 10.2, 10.7; T10.2-1, T10.7-7/8/12/13). `baseline` and `current`
+ * carry the recorded relevant state; their inner structure is product-shaped
+ * and compared whole (as decoded JSON) by the tests that assert them, or read
+ * entry by entry through `decodeRecordedState` (review.ts) by a test
+ * asserting a recorded node's presence, hashes, or absent marker (T10.5-8).
  */
 export interface ReviewItem {
+  /** An item ID: a well-formed argument value (SPEC.md 10.2, 12.0; T10.2-1). */
   readonly id: string;
   readonly kind: ItemKind;
   readonly status: ItemStatus;
   readonly blocked: boolean;
+  /** Item IDs, each a well-formed argument value (SPEC.md 10.2, 12.0). */
   readonly blockedBy: readonly string[];
   readonly reason: string;
   readonly note?: string;
   readonly scope: NodeTextState;
+  /**
+   * Every node of the item's scope as the payload presents it (SPEC.md
+   * 10.7: every scope, context, and origin node, under its current identity
+   * and presence, 10.4, a present one with its source range) — the scope as
+   * last assigned (10.4: by `create`, a re-derivation, 10.5, or a `split`,
+   * 10.7): the scope root and, for a `subtree-coherence` item, each node
+   * beneath it in its scope (10.5: N and all descendants; 10.6: the node
+   * and all its current descendants at derivation) — in the product's order
+   * (10.7 fixes none, so tests compare it as a set). Absent when the
+   * document carries no such list: a test asserting an item's scope set
+   * reads it through `requireScopeNodes` (review.ts), which then fails
+   * loudly (H-3: required information absent).
+   */
+  readonly scopeNodes?: readonly NodeTextState[];
   readonly context: readonly NodeTextState[];
   readonly origin: readonly OriginEntry[];
+  /**
+   * The scope node's metadata pair — present exactly on a
+   * `metadata-consistency` item, whose payload requires it (SPEC.md 10.7;
+   * T10.7-7, T10.7-13); never read on another kind.
+   */
+  readonly metadata?: MetadataPair;
   readonly baseline: unknown;
   readonly current: unknown;
 }
@@ -340,13 +1072,29 @@ export interface NextReport {
   readonly item?: ReviewItem;
 }
 
+/**
+ * One recorded decomposition as `export` presents it (SPEC.md 10.7): the
+ * decomposed original's kind and scope node — "the original's kind and scope
+ * node, replaced by per-child `subtree-coherence` items and the scope node's
+ * `parent-consistency` item" — the scope node under its current identity,
+ * as every read presents a recorded node (10.4; T10.4-4, T10.7-8).
+ */
+export interface RecordedDecomposition {
+  readonly kind: ItemKind;
+  /** The scope node's identity (a string, 12.7). */
+  readonly scope: string;
+}
+
 /** `review export` (T10.7-8): the whole session, one JSON document. */
 export interface ExportReport {
   readonly name: string;
   readonly strategy: string;
   /** Recorded creation parameters — product-shaped, compared whole. */
   readonly creationParameters: unknown;
-  /** Recorded decompositions — product-shaped, compared whole. */
-  readonly decompositions: unknown;
+  /**
+   * Recorded decompositions, each decoded to its kind and scope node, in the
+   * product's order (10.7 fixes none); none recorded is the empty list.
+   */
+  readonly decompositions: readonly RecordedDecomposition[];
   readonly items: readonly ReviewItem[];
 }

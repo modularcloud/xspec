@@ -1,4 +1,4 @@
-// TEST-SPEC §6.5 (move) — SUITE-25: T6.5-1…T6.5-6.
+// TEST-SPEC §6.5 (move) — SUITE-25: T6.5-1…T6.5-9.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -28,17 +28,79 @@
 // ID is a usage error (12.0).
 //
 // Conservative operationalizations (noted per H-4):
-// - T6.5-1 "rewritten so everything resolves": SPEC pins resolution, not the
-//   rewritten specifier's spelling (several relative paths resolve to one
-//   file), so specifiers are asserted as: the stale quoted spelling gone, a
-//   spelling naming the moved module's file stem present (every resolving
-//   specifier ends in `Moved.xspec` / `Other.xspec`), and `check` exit 0 —
-//   which enforces that all imports and references actually resolve (12.2).
+// - T6.5-1's specifier-rewrite byte contract (TEST-SPEC T6.5-1; SPEC 6.5):
+//   the `import-specifier-rewrite` ranges are read by running the preview on
+//   a copy of each arm's fixture (SPEC 6.6: a rewrite's range is the
+//   specifier literal's characters, in pre-operation coordinates), the
+//   preview's `mapping` and complete `files` pinned form-exact meanwhile
+//   (T6.6-4 (c)), and after the real move each rewritten file — the moved
+//   file under its new path, the importing `.mdx`, the importing `.ts` —
+//   must be its pre-move bytes with exactly those ranges replaced by the
+//   expected literal: the kept delimiters around the canonical relative
+//   spelling 6.5 fixes (the `..` ascents, then the descending segments,
+//   `/`-joined, no `.` segments, `./`-prefixed without an ascent, `.xspec`),
+//   compared byte for byte rather than resolved — over a move into a
+//   subdirectory, out of one, across sibling directories, and a relocation
+//   within the file's own directory, whose own specifiers still designate
+//   their source and so are neither rewritten nor reported (6.5). `check`
+//   exit 0 then enforces that everything actually resolves (12.2). A fifth
+//   arm stages five declarations that record no edge or occurrence — two
+//   unreferenced spec-source imports, a code source's type-only import
+//   under each modifier form and its side-effect import — each rewritten
+//   all the same (6.5: every specifier naming a spec module stands in an
+//   import declaration, 4), its pre-move edge sets pinned empty as a
+//   staging premise, and closes with `check` and `build` finding-free. A
+//   sixth stages a code source whose one spec module import stands nested
+//   in a function body (4: wherever the declaration stands; T4.5-10), its
+//   specifier rewritten under the same byte contract, the preview's entry
+//   for that file pinned to the one rewrite at TEST-SPEC's [38, 56), and
+//   closes with `check` and `build` exiting 0 and the marker's
+//   `references` edge from the enclosing function to the moved section —
+//   the file never compiled under H-2's channel, TypeScript's checker
+//   rejecting a nested import declaration after parsing (T4.5-10).
 // - "Mapping appended to the journal" uses the SUITE-21 operationalization:
 //   the journal (absent before the first journaled operation, SPEC 6.1) is a
 //   plain file holding exactly one line-oriented entry after the one move;
 //   entry content stays opaque (H-4). T6.5-1 asserts it for the file form,
 //   T6.5-3 for the section form — "the full mapping … (6.5: both forms)".
+// - The applied-mapping report — "a successful move … reports its applied
+//   mapping, as rename does" (SPEC 6.5, 6.4) — is asserted with T6.4-1's
+//   protocol: the move runs with `--json` (a single JSON document as the
+//   entire stdout, 12.0), its report decodes through the form-exact
+//   performed-operation decoder (`decodeAppliedMappingReport`, a thin alias
+//   of forms.ts's `decodePerformedOperationReport`: exactly `{"findings",
+//   "mapping"}`, `findings` `[]`, SPEC 12.7; H-3), and the decoded pairs are
+//   asserted as the ordered array (`assertAppliedMapping`) — every identity
+//   pair the operation journaled, the preview's `mapping`, one `{"from",
+//   "to"}` per node ordered by `from` bytes (SPEC 6.4, 6.6, 12.7). Both forms
+//   report as rename does, split as the journal clause is: T6.5-1 decodes
+//   the file form's report — every node of the moved file mapped, the
+//   implicit root included (its identity is the path alone, 1.2, 1.5), IDs
+//   kept and file parts changed — and T6.5-3 the section form's: exactly
+//   the moved subtree's prefix-replaced pairs, no other identity mapped.
+// - T6.5-1's human form (T12.0-1's information parity; SPEC 12.0: the JSON
+//   form carries the same information as the human report; 6.5: a move
+//   reports its applied mapping as rename does, 6.4): the `--json` move
+//   consumes the original's pre-move state, so in each arm the copy staged
+//   and built like the original for the preview — which the preview leaves
+//   at the pre-move state — runs the same `move` without `--json` after the
+//   preview, exiting 0 as the `--json` run does; once that run's own
+//   assertions have run, the human report must mention every mapped pair's
+//   `from` and `to` identity, taken from the decoded report (a
+//   product-to-itself comparison, H-4; section-6.4.ts's
+//   `assertHumanAppliedMapping`, through helpers/adapters/human.ts) —
+//   identity-or-path boundaries, so the root's bare path `specs/A.mdx`
+//   never counts inside its sections' identities (`specs/A.mdx#a`), nor
+//   `specs/A.mdx#a` inside `specs/A.mdx#a.mid` (robust matching, H-3:
+//   presence, never wording). Limits: no mention is associated with
+//   another, so which `from` maps to which `to`, and that the report maps
+//   nothing else, stay with the JSON assertions; an identity counts
+//   wherever the report prints it. The section form's report is the same
+//   applied mapping (6.5: both forms report it as rename does), so T6.5-3
+//   asks its JSON form alone. T12.0-15 decodes the file moves' human
+//   reports onto the applied mapping and compares them pair for pair with
+//   their `--json` twins', on the same stagings
+//   (`T6_5_1_FILE_MOVE_STAGINGS`, exported; section-12.0-iv.ts).
 // - T6.5-1/T6.5-3 "finishing regeneration as T6.4-7" is the H-6 two-directory
 //   protocol: a second workspace is seeded with the post-move configuration,
 //   sources, and journal (derived files are reproducible from those,
@@ -60,19 +122,139 @@
 //   references become double-quoted string literals, kept forms keep their
 //   quote style — are asserted as exact substrings (`d={"tm"}`,
 //   `{text("tm.k1")}`, `d={"tm.k1"}`).
-// - T6.5-4 refusal report content is deliberately unasserted (12.0 classes
-//   refusals exit 1; TEST-SPEC pins no report content), so refusal arms run
-//   without `--json`; "modifies nothing" is a whole-workspace-root byte
-//   snapshot compare around each refused command with the pre-refusal
-//   `build`'s derived files present (the T6.4-3 protocol). Because each arm
-//   proves it modified nothing, the arms share one staged workspace. The
-//   not-valid-UTF-8 destination is staged on the Linux leg only (mirroring
-//   T1.5-2's platform note): argv bytes exist as a channel there, carried by
-//   the subprocess driver's raw-byte argv support.
-// - T6.5-5 exit-2 arms run with `--json`: stdout byte-empty (H-5: no report,
-//   no validation findings — the 12.0-ordering discriminator) and the usage
-//   error message on stderr (presence, not wording). The masking arm asserts
-//   exit 1 with exactly one 14.20 finding naming the unparseable origin file.
+// - T6.5-4/T6.5-6 refusal arms run with `--json`: a refused operation's
+//   report is the form-exact 12.7 findings-only report (SPEC 12.7, H-3), and
+//   each arm asserts exactly one finding per applicable refusal reason,
+//   carrying its exact stable code (SPEC 14: one finding per applicable
+//   reason, every applicable reason reported together; TEST-SPEC preamble: a
+//   code is contract) — most arms stage a single cause; T6.5-4's
+//   out-of-group `.mdx` occupant stages two applicable reasons at once —
+//   with the concern §14 assigns the reason: the concerned identity
+//   (refused-invalid-id, refused-identity-unchanged,
+//   refused-missing-target-parent; `identities` exactly the 1.5 identity
+//   over the target file as its sole element, and the collision's located
+//   bearers in location order — support.ts assertRefusalIdentities), the
+//   concerned path
+//   (refused-destination-exists, refused-invalid-destination), or a located
+//   participant (refused-id-collision locates every colliding bearer — the
+//   remaining bearer's construct is the window wherever its bytes are
+//   known: staged (T6.5-4's cross-file arm), or pinned byte-exact before
+//   the refusal (T6.5-6's same-file arm, whose post-move B.mdx the test
+//   asserts as I6_B_AFTER), there asserted every-participant strict —
+//   exactly the one remaining bearer, never the moved section, `path`
+//   null; refused-cycle locates the would-be cycle's full path over the
+//   pre-operation sources — for the dependency-cycle arm, the reference
+//   spelling recording the participating dependency edge, the moved node's
+//   `d={"keep"}`; for the spec-import-cycle arm, whose two participating
+//   imports the move would add and so exist in no pre-operation
+//   coordinates, each added import by the reference spelling the move
+//   roots at its binding: the moved node's `d={"keep"}` (B.mdx's added
+//   import of A.mdx) and `user`'s `d={"mv"}` (A.mdx's added import of
+//   B.mdx), both in specs/A.mdx, asserted every-participant strict —
+//   exactly those two locations in 12.7's within-finding order, `path`
+//   null (support.ts assertFindingLocatesExactly)). "Modifies nothing"
+//   stays the whole-workspace-root byte snapshot compare around each
+//   refused command
+//   with the pre-refusal `build`'s derived files present (the T6.4-3
+//   protocol); because each arm proves it modified nothing, the arms share
+//   one staged workspace — except those whose staging cannot share it, each
+//   on a workspace of its own: the lacking-`.mdx` clause's single-casing
+//   arm, `move specs/a.mdx specs/B.MDX` under the spec globs `specs/*.mdx`
+//   and `specs/*.MDX` (its destination in a spec group yet lacking `.mdx`
+//   byte-wise, 12.0: no case folding); the outside-root link staging; the
+//   derived-path arm and its link sibling, which need `markdown.outDir`
+//   emission and a spec glob admitting the destination `new/b.mdx` (SPEC
+//   7.3, 13.2); and the precondition arm, whose invalid-workspace refusal
+//   instead reports the workspace's numbered findings alone (SPEC 14, 6.4):
+//   exactly its one 14.5 finding located in the offending file. The 6.5
+//   destination clauses "containing `#`" and "not valid UTF-8" admit no
+//   refusal staging (T6.5-4's dead-letter note): every operand spelling that
+//   would present either is an exit-2 usage error before any refusal is
+//   evaluated — those stagings are T6.5-5's. The barred-character arms
+//   are refusals instead: a `<new-id>` carrying a character 1.4's
+//   quote-and-escape bullet bars (refused-invalid-id) and a destination
+//   path carrying one 7.1 bars (refused-invalid-destination) are each a
+//   well-formed argument value that no spelling rule decides (12.0), so
+//   exit 1, never exit 2.
+// - T6.5-5 exit-2 arms run with `--json`: stdout exactly one 12.7 error
+//   document (12.0: with JSON output in effect, an exit-2 invocation emits
+//   the error document as its entire stdout — no report, no validation
+//   findings: the 12.0-ordering discriminator) and the usage error message
+//   on stderr (presence, not wording). The existence and kind checks ride
+//   both a valid workspace and the ordering arm's failing one (12.0:
+//   checked before source validation, as T6.4-4): a nonexistent origin
+//   file — in each form, both of T6.4-4's spellings: absent on disk, and a
+//   valid `.mdx` present on disk (holding a section spelling the origin
+//   ID) but matched by no spec group, its absence from the discovered set
+//   pinned through `ids --json` on the valid workspace (a file named in an
+//   argument exists as a member of the discovered set, SPEC 12.0) — or
+//   origin ID, and a discovered code source as the origin in each
+//   form — both forms' origin operands name discovered spec sources
+//   (SPEC 6.5), so a code-source origin is a wrong-kind operand, judged
+//   like existence before any content question — the wrong-kind arms on
+//   the valid workspace inside whole-root modifies-nothing snapshot
+//   compares (a product accepting a code origin would relocate the file or
+//   act on its named unit), and the existence table inside one such
+//   compare in the valid-workspace and ordering arms alike (a product
+//   probing the filesystem for the stray origin would move it). The
+//   masking arm asserts exit 1 with exactly
+//   one 14.20 finding naming the unparseable origin file, and origin-ID
+//   existence is parse-local over spelled identities, as T6.4-4
+//   (SPEC 6.5, 6.4, 11.2): an origin ID two sections both spell, or one
+//   whose sole bearer spells it beneath an ancestor spelling no identity,
+//   exists — the invalid-workspace refusal reports the workspace's one
+//   14.3 or 14.1 finding instead (exit 1, never exit 2, nothing modified,
+//   the target file not created) — while an origin ID whose only would-be
+//   bearer spells no identity — its `id` attribute repeated on the tag, or,
+//   each on a workspace of its own, braced (`id={"x"}`, moving `x`) or
+//   valueless (`<S id>`, moving `true`, the value JSX gives a bare
+//   attribute), T6.4-4's stagings in the section form, each a one-14.17
+//   premise pinned via `build` — is nonexistent: exit 2, though that file
+//   carries a 14.17 finding, the usage error alone reported (H-5), inside a
+//   whole-root modifies-nothing compare, failing a product that reads the
+//   repeated value, the braced string, or the bare attribute's JSX value as
+//   a spelling (it finds the origin ID and refuses the invalid workspace
+//   instead, exit 1). Operand classification is by spelling alone
+//   (SPEC 6.5: an operand containing `#` is a `<file>#<id>` pair under the
+//   12.0 split, one without is a file): the three mixed-synopsis
+//   invocations — bare-file origin with pair destination, pair origin with
+//   bare-file destination, and the `#`-containing file-form destination
+//   classified as a pair (T6.5-4's dead-letter note) — match neither
+//   synopsis and exit 2, each inside a whole-root modifies-nothing
+//   snapshot compare (every operand names staged content, so a product
+//   accepting a mixed form would perform a move); and a non-UTF-8
+//   destination operand, a usage-error argument value (SPEC 12.0), is
+//   staged on the Linux leg only (mirroring T1.5-2's platform note): argv
+//   bytes exist as a channel there, carried by the subprocess driver's
+//   raw-byte argv support.
+// - T6.5-7 asserts the real move's operation-side rewrite bytes — the
+//   assertion T6.5-2's no-other-byte-changes check excludes and T6.6-4 makes
+//   only of the preview's report — as whole-file byte compares against
+//   independently composed expected constants (H-4, normalizing nothing),
+//   each delta cited to the rule of SPEC 6.5, 6.4, or 3 that forces it. The
+//   fixture is staged so no import is added: every moved reference converts
+//   imported → local, the one rewrite direction free of implementation
+//   latitude (SPEC 6.5: identifier choice and insertion offset attach to
+//   added imports alone), so the two files' post-move bytes are the rules'
+//   unique composition; the moved subtree spells a descendant's `id`
+//   attribute single-quoted (SPEC 2.7), re-identified with its quotes kept
+//   (SPEC 6.4: minimal in-place edits bind the `id`-attribute rewrite as
+//   they bind references, T6.4-2). The code-source counterpart, two `.ts`
+//   files in the same workspace, each importing the origin, target, and
+//   third modules with the origin binding referenced only by markers on
+//   moved nodes (SPEC 4.5): the origin declaration alone on its line in one
+//   file and following the third module's on a shared line in the other,
+//   removed with 6.5's exact extent as in MDX, the moved markers re-rooted
+//   at the existing target binding (no import added), each file byte-equal
+//   to its composed expectation. A premise `build` pins the staging valid
+//   (the shared-line two-declaration import blocks parse, SPEC 2.1, 4) and
+//   a post-move `check` guards the composition's soundness: if the product's
+//   bytes equal the expected bytes yet something failed to resolve, the
+//   staging itself was defective and must fail loud. The whole workspace
+//   recurs with every staged terminator CRLF, and again with every one a
+//   lone CR (SPEC 3), composed by the same rules: emptied lines dropped
+//   with their whole terminators, staged terminators kept, and U+000A the
+//   one terminator the move inserts.
 // - T6.5-6's unstageable clauses are documented at the test, per TEST-SPEC:
 //   the collision clause's after-the-removal qualifier admits no
 //   discriminating fixture (structural IDs make the vacated set exactly the
@@ -81,23 +263,45 @@
 //   resolve" clause is unstageable for T6.4-3's reason.
 
 import { Buffer } from "node:buffer";
-import type { GraphEdge } from "../../helpers/adapters/index.js";
+import * as fsp from "node:fs/promises";
+import { join as joinPath, posix as posixPath } from "node:path";
+import type {
+  AppliedMappingPair,
+  GraphEdge,
+  PreviewEdit,
+  PreviewFileEntry,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
+  decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeFindingsReport,
+  decodeIdsReport,
   decodeNodeRowsReport,
+  decodePreviewReport,
+  decodeViewReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
   assertFileBytes,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertAcrossDirectoriesDeterministic } from "../../helpers/determinism.js";
+import {
+  assertAddedImportInsertion,
+  assertExactDeclarationInsertion,
+  canonicalSpecifier,
+  expectFreshIdentifier,
+} from "../../helpers/import-insertion.js";
+import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
@@ -108,33 +312,106 @@ import type {
   ProductBinding,
   RunResult,
 } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  assertTypeChecksClean,
+  forEachConsumerProject,
+} from "../../helpers/tooling.js";
+import {
+  IDENTIFIER_RUN_SOURCE,
+  NO_RUN_BEFORE_SOURCE,
+} from "../../helpers/ts-identifiers.js";
+import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import type {
+  PerformedOperationStaging,
+  SpellsNoneUsageArm,
+} from "./section-6.4.js";
+import {
+  BARRED_NEW_ID_CHARACTERS,
+  U4_ANC_SOURCE,
+  U4_BAD_SOURCE,
+  U4_BRACED_SOURCE,
+  U4_BROKEN_SOURCE,
+  U4_DUP_SOURCE,
+  U4_SOLO_SOURCE,
+  U4_SOURCE,
+  U4_STRAY_SOURCE,
+  U4_VALUELESS_SOURCE,
+  assertHumanAppliedMapping,
+} from "./section-6.4.js";
+import type {
+  BearerLocationExpectation,
+  FindingSourceExpectation,
+} from "./support.js";
+import {
+  REPLACEMENT_CHARACTER,
+  assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
+  assertFindingConcernsPath,
   assertFindingLocated,
+  assertFindingLocatesExactly,
+  assertFindingMentionsLocation,
+  assertRefusalIdentities,
   assertSameJson,
   buildFindings,
   buildOk,
+  byteWindow,
+  expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
+  expectSyntaxClassUsageError,
   runJson,
   sortedIdentities,
+  stageConfigurationStateTwins,
 } from "./support.js";
 
 // Exactly one spec group (SPEC 7), for the byte-exact edit and identity-terms
-// fixtures.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// fixtures. A staged-source record: T6.5-2, T6.5-5, and T6.5-8 stage it in
+// workspaces created after a product invocation, as T6.6-3 does through
+// MOVE_SOLO_CONFIG and MOVE_IDENTITY_CONFIG, and T6.6-7 and T12.0-15
+// through MOVE_IDENTITY_CONFIG (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.5-2/T6.5-5/T6.5-8/T6.6-3/T6.6-7/T12.0-15 xspec.config.ts — exactly one spec group, the byte-exact, usage-error, and identity-terms fixtures'",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
+
+// One spec group plus one code group (SPEC 7.2), for T6.5-5's wrong-kind
+// origin arms: the staged code source is discovered, so a code-source origin
+// operand is a wrong-kind usage error in either form (SPEC 6.5, 6.4, 12.0).
+// A staged-source record: T6.5-5's ordering arm and T6.5-9's parameter run
+// stage it in a workspace created after a product invocation, as T6.6-3
+// does through MOVE_USAGE_CONFIG (S-9's timing clause).
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T6.5-5/T6.5-9/T6.6-3 xspec.config.ts — one spec group and one code group, the usage-error fixtures' and T6.5-9's code arm's",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`,
+);
 
 // One spec group plus Markdown emission (SPEC 7.3), so T6.5-3's fresh-build
 // compare covers generated modules, Markdown output, and graph data alike.
-const SPECS_MD_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record: T6.5-2, T6.5-3, T6.5-9, and T6.5-10 stage it in
+// workspaces created after a product invocation (S-9's timing clause).
+const SPECS_MD_CONFIG = stagedTs(
+  "T6.5-2/T6.5-3/T6.5-9/T6.5-10 xspec.config.ts — one spec group with Markdown emission",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -142,12 +419,18 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // Specs, code, and Markdown emission, for the T6.5-1 file-form fixture whose
 // rewrites span MDX and TypeScript sources and whose fresh-build compare
-// covers every derived-file kind (the T6.4-7 configuration).
-const FULL_CONFIG = `import { defineConfig } from "xspec"
+// covers every derived-file kind (the T6.4-7 configuration). A staged-source
+// record: T6.5-1 stages it after a product invocation — every arm's preview
+// copy, and arms (b)–(f) — and T12.0-15 every arm's
+// (T6_5_1_FILE_MOVE_STAGINGS; S-9's timing clause).
+const FULL_CONFIG = stagedTs(
+  "T6.5-1/T12.0-15 xspec.config.ts — specs, code, and Markdown emission",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -158,14 +441,20 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // The T6.5-4 refusal configuration: the second spec glob admits `.mdx`-less
 // destinations under `specs/plain/` (isolating the lacking-`.mdx` refusal
 // from the no-spec-group one), and the code group overlaps the spec globs at
 // `specs/dual/` (the belonging-to-a-code-group-as-well refusal, 14.14). Both
-// extra globs match no staged file, so the workspace itself stays valid.
-const REFUSAL_CONFIG = `import { defineConfig } from "xspec"
+// extra globs match no staged file, so the workspace itself stays valid. A
+// staged-source record: T6.5-4's later workspaces stage it after a product
+// invocation, as T6.6-3, T6.6-7, T12.0-15, and T14-7 do through
+// MOVE_REFUSAL_CONFIG (S-9's timing clause).
+const REFUSAL_CONFIG = stagedTs(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 xspec.config.ts — the refusal configuration: a second spec glob under specs/plain/, a code group over specs/dual/",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -175,15 +464,21 @@ export default defineConfig({
     dual: ["specs/dual/**"]
   }
 })
-`;
+`,
+);
 
 const JOURNAL_PATH = ".xspec/journal";
 const LF = 0x0a;
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * An `.mdx` entry of a workspace created after the body's first product
+ * invocation is a staged-source record (the record-accepting initial
+ * `files`; helpers/staged-mdx.ts), staged under the record's declaration.
+ */
 async function withWorkspace<T>(
-  config: string,
-  files: Readonly<Record<string, string>>,
+  config: string | StagedTs,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -296,6 +591,45 @@ async function queryEdgesOfKind(
  * Read a workspace source file as UTF-8 text, failing diagnosed (H-8) when
  * the path does not hold a plain file.
  */
+/**
+ * The rewritten spec file derives under the stock MDX 3 grammar (S-9,
+ * `deriveMdx`). 6.5 adds a declaration only at an admissible offset — one at
+ * which the file, as every edit leaves it, is well-formed under its grammar
+ * (14.20) with the added line a declaration of an ESM block — and a
+ * product's own `check` cannot judge that where its grammar is wider than
+ * 14.20's: the grammar bounds a block line-sensitively, running it to the
+ * next blank line, so a declaration inserted directly above a non-blank line
+ * holding no declaration absorbs it and derives as no block at all, the
+ * insertion inadmissible where the file's end after its final terminator, a
+ * line-start admissible offset, is taken over any other (T6.5-13).
+ */
+async function assertRewrittenSpecDerives(
+  workspace: TestWorkspace,
+  rel: string,
+  context: string,
+): Promise<void> {
+  const bytes = await workspace.readBytes(rel);
+  const verdict = deriveMdx(bytes);
+  if (verdict.derives) return;
+  const where =
+    verdict.position === undefined
+      ? ""
+      : ` at line ${String(verdict.position.line)}, column ${String(verdict.position.column)} (offset ${String(verdict.position.offset)})`;
+  fail(
+    `${context}: ${rel} after the move is not well-formed under the stock ` +
+      `MDX 3 grammar (S-9)${where}: ${verdict.reason} — an added ` +
+      `declaration stands only at an admissible offset, one at which the ` +
+      `file as every edit leaves it is well-formed (14.20) with the added ` +
+      `line a declaration of an ESM block, which the grammar bounds ` +
+      `line-sensitively: a block runs to the next blank line, so a ` +
+      `declaration inserted directly above a non-blank line holding no ` +
+      `declaration absorbs it and derives as no block, an inadmissible ` +
+      `offset while the file's end after its final terminator, a line-start ` +
+      `admissible one, is taken over any other (SPEC 6.5, 14.20; T6.5-13); ` +
+      `the file reads ${JSON.stringify(Buffer.from(bytes).toString("utf8"))}`,
+  );
+}
+
 async function readSourceText(
   workspace: TestWorkspace,
   rel: string,
@@ -340,6 +674,236 @@ function assertLacks(
   }
 }
 
+/** UTF-8 byte length of `text` — SPEC 1.7 ranges are byte offsets. */
+function utf8Length(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * Byte span (SPEC 1.7) of exactly one occurrence of `fragment` in `source`.
+ * An absent or ambiguous fragment is a staging defect — a harness error,
+ * never a product failure: a precomputed span must name its bytes uniquely.
+ */
+function uniqueSpan(
+  source: string,
+  fragment: string,
+  where: string,
+): SourceRange {
+  const first = source.indexOf(fragment);
+  if (first === -1) {
+    throw new Error(
+      `${where}: staging locator — fragment ${JSON.stringify(fragment)} ` +
+        `not found`,
+    );
+  }
+  if (source.indexOf(fragment, first + 1) !== -1) {
+    throw new Error(
+      `${where}: staging locator — fragment ${JSON.stringify(fragment)} ` +
+        `is ambiguous`,
+    );
+  }
+  const start = utf8Length(source.slice(0, first));
+  return { start, end: start + utf8Length(fragment) };
+}
+
+/**
+ * Byte spans (SPEC 1.7) of every occurrence of `fragment` in `source`, in
+ * source order — exactly `count` of them. Any other count is a staging
+ * defect — a harness error, never a product failure: each precomputed span
+ * names one specifier literal of a declaration the fixture stages.
+ */
+function everySpan(
+  source: string,
+  fragment: string,
+  count: number,
+  where: string,
+): readonly SourceRange[] {
+  const spans: SourceRange[] = [];
+  for (
+    let at = source.indexOf(fragment);
+    at !== -1;
+    at = source.indexOf(fragment, at + fragment.length)
+  ) {
+    const start = utf8Length(source.slice(0, at));
+    spans.push({ start, end: start + utf8Length(fragment) });
+  }
+  if (spans.length !== count) {
+    throw new Error(
+      `${where}: staging locator — fragment ${JSON.stringify(fragment)} ` +
+        `occurs ${String(spans.length)} time(s), not ${String(count)}`,
+    );
+  }
+  return spans;
+}
+
+/**
+ * The `import-specifier-rewrite` ranges a completed preview reports for the
+ * file at `rel` — its current, pre-operation path — in the report's own
+ * order (SPEC 6.6: every file the operation would rewrite, with every edit
+ * it would make there, each classed; 12.7: edits ordered by range start).
+ * A file the preview lists other than exactly once, or without a specifier
+ * rewrite, fails diagnosed: the caller's fixture stages in each such file
+ * at least one specifier the file-form move must rewrite.
+ */
+function specifierRewriteRanges(
+  files: readonly PreviewFileEntry[],
+  rel: string,
+  context: string,
+): readonly SourceRange[] {
+  const entries = files.filter((entry) => entry.file === rel);
+  if (entries.length !== 1) {
+    fail(
+      `${context}: the preview must list ${rel} exactly once among the ` +
+        `files the move would rewrite (SPEC 6.6, 12.7); found it ` +
+        `${entries.length} time(s) in [${files
+          .map((entry) => renderPathValue(entry.file))
+          .join(", ")}]`,
+    );
+  }
+  const ranges = entries[0]!.edits
+    .filter((edit) => edit.class === "import-specifier-rewrite")
+    .map((edit) => edit.range);
+  if (ranges.length === 0) {
+    fail(
+      `${context}: the preview's entry for ${rel} reports no ` +
+        `\`import-specifier-rewrite\` edit, yet the relocation must rewrite ` +
+        `the specifier staged there (SPEC 6.5, 6.6)`,
+    );
+  }
+  return ranges;
+}
+
+/** The first offset at which two byte runs differ, or -1 when equal. */
+function firstDifference(a: Uint8Array, b: Uint8Array): number {
+  const shared = Math.min(a.length, b.length);
+  for (let i = 0; i < shared; i += 1) {
+    if (a[i] !== b[i]) return i;
+  }
+  return a.length === b.length ? -1 : shared;
+}
+
+/** Up to 24 bytes of `bytes` from `offset`, rendered for a diagnosis. */
+function excerpt(bytes: Uint8Array, offset: number): string {
+  return JSON.stringify(
+    Buffer.from(bytes.subarray(offset, offset + 24)).toString("utf8"),
+  );
+}
+
+/**
+ * The file-form move's specifier-rewrite byte contract (TEST-SPEC T6.5-1;
+ * SPEC 6.5). `post` must be `pre` with each previewed range — read on a
+ * copy, in pre-operation coordinates (SPEC 6.6, 1.7) — replaced by exactly
+ * its expected literal and nothing else (6.5: beyond its exact edits a move
+ * changes no bytes): the splice walks `pre` and `post` together, requiring
+ * every byte outside the ranges to recur at its spliced position and each
+ * range's post-move content to be, byte for byte, the literal expected
+ * there — the pre-move delimiters (the quote style kept, 6.4) around the
+ * canonical relative spelling of the designated source's post-operation
+ * path from the importing file's post-operation directory: the `..`
+ * ascents, then the descending segments, joined with `/`, no `.` segments,
+ * `./`-prefixed when there is no ascent, `.mdx` replaced by `.xspec` (6.5,
+ * 2.1). The literal is compared, never resolved: a product spelling a `.`
+ * segment, omitting the `./` prefix, leaving a stale `..`, switching quote
+ * style, or rewriting anything beyond the literals fails here.
+ */
+function assertSpecifierRewriteByteContract(
+  options: {
+    readonly rel: string;
+    readonly pre: Uint8Array;
+    readonly post: Uint8Array;
+    /** Each previewed range with the literal expected there after the move. */
+    readonly rewrites: readonly {
+      readonly range: SourceRange;
+      readonly literal: string;
+    }[];
+  },
+  context: string,
+): void {
+  const { rel, pre, post, rewrites } = options;
+  let preCursor = 0;
+  let postCursor = 0;
+  for (const { range, literal } of rewrites) {
+    if (
+      range.start < preCursor ||
+      range.end <= range.start ||
+      range.end > pre.length
+    ) {
+      fail(
+        `${context}: ${rel} — the previewed import-specifier-rewrite range ` +
+          `[${range.start}, ${range.end}) must be non-empty, lie within the ` +
+          `${pre.length} pre-move bytes, and follow the preceding range ` +
+          `(SPEC 6.6, 1.7)`,
+      );
+    }
+    // Bytes outside the ranges: the pre-move run before this range recurs
+    // verbatim at its spliced position.
+    const kept = pre.subarray(preCursor, range.start);
+    const spliced = post.subarray(postCursor, postCursor + kept.length);
+    const drift = firstDifference(kept, spliced);
+    if (drift !== -1) {
+      fail(
+        `${context}: ${rel} — bytes outside the previewed ` +
+          `import-specifier-rewrite ranges changed: from pre-move byte ` +
+          `${preCursor + drift} the file held ${excerpt(kept, drift)}… and ` +
+          `now holds ${excerpt(spliced, drift)}… there — a file-form move ` +
+          `rewrites nothing beyond the specifier literals (SPEC 6.5, 6.6)`,
+      );
+    }
+    postCursor += kept.length;
+    // The range's post-move content: exactly the expected literal.
+    const expected = Buffer.from(literal, "utf8");
+    const found = post.subarray(postCursor, postCursor + expected.length);
+    if (firstDifference(found, expected) !== -1) {
+      fail(
+        `${context}: ${rel} — at the previewed import-specifier-rewrite ` +
+          `range [${range.start}, ${range.end}) the file must hold exactly ` +
+          `${literal}: the pre-move delimiters, the quote style kept, ` +
+          `around the canonical relative spelling of the designated ` +
+          `source's post-operation path from the file's post-operation ` +
+          `directory — the \`..\` ascents, then the descending segments, ` +
+          `joined with \`/\`, no \`.\` segments, \`./\`-prefixed when there ` +
+          `is no ascent, \`.xspec\` (SPEC 6.5, 6.4, 2.1); found ` +
+          `${literalAt(post, postCursor)}`,
+      );
+    }
+    postCursor += expected.length;
+    preCursor = range.end;
+  }
+  // After the last range: the pre-move tail recurs and nothing follows it.
+  const preTail = pre.subarray(preCursor);
+  const postTail = post.subarray(postCursor);
+  const drift = firstDifference(preTail, postTail);
+  if (drift !== -1) {
+    fail(
+      `${context}: ${rel} — after the last previewed ` +
+        `import-specifier-rewrite range the file must end with its ` +
+        `pre-move bytes verbatim; they diverge at pre-move byte ` +
+        `${preCursor + drift} (pre ${excerpt(preTail, drift)}…, post ` +
+        `${excerpt(postTail, drift)}…) — a file-form move rewrites nothing ` +
+        `beyond the specifier literals (SPEC 6.5, 6.6)`,
+    );
+  }
+}
+
+/**
+ * The quoted literal opening at `offset` in `bytes`, rendered for a
+ * diagnosis — or an excerpt when no closed literal opens there.
+ */
+function literalAt(bytes: Uint8Array, offset: number): string {
+  const quote = bytes[offset];
+  if (quote === 0x22 || quote === 0x27) {
+    const close = Buffer.from(
+      bytes.buffer,
+      bytes.byteOffset,
+      bytes.byteLength,
+    ).indexOf(quote, offset + 1);
+    if (close !== -1) {
+      return Buffer.from(bytes.subarray(offset, close + 1)).toString("utf8");
+    }
+  }
+  return `${excerpt(bytes, offset)}…`;
+}
+
 /** Human rendering of an argv that may carry raw-byte elements. */
 function renderArgv(argv: readonly ArgvValue[]): string {
   return argv
@@ -352,63 +916,190 @@ function renderArgv(argv: readonly ArgvValue[]): string {
 }
 
 /**
+ * What one finding of a refused move's report must hold (SPEC 14, 12.7):
+ * its exact stable code plus whichever concern §14 assigns the reason: a
+ * located participant, the exact `identities` where 14 pins them, a
+ * concerned path, or nothing further where the stating arm pins no concern
+ * (T6.6-3's preview twins, whose concerned data the home tests assert; a
+ * T14-7 beside reason whose entry pins none). An arm
+ * staging several applicable reasons passes one expectation per reason
+ * (SPEC 14: every applicable reason reports together, one finding each).
+ * Exported for T6.6-3, which stages T6.5-4's refusals identically and
+ * asserts the `--preview` invocation's refusal equivalence (TEST-SPEC §6.6).
+ */
+export interface RefusalExpectation {
+  /**
+   * The finding's counting key (`assertConditionCounts` vocabulary): a
+   * stable refusal code token (`refused-…`), or a `14.N` condition identity
+   * for the invalid-workspace refusal, which reports the workspace's
+   * numbered findings alone (SPEC 14, 6.4, 6.5).
+   */
+  readonly finding: string;
+  /** At least one location names this file (and byte window when given). */
+  readonly locatedAt?: FindingSourceExpectation;
+  /**
+   * The finding's complete location set — exactly one location per listed
+   * bearer, none beside, index-wise in 12.7's within-finding order, `path`
+   * null (SPEC 14's cardinality rule: `refused-id-collision` locates every
+   * colliding bearer — the every-participant strictness of T6.4-3's
+   * two-bearer arm, asserted by its home test and by T14-7 over the shared
+   * case table; section-6.4.ts declares the same member — here T6.5-6's
+   * same-file collision, whose one remaining bearer is located alone and
+   * never the moved section beside it — and
+   * `refused-cycle` the would-be cycle's full path: T6.5-4's
+   * spec-import-cycle case declares both reference spellings the move
+   * roots at its added imports' bindings, asserted by T6.5-4 and T14-7
+   * over MOVE_REFUSAL_CASES). Declared beside `locatedAt`, whose
+   * SOME-quantified check consumers asserting it alone still apply.
+   */
+  readonly locatedAtEach?: readonly BearerLocationExpectation[];
+  /**
+   * The finding's exact `identities` (SPEC 12.7, 14): stated for every
+   * reason SPEC 14 pins — the concerned identity as the sole element, in
+   * 1.5's form over the operation's destination file (whether or not the ID
+   * is valid), or `refused-id-collision`'s located bearers' identities in
+   * location order — and omitted where 12.7 leaves the composition unpinned
+   * (support.ts assertRefusalIdentities guards both ways).
+   */
+  readonly identities?: readonly string[];
+  /** The finding's 12.7 path member equals this workspace-relative path. */
+  readonly path?: string;
+}
+
+/**
  * A refused move (SPEC 6.5: every validation failure beyond the argument
- * existence checks refuses with exit 1): assert exit 1 exactly and that the
- * refusal modifies nothing — a whole-workspace-root byte snapshot compare
- * around the command (derived files, sources, and the journal all included).
- * Accepts raw-byte argv elements for the Linux-leg non-UTF-8 destination arm.
+ * existence checks refuses with exit 1): run with `--json`, assert exit 1
+ * exactly, decode stdout as the form-exact 12.7 findings-only report of a
+ * refused operation (SPEC 12.7, H-3), assert the report holds exactly one
+ * finding per expected refusal reason — its stable code with its concerned
+ * data (SPEC 14, T14-7: every applicable reason together, one finding each,
+ * and none beside) — and assert the refusal modifies nothing — a
+ * whole-workspace-root byte snapshot compare around the command (derived
+ * files, sources, and the journal all included). Per-reason concern lookup
+ * is by counting key, total because a refusal report never carries two
+ * findings of one reason (SPEC 14: one finding per reason).
  */
 async function expectRefusalModifiesNothing(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly ArgvValue[],
+  argv: readonly string[],
+  expected: RefusalExpectation | readonly RefusalExpectation[],
   context: string,
 ): Promise<void> {
-  const command = renderArgv(argv);
+  const expectations: readonly RefusalExpectation[] = Array.isArray(expected)
+    ? expected
+    : [expected];
+  const command = argv.join(" ");
   await assertLeavesUnchanged(
     workspace.root,
     async () => {
       const result = await runProduct(product, {
         cwd: workspace.root,
-        argv,
+        argv: [...argv, "--json"],
       });
       assertExitCode(
         result,
         1,
-        `${context}: \`${command}\` — the refusal is a validation failure, ` +
-          `exit 1 (SPEC 6.5, 12.0)`,
+        `${context}: \`${command} --json\` — the refusal is a validation ` +
+          `failure, exit 1 (SPEC 6.5, 12.0)`,
       );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(result, `${context}: \`${command} --json\``),
+        `${context}: \`${command} --json\` — a refused operation's report ` +
+          `is the form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+      ).findings;
+      const counts: Record<string, number> = {};
+      for (const expectation of expectations) {
+        counts[expectation.finding] = (counts[expectation.finding] ?? 0) + 1;
+      }
+      assertConditionCounts(
+        findings,
+        counts,
+        `${context}: the report holds exactly one finding per applicable ` +
+          `refusal reason, each carrying its exact stable code, and no ` +
+          `reason beside the staged one(s) — a code is contract (SPEC 14, ` +
+          `12.7, T14-7)`,
+      );
+      for (const expectation of expectations) {
+        const finding = findings.find(
+          (candidate) =>
+            (candidate.condition ?? candidate.code ?? "(code-less)") ===
+            expectation.finding,
+        );
+        if (finding === undefined) {
+          fail(
+            `${context}: no reported finding carries ` +
+              `${JSON.stringify(expectation.finding)} (SPEC 14, 12.7)`,
+          );
+        }
+        if (expectation.locatedAt !== undefined) {
+          assertFindingMentionsLocation(
+            finding,
+            expectation.locatedAt,
+            `${context}: the ${expectation.finding} refusal's concerned ` +
+              `construct`,
+          );
+        }
+        if (expectation.locatedAtEach !== undefined) {
+          assertFindingLocatesExactly(
+            finding,
+            expectation.locatedAtEach,
+            `${context}: the ${expectation.finding} refusal's complete ` +
+              `located-bearer set`,
+          );
+        }
+        assertRefusalIdentities(
+          finding,
+          expectation.finding,
+          expectation.identities,
+          `${context}: the ${expectation.finding} refusal's concerned ` +
+            `identity`,
+        );
+        if (expectation.path !== undefined) {
+          assertFindingConcernsPath(
+            finding,
+            expectation.path,
+            `${context}: the ${expectation.finding} refusal's concerned ` +
+              `path`,
+          );
+        }
+      }
     },
     `${context}: \`${command}\` refused — modifies nothing (SPEC 6.5)`,
   );
 }
 
 /**
- * A move usage error (SPEC 6.5, 12.0: nonexistent origin file or origin ID):
- * run with `--json`, assert exit 2 exactly, byte-empty stdout (H-5: no report
- * and no validation findings — the 12.0-ordering discriminator), and a usage
- * error message on stderr (presence, not wording).
+ * A move usage error (SPEC 6.5, 12.0): run with `--json`, assert exit 2
+ * exactly, the single 12.7 error document as the entire stdout (12.0: no
+ * report and no validation findings — the 12.0-ordering discriminator; H-5),
+ * and a usage error message on stderr (presence, not wording). Accepts
+ * raw-byte argv elements for the Linux-leg non-UTF-8 destination arm
+ * (T6.5-5, T12.0-5: argv is a byte channel there, carried by the subprocess
+ * driver's raw-byte argv support).
  */
 async function expectMoveUsageError(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly string[],
+  argv: readonly ArgvValue[],
   context: string,
 ): Promise<RunResult> {
-  const command = argv.join(" ");
-  const result = await expectExit(
-    product,
-    workspace,
-    [...argv, "--json"],
-    2,
-    `${context}: \`${command} --json\` — a nonexistent origin file or origin ` +
-      `ID is a usage error (SPEC 6.5, 12.0)`,
-  );
-  assertStdoutEmpty(
+  const command = renderArgv(argv);
+  const result = await runProduct(product, {
+    cwd: workspace.root,
+    argv: [...argv, "--json"],
+  });
+  assertExitCode(
     result,
-    `${context}: \`${command} --json\` — under --json, stdout is byte-empty ` +
-      `on exit 2: the usage error emits no report and no validation findings ` +
-      `(SPEC 12.0, H-5)`,
+    2,
+    `${context}: \`${command} --json\` — a usage error, exit 2 (SPEC 6.5, ` +
+      `12.0)`,
+  );
+  expectErrorDocument(
+    result,
+    `${context}: \`${command} --json\` — under --json, the exit-2 error ` +
+      `document is the entire stdout: the usage error emits no report and ` +
+      `no validation findings (SPEC 12.0, 12.7, H-5)`,
   );
   if (result.stderrBytes.length === 0) {
     fail(
@@ -420,327 +1111,1202 @@ async function expectMoveUsageError(
 }
 
 // ---------------------------------------------------------------------------
-// T6.5-1 — file form
+// T6.5-1 — file form: the specifier-rewrite byte contract over four
+// relocations
 // ---------------------------------------------------------------------------
 
-// The moved file imports another spec file (its own import specifier must be
-// rewritten across the directory change) and its generated module is imported
-// by a spec file and a code file (their import paths rewritten); its sections
-// are referenced through `d`, MDX and TS `text(...)`, and a TS marker, so the
-// post-move edge sets witness that everything resolves under the new
-// identities — file part changed, IDs unchanged (SPEC 6.5).
-const F1_OTHER = "specs/Other.mdx";
-const F1_CORE = "specs/Core.mdx";
-const F1_MOVED = "specs/sub/Moved.mdx";
-const F1_REFS = "specs/Refs.mdx";
-const F1_APP = "src/app.ts";
+// The file-form fixture, staged per arm at the paths TEST-SPEC T6.5-1
+// spells. The moved file `A.mdx` holds three nested sections and imports the
+// unmoved `C.mdx` — single-quoted where the arm rewrites it, the quote style
+// a rewrite keeps (SPEC 6.4, 6.5) — through a `d` reference and a
+// `text(...)` embedding; the spec importer `I.mdx` references two of A's
+// nodes through a double-quoted import; and the importing `.ts` file is
+// T6.2-2's: a marker and a `text(...)` call through one `.xspec` import.
+// Every specifier literal occurs exactly once in its file, so the previewed
+// `import-specifier-rewrite` range and the expected post-move bytes are
+// located by fragment (`uniqueSpan`); every source is ASCII, so byte offsets
+// are character offsets (1.7).
+const A_SECTION_IDS = ["a", "a.mid", "a.mid.leaf"] as const;
+// T6.5-1's stagings: arm (a)'s workspace is the body's first; its preview
+// copy and every later arm follow (a)'s invocations, so each `.mdx` source
+// is a ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
+// (a)'s converted uniformly — and T12.0-15 stages every arm after its own
+// first invocation (T6_5_1_FILE_MOVE_STAGINGS), so each record names it. The geometries share sources — all four the
+// other file, (a) and (c) the moved file, (a) and (d) the importer — and
+// identical bytes one test stages at several sites are ONE record staged at
+// each, so `fileMoveArm` composes each source as before and registers it
+// through `t651Record` under a name spelling its composition inputs, the
+// record reused where a later geometry composes the same bytes.
+const C_SOURCE = stagedMdx(
+  "T6.5-1/T12.0-15 every arm's other file specs/C.mdx (specs/w/C.mdx in arm (c))",
+  ['<S id="c">', "C text.", "</S>", ""].join("\n"),
+);
+const CONSUMER = "src/app.ts";
+const T6_5_1_RECORDS = new Map<string, StagedMdx>();
+function t651Record(what: string, source: string): StagedMdx {
+  const name = `T6.5-1/T12.0-15 ${what}`;
+  const known = T6_5_1_RECORDS.get(name);
+  if (known !== undefined) {
+    if (known.source !== source) {
+      throw new Error(
+        `T6.5-1 staging: ${name} is composed twice with different bytes`,
+      );
+    }
+    return known;
+  }
+  const record = stagedMdx(name, source);
+  T6_5_1_RECORDS.set(name, record);
+  return record;
+}
 
-const F1_OTHER_SOURCE = [
-  '<S id="oth">',
-  "Outside target text.",
-  "</S>",
-  "",
-].join("\n");
+/** The moved file's source: its import line(s), then the three sections. */
+function movedFileSource(
+  imports: readonly string[],
+  embedBinding: string,
+): string {
+  return [
+    ...imports,
+    "",
+    '<S id="a">',
+    "A holder text.",
+    "",
+    '<S id="a.mid" d={C.c}>',
+    "Mid text.",
+    "",
+    '<S id="a.mid.leaf">',
+    `Leaf embeds: {text(${embedBinding}.c)}`,
+    "</S>",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+}
 
-const F1_CORE_SOURCE = [
-  'import Other from "./Other.xspec"',
-  "",
-  '<S id="core">',
-  "Core holder text.",
-  "",
-  '<S id="core.mid" d={Other.oth}>',
-  "Mid text.",
-  "",
-  '<S id="core.mid.leaf">',
-  "Leaf embeds: {text(Other.oth)}",
-  "</S>",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+/** The spec importer's source: one double-quoted import of A's module. */
+function importerSource(specifier: string): string {
+  return [
+    `import A from ${specifier}`,
+    "",
+    '<S id="i" d={A.a.mid}>',
+    "I embeds: {text(A.a.mid.leaf)}",
+    "</S>",
+    "",
+  ].join("\n");
+}
 
-const F1_REFS_SOURCE = [
-  'import Core from "./Core.xspec"',
-  "",
-  '<S id="refs" d={Core.core.mid}>',
-  "Refs embeds: {text(Core.core.mid.leaf)}",
-  "</S>",
-  "",
-].join("\n");
+/** T6.2-2's importing `.ts` file: a marker and a `text(...)` call. */
+function consumerSource(specifier: string): string {
+  return [
+    `import A, { text } from ${specifier};`,
+    "",
+    "A.a.mid.leaf;",
+    "text(A.a.mid);",
+    "",
+  ].join("\n");
+}
 
-const F1_APP_SOURCE = [
-  'import CORE, { text } from "../specs/Core.xspec";',
-  "",
-  "CORE.core.mid.leaf;",
-  "text(CORE.core.mid);",
-  "",
-].join("\n");
+/** A specifier literal, delimiters included, before and after the move. */
+interface LiteralRewrite {
+  readonly before: string;
+  /**
+   * The expected post-move literal: the pre-move delimiters (the quote
+   * style kept, 6.4) around the canonical relative spelling of the
+   * designated source's post-operation path from the importing file's
+   * post-operation directory (SPEC 6.5) — spelled here as TEST-SPEC T6.5-1
+   * pins it, never computed.
+   */
+  readonly after: string;
+}
 
-const F1_UNCHANGED_IDENTITIES = [
-  F1_OTHER,
-  `${F1_OTHER}#oth`,
-  F1_REFS,
-  `${F1_REFS}#refs`,
-];
-const F1_PRE_IDENTITIES = [
-  ...F1_UNCHANGED_IDENTITIES,
-  F1_CORE,
-  `${F1_CORE}#core`,
-  `${F1_CORE}#core.mid`,
-  `${F1_CORE}#core.mid.leaf`,
-];
-// Identities change only in their file part (SPEC 6.5): same IDs, new path.
-const F1_POST_IDENTITIES = [
-  ...F1_UNCHANGED_IDENTITIES,
-  F1_MOVED,
-  `${F1_MOVED}#core`,
-  `${F1_MOVED}#core.mid`,
-  `${F1_MOVED}#core.mid.leaf`,
-];
+/** One relocation geometry of T6.5-1, in the spellings TEST-SPEC pins. */
+interface FileMoveGeometry {
+  readonly name: string;
+  readonly origin: string;
+  readonly destination: string;
+  /** The unmoved module the moved file imports. */
+  readonly other: string;
+  /** The moved file's import lines, as staged. */
+  readonly ownImports: readonly string[];
+  /** The binding the leaf's `text(...)` embedding is rooted at. */
+  readonly embedBinding: string;
+  /**
+   * The moved file's own specifier the relocation rewrites — or `null`
+   * where its imports still designate their source from the destination
+   * directory and are neither rewritten nor reported (SPEC 6.5).
+   */
+  readonly ownRewrite: LiteralRewrite | null;
+  /** The spec importer's path and its rewrite. */
+  readonly importer: string;
+  readonly importerRewrite: LiteralRewrite;
+  /** The `.ts` importer's rewrite, or `null` where the arm stages none. */
+  readonly consumerRewrite: LiteralRewrite | null;
+}
 
-/** The fixture's complete dependency-kind edge sets, per moved-file path. */
-function f1Edges(coreFile: string): {
-  depends: GraphEdge[];
-  embeds: GraphEdge[];
-  references: GraphEdge[];
-} {
+/**
+ * The specifier literals the relocation rewrites in one file (SPEC 6.5):
+ * every occurrence of `before` there, each to `after`.
+ */
+interface SpecifierRewrite {
+  /** The importing file's current, pre-operation path (the preview's, 6.6). */
+  readonly pre: string;
+  /** Its post-operation path (the moved file's own import moves with it). */
+  readonly post: string;
+  /**
+   * The staged source, holding `before` once per declaration the move
+   * rewrites there and nowhere else — once in every file but arm (e)'s code
+   * source, whose three declarations spell it alike.
+   */
+  readonly source: string;
+  readonly before: string;
+  readonly after: string;
+}
+
+/** A preview `files` entry as pinned: a plain path and class-plus-range edits. */
+interface ExpectedPreviewFile {
+  readonly file: string;
+  readonly edits: readonly PreviewEdit[];
+}
+
+/** The workspace's complete dependency-kind edge sets. */
+interface EdgeSets {
+  readonly depends: readonly GraphEdge[];
+  readonly embeds: readonly GraphEdge[];
+  readonly references: readonly GraphEdge[];
+}
+
+/**
+ * How a T6.5-1 arm closes after the move: `check` exiting 0 (arms (a)–(d));
+ * `check`, then `build`, each exiting 0 (the nested-declaration arm,
+ * TEST-SPEC T6.5-1: "`build` and `check` exit 0 afterward"); or, as the
+ * five-declaration arm pins, `check` and `build` each exiting 0 with no
+ * finding, their `--json` reports decoded form-exact as `{"findings": []}`.
+ */
+type FileMoveClose = "check" | "check-and-build" | "finding-free";
+
+/** One staged arm of T6.5-1, everything the driver asserts precomputed. */
+interface FileMoveArm {
+  readonly name: string;
+  readonly origin: string;
+  readonly destination: string;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The rewrites the move must make, one per rewritten file. */
+  readonly rewrites: readonly SpecifierRewrite[];
+  /** Staged files the move rewrites nothing in (the configuration included). */
+  readonly untouched: readonly string[];
+  /**
+   * Why the move rewrites none of the moved file's own specifiers — `null`
+   * exactly where it rewrites one, `rewrites` holding the origin's entry —
+   * for the diagnosis of the file's landing under its new path
+   * byte-identical to its pre-move bytes (SPEC 6.5: a specifier is
+   * rewritten exactly when its characters would no longer designate the
+   * source, and beyond its edits a move changes no bytes).
+   */
+  readonly movedFileKept: string | null;
+  /** The preview's complete `files`, ordered by file path bytes (6.6, 12.7). */
+  readonly previewFiles: readonly ExpectedPreviewFile[];
+  /** The applied mapping: every node of the moved file, the root first. */
+  readonly mapping: readonly AppliedMappingPair[];
+  readonly preIdentities: readonly string[];
+  readonly postIdentities: readonly string[];
+  /** The complete edge sets with the moved file at `movedPath`. */
+  readonly edges: (movedPath: string) => EdgeSets;
+  /** The non-derived post-move state seeding a fresh-build directory. */
+  readonly seedFiles: readonly string[];
+  /** How the arm closes after the move (`FileMoveClose`). */
+  readonly close: FileMoveClose;
+}
+
+/** Compare two plain paths by their UTF-8 bytes (12.7's `files` order). */
+function comparePathBytes(a: string, b: string): number {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+/**
+ * Stage one geometry: its sources, the rewrites the move must make, the
+ * preview plan it must report, the mapping it must journal, and the node and
+ * edge inventories before and after — every spelling the geometry's own, the
+ * factory canonicalizing nothing (H-4: the expected bytes are pinned, not
+ * derived by a rule the product might share).
+ */
+function fileMoveArm(geometry: FileMoveGeometry): FileMoveArm {
+  const { name, origin, destination, other, importer } = geometry;
+  const where = `T6.5-1 (${name}) staging`;
+  const movedSource = movedFileSource(
+    geometry.ownImports,
+    geometry.embedBinding,
+  );
+  const importerText = importerSource(geometry.importerRewrite.before);
+  const files: Record<string, InitialFileContents> = {
+    [other]: C_SOURCE,
+    [origin]: t651Record(
+      `the moved file importing ${geometry.ownImports.join("; ")} and embedding ${geometry.embedBinding}`,
+      movedSource,
+    ),
+    [importer]: t651Record(
+      `the spec importer importing ${geometry.importerRewrite.before}`,
+      importerText,
+    ),
+  };
+  const rewrites: SpecifierRewrite[] = [];
+  if (geometry.ownRewrite !== null) {
+    rewrites.push({
+      pre: origin,
+      post: destination,
+      source: movedSource,
+      before: geometry.ownRewrite.before,
+      after: geometry.ownRewrite.after,
+    });
+  }
+  rewrites.push({
+    pre: importer,
+    post: importer,
+    source: importerText,
+    before: geometry.importerRewrite.before,
+    after: geometry.importerRewrite.after,
+  });
+  const consumerStaged = geometry.consumerRewrite !== null;
+  if (geometry.consumerRewrite !== null) {
+    const consumerText = consumerSource(geometry.consumerRewrite.before);
+    files[CONSUMER] = stagedTs(
+      `T6.5-1/T12.0-15 src/app.ts the .ts importer importing ${geometry.consumerRewrite.before}`,
+      consumerText,
+    );
+    rewrites.push({
+      pre: CONSUMER,
+      post: CONSUMER,
+      source: consumerText,
+      before: geometry.consumerRewrite.before,
+      after: geometry.consumerRewrite.after,
+    });
+  }
+  // The preview's plan (SPEC 6.6, 12.7; T6.6-4 (c)): the relocation spans
+  // the entire moved file, its entry under the current, pre-operation path,
+  // and — starting at byte 0 — orders before the file's own specifier
+  // rewrite, whose range starts after the `import` keyword (edits by range
+  // start); every other rewritten file's entry holds its one specifier
+  // rewrite; entries in file path byte order.
+  const movedEdits: PreviewEdit[] = [
+    {
+      class: "file-relocation",
+      range: { start: 0, end: utf8Length(movedSource) },
+    },
+  ];
+  const previewFiles: ExpectedPreviewFile[] = [
+    { file: origin, edits: movedEdits },
+  ];
+  for (const rewrite of rewrites) {
+    const edit: PreviewEdit = {
+      class: "import-specifier-rewrite",
+      range: uniqueSpan(
+        rewrite.source,
+        rewrite.before,
+        `${where} ${rewrite.pre}`,
+      ),
+    };
+    if (rewrite.pre === origin) movedEdits.push(edit);
+    else previewFiles.push({ file: rewrite.pre, edits: [edit] });
+  }
+  previewFiles.sort((x, y) => comparePathBytes(x.file, y.file));
+  // Every node of the moved file, the implicit root included (its identity
+  // is the path alone, SPEC 1.2, 1.5), IDs kept and file parts changed, in
+  // `from`-byte order: the bare path is a proper prefix of every
+  // `<path>#<id>`, and each section ID a prefix of its descendants'.
+  const mapping: AppliedMappingPair[] = [
+    { from: origin, to: destination },
+    ...A_SECTION_IDS.map((id) => ({
+      from: `${origin}#${id}`,
+      to: `${destination}#${id}`,
+    })),
+  ];
+  const unchanged = [other, `${other}#c`, importer, `${importer}#i`];
+  const identities = (movedPath: string): string[] => [
+    ...unchanged,
+    movedPath,
+    ...A_SECTION_IDS.map((id) => `${movedPath}#${id}`),
+  ];
+  const edges = (movedPath: string): EdgeSets => {
+    const embeds: GraphEdge[] = [
+      { from: `${movedPath}#a.mid.leaf`, to: `${other}#c`, kind: "embeds" },
+      { from: `${importer}#i`, to: `${movedPath}#a.mid.leaf`, kind: "embeds" },
+    ];
+    const references: GraphEdge[] = [];
+    if (consumerStaged) {
+      embeds.push({ from: CONSUMER, to: `${movedPath}#a.mid`, kind: "embeds" });
+      references.push({
+        from: CONSUMER,
+        to: `${movedPath}#a.mid.leaf`,
+        kind: "references",
+      });
+    }
+    return {
+      depends: [
+        { from: `${movedPath}#a.mid`, to: `${other}#c`, kind: "depends" },
+        { from: `${importer}#i`, to: `${movedPath}#a.mid`, kind: "depends" },
+      ],
+      embeds,
+      references,
+    };
+  };
+  const seedFiles = ["xspec.config.ts", other, destination, importer];
+  if (consumerStaged) seedFiles.push(CONSUMER);
+  seedFiles.push(JOURNAL_PATH);
   return {
-    depends: [
-      {
-        from: `${coreFile}#core.mid`,
-        to: `${F1_OTHER}#oth`,
-        kind: "depends",
-      },
-      {
-        from: `${F1_REFS}#refs`,
-        to: `${coreFile}#core.mid`,
-        kind: "depends",
-      },
-    ],
-    embeds: [
-      {
-        from: `${coreFile}#core.mid.leaf`,
-        to: `${F1_OTHER}#oth`,
-        kind: "embeds",
-      },
-      {
-        from: `${F1_REFS}#refs`,
-        to: `${coreFile}#core.mid.leaf`,
-        kind: "embeds",
-      },
-      { from: F1_APP, to: `${coreFile}#core.mid`, kind: "embeds" },
-    ],
-    references: [
-      { from: F1_APP, to: `${coreFile}#core.mid.leaf`, kind: "references" },
-    ],
+    name,
+    origin,
+    destination,
+    files,
+    rewrites,
+    untouched: ["xspec.config.ts", other],
+    movedFileKept:
+      geometry.ownRewrite === null
+        ? `its own imports (${geometry.ownImports
+            .map((line) => `\`${line}\``)
+            .join(", ")}) still designate \`${other}\` from ` +
+          `\`${posixPath.dirname(destination)}/\``
+        : null,
+    previewFiles,
+    mapping,
+    preIdentities: identities(origin),
+    postIdentities: identities(destination),
+    edges,
+    seedFiles,
+    close: "check",
   };
 }
 
+// Arm (e): rewritten whatever uses the declaration's bindings (TEST-SPEC
+// T6.5-1; SPEC 6.5: the relocation rewrites the moved file's own import
+// specifiers and the paths by which other files import its module, every
+// specifier naming a spec module standing in an import declaration, 4).
+// Under `move specs/A.mdx specs/sub/A.mdx`, the spec glob `specs/**/*.mdx`
+// reaching the destination and `specs/C.mdx` discovered, five declarations
+// stand that record no edge and no occurrence: the moved file's own
+// `import C`, `C` referenced nowhere, and the spec importer's `import A`,
+// `A` referenced nowhere likewise (2.1: valid, recording no edge); and in a
+// code source a type-only import under each modifier form (T4-4) — `T`
+// spelled at type level alone, `t` nowhere — and a side-effect import
+// (T4-2), none recording an edge or an occurrence (4, 4.5, 5.7). The bytes
+// are TEST-SPEC's, every line terminated by U+000A.
+const T651E_MOVED_SOURCE = [
+  'import C from "./C.xspec"',
+  "",
+  '<S id="x">x</S>',
+  "",
+].join("\n");
+const T651E_IMPORTER_SOURCE = [
+  'import A from "./A.xspec"',
+  "",
+  '<S id="b">b</S>',
+  "",
+].join("\n");
+const T651E_CODE_SOURCE = [
+  'import type T from "../specs/A.xspec"',
+  'import { type text as t } from "../specs/A.xspec"',
+  'import "../specs/A.xspec"',
+  "let v: typeof T.x",
+  "",
+].join("\n");
+const T651E_MOVED = stagedMdx(
+  "T6.5-1/T12.0-15 (e) specs/A.mdx — the moved file, its own import of C unreferenced, and section x",
+  T651E_MOVED_SOURCE,
+);
+const T651E_IMPORTER = stagedMdx(
+  "T6.5-1/T12.0-15 (e) specs/B.mdx — the spec importer, its import of A unreferenced, and section b",
+  T651E_IMPORTER_SOURCE,
+);
+const T651E_CODE = stagedTs(
+  "T6.5-1/T12.0-15 (e) src/c.ts — a type-only import of A's module under each modifier form and a side-effect import of it",
+  T651E_CODE_SOURCE,
+);
+
+/**
+ * Arm (e)'s staging and expectations. Each of the five declarations is
+ * rewritten under the byte contract, its double quotes kept — the moved
+ * file's to `"../C.xspec"`, the importer's to `"./sub/A.xspec"`, and each of
+ * the code source's three to `"../specs/sub/A.xspec"` — no other byte of the
+ * three files changing; the preview's `files` holds the relocation entry and
+ * exactly one `import-specifier-rewrite` per declaration, five in all, each
+ * spanning its specifier literal, and no other edit (T6.6-4 (c)); and the
+ * arm closes with `check` and `build` exiting 0 with no finding. A product
+ * collecting the specifiers it rewrites from recorded edges, occurrences,
+ * or used bindings — as 6.5's reference rewrites follow occurrences —
+ * rewrites none of the five: its preview's `files` lacks them, its real move
+ * leaves them designating no discovered source (14.15 at the next `check`),
+ * and it fails.
+ */
+function fiveDeclarationArm(): FileMoveArm {
+  const where = "T6.5-1 (five declarations recording no edge) staging";
+  const origin = "specs/A.mdx";
+  const destination = "specs/sub/A.mdx";
+  const other = "specs/C.mdx";
+  const importer = "specs/B.mdx";
+  const code = "src/c.ts";
+  const rewrites: SpecifierRewrite[] = [
+    {
+      pre: origin,
+      post: destination,
+      source: T651E_MOVED_SOURCE,
+      before: '"./C.xspec"',
+      after: '"../C.xspec"',
+    },
+    {
+      pre: importer,
+      post: importer,
+      source: T651E_IMPORTER_SOURCE,
+      before: '"./A.xspec"',
+      after: '"./sub/A.xspec"',
+    },
+    {
+      pre: code,
+      post: code,
+      source: T651E_CODE_SOURCE,
+      before: '"../specs/A.xspec"',
+      after: '"../specs/sub/A.xspec"',
+    },
+  ];
+  // One `import-specifier-rewrite` per declaration (the code source's three
+  // in source order), the relocation spanning the entire moved file and
+  // ordering first there (range start 0); entries in file path byte order
+  // (SPEC 6.6, 12.7).
+  const declarations = new Map([
+    [origin, 1],
+    [importer, 1],
+    [code, 3],
+  ]);
+  const previewFiles: ExpectedPreviewFile[] = rewrites.map((rewrite) => {
+    const edits: PreviewEdit[] = everySpan(
+      rewrite.source,
+      rewrite.before,
+      declarations.get(rewrite.pre)!,
+      `${where} ${rewrite.pre}`,
+    ).map((range) => ({ class: "import-specifier-rewrite", range }));
+    if (rewrite.pre === origin) {
+      edits.unshift({
+        class: "file-relocation",
+        range: { start: 0, end: utf8Length(T651E_MOVED_SOURCE) },
+      });
+    }
+    return { file: rewrite.pre, edits };
+  });
+  previewFiles.sort((x, y) => comparePathBytes(x.file, y.file));
+  const identities = (movedPath: string): string[] => [
+    other,
+    `${other}#c`,
+    importer,
+    `${importer}#b`,
+    movedPath,
+    `${movedPath}#x`,
+  ];
+  return {
+    name: "five declarations recording no edge",
+    origin,
+    destination,
+    files: {
+      [other]: C_SOURCE,
+      [origin]: T651E_MOVED,
+      [importer]: T651E_IMPORTER,
+      [code]: T651E_CODE,
+    },
+    rewrites,
+    untouched: ["xspec.config.ts", other],
+    movedFileKept: null,
+    previewFiles,
+    mapping: [
+      { from: origin, to: destination },
+      { from: `${origin}#x`, to: `${destination}#x` },
+    ],
+    preIdentities: identities(origin),
+    postIdentities: identities(destination),
+    // No edge of any kind, before the move or after it: the five
+    // declarations record none (2.1, 4, 4.5, 5.7), and no file references
+    // another.
+    edges: () => ({ depends: [], embeds: [], references: [] }),
+    seedFiles: [
+      "xspec.config.ts",
+      other,
+      destination,
+      importer,
+      code,
+      JOURNAL_PATH,
+    ],
+    close: "finding-free",
+  };
+}
+
+// Arm (f): nested declarations alike (TEST-SPEC T6.5-1; SPEC 4: every
+// specifier naming a spec module stands in an import declaration, wherever
+// the declaration stands; 6.5; T4.5-10). Under the same move, `move
+// specs/A.mdx specs/sub/A.mdx`, the workspace discovers `specs/A.mdx`,
+// holding section `x` alone, and a code source `src/n.ts` whose one spec
+// module import stands nested in `g`'s body, its binding rooting the marker
+// `A.x` there — the file well-formed (S-9) and never compiled under H-2's
+// channel, TypeScript's checker rejecting a nested import declaration after
+// parsing (T4.5-10), so the arm observes xspec's surfaces alone. The bytes
+// are TEST-SPEC's, every line terminated by U+000A.
+const T651F_MOVED_SOURCE = ['<S id="x">x</S>', ""].join("\n");
+const T651F_CODE_SOURCE = [
+  "export function g() {",
+  '  import A from "../specs/A.xspec"',
+  "  A.x",
+  "}",
+  "",
+].join("\n");
+const T651F_MOVED = stagedMdx(
+  "T6.5-1/T12.0-15 (f) specs/A.mdx — the moved file, section x alone",
+  T651F_MOVED_SOURCE,
+);
+const T651F_CODE = stagedTs(
+  "T6.5-1/T12.0-15 (f) src/n.ts — an import of A's module nested in g's body, rooting the marker A.x there",
+  T651F_CODE_SOURCE,
+);
+// The nested declaration's specifier literal as TEST-SPEC T6.5-1 pins it,
+// [38, 56), checked against the staged bytes at module load
+// (`nestedDeclarationArm`): a mismatch is a harness defect, never a product
+// verdict.
+const T651F_SPECIFIER_RANGE: SourceRange = { start: 38, end: 56 };
+
+/**
+ * Arm (f)'s staging and expectations (TEST-SPEC T6.5-1, "Nested
+ * declarations alike"). The move rewrites the nested declaration's
+ * specifier to `"../specs/sub/A.xspec"` under the byte contract, no other
+ * byte of `src/n.ts` changing, and the moved file, importing nothing, lands
+ * byte-identical; the preview's `files` holds the relocation entry and, for
+ * `src/n.ts`, exactly one `import-specifier-rewrite`, spanning the literal
+ * at [38, 56), and no other edit (T6.6-4 (c)); `check`, then `build`, exit
+ * 0 afterward; and the workspace's edges are exactly the marker's
+ * `references` edge from `src/n.ts#g` — the innermost enclosing named unit
+ * (4.6) — to the moved file's `x`: `specs/A.mdx#x` before the move, a
+ * staging premise, and `specs/sub/A.mdx#x` after it. A product rewriting
+ * the specifiers of top-level declarations alone leaves the nested one
+ * designating no discovered source — 14.15 at the next `check` — and fails.
+ */
+function nestedDeclarationArm(): FileMoveArm {
+  const where = "T6.5-1 (a nested declaration) staging";
+  const origin = "specs/A.mdx";
+  const destination = "specs/sub/A.mdx";
+  const code = "src/n.ts";
+  const before = '"../specs/A.xspec"';
+  const range = uniqueSpan(T651F_CODE_SOURCE, before, `${where} ${code}`);
+  if (
+    range.start !== T651F_SPECIFIER_RANGE.start ||
+    range.end !== T651F_SPECIFIER_RANGE.end
+  ) {
+    throw new Error(
+      `${where}: ${code}'s specifier literal ${before} spans ` +
+        `[${String(range.start)}, ${String(range.end)}) in the staged ` +
+        `bytes, not [38, 56) as TEST-SPEC T6.5-1 pins it — fix the staging`,
+    );
+  }
+  // The relocation spanning the entire moved file, and the nested
+  // declaration's one specifier rewrite; entries in file path byte order
+  // (SPEC 6.6, 12.7).
+  const previewFiles: ExpectedPreviewFile[] = [
+    {
+      file: origin,
+      edits: [
+        {
+          class: "file-relocation",
+          range: { start: 0, end: utf8Length(T651F_MOVED_SOURCE) },
+        },
+      ],
+    },
+    {
+      file: code,
+      edits: [
+        { class: "import-specifier-rewrite", range: T651F_SPECIFIER_RANGE },
+      ],
+    },
+  ];
+  previewFiles.sort((x, y) => comparePathBytes(x.file, y.file));
+  return {
+    name: "a nested declaration",
+    origin,
+    destination,
+    files: { [origin]: T651F_MOVED, [code]: T651F_CODE },
+    rewrites: [
+      {
+        pre: code,
+        post: code,
+        source: T651F_CODE_SOURCE,
+        before,
+        after: '"../specs/sub/A.xspec"',
+      },
+    ],
+    untouched: ["xspec.config.ts"],
+    movedFileKept: "it spells no import declaration, holding section `x` alone",
+    previewFiles,
+    mapping: [
+      { from: origin, to: destination },
+      { from: `${origin}#x`, to: `${destination}#x` },
+    ],
+    preIdentities: [origin, `${origin}#x`],
+    postIdentities: [destination, `${destination}#x`],
+    // The marker's `references` edge alone: the import declaration records
+    // none of its own (4, 4.5), and the moved file references nothing.
+    edges: (movedPath) => ({
+      depends: [],
+      embeds: [],
+      references: [
+        { from: `${code}#g`, to: `${movedPath}#x`, kind: "references" },
+      ],
+    }),
+    seedFiles: ["xspec.config.ts", destination, code, JOURNAL_PATH],
+    close: "check-and-build",
+  };
+}
+
+// The six arms TEST-SPEC T6.5-1 pins, each literal spelled as the entry
+// spells it (SPEC 6.5: the `..` ascents, then the descending segments,
+// joined with `/`, no `.` segments, `./`-prefixed when there is no ascent,
+// `.mdx` replaced by `.xspec`; the quote style kept, 6.4).
+const FILE_MOVE_ARMS: readonly FileMoveArm[] = [
+  // (a) Into a subdirectory: the importer's `"./A.xspec"` becomes
+  // `"./sub/A.xspec"`; the moved file's own `'./C.xspec'` becomes
+  // `'../C.xspec'`, single quotes kept — an ascent gained; the `.ts`
+  // importer's ascent-then-descent spelling gains a segment.
+  fileMoveArm({
+    name: "into a subdirectory",
+    origin: "specs/A.mdx",
+    destination: "specs/sub/A.mdx",
+    other: "specs/C.mdx",
+    ownImports: ["import C from './C.xspec'"],
+    embedBinding: "C",
+    ownRewrite: { before: "'./C.xspec'", after: "'../C.xspec'" },
+    importer: "specs/I.mdx",
+    importerRewrite: { before: '"./A.xspec"', after: '"./sub/A.xspec"' },
+    consumerRewrite: {
+      before: '"../specs/A.xspec"',
+      after: '"../specs/sub/A.xspec"',
+    },
+  }),
+  // (b) Out of a subdirectory — an ascent lost: the moved file's own
+  // `'../C.xspec'` becomes `'./C.xspec'` (`./`-prefixed, no ascent left),
+  // the importer's `"./sub/A.xspec"` `"./A.xspec"`, the `.ts` importer's
+  // `"../specs/sub/A.xspec"` `"../specs/A.xspec"`; a stale `..` fails.
+  fileMoveArm({
+    name: "out of a subdirectory",
+    origin: "specs/sub/A.mdx",
+    destination: "specs/A.mdx",
+    other: "specs/C.mdx",
+    ownImports: ["import C from '../C.xspec'"],
+    embedBinding: "C",
+    ownRewrite: { before: "'../C.xspec'", after: "'./C.xspec'" },
+    importer: "specs/I.mdx",
+    importerRewrite: { before: '"./sub/A.xspec"', after: '"./A.xspec"' },
+    consumerRewrite: {
+      before: '"../specs/sub/A.xspec"',
+      after: '"../specs/A.xspec"',
+    },
+  }),
+  // (c) Across sibling directories — ascents before descents: the importer
+  // in `specs/y/` spells `"../w/A.xspec"`, then `"../x/A.xspec"`; the moved
+  // file's own `'./C.xspec'`, C staying in `specs/w/`, becomes
+  // `'../w/C.xspec'`.
+  fileMoveArm({
+    name: "across sibling directories",
+    origin: "specs/w/A.mdx",
+    destination: "specs/x/A.mdx",
+    other: "specs/w/C.mdx",
+    ownImports: ["import C from './C.xspec'"],
+    embedBinding: "C",
+    ownRewrite: { before: "'./C.xspec'", after: "'../w/C.xspec'" },
+    importer: "specs/y/I.mdx",
+    importerRewrite: { before: '"../w/A.xspec"', after: '"../x/A.xspec"' },
+    consumerRewrite: {
+      before: '"../specs/w/A.xspec"',
+      after: '"../specs/x/A.xspec"',
+    },
+  }),
+  // (d) Relocation within the file's own directory (`specs/A.mdx` →
+  // `specs/A2.mdx`): the moved file's own imports — a canonical `./C.xspec`
+  // and a non-canonical `.//C.xspec`, each still designating `C.mdx` from
+  // `specs/` (SPEC 2.1) — are neither rewritten nor reported (6.5), while
+  // the importer's `./A.xspec` becomes `./A2.xspec`; no `.ts` importer, so
+  // the preview's `files` holds exactly the relocation entry and the
+  // importer's `import-specifier-rewrite`.
+  fileMoveArm({
+    name: "relocation within the directory",
+    origin: "specs/A.mdx",
+    destination: "specs/A2.mdx",
+    other: "specs/C.mdx",
+    ownImports: ['import C from "./C.xspec"', 'import C2 from ".//C.xspec"'],
+    embedBinding: "C2",
+    ownRewrite: null,
+    importer: "specs/I.mdx",
+    importerRewrite: { before: '"./A.xspec"', after: '"./A2.xspec"' },
+    consumerRewrite: null,
+  }),
+  // (e) Five declarations recording no edge, each rewritten whatever uses
+  // its bindings: the moved file's own `"./C.xspec"` becomes
+  // `"../C.xspec"`, the importer's `"./A.xspec"` `"./sub/A.xspec"`, and
+  // each of the code source's three `"../specs/A.xspec"`
+  // `"../specs/sub/A.xspec"`.
+  fiveDeclarationArm(),
+  // (f) A nested declaration, rewritten alike: `src/n.ts`'s import in `g`'s
+  // body, its `"../specs/A.xspec"` at [38, 56) becoming
+  // `"../specs/sub/A.xspec"`.
+  nestedDeclarationArm(),
+];
+// Each arm's account of the moved file agrees with its rewrites: a reason
+// the file lands byte-identical exactly where no rewrite is the origin's.
+for (const arm of FILE_MOVE_ARMS) {
+  const rewritesOwn = arm.rewrites.some(
+    (rewrite) => rewrite.pre === arm.origin,
+  );
+  if (rewritesOwn === (arm.movedFileKept !== null)) {
+    throw new Error(
+      `T6.5-1 (${arm.name}) staging: \`movedFileKept\` must be null exactly ` +
+        `where the arm's rewrites include the moved file's own — fix the arm`,
+    );
+  }
+}
+
+/**
+ * T6.5-1's stagings (FILE_MOVE_ARMS, in its order), exported for
+ * T12.0-15's human twin of each performed move's report (TEST-SPEC
+ * T12.0-15: the performed reports of T6.4-1 and T6.5-1): each arm's files
+ * under FULL_CONFIG, built, then the arm's file-form `move <origin>
+ * <destination>` — the staging and the move T6.5-1's driver
+ * (`runFileMoveArm`) performs on that state.
+ */
+export const T6_5_1_FILE_MOVE_STAGINGS: readonly PerformedOperationStaging[] =
+  FILE_MOVE_ARMS.map((arm) => ({
+    name: `T6.5-1's file move (${arm.name})`,
+    config: FULL_CONFIG,
+    files: arm.files,
+    argv: ["move", arm.origin, arm.destination],
+  }));
+
+/** Preview edits projected to their pinned form, for an exact compare. */
+function projectEdits(edits: readonly PreviewEdit[]): readonly PreviewEdit[] {
+  return edits.map((edit) => ({
+    class: edit.class,
+    range: { start: edit.range.start, end: edit.range.end },
+  }));
+}
+
+/**
+ * The preview's complete `files` against the arm's pinned plan (SPEC 6.6,
+ * 12.7; T6.6-4 (c)): one entry per file the relocation would rewrite or
+ * relocate — the moved file's under its current, pre-operation path — in
+ * file path byte order, each edit class-plus-range only, in 12.7's order. A
+ * file the move rewrites nothing in has no entry: a specifier that still
+ * designates its source from the file's post-operation directory is neither
+ * rewritten nor reported (6.5).
+ */
+function assertPreviewFiles(
+  files: readonly PreviewFileEntry[],
+  expected: readonly ExpectedPreviewFile[],
+  context: string,
+): void {
+  if (files.length !== expected.length) {
+    fail(
+      `${context}: \`files\` must hold exactly one {"file", "edits"} entry ` +
+        `per file the relocation would rewrite or relocate, and none for a ` +
+        `file it rewrites nothing in — expected ` +
+        `[${expected.map((entry) => entry.file).join(", ")}], got ` +
+        `[${files.map((entry) => renderPathValue(entry.file)).join(", ")}] ` +
+        `(SPEC 6.5, 6.6, 12.7)`,
+    );
+  }
+  for (let i = 0; i < expected.length; i += 1) {
+    const want = expected[i]!;
+    const got = files[i]!;
+    if (got.file !== want.file) {
+      fail(
+        `${context}: files[${String(i)}] must be ${JSON.stringify(want.file)} ` +
+          `— entries under current, pre-operation paths, ordered by file ` +
+          `path bytes (SPEC 6.6, 12.7); got ${renderPathValue(got.file)}`,
+      );
+    }
+    assertSameJson(
+      projectEdits(got.edits),
+      projectEdits(want.edits),
+      `${context}: ${want.file} — every edit the relocation would make ` +
+        `there, class-plus-range only: the \`file-relocation\` spanning the ` +
+        `entire moved file and each \`import-specifier-rewrite\` spanning ` +
+        `exactly the specifier literal's characters, quotes included, in ` +
+        `12.7's pinned edit order (SPEC 6.5, 6.6, 1.7)`,
+    );
+  }
+}
+
 /** Assert the workspace-wide edge set of each dependency kind (SPEC 5.2, 11). */
-async function assertF1Edges(
+async function assertEdges(
   product: ProductBinding,
   workspace: TestWorkspace,
-  coreFile: string,
+  expected: EdgeSets,
   context: string,
 ): Promise<void> {
-  const expected = f1Edges(coreFile);
   for (const kind of ["depends", "embeds", "references"] as const) {
     assertEdgeSetEqual(
       await queryEdgesOfKind(product, workspace, kind, context),
       expected[kind],
       `${context}: the workspace's complete \`${kind}\` edge set — every ` +
-        `reference resolves to the moved file's new identities, whose file ` +
-        `part alone changed (SPEC 6.5, 5.2)`,
+        `reference resolves to the moved file's identities, whose file ` +
+        `part alone changed (SPEC 6.5, 5.2), and no import declaration ` +
+        `records an edge of its own, its binding used or not — a type-only ` +
+        `binding and a side-effect import included (2.1, 4, 4.5, 5.7)`,
     );
   }
 }
 
-// The non-derived workspace state seeded into the fresh-build directory:
-// configuration, every source file (post-move bytes), and the journal
-// (derived files are reproducible from those, SPEC 13.4).
-const F1_SEED_FILES = [
-  "xspec.config.ts",
-  F1_OTHER,
-  F1_MOVED,
-  F1_REFS,
-  F1_APP,
-  JOURNAL_PATH,
-] as const;
+/**
+ * One arm of T6.5-1 on its own fresh workspace: the preview's plan read on a
+ * copy, and the human `move` run on that copy after the preview (the module
+ * header's human-form bullet); the real move's report, and the human
+ * report's mentions of its applied mapping; the specifier-rewrite byte
+ * contract, the untouched files, the journal, `check`, and the node and
+ * edge inventories; with `fullProtocol`, the finishing regeneration as
+ * T6.4-7 (H-6); and, for an arm closing with a `build` (`FileMoveClose`), a
+ * final `build` exiting 0 — with no finding, for an arm closing
+ * finding-free.
+ */
+async function runFileMoveArm(
+  product: ProductBinding,
+  arm: FileMoveArm,
+  fullProtocol: boolean,
+): Promise<void> {
+  const context = `T6.5-1 (${arm.name})`;
+  const moveArgv = ["move", arm.origin, arm.destination] as const;
+  await withWorkspace(FULL_CONFIG, arm.files, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` over the staged workspace`,
+    );
+
+    // Staging premises: no journal before the first journaled operation
+    // (SPEC 6.1); the pre-move node and edge inventories are exactly as
+    // staged, so the post-move assertions witness a real transition.
+    const journalBefore = await workspace.kind(JOURNAL_PATH);
+    if (journalBefore !== "absent") {
+      fail(
+        `${context}: staging premise — no journal file exists before the ` +
+          `first journaled operation (SPEC 6.1); found ${journalBefore} ` +
+          `at ${JOURNAL_PATH}`,
+      );
+    }
+    await assertNodeIdentities(
+      product,
+      workspace,
+      arm.preIdentities,
+      "staging premise — the pre-move enumeration is exactly the staged " +
+        "node set (SPEC 11, 1.5)",
+      `${context} pre-move`,
+    );
+    await assertEdges(
+      product,
+      workspace,
+      arm.edges(arm.origin),
+      `${context} pre-move`,
+    );
+
+    // The preview side (TEST-SPEC T6.5-1): the `import-specifier-rewrite`
+    // ranges — in current, pre-operation coordinates (SPEC 6.6, 1.7) — are
+    // read by running the preview on a copy of the fixture, staged and
+    // built like the original, whose pre-move state no preview then
+    // touches; the preview's `mapping` and complete `files` are pinned
+    // form-exact meanwhile (6.6, 12.7; T6.6-4 (c)). The copy, still at the
+    // pre-move state after the preview, then serves the human form's run
+    // (the module header): the same `move` without `--json`, exiting 0 as
+    // the `--json` run on the original does, its report matched once that
+    // run's own assertions have run.
+    const { previewRanges, humanMove } = await withWorkspace(
+      FULL_CONFIG,
+      arm.files,
+      async (copy) => {
+        await buildOk(
+          product,
+          copy,
+          `${context} \`build\` over the copy staged for the preview`,
+        );
+        const label = `${context} \`${moveArgv.join(" ")} --preview --json\` on the copy`;
+        const report = decodePreviewReport(
+          await runJson(
+            product,
+            copy,
+            [...moveArgv, "--preview", "--json"],
+            label,
+          ),
+          label,
+        );
+        assertSameJson(
+          report.findings,
+          [],
+          `${label}: the preview of the valid file-form move completes ` +
+            `with findings [] (SPEC 6.6)`,
+        );
+        if (report.mapping === null || report.files === null) {
+          fail(
+            `${label}: the completed preview reports its plan — \`mapping\` ` +
+              `and \`files\` non-null (SPEC 6.6, 12.7)`,
+          );
+        }
+        assertAppliedMapping(
+          report.mapping,
+          arm.mapping,
+          `${label}: \`mapping\` is one entry per node of the moved file — ` +
+            `the root's bare-path identities, \`from\` the old path and ` +
+            `\`to\` the new, and every section's — ordered by \`from\` ` +
+            `bytes (SPEC 6.6, 12.7)`,
+        );
+        assertPreviewFiles(report.files, arm.previewFiles, label);
+        const files = report.files;
+        const ranges = new Map(
+          arm.rewrites.map(
+            (rewrite) =>
+              [
+                rewrite.pre,
+                specifierRewriteRanges(files, rewrite.pre, label),
+              ] as const,
+          ),
+        );
+        const human = await expectExit(
+          product,
+          copy,
+          moveArgv,
+          0,
+          `${context} \`${moveArgv.join(" ")}\` on the copy the preview ` +
+            `left at the pre-move state (human report) — the same exit ` +
+            `code as the \`--json\` run on the original: 0, the move ` +
+            `succeeding (SPEC 6.5, 6.4, 12.0)`,
+        );
+        return { previewRanges: ranges, humanMove: human };
+      },
+    );
+
+    // The pre-move bytes of every staged file, taken from the original just
+    // before the move (staging premise: as staged — `build` rewrites no
+    // source, T6.1-1).
+    const preMoveBytes = new Map<string, Uint8Array>();
+    for (const rel of ["xspec.config.ts", ...Object.keys(arm.files)]) {
+      preMoveBytes.set(rel, await workspace.readBytes(rel));
+    }
+    for (const rewrite of arm.rewrites) {
+      assertBytesEqual(
+        preMoveBytes.get(rewrite.pre)!,
+        rewrite.source,
+        `${context}: staging premise — ${rewrite.pre} holds its staged ` +
+          `source before the move`,
+      );
+    }
+
+    // The command's own report is the applied mapping — every identity pair
+    // the operation journaled, the preview's `mapping` (SPEC 6.5: both forms
+    // report as rename does; 6.4, 6.6) — carried in JSON in the form-exact
+    // performed-operation document of 12.7 (H-3; T6.4-1's protocol: exactly
+    // `{"findings", "mapping"}`, pairs ordered by `from` bytes). The premise
+    // enumeration above pins the moved file's nodes as exactly these four,
+    // so no other identity is mapped.
+    const moveReport = await runJson(
+      product,
+      workspace,
+      [...moveArgv, "--json"],
+      `${context} file-form \`${moveArgv.join(" ")} --json\``,
+    );
+    const appliedMapping = decodeAppliedMappingReport(moveReport, context);
+    assertAppliedMapping(
+      appliedMapping,
+      arm.mapping,
+      `${context}: the successful file-form move's report is the applied ` +
+        `mapping — exactly the identity pairs the operation journaled: ` +
+        `every node of the moved file, the implicit root included, its ID ` +
+        `kept and its file part changed (SPEC 6.5, 6.4, 6.6, 12.0)`,
+    );
+    // The human report, run on the preview's copy at the pre-move state,
+    // carries the same applied mapping: every mapped pair's `from` and `to`
+    // identity, taken from the decoded report just asserted (module header;
+    // H-3, H-4).
+    assertHumanAppliedMapping(
+      humanMove,
+      appliedMapping,
+      `${context} \`${moveArgv.join(" ")}\` on the preview's copy (human ` +
+        `report)`,
+    );
+
+    // The file was relocated.
+    const originKind = await workspace.kind(arm.origin);
+    if (originKind !== "absent") {
+      fail(
+        `${context}: the origin file ${arm.origin} must be gone after the ` +
+          `file-form move (SPEC 6.5); found ${originKind}`,
+      );
+    }
+    const destinationKind = await workspace.kind(arm.destination);
+    if (destinationKind !== "file") {
+      fail(
+        `${context}: expected a plain file at ${arm.destination} after the ` +
+          `file-form move (SPEC 6.5, 13.4); found ${destinationKind}`,
+      );
+    }
+
+    // The specifier-rewrite byte contract, the operation side (TEST-SPEC
+    // T6.5-1; SPEC 6.5): each rewritten file — the moved file under its new
+    // path, the importing `.mdx`, the importing `.ts` — is its pre-move
+    // bytes with exactly the previewed ranges replaced by the expected
+    // literal: the kept delimiters around the canonical relative spelling.
+    for (const rewrite of arm.rewrites) {
+      const kind = await workspace.kind(rewrite.post);
+      if (kind !== "file") {
+        fail(
+          `${context} rewrite check: expected a plain file at ` +
+            `${rewrite.post} after the move (SPEC 6.5, 13.4); found ${kind}`,
+        );
+      }
+      assertSpecifierRewriteByteContract(
+        {
+          rel: rewrite.post,
+          pre: preMoveBytes.get(rewrite.pre)!,
+          post: await workspace.readBytes(rewrite.post),
+          rewrites: previewRanges
+            .get(rewrite.pre)!
+            .map((range) => ({ range, literal: rewrite.after })),
+        },
+        `${context} rewrite check`,
+      );
+    }
+    // A moved file whose own specifiers still designate their source from
+    // its new directory — or that spells none — lands byte-identical:
+    // nothing in it rewritten or reported (SPEC 6.5, 2.1).
+    if (arm.movedFileKept !== null) {
+      await assertFileBytes(
+        workspace.path(arm.destination),
+        preMoveBytes.get(arm.origin)!,
+        `${context}: ${arm.destination} — the move rewrites none of the ` +
+          `moved file's own specifiers: ${arm.movedFileKept}, so the file ` +
+          `must land byte-identical to its pre-move bytes — a specifier is ` +
+          `rewritten exactly when its characters would no longer designate ` +
+          `the source, and beyond its edits a move changes no bytes ` +
+          `(SPEC 6.5, 2.1)`,
+      );
+    }
+    // Nothing else changed: a file the move rewrites nothing in is
+    // byte-identical to its pre-move bytes (SPEC 6.5).
+    for (const rel of arm.untouched) {
+      await assertFileBytes(
+        workspace.path(rel),
+        preMoveBytes.get(rel)!,
+        `${context}: ${rel} — a file the file-form move rewrites nothing ` +
+          `in must be byte-identical to its pre-move bytes (SPEC 6.5)`,
+      );
+    }
+
+    // Mapping appended to the journal (SPEC 6.5, 6.1; SUITE-21
+    // operationalization, content opaque per H-4).
+    await assertJournalHoldsOneEntry(workspace, `${context} after the move`);
+
+    // Everything resolves and no stale output remains: `check` exit 0
+    // immediately after the move (SPEC 6.5, 12.2, 14.10) — in an arm
+    // closing finding-free (the five-declaration arm) with no finding, its
+    // `--json` report exactly `{"findings": []}` (TEST-SPEC T6.5-1; 12.7).
+    const checkContext =
+      `${context} \`check\` immediately after the file-form move — all ` +
+      `rewritten imports and references resolve and the finishing ` +
+      `regeneration left no staleness (SPEC 6.5, 12.2, 14.10, 14.15)`;
+    if (arm.close === "finding-free") {
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        checkContext,
+      );
+    } else {
+      await expectExit(product, workspace, ["check"], 0, checkContext);
+    }
+
+    // IDs unchanged; identities change file part only (query-asserted).
+    await assertNodeIdentities(
+      product,
+      workspace,
+      arm.postIdentities,
+      "after the file-form move, every moved identity keeps its ID and " +
+        "changes only its file part; every other identity is unchanged " +
+        "(SPEC 6.5, 1.5)",
+      `${context} post-move`,
+    );
+    await assertEdges(
+      product,
+      workspace,
+      arm.edges(arm.destination),
+      `${context} post-move`,
+    );
+
+    if (fullProtocol) {
+      await assertFreshBuildAgrees(product, workspace, arm, context);
+    }
+
+    // The closing `build` (TEST-SPEC T6.5-1): the five-declaration arm's
+    // exits 0 with no finding after the move as well, the nested-declaration
+    // arm's exits 0 — run last, so that no arm's fresh-build compare ever
+    // follows a `build` of the moved workspace.
+    const buildContext =
+      `${context} \`build\` after the file-form move — every rewritten ` +
+      `specifier designates a discovered source (SPEC 6.5, 2.1, 4, 14.15)`;
+    if (arm.close === "finding-free") {
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["build", "--json"],
+        buildContext,
+      );
+    } else if (arm.close === "check-and-build") {
+      await expectExit(product, workspace, ["build"], 0, buildContext);
+    }
+  });
+}
+
+/**
+ * Finishing regeneration as T6.4-7 (H-6 two-directory protocol): seed a
+ * fresh workspace with the post-move sources, configuration, and journal;
+ * `build`; compare the whole roots byte-for-byte.
+ */
+async function assertFreshBuildAgrees(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  arm: FileMoveArm,
+  context: string,
+): Promise<void> {
+  const fresh = await TestWorkspace.create();
+  try {
+    for (const rel of arm.seedFiles) {
+      const kind = await workspace.kind(rel);
+      if (kind !== "file") {
+        fail(
+          `${context}: expected ${rel} as a plain file in the moved ` +
+            `workspace to seed the fresh-build directory (SPEC 6.5, 6.1, ` +
+            `13.4); found ${kind}`,
+        );
+      }
+      await fresh.copyFrom(workspace, rel);
+    }
+    await buildOk(
+      product,
+      fresh,
+      `${context} fresh \`build\` over the post-move sources`,
+    );
+    await assertDirectoriesEqual(
+      workspace.root,
+      fresh.root,
+      `${context}: the moved workspace vs a fresh \`build\` of the ` +
+        `post-move sources — generated modules, Markdown output, and ` +
+        `graph data must be byte-identical (SPEC 6.5: a successful move ` +
+        `regenerates derived files as rename does; 6.4, 12.0 ` +
+        `determinism; H-4/H-6, normalizing nothing)`,
+    );
+  } finally {
+    await fresh.dispose();
+  }
+}
 
 const T6_5_1 = defineProductTest({
   id: "T6.5-1",
   title:
-    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal; finishing regeneration as T6.4-7 — byte-identical to a fresh `build`, `check` clean (SPEC 6.5, 6.1, 12.1, 14.10)",
+    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal and reported as the form-exact performed-operation document, and the human `move`, run on the preview's copy at the pre-move state, exits 0 alike and carries that mapping — every pair's `from` and `to` identity (robust matching, H-3; SPEC 12.0); the finishing regeneration is byte-identical to a fresh build — the specifier-rewrite byte contract of 6.5 byte-asserted, the `import-specifier-rewrite` ranges read from a preview on a copy whose `files` is pinned form-exact, over a move into a subdirectory (the importer's `\"./A.xspec\"` becomes `\"./sub/A.xspec\"`, the moved file's own `'./C.xspec'` `'../C.xspec'` with its single quotes kept), out of one (an ascent lost), and across sibling directories (`\"../x/A.xspec\"`, ascents before descents) — each rewritten literal exactly the kept delimiters around the canonical relative spelling and every other byte unchanged, so a `.` segment, a missing `./` prefix, a stale `..`, a switched quote style, or any rewrite beyond the literals fails — and a relocation within the file's own directory (`specs/A.mdx` → `specs/A2.mdx`) that leaves its canonical `./C.xspec` and non-canonical `.//C.xspec` imports byte-untouched and unreported while the importer's `./A.xspec` becomes `./A2.xspec`, the preview's `files` exactly the relocation entry and the importer's rewrite — and, under `move specs/A.mdx specs/sub/A.mdx`, five import declarations recording no edge or occurrence (the moved file's own `import C from \"./C.xspec\"` and the spec importer's `import A from \"./A.xspec\"`, neither binding referenced, and a code source's `import type T`, `import { type text as t }`, and side-effect `import` of `\"../specs/A.xspec\"`) each rewritten under the same byte contract, its quote style kept, whatever uses its bindings — the preview's `files` the relocation entry and exactly five `import-specifier-rewrite` edits, each spanning its literal — and `check` and `build` exiting 0 with no finding afterward, so a product collecting the specifiers it rewrites from recorded edges, occurrences, or used bindings fails — and nested declarations alike: under the same move, the import of `\"../specs/A.xspec\"` standing nested in `g`'s body in `src/n.ts` (well-formed, never compiled) rewritten to `\"../specs/sub/A.xspec\"` under the same byte contract, no other byte of the file changing, the preview's entry for `src/n.ts` exactly one `import-specifier-rewrite`, spanning the literal at [38, 56), `check` and `build` exiting 0 afterward, and `query edges` holding exactly the marker's `references` edge from `src/n.ts#g` to `specs/sub/A.mdx#x`, so a product rewriting the specifiers of top-level declarations alone fails",
   run: async (product) => {
-    await withWorkspace(
-      FULL_CONFIG,
-      {
-        [F1_OTHER]: F1_OTHER_SOURCE,
-        [F1_CORE]: F1_CORE_SOURCE,
-        [F1_REFS]: F1_REFS_SOURCE,
-        [F1_APP]: F1_APP_SOURCE,
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T6.5-1 `build` over the staged workspace",
-        );
-
-        // Staging premises: no journal before the first journaled operation
-        // (SPEC 6.1); the pre-move node and edge inventories are exactly as
-        // staged, so the post-move assertions witness a real transition.
-        const journalBefore = await workspace.kind(JOURNAL_PATH);
-        if (journalBefore !== "absent") {
-          fail(
-            `T6.5-1: staging premise — no journal file exists before the ` +
-              `first journaled operation (SPEC 6.1); found ${journalBefore} ` +
-              `at ${JOURNAL_PATH}`,
-          );
-        }
-        await assertNodeIdentities(
-          product,
-          workspace,
-          F1_PRE_IDENTITIES,
-          "staging premise — the pre-move enumeration is exactly the staged " +
-            "node set (SPEC 11, 1.5)",
-          "T6.5-1 pre-move",
-        );
-        await assertF1Edges(product, workspace, F1_CORE, "T6.5-1 pre-move");
-
-        await expectExit(
-          product,
-          workspace,
-          ["move", F1_CORE, F1_MOVED],
-          0,
-          "T6.5-1 file-form `move specs/Core.mdx specs/sub/Moved.mdx`",
-        );
-
-        // The file was relocated.
-        const originKind = await workspace.kind(F1_CORE);
-        if (originKind !== "absent") {
-          fail(
-            `T6.5-1: the origin file ${F1_CORE} must be gone after the ` +
-              `file-form move (SPEC 6.5); found ${originKind}`,
-          );
-        }
-
-        // Specifier rewrites (module header, H-4): the stale quoted spelling
-        // is gone and a spelling naming the resolving module remains — the
-        // moved file's own import, a spec file's import, a code file's
-        // import (SPEC 6.5).
-        const movedText = await readSourceText(
-          workspace,
-          F1_MOVED,
-          "T6.5-1 rewrite check",
-        );
-        assertLacks(
-          movedText,
-          F1_MOVED,
-          '"./Other.xspec"',
-          "the moved file's own import specifiers are rewritten for its new " +
-            "directory (SPEC 6.5); from specs/sub/ the old spelling no " +
-            "longer resolves",
-          "T6.5-1 rewrite check",
-        );
-        assertContains(
-          movedText,
-          F1_MOVED,
-          "Other.xspec",
-          "every resolving specifier for specs/Other.mdx ends in " +
-            "`Other.xspec` (SPEC 2.1)",
-          "T6.5-1 rewrite check",
-        );
-        for (const [rel, stale] of [
-          [F1_REFS, '"./Core.xspec"'],
-          [F1_APP, '"../specs/Core.xspec"'],
-        ] as const) {
-          const text = await readSourceText(
-            workspace,
-            rel,
-            "T6.5-1 rewrite check",
-          );
-          assertLacks(
-            text,
-            rel,
-            stale,
-            "imports of the moved file's generated module are rewritten so " +
-              "all references continue to resolve (SPEC 6.5)",
-            "T6.5-1 rewrite check",
-          );
-          assertContains(
-            text,
-            rel,
-            "Moved.xspec",
-            "every resolving specifier for the moved module ends in " +
-              "`Moved.xspec` (SPEC 2.1, 4)",
-            "T6.5-1 rewrite check",
-          );
-        }
-
-        // Mapping appended to the journal (SPEC 6.5, 6.1; SUITE-21
-        // operationalization, content opaque per H-4).
-        await assertJournalHoldsOneEntry(workspace, "T6.5-1 after the move");
-
-        // Everything resolves and no stale output remains: `check` exit 0
-        // immediately after the move (SPEC 6.5, 12.2, 14.10).
-        await expectExit(
-          product,
-          workspace,
-          ["check"],
-          0,
-          "T6.5-1 `check` immediately after the file-form move — all " +
-            "rewritten imports and references resolve and the finishing " +
-            "regeneration left no staleness (SPEC 6.5, 12.2, 14.10)",
-        );
-
-        // IDs unchanged; identities change file part only (query-asserted).
-        await assertNodeIdentities(
-          product,
-          workspace,
-          F1_POST_IDENTITIES,
-          "after the file-form move, every moved identity keeps its ID and " +
-            "changes only its file part; every other identity is unchanged " +
-            "(SPEC 6.5, 1.5)",
-          "T6.5-1 post-move",
-        );
-        await assertF1Edges(product, workspace, F1_MOVED, "T6.5-1 post-move");
-
-        // Finishing regeneration as T6.4-7 (H-6 two-directory protocol):
-        // seed a fresh workspace with the post-move sources, configuration,
-        // and journal; `build`; compare the whole roots byte-for-byte.
-        const fresh = await TestWorkspace.create();
-        try {
-          for (const rel of F1_SEED_FILES) {
-            const kind = await workspace.kind(rel);
-            if (kind !== "file") {
-              fail(
-                `T6.5-1: expected ${rel} as a plain file in the moved ` +
-                  `workspace to seed the fresh-build directory (SPEC 6.5, ` +
-                  `6.1, 13.4); found ${kind}`,
-              );
-            }
-            await fresh.file(rel, await workspace.readBytes(rel));
-          }
-          await buildOk(
-            product,
-            fresh,
-            "T6.5-1 fresh `build` over the post-move sources",
-          );
-          await assertDirectoriesEqual(
-            workspace.root,
-            fresh.root,
-            "T6.5-1: the moved workspace vs a fresh `build` of the post-move " +
-              "sources — generated modules, Markdown output, and graph data " +
-              "must be byte-identical (SPEC 6.5: a successful move " +
-              "regenerates derived files as rename does; 6.4, 12.0 " +
-              "determinism; H-4/H-6, normalizing nothing)",
-          );
-        } finally {
-          await fresh.dispose();
-        }
-      },
-    );
+    for (let i = 0; i < FILE_MOVE_ARMS.length; i += 1) {
+      await runFileMoveArm(product, FILE_MOVE_ARMS[i]!, i === 0);
+    }
   },
 });
 
@@ -756,18 +2322,35 @@ const T6_5_1 = defineProductTest({
 // it is dropped with its terminator (rule of 3), while the blank line above
 // it — already empty in the source — is kept (SPEC 6.5, 3).
 const X2_ORIGIN = "specs/A.mdx";
-const X2_ORIGIN_BEFORE = [
-  '<S id="a">',
-  "Alpha holder.",
-  "",
-  '<S id="a.mv">',
-  "Moved text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const X2_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-2 specs/A.mdx (the shared origin)",
+  [
+    '<S id="a">',
+    "Alpha holder.",
+    "",
+    '<S id="a.mv">',
+    "Moved text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 const X2_ORIGIN_AFTER = ['<S id="a">', "Alpha holder.", "", "</S>", ""].join(
   "\n",
+);
+
+// The fourth geometry's origin: the moved construct `a.m` is a single-line
+// in-line section holding prose outside its tags, alone on its line — a
+// paragraph line (`x</S>` follows its opening tag on the line, so the flow
+// attempt fails and both tags stand in text position). Deleting its own
+// characters leaves that line empty purely by the deletion, so it drops
+// with its terminator (rule of 3), leaving exactly `X2_ORIGIN_AFTER`
+// (SPEC 6.5, 3).
+const X2_INLINE_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-2 mid-line insertion arm specs/A.mdx (the in-line origin)",
+  ['<S id="a">', "Alpha holder.", "", '<S id="a.m">x</S>', "</S>", ""].join(
+    "\n",
+  ),
 );
 
 // Uninvolved bystander, asserted byte-identical in every arm: beyond the
@@ -775,13 +2358,122 @@ const X2_ORIGIN_AFTER = ['<S id="a">', "Alpha holder.", "", "</S>", ""].join(
 // regeneration, a move changes no bytes (SPEC 6.5).
 const X2_ZED = "specs/Zed.mdx";
 const X2_ZED_SOURCE = ['<S id="zed">', "Zed text.", "</S>", ""].join("\n");
+const X2_ZED_STAGED = stagedMdx(
+  "T6.5-2 specs/Zed.mdx (the uninvolved bystander)",
+  X2_ZED_SOURCE,
+);
+
+// The arms' stagings: the first arm's workspace is the body's first, every
+// later arm follows its invocations, so each staged `.mdx` source is a
+// ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
+// the first arm's converted uniformly; the Beta holder two arms stage at
+// `specs/B.mdx` — the line-start and the self-closing-section arms — is one
+// record (identical bytes). The `expected` texts stay strings.
+const X2_B_HOLDER = stagedMdx(
+  "T6.5-2 line-start and self-closing-section arms specs/B.mdx",
+  ['<S id="b">', "Beta holder.", "</S>", ""].join("\n"),
+);
 
 /** One byte-exact arm: staged files, the move argv, expected file bytes. */
 interface ByteExactArm {
   readonly name: string;
-  readonly files: Readonly<Record<string, string>>;
+  /** The staged configuration; `SPECS_ONLY_CONFIG` unless the arm reads compiled Markdown. */
+  readonly config?: StagedTs;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   readonly expected: Readonly<Record<string, string>>;
+  /**
+   * Compiled Markdown asserted after a post-move `build`: the moved-to
+   * file's output under SPEC 3, compiled over the composed source, at 7.3's
+   * default destination beside the source (`specs/G.mdx` → `specs/G.md`).
+   */
+  readonly markdown?: Readonly<Record<string, string>>;
+}
+
+// The self-closing target-parent arms' one expected `specs/P.mdx`: whether
+// the parent is spelled `<Spec id="p" />` or `<Spec id="p" / >`, its `/` and
+// the whitespace immediately before or after it are deleted and `</Spec>`
+// appended after the tag's terminating `>`, the moved text inserted before
+// that closing tag (SPEC 6.5, 1.1) — one string, so the two arms demonstrably
+// expect the same bytes.
+const X2_PAIRED_PARENT_AFTER = [
+  '<Spec id="p">',
+  '<S id="p.mv">',
+  "Moved text.",
+  "</S>",
+  "</Spec>",
+  "",
+].join("\n");
+
+// The terminator-kind arms' characters (SPEC 3), spelled from code points
+// (tool-safe): a CRLF pair is one terminator, a lone CR one too, and U+000A
+// is the terminator every move inserts, whatever terminators the file holds.
+const X2_CR = String.fromCodePoint(0x000d);
+const X2_LF = String.fromCodePoint(0x000a);
+const X2_CRLF = X2_CR + X2_LF;
+
+/**
+ * T6.5-2's terminator-kind arms for one kind T (SPEC 3, 6.5), origin and
+ * target sharing it: the origin `specs/o.mdx` = `<S id="a">x</S>`, T,
+ * `<S id="m">`, T, `y`, T, `</S>`, T, moved into parent `p` of
+ * `specs/t.mdx` = `<S id="p">`, T, `x`, T, `</S>`, T, and to top-level `n`
+ * at the end of `specs/u.mdx` = `<S id="p">x</S>`, T. The deletion empties
+ * the moved construct's joined line, dropped with its whole terminator; the
+ * moved text carries its own terminators and is followed by one U+000A; the
+ * insertion point, following a T, is a line start (none added before it);
+ * every terminator the edits leave in place is kept byte-for-byte. A product
+ * matching the file's terminator style (T after the moved text) fails, and
+ * one splitting lines on U+000A alone, which in the lone-CR arms keeps the
+ * emptied origin line and adds a U+000A before the moved text. Called at
+ * module load: the records are the ledger's (S-9; later arms of the body).
+ */
+function x2TerminatorKindArms(
+  kind: string,
+  terminator: string,
+): readonly ByteExactArm[] {
+  const t = terminator;
+  const origin = stagedMdx(
+    `T6.5-2 ${kind} terminator-kind arms specs/o.mdx (the shared origin)`,
+    ['<S id="a">x</S>', '<S id="m">', "y", "</S>", ""].join(t),
+  );
+  const originAfter = '<S id="a">x</S>' + t;
+  return [
+    {
+      name: `${kind} terminators, into parent p: the emptied origin line dropped with its terminator, U+000A after the moved text, none before it`,
+      files: {
+        "specs/o.mdx": origin,
+        "specs/t.mdx": stagedMdx(
+          `T6.5-2 ${kind} terminator-kind arm specs/t.mdx (into parent p)`,
+          ['<S id="p">', "x", "</S>", ""].join(t),
+        ),
+      },
+      argv: ["move", "specs/o.mdx#m", "specs/t.mdx#p.m"],
+      expected: {
+        "specs/o.mdx": originAfter,
+        "specs/t.mdx":
+          ['<S id="p">', "x", '<S id="p.m">', "y", "</S>"].join(t) +
+          X2_LF +
+          "</S>" +
+          t,
+      },
+    },
+    {
+      name: `${kind} terminators, end of file at top-level n: U+000A after the moved text, none before it`,
+      files: {
+        "specs/o.mdx": origin,
+        "specs/u.mdx": stagedMdx(
+          `T6.5-2 ${kind} terminator-kind arm specs/u.mdx (end of file)`,
+          '<S id="p">x</S>' + t,
+        ),
+      },
+      argv: ["move", "specs/o.mdx#m", "specs/u.mdx#n"],
+      expected: {
+        "specs/o.mdx": originAfter,
+        "specs/u.mdx":
+          ['<S id="p">x</S>', '<S id="n">', "y", "</S>"].join(t) + X2_LF,
+      },
+    },
+  ];
 }
 
 const X2_ARMS: readonly ByteExactArm[] = [
@@ -794,7 +2486,7 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "line-start insertion + origin line-drop",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/B.mdx": ['<S id="b">', "Beta holder.", "</S>", ""].join("\n"),
+      "specs/B.mdx": X2_B_HOLDER,
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/B.mdx#b.mv"],
     expected: {
@@ -811,22 +2503,77 @@ const X2_ARMS: readonly ByteExactArm[] = [
     },
   },
   {
-    // The target parent's closing tag is mid-line (preceded by `.`), so the
-    // insertion is preceded by one U+000A as well as followed by one.
-    name: "mid-line insertion point",
+    // Sibling of the line-start arm: the target parent's closing tag is
+    // indented on its line, `  </S>` after two spaces — a flow-position tag
+    // still (SPEC 14.20: the flow attempt consumes the line prefix). The
+    // insertion point, immediately before the tag, is preceded by the two
+    // spaces, so it is no line start (a terminator immediately precedes it
+    // exactly when it is): one U+000A is added, leaving the spaces a line of
+    // their own before the moved text, and the closing tag follows the
+    // moved text's own terminator at a line start. The composed form derives
+    // (S-9: the whitespace-only line ends the holder's paragraph; the moved
+    // text's tags are flow-position tags). In the compiled Markdown the
+    // two-space line is kept with its terminator: no non-whitespace stood on
+    // it, so 3's drop rule — a line that contained non-whitespace left
+    // empty or whitespace-only purely by removals — does not reach it. A
+    // product reading T3-3's `alone on its line` as `at a line start`, and
+    // so inserting at the tag's line start without a terminator, fails.
+    name: "indented closing tag: terminator added, the spaces left a line of their own",
+    config: SPECS_MD_CONFIG,
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/C.mdx": '<S id="c">Gamma holder.</S>\n',
+      "specs/G.mdx": stagedMdx(
+        "T6.5-2 indented-closing-tag arm specs/G.mdx",
+        ['<S id="g">', "Golf holder.", "  </S>", ""].join("\n"),
+      ),
     },
-    argv: ["move", "specs/A.mdx#a.mv", "specs/C.mdx#c.mv"],
+    argv: ["move", "specs/A.mdx#a.mv", "specs/G.mdx#g.mv"],
     expected: {
       [X2_ORIGIN]: X2_ORIGIN_AFTER,
-      "specs/C.mdx": [
-        '<S id="c">Gamma holder.',
-        '<S id="c.mv">',
+      "specs/G.mdx": [
+        '<S id="g">',
+        "Golf holder.",
+        "  ",
+        '<S id="g.mv">',
         "Moved text.",
         "</S>",
         "</S>",
+        "",
+      ].join("\n"),
+    },
+    markdown: {
+      "specs/G.md": ["Golf holder.", "  ", "Moved text.", ""].join("\n"),
+    },
+  },
+  {
+    // The fourth geometry: before a closing tag sharing its line with
+    // preceding content — the text-position parent `foo <S id="p">bar</S>
+    // baz` receiving a single-line in-line section holding prose outside its
+    // tags, `<S id="a.m">x</S>`. The insertion point, preceded by `bar`, is
+    // no line start, so one U+000A precedes the moved text as well as
+    // following it; the moved text's line is then a paragraph continuation
+    // at the destination (the prose outside its tags denies the flow
+    // attempt), so the composed form derives (S-9). A flow-form section
+    // here — its tags alone on their lines — would interrupt the paragraph
+    // holding `p`'s opening tag and leave `p` unclosed (14.20, T3-3's
+    // constraint): T6.5-16(c)'s refused shape, which this arm's former
+    // staging (`<S id="c">Gamma holder.</S>` receiving `a.mv`) pinned as a
+    // performed move's result.
+    name: "mid-line insertion point: a text-position parent receiving an in-line section",
+    files: {
+      [X2_ORIGIN]: X2_INLINE_ORIGIN_BEFORE,
+      "specs/C.mdx": stagedMdx(
+        "T6.5-2 mid-line insertion arm specs/C.mdx",
+        'foo <S id="p">bar</S> baz\n',
+      ),
+    },
+    argv: ["move", "specs/A.mdx#a.m", "specs/C.mdx#p.m"],
+    expected: {
+      [X2_ORIGIN]: X2_ORIGIN_AFTER,
+      "specs/C.mdx": [
+        'foo <S id="p">bar',
+        '<S id="p.m">x</S>',
+        "</S> baz",
         "",
       ].join("\n"),
     },
@@ -850,7 +2597,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "end-of-file insertion after a terminated final line",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/D.mdx": ['<S id="d">', "Delta text.", "</S>", ""].join("\n"),
+      "specs/D.mdx": stagedMdx(
+        "T6.5-2 terminated-final-line arm specs/D.mdx",
+        ['<S id="d">', "Delta text.", "</S>", ""].join("\n"),
+      ),
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/D.mdx#dm"],
     expected: {
@@ -873,7 +2623,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "end-of-file insertion after an unterminated final line",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/E.mdx": ['<S id="e">', "Echo text.", "</S>"].join("\n"),
+      "specs/E.mdx": stagedMdx(
+        "T6.5-2 unterminated-final-line arm specs/E.mdx",
+        ['<S id="e">', "Echo text.", "</S>"].join("\n"),
+      ),
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/E.mdx#em"],
     expected: {
@@ -895,14 +2648,13 @@ const X2_ARMS: readonly ByteExactArm[] = [
     // destination, re-identified; its origin line is dropped (rule of 3).
     name: "self-closing moved section",
     files: {
-      [X2_ORIGIN]: [
-        '<S id="a">',
-        "Alpha holder.",
-        '<S id="a.todo" />',
-        "</S>",
-        "",
-      ].join("\n"),
-      "specs/B.mdx": ['<S id="b">', "Beta holder.", "</S>", ""].join("\n"),
+      [X2_ORIGIN]: stagedMdx(
+        "T6.5-2 self-closing-section arm specs/A.mdx",
+        ['<S id="a">', "Alpha holder.", '<S id="a.todo" />', "</S>", ""].join(
+          "\n",
+        ),
+      ),
+      "specs/B.mdx": X2_B_HOLDER,
     },
     argv: ["move", "specs/A.mdx#a.todo", "specs/B.mdx#b.todo"],
     expected: {
@@ -918,40 +2670,82 @@ const X2_ARMS: readonly ByteExactArm[] = [
   },
   {
     // Self-closing target parent (the TEST-SPEC worked example): its `/` and
-    // the whitespace immediately before it are deleted, `</Spec>` — the
-    // closing tag matching the opening tag's name — is appended immediately
-    // after the tag's terminating `>`, and the insertion rule then applies
-    // before that closing tag: `<Spec id="p" />` becomes `<Spec id="p">` +
-    // U+000A + the moved text + U+000A + `</Spec>` (SPEC 6.5, 1.1).
+    // any whitespace immediately before or after it (here the one space
+    // before it) are deleted, `</Spec>` — the closing tag matching the
+    // opening tag's name — is appended immediately after the tag's
+    // terminating `>`, and the insertion rule then applies before that
+    // closing tag: `<Spec id="p" />` becomes `<Spec id="p">` + U+000A + the
+    // moved text + U+000A + `</Spec>` (SPEC 6.5, 1.1).
     name: "self-closing target parent rewritten to paired form",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/P.mdx": '<Spec id="p" />\n',
+      "specs/P.mdx": stagedMdx(
+        "T6.5-2 self-closing-target-parent arm specs/P.mdx",
+        '<Spec id="p" />\n',
+      ),
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/P.mdx#p.mv"],
     expected: {
       [X2_ORIGIN]: X2_ORIGIN_AFTER,
-      "specs/P.mdx": [
-        '<Spec id="p">',
-        '<S id="p.mv">',
-        "Moved text.",
-        "</S>",
-        "</Spec>",
-        "",
-      ].join("\n"),
+      "specs/P.mdx": X2_PAIRED_PARENT_AFTER,
     },
   },
+  {
+    // The self-closing target parent with whitespace on both sides of its
+    // `/`, `<Spec id="p" / >` — a self-closing tag still, deriving (S-9:
+    // the grammar admits whitespace between the `/` and the `>`). The `/`
+    // and the whitespace immediately before and after it are deleted, so
+    // the parent becomes exactly what the `/>` arm's does — never
+    // `<Spec id="p" >`, which a product deleting only the whitespace before
+    // the `/` leaves (SPEC 6.5, 1.1).
+    name: "self-closing target parent with whitespace on both sides of its `/` rewritten to the same paired form",
+    files: {
+      [X2_ORIGIN]: X2_ORIGIN_BEFORE,
+      "specs/P.mdx": stagedMdx(
+        "T6.5-2 self-closing-target-parent arm, whitespace on both sides of its slash, specs/P.mdx",
+        '<Spec id="p" / >\n',
+      ),
+    },
+    argv: ["move", "specs/A.mdx#a.mv", "specs/P.mdx#p.mv"],
+    expected: {
+      [X2_ORIGIN]: X2_ORIGIN_AFTER,
+      "specs/P.mdx": X2_PAIRED_PARENT_AFTER,
+    },
+  },
+  // Terminator-kind arms (SPEC 3, 6.5): one per kind, CRLF and lone CR, in
+  // both geometries — into parent `p` and at the end of the file at `n`.
+  ...x2TerminatorKindArms("CRLF", X2_CRLF),
+  ...x2TerminatorKindArms("lone CR", X2_CR),
 ];
+
+/**
+ * Every composed (post-move) MDX text T6.5-2 asserts, for the S-9 self-test
+ * (test/self/s9-fixture-well-formedness.test.ts): T6.5-2 stages geometries
+ * whose composed form derives, so an expectation here the stock MDX 3 parser
+ * rejects would pin a text SPEC 6.5 refuses (`refused-invalid-rewrite`,
+ * T6.5-16) as a performed move's result. The staged pre-move files are judged
+ * by the workspace builder as they are staged.
+ */
+export const X2_COMPOSED_FORMS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = X2_ARMS.flatMap((arm) =>
+  Object.entries(arm.expected)
+    .filter(([rel]) => rel.endsWith(".mdx"))
+    .map(([rel, source]): readonly [string, string] => [
+      `T6.5-2 (${arm.name}) ${rel} after the move`,
+      source,
+    ]),
+);
 
 const T6_5_2 = defineProductTest({
   id: "T6.5-2",
   title:
-    "section form text edits, byte-exact: moved text spans the opening tag's first character through the closing tag's last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent's closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when not at line start; target file created when absent; self-closing sections move as exactly their tag's characters and a self-closing target parent is first rewritten to paired form; no other byte changes (SPEC 6.5, 3, 1.1)",
+    'section form text edits, byte-exact: moved text spans the opening tag\'s first character through the closing tag\'s last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent\'s closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when the insertion point is not at the start of a line, judged over the composed text — staged over four geometries: a closing tag alone on its line (no terminator added), with its sibling indented on its line, `  </S>` (one added, the two spaces left a line of their own, kept in the compiled Markdown); the end of a file with a final terminator (none added) and without one (one added); and a closing tag sharing its line with preceding content, a text-position parent receiving a single-line in-line section whose line is a paragraph continuation there (one added); target file created when absent; self-closing sections move as exactly their tag\'s characters and a self-closing target parent is first rewritten to paired form, its `/` and the whitespace on either side of it deleted — `<Spec id="p" />` and `<Spec id="p" / >` (whitespace on both sides of its `/`, deriving) alike become `<Spec id="p">` + U+000A + the moved text + U+000A + `</Spec>`, never `<Spec id="p" >`; terminator-kind arms, CRLF and lone CR, origin and target sharing the kind, into a parent and at the end of a file: every terminator the move inserts is U+000A, a line start and the drop rule are judged by 3\'s terminators (the emptied origin line dropped with its whole terminator, none added before the moved text), and every kept terminator stays byte-for-byte; no other byte changes (SPEC 6.5, 3, 1.1, 14.20)',
   run: async (product) => {
     for (const arm of X2_ARMS) {
       await withWorkspace(
-        SPECS_ONLY_CONFIG,
-        { ...arm.files, [X2_ZED]: X2_ZED_SOURCE },
+        arm.config ?? SPECS_ONLY_CONFIG,
+        { ...arm.files, [X2_ZED]: X2_ZED_STAGED },
         async (workspace) => {
           const context = `T6.5-2 (${arm.name})`;
           await expectExit(
@@ -977,6 +2771,27 @@ const T6_5_2 = defineProductTest({
               `and the finishing regeneration, a move changes no bytes ` +
               `(SPEC 6.5)`,
           );
+          if (arm.markdown !== undefined) {
+            await expectExit(
+              product,
+              workspace,
+              ["build"],
+              0,
+              `${context}: \`build\` over the moved-to workspace, every ` +
+                `source well-formed (SPEC 14.20) — its compiled Markdown is ` +
+                `asserted next`,
+            );
+            for (const [rel, bytes] of Object.entries(arm.markdown)) {
+              await assertFileBytes(
+                workspace.path(rel),
+                bytes,
+                `${context}: ${rel}, the compiled Markdown of the composed ` +
+                  `source — a line that held no non-whitespace is kept with ` +
+                  `its terminator; 3's drop rule reaches only lines left ` +
+                  `empty or whitespace-only purely by removals (SPEC 3, 7.3)`,
+              );
+            }
+          }
         },
       );
     }
@@ -1009,45 +2824,62 @@ const R3_SPARE = "specs/Spare.mdx";
 const R3_ORIGIN = "specs/Origin.mdx";
 const R3_TARGET = "specs/Target.mdx";
 
-const R3_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
-const R3_SPARE_SOURCE = ['<S id="sp">', "Spare text.", "</S>", ""].join("\n");
+// The determinism directories are the body's first workspaces (both created
+// before the first run); the third-file arms follow, staging R3_FILES again
+// with their own third file, so every `.mdx` source is a ledger record (S-9's
+// before-any-product clause; helpers/staged-mdx.ts), the first workspaces'
+// converted uniformly.
+const R3_KEEP_SOURCE = stagedMdx(
+  "T6.5-3 specs/Keep.mdx",
+  ['<S id="keep">', "Keep text.", "</S>", ""].join("\n"),
+);
+const R3_SPARE_SOURCE = stagedMdx(
+  "T6.5-3 specs/Spare.mdx",
+  ['<S id="sp">', "Spare text.", "</S>", ""].join("\n"),
+);
 
-const R3_ORIGIN_SOURCE = [
-  'import Keep from "./Keep.xspec"',
-  "",
-  '<S id="org">',
-  "Origin holder text.",
-  "",
-  '<S id="org.mv" d={Keep.keep}>',
-  "Moved root text.",
-  "",
-  '<S id="org.mv.k1">',
-  "Moved first kid.",
-  "</S>",
-  "",
-  '<S id="org.mv.k2" d={"org.mv.k1"}>',
-  "Moved second kid.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="org.usemv" d={"org.mv"}>',
-  'Uses the moved node: {text("org.mv.k1")}',
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const R3_ORIGIN_SOURCE = stagedMdx(
+  "T6.5-3 specs/Origin.mdx",
+  [
+    'import Keep from "./Keep.xspec"',
+    "",
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    '<S id="org.mv" d={Keep.keep}>',
+    "Moved root text.",
+    "",
+    '<S id="org.mv.k1">',
+    "Moved first kid.",
+    "</S>",
+    "",
+    '<S id="org.mv.k2" d={"org.mv.k1"}>',
+    "Moved second kid.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="org.usemv" d={"org.mv"}>',
+    'Uses the moved node: {text("org.mv.k1")}',
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const R3_TARGET_SOURCE = [
-  'import Org from "./Origin.xspec"',
-  'import Keep from "./Spare.xspec"',
-  "",
-  '<S id="tgt" d={Org.org.mv}>',
-  "Target text: {text(Org.org.mv.k1)}",
-  "</S>",
-  "",
-].join("\n");
+const R3_TARGET_SOURCE = stagedMdx(
+  "T6.5-3 specs/Target.mdx",
+  [
+    'import Org from "./Origin.xspec"',
+    'import Keep from "./Spare.xspec"',
+    "",
+    '<S id="tgt" d={Org.org.mv}>',
+    "Target text: {text(Org.org.mv.k1)}",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const R3_FILES: Readonly<Record<string, string>> = {
+const R3_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_MD_CONFIG,
   [R3_KEEP]: R3_KEEP_SOURCE,
   [R3_SPARE]: R3_SPARE_SOURCE,
@@ -1055,10 +2887,14 @@ const R3_FILES: Readonly<Record<string, string>> = {
   [R3_TARGET]: R3_TARGET_SOURCE,
 };
 
+// `--json` carries the command's own report — the applied mapping — as a
+// single JSON document (SPEC 12.0; the report assertion below); identical
+// argv in both determinism directories, so H-6's compare is unaffected.
 const R3_MOVE_ARGV = [
   "move",
   "specs/Origin.mdx#org.mv",
   "specs/Target.mdx#tm",
+  "--json",
 ] as const;
 
 // Subtree re-identified by prefix replacement: org.mv → tm, descendants too.
@@ -1086,10 +2922,342 @@ const R3_SEED_FILES = [
   JOURNAL_PATH,
 ] as const;
 
+// Third-file arms (TEST-SPEC T6.5-3; SPEC 6.5: "all references across the
+// workspace are rewritten"): a spec source that is neither origin nor target
+// imports the origin module and references the moved node through it (a `d`
+// chain). After the move that reference is rewritten to the target module
+// under an import added to the third file. The added declaration's
+// identifier and insertion offset are 6.5's latitude, so the file's bytes
+// are asserted with T6.5-8's discipline (`assertAddedImportInsertion`): its
+// expected post-move bytes are composed from the rules of 6.4/6.5 and 3
+// WITHOUT the added import, the fresh identifier read off the rewritten
+// reference as TypeScript 5.9.3 at ESNext reads an identifier (a non-ASCII
+// letter as readily as `a`; helpers/ts-identifiers.ts, SPEC 1.4, 14.20),
+// and the single inserted run isolated by diff must be
+// byte-exactly 6.5's spelling, `import <X> from "./Target.xspec"`, followed
+// by U+000A at a line-start offset — the file holds one (its end after the
+// final terminator), which 6.5 takes over any other (T6.5-8). The origin
+// import's fate splits the arms (6.5:
+// removed exactly when its binding had references and the rewrite leaves it
+// with none):
+// - (a) the last-reference arm: `Org`'s references are the moved node's
+//   chain spelled twice in one `d` array, `d={[Org.org.mv, Org.org.mv]}` —
+//   one edge, two spellings (5.2) — and the rewrite reaches every spelling
+//   (6.5: all references), so both entries become `<fresh>.tm`, rooted at
+//   the one added binding, and `Org` is left with no reference → the
+//   own-line declaration's characters are deleted and its emptied line
+//   dropped with its terminator (6.5, 3); the blank line after it was blank
+//   before the deletion, so it stays — the composed file begins with that
+//   U+000A. A product rewriting one spelling per edge leaves the second
+//   entry on `Org`, which then keeps a reference and its import.
+// - (b) `th2` keeps `d={Org.org}` through the binding → the declaration
+//   survives byte-for-byte; only the moved reference is rewritten.
+// The rewritten reference keeps its access form — `Org.org.mv` becomes
+// `<fresh>.tm`, dot access for the identifier-valid segment (6.4) — and the
+// fresh binding may not collide with `Org` where it stays, nor be `S`,
+// `Spec`, or `text` (2.1); `check` would fail either, but the arms name the
+// collision first.
+const R3_THIRD = "specs/Third.mdx";
+const R3_TARGET_MODULE = "specs/Target.xspec";
+
+const R3_THIRD_A_SOURCE = stagedMdx(
+  "T6.5-3 third-file arm (a) specs/Third.mdx",
+  [
+    'import Org from "./Origin.xspec"',
+    "",
+    '<S id="th" d={[Org.org.mv, Org.org.mv]}>',
+    "Third text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/**
+ * Arm (a)'s expected post-move bytes without the added import (6.5, 3):
+ * both entries of the `d` array rewritten, rooted at the one added binding.
+ */
+const R3_THIRD_A_BASE = (root: string): string =>
+  [
+    "",
+    `<S id="th" d={[${root}.tm, ${root}.tm]}>`,
+    "Third text.",
+    "</S>",
+    "",
+  ].join("\n");
+
+const R3_THIRD_B_SOURCE = stagedMdx(
+  "T6.5-3 third-file arm (b) specs/Third.mdx",
+  [
+    'import Org from "./Origin.xspec"',
+    "",
+    '<S id="th" d={Org.org.mv}>',
+    "Third text.",
+    "</S>",
+    "",
+    '<S id="th2" d={Org.org}>',
+    "Third keeps the origin.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/** Arm (b)'s expected post-move bytes without the added import (6.5). */
+const R3_THIRD_B_BASE = (root: string): string =>
+  [
+    'import Org from "./Origin.xspec"',
+    "",
+    `<S id="th" d={${root}.tm}>`,
+    "Third text.",
+    "</S>",
+    "",
+    '<S id="th2" d={Org.org}>',
+    "Third keeps the origin.",
+    "</S>",
+    "",
+  ].join("\n");
+
+/** The section form's journaled mapping: the moved subtree, nothing else. */
+const R3_MAPPING = [
+  { from: `${R3_ORIGIN}#org.mv`, to: `${R3_TARGET}#tm` },
+  { from: `${R3_ORIGIN}#org.mv.k1`, to: `${R3_TARGET}#tm.k1` },
+  { from: `${R3_ORIGIN}#org.mv.k2`, to: `${R3_TARGET}#tm.k2` },
+] as const;
+
+/** The complete post-move `depends` edge set of the four-file fixture. */
+const R3_DEPENDS_EDGES: readonly GraphEdge[] = [
+  { from: `${R3_ORIGIN}#org.usemv`, to: `${R3_TARGET}#tm`, kind: "depends" },
+  { from: `${R3_TARGET}#tgt`, to: `${R3_TARGET}#tm`, kind: "depends" },
+  { from: `${R3_TARGET}#tm`, to: `${R3_KEEP}#keep`, kind: "depends" },
+  { from: `${R3_TARGET}#tm.k2`, to: `${R3_TARGET}#tm.k1`, kind: "depends" },
+];
+
+/**
+ * A global pattern for one rewritten reference in 6.4's pinned spelling:
+ * `before`, then the root captured as group 1 — a permissive identifier
+ * run (helpers/ts-identifiers.ts: every code point but ASCII's
+ * non-identifier ones, so it holds any identifier TypeScript 5.9.3 at
+ * ESNext reads, a non-ASCII letter or U+2EBF0 included, and stops at the
+ * spelling's ASCII `.` or `[`) — then `after`; both regular-expression
+ * sources. The bytes the spelling pins beside the root are ASCII, so the
+ * capture is the identifier whole; the reader judges it
+ * (`expectFreshIdentifier`: SPEC 6.5, 1.4, 14.20).
+ */
+function rewrittenRootPattern(before: string, after: string): RegExp {
+  return new RegExp(`${before}(${IDENTIFIER_RUN_SOURCE})${after}`, "g");
+}
+
+/**
+ * The third file's rewritten `th` tag in one arm's shape: `shown` spells it
+ * for diagnosis, `<binding>` standing for each root, and `pattern` matches it
+ * globally, one root captured per spelling of the moved node's chain, group 1
+ * onward — each capture a permissive identifier run, as in
+ * rewrittenRootPattern.
+ */
+interface ThirdFileRewrite {
+  readonly shown: string;
+  readonly pattern: RegExp;
+}
+
+/** `<S id="th" d={<root>.tm}>` — arm (b)'s one rewritten spelling. */
+const R3_THIRD_REWRITTEN_ONCE: ThirdFileRewrite = {
+  shown: '<S id="th" d={<binding>.tm}>',
+  pattern: rewrittenRootPattern(
+    String.raw`<S id="th" d=\{`,
+    String.raw`\.tm\}>`,
+  ),
+};
+
+/**
+ * `<S id="th" d={[<root>.tm, <root>.tm]}>` — arm (a)'s chain spelled twice in
+ * one `d` array, both entries rewritten in place (the `, ` between them kept).
+ */
+const R3_THIRD_REWRITTEN_TWICE: ThirdFileRewrite = {
+  shown: '<S id="th" d={[<binding>.tm, <binding>.tm]}>',
+  pattern: new RegExp(
+    String.raw`<S id="th" d=\{\[` +
+      `(${IDENTIFIER_RUN_SOURCE})` +
+      String.raw`\.tm, ` +
+      `(${IDENTIFIER_RUN_SOURCE})` +
+      String.raw`\.tm\]\}>`,
+    "g",
+  ),
+};
+
+/**
+ * The identifier the third file's rewritten reference is rooted at — the
+ * value-unpinned fresh binding (SPEC 6.5), read off the one place 6.4's
+ * pinned spelling makes it observable, as TypeScript 5.9.3 at ESNext reads
+ * an identifier (SPEC 1.4, 14.20); diagnosed when the reference is not
+ * spelled in the arm's shape exactly once — every spelling of the moved
+ * node's chain rewritten (6.5: all references) — when its spellings are
+ * rooted at different identifiers (the file lacks one binding, the target
+ * module's default, so the rewrite adds one import binding it, 6.5), or when
+ * its root reads as no identifier.
+ */
+function thirdFileReferenceRoot(
+  text: string,
+  rewrite: ThirdFileRewrite,
+  context: string,
+): string {
+  const matches = [...text.matchAll(rewrite.pattern)];
+  const match = matches.length === 1 ? matches[0] : undefined;
+  if (match === undefined) {
+    fail(
+      `${context}: ${R3_THIRD} must hold exactly one \`${rewrite.shown}\` — ` +
+        `the third file's reference to the moved node rewritten to the ` +
+        `target module under the new identity, every spelling of it ` +
+        `(SPEC 6.5: all references across the workspace), its access form ` +
+        `kept (dot access for the identifier-valid segment; SPEC 6.5, 6.4); ` +
+        `found ${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  const roots = match.slice(1);
+  const root = roots[0]!;
+  if (roots.some((other) => other !== root)) {
+    fail(
+      `${context}: ${R3_THIRD}'s rewritten spellings of the moved node's ` +
+        `chain must all be rooted at one binding — the target module's ` +
+        `default binding, which the file lacks, so the rewrite adds the one ` +
+        `import binding it (SPEC 6.5, 2.1, 4.5); found roots ` +
+        `${JSON.stringify(roots)} in \`${match[0]}\``,
+    );
+  }
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${R3_THIRD}'s rewritten reference \`${rewrite.shown}\` ` +
+      `must be rooted at the added import's binding`,
+  );
+}
+
+/**
+ * One third-file arm: stage the four-file fixture plus `Third.mdx`, run the
+ * identical section-form move, and assert the third file's rewrite — the
+ * moved reference, every spelling of it in the shape `rewritten` gives,
+ * re-rooted at a fresh binding of the target module, added under 6.5's line
+ * discipline; the origin import removed or kept as `originImportKept` says —
+ * beside the applied-mapping report, the journal entry, the complete
+ * `depends` edge set, and a clean `check`.
+ */
+async function runThirdFileArm(
+  product: ProductBinding,
+  created: TestWorkspace[],
+  arm: {
+    readonly label: string;
+    readonly source: StagedMdx;
+    readonly rewritten: ThirdFileRewrite;
+    readonly base: (root: string) => string;
+    readonly originImportKept: boolean;
+    readonly thirdEdges: readonly GraphEdge[];
+  },
+): Promise<void> {
+  const context = `T6.5-3 third-file arm ${arm.label}`;
+  const workspace = await TestWorkspace.create({
+    files: { ...R3_FILES, [R3_THIRD]: arm.source },
+  });
+  created.push(workspace);
+  const result = await runProduct(product, {
+    cwd: workspace.root,
+    argv: [...R3_MOVE_ARGV],
+  });
+  assertExitCode(
+    result,
+    0,
+    `${context} \`move specs/Origin.mdx#org.mv specs/Target.mdx#tm --json\``,
+  );
+  assertAppliedMapping(
+    decodeAppliedMappingReport(
+      parseJsonStdout(result, `${context} report (SPEC 12.0)`),
+      context,
+    ),
+    [...R3_MAPPING],
+    `${context}: the applied mapping is exactly the moved subtree's ` +
+      `prefix-replaced pairs — the third file's rewrite maps no identity ` +
+      `(SPEC 6.5, 6.4)`,
+  );
+
+  const text = await readSourceText(workspace, R3_THIRD, context);
+  const root = thirdFileReferenceRoot(text, arm.rewritten, context);
+  if (arm.originImportKept) {
+    assertContains(
+      text,
+      R3_THIRD,
+      'import Org from "./Origin.xspec"\n',
+      "the `Org` binding keeps a reference (`th2`'s `d={Org.org}`) after " +
+        "the rewrite, so its import stays byte-for-byte (SPEC 6.5, 2.1)",
+      context,
+    );
+    if (root === "Org") {
+      fail(
+        `${context}: the added import binds \`Org\`, an identifier the ` +
+          `file's retained origin import already binds — an added import ` +
+          `binds fresh identifiers colliding with no binding already in ` +
+          `the file (SPEC 6.5, 2.1, 14.15)`,
+      );
+    }
+  } else {
+    assertLacks(
+      text,
+      R3_THIRD,
+      "Origin.xspec",
+      "the `Org` binding's references — the moved node's chain, spelled " +
+        "twice in one `d` array — were all to the moved node, so the " +
+        "rewrite, reaching both spellings, leaves it with none and the " +
+        "import is removed (SPEC 6.5, 2.1)",
+      context,
+    );
+  }
+  for (const reserved of ["S", "Spec", "text"]) {
+    if (root === reserved) {
+      fail(
+        `${context}: the added import binds \`${reserved}\`, a ` +
+          `compiler-provided name no import may bind (SPEC 2.1, 14.15)`,
+      );
+    }
+  }
+  // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns — the
+  // fresh identifier (now known) and the insertion offset (isolated below).
+  assertAddedImportInsertion(
+    {
+      rel: R3_THIRD,
+      base: Buffer.from(arm.base(root), "utf8"),
+      actual: await workspace.readBytes(R3_THIRD),
+      importerDir: posixPath.dirname(R3_THIRD),
+      expectedModule: R3_TARGET_MODULE,
+      identifier: root,
+    },
+    `${context}: the third file's rewrite is its composed post-move bytes ` +
+      `with exactly one import of the target module added in 6.5's exact ` +
+      `spelling as a line of its own at a line-start offset (SPEC 6.5, ` +
+      `2.1, 6.4, 3; T6.5-8)`,
+  );
+
+  await assertJournalHoldsOneEntry(workspace, `${context} after the move`);
+  assertEdgeSetEqual(
+    await queryEdgesOfKind(product, workspace, "depends", context),
+    [...R3_DEPENDS_EDGES, ...arm.thirdEdges],
+    `${context}: the complete \`depends\` edge set — the third file's ` +
+      `edge is reported under the moved node's new identity` +
+      (arm.originImportKept
+        ? ", its other edge through the retained origin binding unchanged"
+        : "") +
+      ` (SPEC 6.5, 5.2)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["check"],
+    0,
+    `${context} \`check\` immediately after the move — the third file's ` +
+      `rewritten reference and added import resolve, the fresh binding ` +
+      `collides with nothing (14.15), and no staleness remains (SPEC 6.5, ` +
+      `12.2, 14.10)`,
+  );
+}
+
 const T6_5_3 = defineProductTest({
   id: "T6.5-3",
   title:
-    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal; finishing regeneration as T6.4-7 (SPEC 6.5, 2.1, 6.1, 6.4, 12.1, 14.10)",
+    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 form-exact decode); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3 is byte-exactly `import <X> from \"./Target.xspec\"` followed by U+000A at a line-start offset, its identifier alone the product's), the origin import removed exactly when the moved reference was its binding's last — that arm spelling the chain twice in one `d` array, `d={[Org.org.mv, Org.org.mv]}`, both entries rewritten at the one added binding and the import still removed, its binding left with no reference — and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
   run: async (product) => {
     const created: TestWorkspace[] = [];
     try {
@@ -1116,9 +3284,36 @@ const T6_5_3 = defineProductTest({
       assertExitCode(
         first,
         0,
-        "T6.5-3 `move specs/Origin.mdx#org.mv specs/Target.mdx#tm`",
+        "T6.5-3 `move specs/Origin.mdx#org.mv specs/Target.mdx#tm --json`",
       );
       const workspace = firstWorkspace;
+
+      // The command's own report is the applied mapping — the section form
+      // reports as rename does (SPEC 6.5, 6.4; the file form is T6.5-1's
+      // assertion) — carried in JSON in the form-exact performed-operation
+      // document of 12.7 (H-3; T6.4-1's protocol, pairs ordered by `from`
+      // bytes). The fixture pins the journaled mapping completely and in
+      // order: the section form maps exactly the
+      // moved subtree, `org.mv` and its two descendants re-identified by
+      // prefix replacement of `org.mv` with `tm` (SPEC 6.5), while every
+      // identity outside the subtree — both files' roots, `org`,
+      // `org.usemv`, `tgt`, `keep`, `sp` — is unchanged and unmapped
+      // (R3_POST_IDENTITIES pins that below).
+      assertAppliedMapping(
+        decodeAppliedMappingReport(
+          parseJsonStdout(
+            first,
+            "T6.5-3 the section-form move's report — a single JSON document " +
+              "as the entire stdout (SPEC 12.0)",
+          ),
+          "T6.5-3",
+        ),
+        [...R3_MAPPING],
+        "T6.5-3: the successful section-form move's report is the applied " +
+          "mapping — exactly the identity pairs the operation journaled: " +
+          "the moved subtree's prefix-replaced identities, nothing else " +
+          "(SPEC 6.5, 6.4, 6.6, 12.0)",
+      );
 
       // Conversion and import-rewrite observables (module header, H-4).
       const originText = await readSourceText(
@@ -1242,20 +3437,7 @@ const T6_5_3 = defineProductTest({
           "depends",
           "T6.5-3 post-move",
         ),
-        [
-          {
-            from: `${R3_ORIGIN}#org.usemv`,
-            to: `${R3_TARGET}#tm`,
-            kind: "depends",
-          },
-          { from: `${R3_TARGET}#tgt`, to: `${R3_TARGET}#tm`, kind: "depends" },
-          { from: `${R3_TARGET}#tm`, to: `${R3_KEEP}#keep`, kind: "depends" },
-          {
-            from: `${R3_TARGET}#tm.k2`,
-            to: `${R3_TARGET}#tm.k1`,
-            kind: "depends",
-          },
-        ],
+        R3_DEPENDS_EDGES,
         "T6.5-3: the complete `depends` edge set — every converted, added, " +
           "and re-identified reference resolves to the new identities " +
           "(SPEC 6.5, 5.2)",
@@ -1307,7 +3489,7 @@ const T6_5_3 = defineProductTest({
               `found ${kind}`,
           );
         }
-        await fresh.file(rel, await workspace.readBytes(rel));
+        await fresh.copyFrom(workspace, rel);
       }
       await buildOk(
         product,
@@ -1322,6 +3504,32 @@ const T6_5_3 = defineProductTest({
           "must be byte-identical (SPEC 6.5, 6.4, 12.0; H-4/H-6, " +
           "normalizing nothing)",
       );
+
+      // Third-file arms (SPEC 6.5: all references across the workspace):
+      // (a) the moved reference, its chain spelled twice in one `d` array,
+      // was the origin binding's last — both entries rewritten, import
+      // removed; (b) another reference through it remains — import kept.
+      await runThirdFileArm(product, created, {
+        label: "(a) origin import removed, the moved chain spelled twice",
+        source: R3_THIRD_A_SOURCE,
+        rewritten: R3_THIRD_REWRITTEN_TWICE,
+        base: R3_THIRD_A_BASE,
+        originImportKept: false,
+        thirdEdges: [
+          { from: `${R3_THIRD}#th`, to: `${R3_TARGET}#tm`, kind: "depends" },
+        ],
+      });
+      await runThirdFileArm(product, created, {
+        label: "(b) origin import kept",
+        source: R3_THIRD_B_SOURCE,
+        rewritten: R3_THIRD_REWRITTEN_ONCE,
+        base: R3_THIRD_B_BASE,
+        originImportKept: true,
+        thirdEdges: [
+          { from: `${R3_THIRD}#th`, to: `${R3_TARGET}#tm`, kind: "depends" },
+          { from: `${R3_THIRD}#th2`, to: `${R3_ORIGIN}#org`, kind: "depends" },
+        ],
+      });
     } finally {
       for (const workspace of created) {
         await workspace.dispose();
@@ -1339,12 +3547,29 @@ const T6_5_3 = defineProductTest({
 //   `mv` into B.mdx forces imports in both directions (A ↔ B): the spec
 //   import cycle. Moving `mv` *under* `keep` in the same file makes it depend
 //   on its own ancestor: the dependency cycle (5.3) — no imports involved.
-// - `x`/`x.sub` carry no references: the collision and target-parent arms
-//   refuse on exactly their stated grounds.
+// - `x`/`x.sub` carry no references: the collision, target-parent, and
+//   section-form occupant arms refuse on exactly their stated grounds.
 // - B.mdx exists (file-form destination), holds `y` (cross-file collision),
 //   and has no `nope` (missing target parent).
 // - The destination-path arms use the file form of the reference-free A.mdx,
 //   each violating exactly one destination rule under REFUSAL_CONFIG.
+// - Destination occupants (SPEC 6.5): the file form refuses on ANY occupant
+//   — a plain file (B.mdx), a directory (a product probing for a file alone
+//   sees none and proceeds), a symbolic link, a broken symbolic link (target
+//   absent; a product probing existence through link-following stat sees
+//   that path absent and proceeds to relocate) — and the section form on
+//   any occupant that is not a discovered spec source: a directory, a
+//   symbolic link resolving to the discovered B.mdx (discovery never yields
+//   a symlink, SPEC 7 — a product resolving the target path through the
+//   filesystem finds a spec source there and inserts through the link), or
+//   the out-of-group plain `.mdx` file docs/Occ.mdx (present, right
+//   extension, still no discovered spec source), the latter refusing under
+//   both applicable reasons at once — refused-destination-exists beside
+//   refused-invalid-destination, one finding per reason (SPEC 14, T14-7).
+//   The non-file occupants stage at in-group `specs/*.mdx` paths discovery
+//   ignores (no source file, so no discovery, no derived paths), so the
+//   pre-refusal `build` stays valid and every arm refuses on exactly its
+//   staged ground rather than the invalid-workspace precondition.
 const V4_A = "specs/A.mdx";
 const V4_A_SOURCE = [
   '<S id="keep">',
@@ -1381,11 +3606,68 @@ const V4_B_SOURCE = [
   "",
 ].join("\n");
 
+// The A and B sources stay strings for the location windows below; the
+// records made from them serve every set staging them — MOVE_REFUSAL_FILES
+// (T6.5-4's first workspace; T6.6-3, T6.6-7, T12.0-15, and T14-7 stage it
+// after their first invocations), MOVE_LINK_OUTSIDE_FILES, and
+// MOVE_PRECONDITION_FILES — one
+// record per byte sequence, named with every staging test (S-9's
+// before-any-product clause; helpers/staged-mdx.ts); the sets' other `.mdx`
+// sources are wrapped in place below.
+const V4_A_STAGED = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 specs/A.mdx",
+  V4_A_SOURCE,
+);
+const V4_B_STAGED = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 specs/B.mdx",
+  V4_B_SOURCE,
+);
+
+// Destination-occupant paths (the staging note above): non-file occupants at
+// in-group `.mdx` paths, staged in the test body before the pre-refusal
+// `build`, plus the out-of-group plain `.mdx` file (in the files map).
+const V4_SYM_DEST = "specs/SymDest.mdx"; // file form: symlink → B.mdx
+const V4_GONE_DEST = "specs/GoneDest.mdx"; // file form: broken symlink
+const V4_DIR_DEST = "specs/DirDest.mdx"; // file form: directory
+const V4_DIR_TARGET = "specs/DirTarget.mdx"; // section form: directory
+const V4_LINK_TARGET = "specs/LinkTarget.mdx"; // section form: symlink → B.mdx
+const V4_OCC = "docs/Occ.mdx"; // section form: out-of-group `.mdx` file
+const V4_OCC_SOURCE = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 docs/Occ.mdx",
+  ['<S id="occ">', "Occupant text.", "</S>", ""].join("\n"),
+);
+
+// Location windows within the staged sources (SPEC 14): the dependency-cycle
+// arm locates the reference spelling recording the participating dependency
+// edge — the moved node's `d={"keep"}` — and the spec-import-cycle arm the
+// reference spellings the move roots at its two added imports' bindings —
+// that same `d={"keep"}` and `user`'s `d={"mv"}`; the cross-file collision
+// arm locates the remaining colliding bearer `y`'s construct in the target
+// file (any in-window precision passes; wrong-construct attribution fails).
+const V4_KEEP_SPELLING = 'd={"keep"}';
+const V4_KEEP_WINDOW = byteWindow(
+  V4_A_SOURCE.slice(0, V4_A_SOURCE.indexOf(V4_KEEP_SPELLING)),
+  V4_KEEP_SPELLING,
+);
+const V4_MV_SPELLING = 'd={"mv"}';
+const V4_MV_WINDOW = byteWindow(
+  V4_A_SOURCE.slice(0, V4_A_SOURCE.indexOf(V4_MV_SPELLING)),
+  V4_MV_SPELLING,
+);
+const V4_Y_CONSTRUCT = '<S id="y">\nY text.\n</S>';
+const V4_Y_WINDOW = byteWindow(
+  V4_B_SOURCE.slice(0, V4_B_SOURCE.indexOf(V4_Y_CONSTRUCT)),
+  V4_Y_CONSTRUCT,
+);
+
 // The precondition arm's other file: valid at staging (so the pre-refusal
 // `build` succeeds), then overwritten with an unresolved local `d` reference
 // (14.5) — the pre-existing validation error elsewhere (as T6.4-6).
 const V4_OTHER = "specs/Other.mdx";
-const V4_OTHER_VALID = ['<S id="oth">', "Other text.", "</S>", ""].join("\n");
+const V4_OTHER_VALID = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15 precondition arm specs/Other.mdx as staged (valid)",
+  ['<S id="oth">', "Other text.", "</S>", ""].join("\n"),
+);
 const V4_OTHER_INVALID = [
   '<S id="oth" d={"nope"}>',
   "Other text.",
@@ -1393,23 +3675,721 @@ const V4_OTHER_INVALID = [
   "",
 ].join("\n");
 
-// Destination path that is not valid UTF-8: `specs/<0xFF>.mdx` (Linux-leg
-// staging — argv is a byte channel there; TEST-SPEC T6.5-4, T1.5-2's note).
-const V4_NON_UTF8_DESTINATION: Uint8Array = Buffer.concat([
-  Buffer.from("specs/", "utf8"),
-  Buffer.from([0xff]),
-  Buffer.from(".mdx", "utf8"),
-]);
+// The derived-path arm of refused-invalid-destination (SPEC 6.5: a
+// workspace-relative directory component of a derived path the destination
+// would generate — 13.1, 13.2, 7.3 — occupied by a non-directory), on its
+// own workspace: Markdown emission redirected under `markdown.outDir`, and a
+// second spec glob admitting the file-form destination `new/b.mdx`. The
+// destination is otherwise valid — in-group, `.mdx`, unoccupied, its own
+// directory component `new/` absent (a nonexistent component is never a
+// refusal cause, SPEC 13.4) and the destination's generated module and
+// companions sharing that same absent directory (13.1) — but the destination
+// would emit `mdout/new/b.md` (13.2, 7.3: outDir preserves
+// workspace-relative paths), and that derived path's directory component
+// `mdout/new` is occupied by a plain file. The occupant lies under no
+// current source's write path (specs/Solo.mdx writes specs/Solo.xspec.ts
+// with its companions and mdout/specs/Solo.md), so the staged workspace
+// passes `build`'s validations, and the refusal is the move's own:
+// refused-invalid-destination concerning the destination path, never 14.22
+// (SPEC 14, T14-7) — discriminating a product that vets only the
+// destination path's own components (it sees `new/` absent and proceeds).
+// A staged-source record: T6.5-4's derived-path workspaces are created
+// after a product invocation, as T6.6-3's, T6.6-7's, T12.0-15's, and
+// T14-7's are through MOVE_DERIVED_PATH_CONFIG (S-9's timing clause).
+const V4_OUTDIR_CONFIG = stagedTs(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 xspec.config.ts — the derived-path configuration: a second spec glob under new/, Markdown emitted under mdout/",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx", "new/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "mdout" }
+})
+`,
+);
+const V4_SOLO = "specs/Solo.mdx";
+// Exported: T14-7's destination-component arm (section-14.ts), and T6.6-3's
+// twin of it, stage the same bytes as its moved file specs/Src.mdx — one
+// staged-source record (S-9) for every site.
+export const V4_SOLO_SOURCE = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; the destination-component arm's specs/Src.mdx, T14-7's and T6.6-3's twin)",
+  ['<S id="solo">', "Solo text.", "</S>", ""].join("\n"),
+);
+const V4_MDOUT_OCCUPANT = "mdout/new";
+const V4_MDOUT_OCCUPANT_CONTENT = "not a directory\n";
+
+// The symbolic-link arms of the same clause (SPEC 6.5: a workspace-relative
+// directory component of the destination path, or of a derived path the
+// destination would generate, occupied by a symbolic link — whatever it
+// targets: discovery never traverses one, 7, and writes never traverse or
+// replace one, 13.4, 14.22). `specs/sub` is a symbolic link to a real, empty
+// directory, so the file-form destination `specs/sub/b.mdx` and the section
+// form's created target file `specs/sub/new.mdx` each have that link as a
+// directory component. Staged twice: with the link targeting the empty
+// directory `linked/` inside the workspace root (on the main refusal
+// workspace, beside the occupant arms), and, on its own workspace, a real
+// directory outside the root — beside the workspace in the test-owned
+// temporary directory, disposed with it. These discriminate a product
+// vetting components through link-following stat: it sees a directory at
+// the link, proceeds, and writes the moved file — and its regenerated
+// derived files — through the link, possibly outside the workspace; the
+// outside-root arms therefore also compare the link's target directory
+// around each refusal, since the whole-root compare cannot see a write
+// landing there. The link lies under no current source's write path and is
+// never a source (SPEC 7), so the premise `build` passes; through the link
+// the destination path itself is absent (the target directory is empty), so
+// no occupant refusal applies beside the component one — one finding,
+// refused-invalid-destination concerning the destination path (14, T14-7),
+// never 14.22. The derived-path arm's sibling stages `mdout/new` — the emit
+// destination's directory component — as such a link (to `linked/`) instead
+// of a plain file, refused identically.
+const V4_LINK_COMPONENT = "specs/sub";
+const V4_LINKED_DIR = "linked"; // the real, empty inside-root target
+const V4_LINKED_TARGET = "../linked"; // spelled from one level below the root
+const V4_OUTSIDE_DIR = "outside"; // beside the root in the temporary directory
+const V4_OUTSIDE_TARGET = "../../outside"; // work/specs/sub → tempRoot/outside
+const V4_LINK_FILE_DEST = "specs/sub/b.mdx";
+const V4_LINK_SECTION_DEST = "specs/sub/new.mdx";
+
+/**
+ * One T6.5-4 refusal case: the full move argv (without `--json`), the
+ * expected refusal finding — or one expectation per applicable reason where
+ * the staging carries several (SPEC 14) — and its diagnosis context.
+ */
+export interface MoveRefusalCase {
+  readonly argv: readonly string[];
+  readonly expected: RefusalExpectation | readonly RefusalExpectation[];
+  readonly reason: string;
+}
+
+/**
+ * The two link-component arms (V4_LINK_COMPONENT's note) for one staging of
+ * `specs/sub` — the file-form destination and the section form's created
+ * target file — each refused refused-invalid-destination concerning the
+ * destination path (SPEC 6.5, 14, T14-7), never 14.22; `target` names what
+ * the staged link resolves to, for diagnosis.
+ */
+function linkComponentCases(target: string): readonly MoveRefusalCase[] {
+  return [
+    {
+      argv: ["move", "specs/A.mdx", V4_LINK_FILE_DEST],
+      expected: {
+        finding: "refused-invalid-destination",
+        path: V4_LINK_FILE_DEST,
+      },
+      reason:
+        "file form whose destination path has its directory component " +
+        `specs/sub occupied by a symbolic link to ${target} — a component ` +
+        "occupied by anything other than a directory, a symbolic link " +
+        "whatever it targets, is the move's own refusal, never 14.22; a " +
+        "product vetting components through link-following stat sees a " +
+        "directory there, proceeds, and writes the moved file through the " +
+        "link (SPEC 6.5, 7, 13.4, 14)",
+    },
+    {
+      argv: ["move", "specs/A.mdx#x", `${V4_LINK_SECTION_DEST}#tnew`],
+      expected: {
+        finding: "refused-invalid-destination",
+        path: V4_LINK_SECTION_DEST,
+      },
+      reason:
+        "section form creating the target file specs/sub/new.mdx, whose " +
+        `directory component specs/sub is a symbolic link to ${target} — ` +
+        "the created target file's path is vetted like the file form's " +
+        "destination, refused never 14.22; through the link the path is " +
+        "absent, so no occupant reason applies beside it (SPEC 6.5, 7, " +
+        "13.4, 14)",
+    },
+  ];
+}
+
+/**
+ * The inside-root staging of the link-component arms (V4_LINK_COMPONENT's
+ * note): `specs/sub` → `linked/`, staged by stageMoveRefusalOccupants on the
+ * main refusal workspace — the last entries of MOVE_REFUSAL_CASES, exported
+ * for T14-7, which compares the link and its target around each (TEST-SPEC
+ * T14-7: the link and its target byte-identical after each refusal).
+ */
+export const MOVE_LINK_INSIDE_CASES: readonly MoveRefusalCase[] =
+  linkComponentCases("the empty directory linked/ inside the workspace root");
+
+/**
+ * The links of the link-component stagings (V4_LINK_COMPONENT's note),
+ * exported for T14-7's link-and-target compare: `specs/sub`, the
+ * destination-side component of MOVE_LINK_INSIDE_CASES' and
+ * MOVE_LINK_OUTSIDE_CASES' stagings, and `mdout/new`, the emit
+ * destination's component in MOVE_DERIVED_LINK_CASE's.
+ */
+export const MOVE_LINK_COMPONENT = V4_LINK_COMPONENT;
+export const MOVE_DERIVED_LINK_COMPONENT = V4_MDOUT_OCCUPANT;
+
+/**
+ * T6.5-4's main-workspace staging and complete refusal-case table, exported
+ * so T6.6-3 can stage each refusal identically and assert the `--preview`
+ * invocation's refusal equivalence over it (TEST-SPEC §6.6: "for each
+ * refusal of T6.4-3 and T6.5-4 — the invalid-workspace precondition included
+ * — staged identically"). The workspace is MOVE_REFUSAL_CONFIG +
+ * MOVE_REFUSAL_FILES with the destination occupants staged by
+ * `stageMoveRefusalOccupants` BEFORE the premise `build` (which must still
+ * pass — the staging note above the V4 fixtures).
+ */
+export const MOVE_REFUSAL_CONFIG = REFUSAL_CONFIG;
+export const MOVE_REFUSAL_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    [V4_A]: V4_A_STAGED,
+    [V4_B]: V4_B_STAGED,
+    [V4_OCC]: V4_OCC_SOURCE,
+  };
+
+/**
+ * Destination occupants (the V4 staging note): non-file occupants at
+ * in-group `.mdx` paths discovery ignores, staged before the pre-refusal
+ * `build` — a directory is no source file and discovery never yields a
+ * symbolic link (SPEC 7), so the build stays valid and each occupant arm
+ * refuses on exactly its staged ground — plus the inside-root staging of
+ * the link-component arms (V4_LINK_COMPONENT's note): `specs/sub` a
+ * symbolic link to the real, empty directory `linked/` at the root.
+ */
+export async function stageMoveRefusalOccupants(
+  workspace: TestWorkspace,
+): Promise<void> {
+  await workspace.dir(V4_DIR_TARGET);
+  await workspace.dir(V4_DIR_DEST);
+  await workspace.symlink(V4_SYM_DEST, "B.mdx");
+  await workspace.symlink(V4_LINK_TARGET, "B.mdx");
+  await workspace.symlink(V4_GONE_DEST, "missing-target.mdx");
+  await workspace.dir(V4_LINKED_DIR);
+  await workspace.symlink(V4_LINK_COMPONENT, V4_LINKED_TARGET, "dir");
+}
+
+/** `U+XXXX`, naming a barred character in a case's diagnosis text. */
+function codePointName(codePoint: number): string {
+  return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+// T6.5-4's barred-character `<new-id>` arms (TEST-SPEC T6.5-4; SPEC 1.4's
+// quote-and-escape bullet — T6.4-3's discriminator, met in the section
+// form): one per character the bullet bars (section-6.4.ts's
+// BARRED_NEW_ID_CHARACTERS: the double quote, the single quote, the escape
+// character, `&`, U+2028, and U+2029), each spelled between two letters in
+// a one-segment `<new-id>` (as T1.4-1 spells them: the literal, validly
+// encoded character) moving A.mdx's `keep` into B.mdx, as the other
+// invalid-id arms do. Each destination operand `specs/B.mdx#a<c>b` is a
+// well-formed argument value (12.0: valid UTF-8, no U+FFFD, one `#`) that
+// no spelling rule decides, so each arm exits 1 with `refused-invalid-id`
+// alone, never exit 2, its `identities` exactly `["specs/B.mdx#a<c>b"]`
+// with the character verbatim (SPEC 14: refused-structural-parent and
+// refused-invalid-rewrite are evaluated only over an intrinsically valid
+// new ID, and no other reason applies to the staging). A product
+// whose new-ID check omits a character its source validation bars (T1.4-1)
+// performs the move — writing the character into an `id` attribute, a
+// workspace failing validation behind a reported success — and fails the
+// exit, the finding, and the modifies-nothing compare (workspace and
+// journal alike). Each character is built from its code point, so no tool
+// layer can normalize the spelling away.
+const BARRED_CHARACTER_NEW_ID_CASES: readonly MoveRefusalCase[] =
+  BARRED_NEW_ID_CHARACTERS.map(([codePoint, name]): MoveRefusalCase => {
+    const newId = `a${String.fromCodePoint(codePoint)}b`;
+    return {
+      argv: ["move", "specs/A.mdx#keep", `${V4_B}#${newId}`],
+      expected: {
+        finding: "refused-invalid-id",
+        identities: [`${V4_B}#${newId}`],
+      },
+      reason:
+        `section form whose one-segment <new-id> carries ${name} ` +
+        `(${codePointName(codePoint)}) between two letters, which 1.4's ` +
+        `quote-and-escape bullet bars — a well-formed argument value no ` +
+        `spelling rule decides, so exit 1, never exit 2, the character ` +
+        `verbatim in identities (SPEC 6.5, 1.4, 12.0, 14)`,
+    };
+  });
+
+// T6.5-4's barred destination-path arms (TEST-SPEC T6.5-4; SPEC 7.1, 6.5,
+// 14.19): one file-form arm and one section-form arm creating the target
+// per character 7.1 bars from spec-source paths — the double quote, the
+// single quote, the backslash, U+000A, U+000D, U+2028, and U+2029 — each
+// spelled between two letters in the destination's file name
+// (`specs/a<c>b.mdx`; the section form's `specs/a<c>b.mdx#x`, nothing at
+// that path), plus, for the single quote, one arm of each form placing it
+// in a directory component instead (`specs/it's/b.mdx`, `specs/it's`
+// absent): 7.1 bars the character anywhere in the path, so a validator
+// checking the file name alone fails there. REFUSAL_CONFIG's spec glob
+// `specs/**/*.mdx` reaches every destination these arms spell — under a
+// glob reaching the top level alone `specs/it's/b.mdx` would belong to no
+// spec group, refused under the same code concerning the same path, and
+// that validator would pass. Each destination is a well-formed argument
+// value (12.0: valid UTF-8, no U+FFFD, no `#` in its path part), so each
+// arm is refused `refused-invalid-destination` concerning the destination
+// path as spelled, the character verbatim (SPEC 6.5, 14.19, 14) — never a
+// usage error — and modifies nothing; no other reason applies (A.mdx is
+// referenced from no other file, and `x` moves under its own valid ID with
+// nothing referencing it). The destinations are operands, never staged
+// file names, so no arm needs Linux-leg gating. Each character is built
+// from its code point.
+const BARRED_PATH_CHARACTERS: readonly (readonly [number, string])[] = [
+  [0x22, "the double quote"],
+  [0x27, "the single quote"],
+  [0x5c, "the backslash"],
+  [0x0a, "LINE FEED"],
+  [0x0d, "CARRIAGE RETURN"],
+  [0x2028, "LINE SEPARATOR"],
+  [0x2029, "PARAGRAPH SEPARATOR"],
+];
+
+/**
+ * The two arms of one barred destination path: the file form moving A.mdx
+ * to `path`, and the section form moving A.mdx's `x` to `path#x`, creating
+ * the target file — each refused `refused-invalid-destination` concerning
+ * `path` exactly as spelled. `shown` renders the path for diagnosis with
+ * the barred character named by its code point.
+ */
+function barredPathCases(
+  path: string,
+  shown: string,
+  name: string,
+): readonly MoveRefusalCase[] {
+  return [
+    {
+      argv: ["move", V4_A, path],
+      expected: { finding: "refused-invalid-destination", path },
+      reason:
+        `file form whose destination path ${shown} contains ${name} — a ` +
+        `character 7.1 bars from spec-source paths; a well-formed argument ` +
+        `value, so refused concerning the path as spelled, never a usage ` +
+        `error (SPEC 6.5, 7.1, 14.19, 12.0)`,
+    },
+    {
+      argv: ["move", `${V4_A}#x`, `${path}#x`],
+      expected: { finding: "refused-invalid-destination", path },
+      reason:
+        `section form creating the target file ${shown}, whose path ` +
+        `contains ${name} — a character 7.1 bars from spec-source paths; ` +
+        `the created target file's path is vetted like the file form's ` +
+        `destination, refused concerning it as spelled, never a usage ` +
+        `error (SPEC 6.5, 7.1, 14.19, 12.0)`,
+    },
+  ];
+}
+
+const BARRED_DESTINATION_PATH_CASES: readonly MoveRefusalCase[] = [
+  ...BARRED_PATH_CHARACTERS.flatMap(([codePoint, name]) =>
+    barredPathCases(
+      `specs/a${String.fromCodePoint(codePoint)}b.mdx`,
+      `specs/a<${codePointName(codePoint)}>b.mdx`,
+      `${name} (${codePointName(codePoint)}) in its file name`,
+    ),
+  ),
+  ...barredPathCases(
+    `specs/it${String.fromCodePoint(0x27)}s/b.mdx`,
+    `specs/it<U+0027>s/b.mdx (specs/it<U+0027>s absent)`,
+    "the single quote (U+0027) in a directory component, where a " +
+      "validator checking the file name alone sees none",
+  ),
+];
+
+// Each case's expected refusal finding (SPEC 14): the exact stable code with
+// the concern §14 assigns the reason — identity, path, or located
+// participant (the module header's T6.5-4 note walks the per-reason
+// choices). No `#`-containing and no non-UTF-8 destination case: those 6.5
+// destination clauses are dead letters as refusals (T6.5-4's note) — every
+// spelling that would present either is an exit-2 usage error first, staged
+// in T6.5-5.
+export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
+  {
+    argv: ["move", "specs/A.mdx#mv", "specs/B.mdx#bmv"],
+    // Both participating imports are ones the move would add — B.mdx's of
+    // A.mdx and A.mdx's of B.mdx — existing in no pre-operation
+    // coordinates, so SPEC 14 locates each by every reference spelling the
+    // move roots at its binding, read over the pre-operation sources: the
+    // moved node's `d={"keep"}` and `user`'s `d={"mv"}`, both in
+    // specs/A.mdx. No existing import declaration participates and no
+    // dependency cycle arises beside it, so the complete located set is
+    // exactly those two, in 12.7's within-finding order (one file: the
+    // `keep` spelling first), `path` null.
+    expected: {
+      finding: "refused-cycle",
+      locatedAtEach: [
+        { file: V4_A, window: V4_KEEP_WINDOW },
+        { file: V4_A, window: V4_MV_WINDOW },
+      ],
+    },
+    reason:
+      "spec import cycle — the moved node's local `d` on `keep` needs " +
+      "B.mdx to import A.mdx while `user`'s reference to the moved " +
+      "node needs A.mdx to import B.mdx (SPEC 6.5, 2.1)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#mv", "specs/A.mdx#keep.mv"],
+    expected: {
+      finding: "refused-cycle",
+      locatedAt: { file: V4_A, window: V4_KEEP_WINDOW },
+    },
+    reason:
+      "dependency cycle — the moved node depends on `keep` and would " +
+      "become its child, a dependency on its own ancestor (SPEC 6.5, 5.3)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "specs/B.mdx"],
+    expected: { finding: "refused-destination-exists", path: V4_B },
+    reason: "file form whose destination file already exists (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", V4_SYM_DEST],
+    expected: { finding: "refused-destination-exists", path: V4_SYM_DEST },
+    reason:
+      "file form whose destination path is occupied by a symbolic link — " +
+      "whatever kind of filesystem object occupies it, a symbolic link " +
+      "included (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", V4_GONE_DEST],
+    expected: { finding: "refused-destination-exists", path: V4_GONE_DEST },
+    reason:
+      "file form whose destination path is occupied by a broken symbolic " +
+      "link, target absent — a product probing existence through " +
+      "link-following stat sees the path absent and proceeds (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", V4_DIR_DEST],
+    expected: { finding: "refused-destination-exists", path: V4_DIR_DEST },
+    reason:
+      "file form whose destination path is occupied by a directory — " +
+      "whatever kind of filesystem object occupies it; a product probing " +
+      "for a file alone sees none there and proceeds (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", `${V4_DIR_TARGET}#tdir`],
+    expected: { finding: "refused-destination-exists", path: V4_DIR_TARGET },
+    reason:
+      "section form whose target path is occupied by a directory — not a " +
+      "discovered spec source: neither an insertion target nor an absent " +
+      "path to create (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", `${V4_LINK_TARGET}#tlink`],
+    expected: { finding: "refused-destination-exists", path: V4_LINK_TARGET },
+    reason:
+      "section form whose target path is occupied by a symbolic link " +
+      "resolving to a discovered spec source — discovery never yields a " +
+      "symlink (SPEC 6.5, 7): a product resolving the target path through " +
+      "the filesystem finds a spec source there and inserts through the " +
+      "link into B.mdx",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", `${V4_OCC}#tocc`],
+    expected: [
+      { finding: "refused-destination-exists", path: V4_OCC },
+      { finding: "refused-invalid-destination", path: V4_OCC },
+    ],
+    reason:
+      "section form whose target path is occupied by an existing `.mdx` " +
+      "file outside every configured spec group — present, right " +
+      "extension, still no discovered spec source — refusing under both " +
+      "applicable reasons, one finding per reason (SPEC 6.5, 14)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#then"],
+    expected: {
+      finding: "refused-invalid-id",
+      identities: [`${V4_B}#then`],
+    },
+    reason:
+      "section form whose <new-id> is invalid per 1.4 — the forbidden " +
+      "name `then` (the mirrored new-ID-is-valid check, SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#ha lf"],
+    expected: {
+      finding: "refused-invalid-id",
+      identities: [`${V4_B}#ha lf`],
+    },
+    reason:
+      "section form whose <new-id> is invalid per 1.4 — a " +
+      "whitespace-bearing segment (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#"],
+    expected: {
+      finding: "refused-invalid-id",
+      identities: [`${V4_B}#`],
+    },
+    reason:
+      "section form whose <new-id> is empty — the destination operand " +
+      "`specs/B.mdx#` holds one `#`, a well-formed 12.0 split whose id " +
+      "part has zero segments, refused as an invalid intrinsic ID (one or " +
+      "more segments, SPEC 14) — never the exit-2 malformed-value " +
+      "treatment a product gets by generalizing 11.3's `--to` spelling " +
+      "rule to move operands (SPEC 6.5, 12.0)",
+  },
+  ...BARRED_CHARACTER_NEW_ID_CASES,
+  {
+    argv: ["move", "specs/A.mdx#x", "specs/B.mdx#y"],
+    expected: {
+      finding: "refused-id-collision",
+      locatedAt: { file: V4_B, window: V4_Y_WINDOW },
+      identities: [`${V4_B}#y`],
+    },
+    reason:
+      "the ordinary cross-file collision — <new-id> `y` collides with the " +
+      "section `y` already present in the distinct target file (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#nope.k"],
+    expected: {
+      finding: "refused-missing-target-parent",
+      identities: [`${V4_B}#nope`],
+    },
+    reason:
+      "section form whose target parent (`nope`, the <new-id> minus its " +
+      "final segment) is missing from the target file (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", "specs/A.mdx#x.sub.q"],
+    expected: {
+      finding: "refused-missing-target-parent",
+      identities: [`${V4_A}#x.sub`],
+    },
+    reason:
+      "section form whose target parent (`x.sub`) lies within the moved " +
+      "subtree, leaving no insertion point after the removal (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "docs/Out.mdx"],
+    expected: { finding: "refused-invalid-destination", path: "docs/Out.mdx" },
+    reason:
+      "destination path belonging to no configured spec group — a move " +
+      "never takes a node out of the workspace (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "specs/dual/Out.mdx"],
+    expected: {
+      finding: "refused-invalid-destination",
+      path: "specs/dual/Out.mdx",
+    },
+    reason:
+      "destination path belonging to a code group as well (SPEC 6.5, 14.14)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "specs/plain/Out.md"],
+    expected: {
+      finding: "refused-invalid-destination",
+      path: "specs/plain/Out.md",
+    },
+    reason:
+      "destination path lacking the `.mdx` extension — it matches the " +
+      "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
+      "(SPEC 6.5, 7.1, 14.19)",
+  },
+  // The lacking-`.mdx` clause's single-casing arm, `specs/B.MDX`, needs spec
+  // globs of its own and stages on its own workspace (MOVE_CASING_CASE).
+  ...BARRED_DESTINATION_PATH_CASES,
+  // The inside-root staging of the link-component arms (V4_LINK_COMPONENT's
+  // note): `specs/sub` → `linked/`, staged by stageMoveRefusalOccupants; the
+  // whole-root compare sees any write landing through the link.
+  ...MOVE_LINK_INSIDE_CASES,
+];
+
+// The single-casing arm of the lacking-`.mdx` refusal (TEST-SPEC T6.5-4;
+// SPEC 6.5, 7.1, 12.0), on its own workspace: under the spec globs
+// `specs/*.mdx` and `specs/*.MDX`, the file-form destination `specs/B.MDX`
+// belongs to a spec group — the second glob matches it, byte-wise and
+// case-sensitively (7) — yet lacks the `.mdx` extension byte-wise, since no
+// case folding is applied anywhere (12.0), so the move is refused
+// refused-invalid-destination concerning that path and modifies nothing; a
+// product folding case in the extension test sees `.mdx` there and performs
+// the move. No reason applies beside it: the destination is unoccupied, and
+// a spec-group file without the `.mdx` extension generates no derived path
+// at all (13.1), so none can be obstructed. The arm stages on any
+// filesystem: no two staged or spelled paths differ by case alone (the
+// origin is `specs/a.mdx`, and nothing occupies `specs/B.MDX` or a case
+// variant of it). The `specs/*.MDX` glob matches no staged file, so the
+// premise `build` passes and the refusal is the move's own. Its workspace is
+// created after the body's first product invocation, as T6.6-3's,
+// T6.6-7's, and T12.0-15's twins' are, so the configuration and the origin
+// are staged-source records (S-9's timing clause).
+const V4_CASING_CONFIG = stagedTs(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15 xspec.config.ts — the casing arm's configuration: spec globs specs/*.mdx and specs/*.MDX",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx", "specs/*.MDX"]
+  }
+})
+`,
+);
+const V4_CASING_ORIGIN = "specs/a.mdx";
+const V4_CASING_DESTINATION = "specs/B.MDX";
+
+/**
+ * T6.5-4's single-casing arm (its own workspace; the V4_CASING_CONFIG
+ * staging note), exported for T6.6-3's `--preview` twin: MOVE_CASING_FILES
+ * under MOVE_CASING_CONFIG, built, then the file-form move to `specs/B.MDX`
+ * — in a spec group through `specs/*.MDX` yet lacking `.mdx` byte-wise —
+ * refused refused-invalid-destination concerning that path alone.
+ */
+export const MOVE_CASING_CONFIG = V4_CASING_CONFIG;
+export const MOVE_CASING_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    [V4_CASING_ORIGIN]: stagedMdx(
+      "T6.5-4/T6.6-3/T6.6-7/T12.0-15 casing arm specs/a.mdx",
+      ['<S id="a">', "Casing arm text.", "</S>", ""].join("\n"),
+    ),
+  };
+export const MOVE_CASING_CASE: MoveRefusalCase = {
+  argv: ["move", V4_CASING_ORIGIN, V4_CASING_DESTINATION],
+  expected: {
+    finding: "refused-invalid-destination",
+    path: V4_CASING_DESTINATION,
+  },
+  reason:
+    "single-casing arm — the file-form `move specs/a.mdx specs/B.MDX` under " +
+    "the spec globs specs/*.mdx and specs/*.MDX: the destination belongs " +
+    "to a spec group yet lacks the `.mdx` extension byte-wise — no case " +
+    "folding is applied anywhere — so a product folding case in the " +
+    "extension test performs the move (SPEC 6.5, 7, 7.1, 12.0, 14.19)",
+};
+
+/**
+ * T6.5-4's derived-path arm (its own workspace; the V4_OUTDIR_CONFIG staging
+ * note), exported for T6.6-3: the otherwise-valid destination's emit
+ * destination has its directory component occupied by a plain file lying
+ * under no current source's write path, so the premise `build` passes and
+ * the refusal is the move's own — refused-invalid-destination concerning the
+ * destination path, never 14.22.
+ */
+export const MOVE_DERIVED_PATH_CONFIG = V4_OUTDIR_CONFIG;
+export const MOVE_DERIVED_PATH_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [V4_SOLO]: V4_SOLO_SOURCE,
+  [V4_MDOUT_OCCUPANT]: V4_MDOUT_OCCUPANT_CONTENT,
+};
+export const MOVE_DERIVED_PATH_CASE: MoveRefusalCase = {
+  argv: ["move", V4_SOLO, "new/b.mdx"],
+  expected: { finding: "refused-invalid-destination", path: "new/b.mdx" },
+  reason:
+    "derived-path arm — a workspace-relative directory component of a " +
+    "derived path the destination would generate, the emit destination " +
+    "mdout/new/b.md under markdown.outDir, is occupied by a plain file: " +
+    "refused refused-invalid-destination concerning the destination path, " +
+    "never 14.22 — a product vetting only the destination path's own " +
+    "components sees new/ absent and proceeds (SPEC 6.5, 7.3, 13.1, 13.2, 14)",
+};
+
+/**
+ * T6.5-4's outside-root staging of the link-component arms
+ * (V4_LINK_COMPONENT's note), exported for T6.6-3: MOVE_LINK_OUTSIDE_FILES
+ * under MOVE_REFUSAL_CONFIG, `specs/sub` a symbolic link to a real, empty
+ * directory created beside the workspace root in the test-owned temporary
+ * directory (disposed with the workspace). Returns that directory's
+ * absolute path: the caller compares its byte state around each refusal
+ * (`assertLeavesUnchanged`), since the whole-root compare cannot see a
+ * write landing through the link outside the root.
+ */
+export const MOVE_LINK_OUTSIDE_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [V4_A]: V4_A_STAGED,
+  [V4_B]: V4_B_STAGED,
+};
+export async function stageMoveLinkOutsideComponent(
+  workspace: TestWorkspace,
+): Promise<string> {
+  const outside = joinPath(workspace.tempRoot, V4_OUTSIDE_DIR);
+  await fsp.mkdir(outside);
+  await workspace.symlink(V4_LINK_COMPONENT, V4_OUTSIDE_TARGET, "dir");
+  return outside;
+}
+export const MOVE_LINK_OUTSIDE_CASES: readonly MoveRefusalCase[] =
+  linkComponentCases("an empty directory outside the workspace root");
+
+/**
+ * The derived-path arm's symbolic-link sibling (V4_LINK_COMPONENT's note),
+ * exported for T6.6-3: MOVE_DERIVED_LINK_FILES under
+ * MOVE_DERIVED_PATH_CONFIG, with `mdout/new` — the emit destination's
+ * directory component — staged as a symbolic link to the real, empty
+ * directory `linked/` instead of a plain file; the link lies under no
+ * current source's write path (specs/Solo.mdx emits mdout/specs/Solo.md),
+ * so the premise `build` passes, and the move is refused identically —
+ * refused-invalid-destination concerning the destination path, never
+ * 14.22, the link and its target byte-identical afterward.
+ */
+export const MOVE_DERIVED_LINK_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [V4_SOLO]: V4_SOLO_SOURCE,
+};
+export async function stageMoveDerivedLinkComponent(
+  workspace: TestWorkspace,
+): Promise<void> {
+  await workspace.dir(V4_LINKED_DIR);
+  await workspace.symlink(V4_MDOUT_OCCUPANT, V4_LINKED_TARGET, "dir");
+}
+export const MOVE_DERIVED_LINK_CASE: MoveRefusalCase = {
+  argv: MOVE_DERIVED_PATH_CASE.argv,
+  expected: MOVE_DERIVED_PATH_CASE.expected,
+  reason:
+    "derived-path arm's symbolic-link sibling — the emit destination's " +
+    "directory component mdout/new occupied by a symbolic link to the " +
+    "empty directory linked/ instead of a plain file (a component occupied " +
+    "by a symbolic link, whatever it targets; writes never traverse one): " +
+    "refused refused-invalid-destination concerning the destination path, " +
+    "never 14.22, the link and its target byte-identical (SPEC 6.5, 7.3, " +
+    "13.1, 13.2, 13.4, 14)",
+};
+
+/**
+ * T6.5-4's valid-workspace precondition arm (as T6.4-6), exported for
+ * T6.6-3: stage MOVE_PRECONDITION_FILES under MOVE_REFUSAL_CONFIG, `build`
+ * (exit 0), then overwrite MOVE_PRECONDITION_BREAK_FILE with
+ * MOVE_PRECONDITION_BREAK_SOURCE — the pre-existing validation error
+ * elsewhere (14.5) — and the otherwise-valid move refuses reporting the
+ * workspace's numbered findings alone.
+ */
+export const MOVE_PRECONDITION_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [V4_A]: V4_A_STAGED,
+  [V4_B]: V4_B_STAGED,
+  [V4_OTHER]: V4_OTHER_VALID,
+};
+export const MOVE_PRECONDITION_BREAK_FILE = V4_OTHER;
+const MOVE_PRECONDITION_BREAK_SOURCE = V4_OTHER_INVALID;
+// The break is staged after each arm's `build` — here and in T6.6-3's
+// identically staged arm — so it is a ledger record (S-9's before-any-product
+// clause; helpers/staged-mdx.ts) shared by both tests: the same constant.
+export const MOVE_PRECONDITION_BREAK = stagedMdx(
+  "T6.5-4/T6.6-3/T6.6-7/T12.0-15 precondition arm: specs/Other.mdx overwritten with an unresolved local d reference",
+  MOVE_PRECONDITION_BREAK_SOURCE,
+);
+export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
+  argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#kp"],
+  expected: { finding: "14.5", locatedAt: { file: V4_OTHER } },
+  reason:
+    "valid-workspace precondition as T6.4-6 — the workspace fails the " +
+    "validations of `xspec build` through an unresolved d reference in " +
+    "specs/Other.mdx (SPEC 14.5), so the move refuses before modifying " +
+    "anything, reporting the workspace's numbered findings alone " +
+    "(SPEC 6.5, 6.4, 12.1, 14)",
+};
 
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle; file form whose destination exists; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment); the ordinary cross-file `<new-id>` collision; a missing target parent; a target parent within the moved subtree; and destination paths in no configured spec group, in a code group as well, containing `#`, not valid UTF-8 (Linux leg), or lacking `.mdx`; plus the valid-workspace precondition as T6.4-6 (SPEC 6.5, 5.3, 2.1, 1.4, 1.3, 14.14, 14.19, 12.0)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, locating the would-be cycle's full path: the spec-import arm, whose participating imports the move would add, by the reference spellings it roots at their bindings — the moved node's `d` spelling on `keep` and `user`'s on `mv` — exactly those two, path null; the dependency arm the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule; one arm per character 1.4's quote-and-escape bullet bars — the double quote, the single quote, the escape character, `&`, U+2028, and U+2029 — each between two letters in a one-segment `<new-id>` (destination operand `specs/B.mdx#a<c>b`), a well-formed argument value no spelling rule decides, so exit 1, never exit 2, the character verbatim in identities — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, lacking `.mdx` — among them a single-casing arm on its own workspace, the file-form `move specs/a.mdx specs/B.MDX` under the spec globs `specs/*.mdx` and `specs/*.MDX`, its destination in a spec group yet without the `.mdx` extension byte-wise (12.0: no case folding), failing a product that folds case in the extension test — or containing a character 7.1 bars from spec-source paths — the double quote, the single quote, the backslash, U+000A, U+000D, U+2028, or U+2029 — one file-form arm and one section-form arm creating the target per character (`specs/a<c>b.mdx`, nothing at that path), and for the single quote one arm of each form placing it in a directory component instead (`specs/it's/b.mdx`, `specs/it's` absent: a validator checking the file name alone passes it), under the spec glob `specs/**/*.mdx`, which reaches every such destination, each refused concerning the destination path as spelled, never a usage error — every such spelling is a well-formed argument value (12.0) — and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.1, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
-      REFUSAL_CONFIG,
-      { [V4_A]: V4_A_SOURCE, [V4_B]: V4_B_SOURCE },
+      MOVE_REFUSAL_CONFIG,
+      MOVE_REFUSAL_FILES,
       async (workspace) => {
+        // Destination occupants (the staging note above): staged before the
+        // pre-refusal `build`, which must still pass, so each occupant arm
+        // refuses on exactly its staged ground, not the invalid-workspace
+        // precondition.
+        await stageMoveRefusalOccupants(workspace);
         // Build first, so the modifies-nothing compares include intact
         // derived files (the T6.4-3 protocol).
         await buildOk(
@@ -1418,122 +4398,172 @@ const T6_5_4 = defineProductTest({
           "T6.5-4 `build` over the staged workspace",
         );
 
-        const cases: readonly (readonly [readonly string[], string])[] = [
-          [
-            ["move", "specs/A.mdx#mv", "specs/B.mdx#bmv"],
-            "spec import cycle — the moved node's local `d` on `keep` needs " +
-              "B.mdx to import A.mdx while `user`'s reference to the moved " +
-              "node needs A.mdx to import B.mdx (SPEC 6.5, 2.1)",
-          ],
-          [
-            ["move", "specs/A.mdx#mv", "specs/A.mdx#keep.mv"],
-            "dependency cycle — the moved node depends on `keep` and would " +
-              "become its child, a dependency on its own ancestor (SPEC 6.5, " +
-              "5.3)",
-          ],
-          [
-            ["move", "specs/A.mdx", "specs/B.mdx"],
-            "file form whose destination file already exists (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#keep", "specs/B.mdx#then"],
-            "section form whose <new-id> is invalid per 1.4 — the forbidden " +
-              "name `then` (the mirrored new-ID-is-valid check, SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#keep", "specs/B.mdx#ha lf"],
-            "section form whose <new-id> is invalid per 1.4 — a " +
-              "whitespace-bearing segment (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#x", "specs/B.mdx#y"],
-            "the ordinary cross-file collision — <new-id> `y` collides with " +
-              "the section `y` already present in the distinct target file " +
-              "(SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#keep", "specs/B.mdx#nope.k"],
-            "section form whose target parent (`nope`, the <new-id> minus " +
-              "its final segment) is missing from the target file (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#x", "specs/A.mdx#x.sub.q"],
-            "section form whose target parent (`x.sub`) lies within the " +
-              "moved subtree, leaving no insertion point after the removal " +
-              "(SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx", "docs/Out.mdx"],
-            "destination path belonging to no configured spec group — a " +
-              "move never takes a node out of the workspace (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx", "specs/dual/Out.mdx"],
-            "destination path belonging to a code group as well (SPEC 6.5, " +
-              "14.14)",
-          ],
-          [
-            ["move", "specs/A.mdx", "specs/Ha#sh.mdx"],
-            "destination path containing `#` (SPEC 6.5, 1.5, 14.19)",
-          ],
-          [
-            ["move", "specs/A.mdx", "specs/plain/Out.md"],
-            "destination path lacking the `.mdx` extension — it matches the " +
-              "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
-              "(SPEC 6.5, 7.1, 14.19)",
-          ],
-        ];
-        for (const [argv, reason] of cases) {
+        // The complete case table (module scope, shared with T6.6-3's
+        // preview-refusal equivalence — TEST-SPEC §6.6 "staged identically";
+        // the dead-letter destination spellings stay in T6.5-5, the module
+        // header's note).
+        for (const { argv, expected, reason } of MOVE_REFUSAL_CASES) {
           await expectRefusalModifiesNothing(
             product,
             workspace,
             argv,
+            expected,
             `T6.5-4 (${reason})`,
-          );
-        }
-
-        // Not valid UTF-8, staged on the Linux leg per T6.5-4's own text:
-        // Linux argv is a byte channel, so the destination is passed as raw
-        // bytes (driver trampoline); other platforms cannot carry the
-        // argument at all (the T1.5-2 platform note).
-        if (process.platform === "linux") {
-          await expectRefusalModifiesNothing(
-            product,
-            workspace,
-            ["move", V4_A, V4_NON_UTF8_DESTINATION],
-            "T6.5-4 (destination path not valid UTF-8 — Linux leg; " +
-              "SPEC 6.5, 14.19)",
           );
         }
       },
     );
 
+    // The lacking-`.mdx` clause's single-casing arm, on its own workspace
+    // (V4_CASING_CONFIG's note): `specs/B.MDX` lies in a spec group through
+    // the glob `specs/*.MDX` yet lacks the `.mdx` extension byte-wise (SPEC
+    // 12.0: no case folding), so the file-form move is refused
+    // refused-invalid-destination concerning that path, nothing modified.
+    await withWorkspace(
+      MOVE_CASING_CONFIG,
+      MOVE_CASING_FILES,
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 casing arm `build` over the staged workspace — the glob " +
+            "specs/*.MDX matches no staged file, so the workspace passes " +
+            "`build`'s validations and the refusal below is the move's own",
+        );
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          MOVE_CASING_CASE.argv,
+          MOVE_CASING_CASE.expected,
+          `T6.5-4 (${MOVE_CASING_CASE.reason})`,
+        );
+      },
+    );
+
+    // The outside-root staging of the link-component arms
+    // (V4_LINK_COMPONENT's note): `specs/sub` a symbolic link to a real,
+    // empty directory beside the workspace root. Each refusal is compared
+    // over the link's target directory as well — a product writing the
+    // moved file, or its regenerated derived files, through the link lands
+    // them outside the root, where the whole-root compare cannot see them.
+    await withWorkspace(
+      MOVE_REFUSAL_CONFIG,
+      MOVE_LINK_OUTSIDE_FILES,
+      async (workspace) => {
+        const outside = await stageMoveLinkOutsideComponent(workspace);
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 outside-root link staging `build` — the link specs/sub " +
+            "is never discovered nor traversed and lies under no current " +
+            "source's write path (SPEC 7, 13.4), so the workspace passes " +
+            "`build`'s validations and each refusal below is the move's own",
+        );
+        for (const { argv, expected, reason } of MOVE_LINK_OUTSIDE_CASES) {
+          await assertLeavesUnchanged(
+            outside,
+            () =>
+              expectRefusalModifiesNothing(
+                product,
+                workspace,
+                argv,
+                expected,
+                `T6.5-4 (${reason})`,
+              ),
+            `T6.5-4 (${reason}): the link's target directory outside the ` +
+              `workspace root stays byte-identical — nothing is written ` +
+              `through the link (SPEC 6.5, 13.4)`,
+          );
+        }
+      },
+    );
+
+    // The derived-path arm of refused-invalid-destination, on its own
+    // workspace (V4_OUTDIR_CONFIG's note): the destination `new/b.mdx` is
+    // otherwise valid and its own directory components unobstructed (`new/`
+    // absent — a nonexistent component is never a refusal cause, SPEC
+    // 13.4), but the emit destination `mdout/new/b.md` it would generate
+    // (SPEC 13.2, 7.3) has its directory component `mdout/new` occupied by
+    // a plain file.
+    await withWorkspace(
+      MOVE_DERIVED_PATH_CONFIG,
+      MOVE_DERIVED_PATH_FILES,
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 derived-path arm `build` over the staged workspace — the " +
+            "plain file mdout/new lies under no current source's write " +
+            "path (SPEC 13.4), so the workspace passes `build`'s " +
+            "validations and the refusal below is the move's own",
+        );
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          MOVE_DERIVED_PATH_CASE.argv,
+          MOVE_DERIVED_PATH_CASE.expected,
+          `T6.5-4 (${MOVE_DERIVED_PATH_CASE.reason})`,
+        );
+      },
+    );
+
+    // The derived-path arm's symbolic-link sibling (V4_LINK_COMPONENT's
+    // note): `mdout/new` a symbolic link to the empty directory `linked/`
+    // instead of a plain file — refused identically, the link and its
+    // target byte-identical (both inside the root: the whole-root compare).
+    await withWorkspace(
+      MOVE_DERIVED_PATH_CONFIG,
+      MOVE_DERIVED_LINK_FILES,
+      async (workspace) => {
+        await stageMoveDerivedLinkComponent(workspace);
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 derived-path link sibling `build` — the link mdout/new " +
+            "lies under no current source's write path (SPEC 13.4), so the " +
+            "workspace passes `build`'s validations and the refusal below " +
+            "is the move's own",
+        );
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          MOVE_DERIVED_LINK_CASE.argv,
+          MOVE_DERIVED_LINK_CASE.expected,
+          `T6.5-4 (${MOVE_DERIVED_LINK_CASE.reason})`,
+        );
+      },
+    );
+
     // Valid-workspace precondition, as T6.4-6: with a pre-existing
     // validation error elsewhere, the move's own arguments being valid, the
-    // move refuses (exit 1) before modifying anything.
+    // move refuses (exit 1) before modifying anything. The invalid-workspace
+    // refusal reports the workspace's findings themselves — exactly the one
+    // 14.5 finding located in the offending file, no refusal reason
+    // evaluated or reported beside it (SPEC 6.5, 6.4, 14). The precondition's
+    // refused-writes arm — the file-form `move specs/A.mdx specs/C.mdx` over
+    // an `out` replaced by a plain file, refused with the condition-22
+    // finding alone, never refused-invalid-destination — is staged where
+    // T6.4-6 states it, in T6.4-6 itself (section-6.4.ts's
+    // REFUSED_WRITES_CASES), and twinned in T6.6-3.
     await withWorkspace(
-      REFUSAL_CONFIG,
-      {
-        [V4_A]: V4_A_SOURCE,
-        [V4_B]: V4_B_SOURCE,
-        [V4_OTHER]: V4_OTHER_VALID,
-      },
+      MOVE_REFUSAL_CONFIG,
+      MOVE_PRECONDITION_FILES,
       async (workspace) => {
         await buildOk(
           product,
           workspace,
           "T6.5-4 precondition arm `build` over the staged workspace",
         );
-        await workspace.file(V4_OTHER, V4_OTHER_INVALID);
+        await workspace.file(
+          MOVE_PRECONDITION_BREAK_FILE,
+          MOVE_PRECONDITION_BREAK,
+        );
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["move", "specs/A.mdx#keep", "specs/B.mdx#kp"],
-          "T6.5-4 (valid-workspace precondition as T6.4-6 — the workspace " +
-            "fails the validations of `xspec build` through an unresolved d " +
-            "reference in specs/Other.mdx, SPEC 14.5, so the move refuses " +
-            "before modifying anything: no source rewrite, no journal " +
-            "entry, no derived-file change; SPEC 6.5, 6.4, 12.1)",
+          MOVE_PRECONDITION_CASE.argv,
+          MOVE_PRECONDITION_CASE.expected,
+          `T6.5-4 (${MOVE_PRECONDITION_CASE.reason})`,
         );
       },
     );
@@ -1545,46 +4575,146 @@ const T6_5_4 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 const U5_A = "specs/A.mdx";
-const U5_A_SOURCE = [
-  '<S id="a">',
-  "Alpha text.",
-  "",
-  '<S id="a.mid">',
-  "Mid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// T6.5-5's sources mirror T6.4-4's byte for byte (section-6.4.ts's U4_*
+// records, exported for this module): identical bytes are ONE record (S-9's
+// naming rule; helpers/staged-mdx.ts), named there with T6.5-5 too, so this
+// module aliases the records rather than registering the bytes twice. The
+// base arm's workspace is the body's first; the configuration-state twins
+// and the ordering, masking, duplicate-spellings, undefined-ancestor, and
+// solo arms follow its invocations, and T6.6-3 stages the exported sets
+// after its first invocation — so every `.mdx` source here is a record, the
+// base arm's converted uniformly. Only `specs/B.mdx`, the section form's
+// target, is this module's own.
+const U5_A_SOURCE = U4_SOURCE;
 
 const U5_B = "specs/B.mdx";
-const U5_B_SOURCE = ['<S id="b">', "Beta text.", "</S>", ""].join("\n");
+const U5_B_SOURCE = stagedMdx(
+  "T6.5-5/T6.6-3 specs/B.mdx",
+  ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+);
 
 // The ordering arm's unrelated validation error: an unresolved local `d`
 // reference (14.5) in a file untouched by the move arguments.
 const U5_BAD = "specs/Bad.mdx";
-const U5_BAD_SOURCE = [
-  '<S id="bad" d={"nope"}>',
-  "Bad text depending on nothing that exists.",
-  "</S>",
-  "",
-].join("\n");
+const U5_BAD_SOURCE = U4_BAD_SOURCE;
 
 // The masking arm's unparseable origin file: an unclosed section tag (14.20).
 const U5_BROKEN = "specs/Broken.mdx";
-const U5_BROKEN_SOURCE = [
-  '<S id="broken">',
-  "Text that never closes.",
-  "",
-].join("\n");
+const U5_BROKEN_SOURCE = U4_BROKEN_SOURCE;
 
-const U5_USAGE_CASES: readonly (readonly [readonly string[], string])[] = [
+// The wrong-kind arms' discovered code source (SPEC 7.2): valid TypeScript
+// with no spec references, so the base arm's workspace still builds clean —
+// a code source bears no requirement IDs, and both forms' origin operands
+// name discovered spec sources (SPEC 6.5), making a code-source origin a
+// wrong-kind operand in either form, judged like existence before any
+// content question (SPEC 6.4, 12.0). A staged-source record: T6.5-5's twins
+// and ordering arm stage it after a product invocation, as T6.6-3 does
+// through MOVE_USAGE_ORDERING_FILES (S-9's timing clause).
+const U5_CODE = "src/app.ts";
+const U5_CODE_SOURCE = stagedTs(
+  "T6.5-5/T6.6-3 src/app.ts — a discovered code source bearing no requirement IDs, the wrong-kind origin operand",
+  "export function noop(): void {}\n",
+);
+
+// The second nonexistent-`<file>` spelling (TEST-SPEC T6.5-5: "both of
+// T6.4-4's spellings"): a valid `.mdx` present on disk, holding a section
+// spelling the origin ID `a`, but outside every configured spec group
+// (`specs/**/*.mdx`, SPEC 7) — both forms' origin operands name discovered
+// spec sources (SPEC 6.5), and a file named in an argument exists as a
+// member of the discovered set (SPEC 12.0), so this operand is as
+// nonexistent as an absent path in either form. A product probing the
+// filesystem for the operand finds the file (file form) and the origin ID
+// it spells (section form) and proceeds — moving the stray file to
+// `specs/New.mdx`, or inserting its `a` subtree into `specs/B.mdx` as `z` —
+// instead of exiting 2, so the existence table runs inside whole-root
+// modifies-nothing compares. Its `a` beside `specs/A.mdx`'s is no
+// duplicate-ID condition even when discovered (SPEC 14 condition 3 is a
+// duplicate within a file), so the base arm pins the stray file's absence
+// from the discovered set directly, through `ids --json` (SPEC 12.3), as
+// T6.4-4 does.
+const U5_STRAY = "docs/Stray.mdx";
+const U5_STRAY_SOURCE = U4_STRAY_SOURCE;
+
+// Parse-local existence fixtures, mirroring T6.4-4 (SPEC 6.5, 6.4, 11.2).
+// Two sections both spelling the same ID: every bearer's node identity is
+// undefined (11.2, duplicate spellings), yet each spells `dup`, so the
+// origin ID exists and the duplicate-ID finding (14.3) refuses instead of
+// any usage error.
+const U5_DUP = "specs/Dup.mdx";
+const U5_DUP_SOURCE = U4_DUP_SOURCE;
+
+// A sole bearer spelling its ID beneath an ancestor spelling no identity —
+// no `id` attribute at all (14.1): the bearer's node identity is undefined
+// through the ancestor chain (11.2), yet it spells `kid`, so the origin ID
+// exists and the ancestor's finding refuses. The bearer's own structural
+// check (14.2) is masked by the parent's condition (SPEC 14 condition 2), so
+// the workspace's findings are exactly the one 14.1.
+const U5_ANC = "specs/Anc.mdx";
+const U5_ANC_SOURCE = U4_ANC_SOURCE;
+
+// The origin ID's only would-be bearer spells no identity — its `id`
+// attribute repeated on the tag (11.2; condition 17, never 14.1) — so the
+// origin ID is nonexistent: exit 2 even beside that file's findings.
+const U5_SOLO = "specs/Solo.mdx";
+const U5_SOLO_SOURCE = U4_SOLO_SOURCE;
+
+// Likewise when the only would-be bearer's one `id` attribute holds a value
+// not in the quoted static-string form (11.2: a value in any other form,
+// braced or valueless included, spells none; condition 17, never 14.1):
+// braced, `id={"x"}`, the origin ID `x` its braced string's value; and,
+// separately, valueless, `<S id>`, the origin ID `true` the value JSX gives
+// a bare attribute — T6.4-4's two stagings, byte for byte (ONE record each,
+// section-6.4.ts). Each origin ID is nonexistent: exit 2, though the file
+// carries a 14.17 finding, the usage error alone reported — failing a
+// product that reads the braced string, or the bare attribute's JSX value,
+// as a spelling, which finds the origin ID and refuses the invalid workspace
+// instead (exit 1).
+const U5_BRACED = "specs/Braced.mdx";
+const U5_BRACED_SOURCE = U4_BRACED_SOURCE;
+const U5_VALUELESS = "specs/Valueless.mdx";
+const U5_VALUELESS_SOURCE = U4_VALUELESS_SOURCE;
+
+// Destination operand that is not valid UTF-8: `specs/<0xFF>.mdx` (Linux-leg
+// staging — argv is a byte channel there; T6.5-5, T12.0-5, T1.5-2's note).
+// It contains no `#`, so only the argument-value rule makes it exit 2: a
+// non-UTF-8 argument value is a usage error (SPEC 12.0), and a valid operand
+// therefore never denotes a non-UTF-8 destination path — the 6.5 refusal
+// clause is unreachable (T6.5-4's dead-letter note).
+const U5_NON_UTF8_DESTINATION: Uint8Array = Buffer.concat([
+  Buffer.from("specs/", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from(".mdx", "utf8"),
+]);
+
+// The T6.5-5 usage tables below are exported so T6.6-3 can assert each
+// `--preview` variant exits 2 identically (TEST-SPEC §6.6: "for the usage
+// errors of T6.4-4/T6.5-5 the preview exits 2 identically — argument checks
+// precede either way").
+
+export const MOVE_USAGE_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
   [
     ["move", "specs/Missing.mdx", "specs/New.mdx"],
-    "file form, nonexistent origin file",
+    "file form, nonexistent origin file, absent on disk",
+  ],
+  [
+    ["move", U5_STRAY, "specs/New.mdx"],
+    "file form, nonexistent origin file — an .mdx present on disk but " +
+      "matched by no spec group (a file named in an argument exists as a " +
+      "member of the discovered set, SPEC 12.0; both forms' origin " +
+      "operands name discovered spec sources, SPEC 6.5)",
   ],
   [
     ["move", "specs/Missing.mdx#a", "specs/B.mdx#z"],
-    "section form, nonexistent origin file",
+    "section form, nonexistent origin file, absent on disk",
+  ],
+  [
+    ["move", `${U5_STRAY}#a`, "specs/B.mdx#z"],
+    "section form, nonexistent origin file — an .mdx present on disk " +
+      "(holding a section spelling the origin ID) but matched by no spec " +
+      "group (SPEC 6.5, 12.0)",
   ],
   [
     ["move", "specs/A.mdx#nope", "specs/B.mdx#z"],
@@ -1592,37 +4722,317 @@ const U5_USAGE_CASES: readonly (readonly [readonly string[], string])[] = [
   ],
 ];
 
+// Wrong-kind origins (SPEC 6.5: both forms' origin operands name discovered
+// spec sources; a code source bears no requirement IDs, so a code-source
+// origin is a wrong-kind operand, judged like existence before any content
+// question, SPEC 6.4, 12.0). The section form's id part names the code
+// file's real exported unit (`noop`), so a product that resolves code units
+// in move origins is discriminated. These cases ride the base arm (inside
+// modifies-nothing compares) and the ordering arm (the wrong-kind check
+// precedes source validation, as T6.4-4).
+export const MOVE_WRONG_KIND_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
+  [
+    ["move", U5_CODE, "specs/New.mdx"],
+    "file form, discovered code source as origin",
+  ],
+  [
+    ["move", `${U5_CODE}#noop`, "specs/B.mdx#z"],
+    "section form, discovered code source as origin file",
+  ],
+];
+
+// The three mixed-synopsis invocations (SPEC 6.5: a move operand is
+// classified by spelling alone — an operand containing `#` is a
+// `<file>#<id>` pair under the 12.0 split, one without is a file — so an
+// invocation mixing the two synopses' forms matches neither). Every operand
+// names staged content (`specs/A.mdx`, its section `a`, `specs/B.mdx`), so a
+// product accepting a mixed form would perform a move — each case runs
+// inside a whole-root modifies-nothing compare. The third, the
+// `#`-containing file-form destination, is also the staging T6.5-4's
+// dead-letter note sets aside: exit 2, never the 6.5 destination refusal
+// (exit 1) it would be were the operand a path.
+export const MOVE_MIXED_SYNOPSIS_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
+  [
+    ["move", U5_A, "specs/B.mdx#y"],
+    "mixed synopsis `a.mdx b.mdx#y` — a bare-file origin with a pair " +
+      "destination matches neither form (SPEC 6.5, 12.0)",
+  ],
+  [
+    ["move", `${U5_A}#a`, U5_B],
+    "mixed synopsis `a.mdx#x b.mdx` — a pair origin with a bare-file " +
+      "destination matches neither form (SPEC 6.5, 12.0)",
+  ],
+  [
+    ["move", "specs/A.mdx", "specs/Ha#sh.mdx"],
+    "mixed synopsis `a.mdx b#c.mdx` — the `#`-containing file-form " +
+      "destination classifies as a `<file>#<id>` pair by spelling alone, " +
+      "so the invocation mixes the two synopses' forms and matches " +
+      "neither (SPEC 6.5, 12.0; the staging T6.5-4's dead-letter note " +
+      "sets aside)",
+  ],
+];
+
+/**
+ * The non-UTF-8 destination operand invocation (raw argv bytes; the other
+ * dead-letter staging) — Linux leg only: Linux argv is a byte channel, so
+ * the destination is passed as raw bytes via the subprocess driver's
+ * raw-argv support; other platforms cannot carry the argument at all
+ * (T1.5-2's platform note). Callers gate on `process.platform === "linux"`.
+ */
+export const MOVE_NON_UTF8_ARGV: readonly ArgvValue[] = [
+  "move",
+  U5_A,
+  U5_NON_UTF8_DESTINATION,
+];
+
+/**
+ * The U+FFFD destination operands (either leg): the file form's
+ * `specs/B<U+FFFD>.mdx` and the section form's `specs/B.mdx#x<U+FFFD>`,
+ * each a malformed argument value — a usage error of the syntax class,
+ * judged before any refusal is evaluated (SPEC 12.0, 6.5; T12.0-5) — so
+ * neither ever reaches `refused-invalid-destination` or `refused-invalid-id`.
+ * The origins exist (`specs/A.mdx`; its `a.mid`), so the malformed value is
+ * each invocation's only defect. The character is built from its code point
+ * so no tool layer can normalize the spelling away. Exported beside
+ * MOVE_NON_UTF8_ARGV for T6.6-3's preview variants.
+ */
+export const MOVE_REPLACEMENT_DESTINATION_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
+  [
+    ["move", U5_A, `specs/B${REPLACEMENT_CHARACTER}.mdx`],
+    "file-form destination containing U+FFFD",
+  ],
+  [
+    ["move", `${U5_A}#a.mid`, `${U5_B}#x${REPLACEMENT_CHARACTER}`],
+    "section-form destination whose id part contains U+FFFD",
+  ],
+];
+
+/** The base/ordering staging shared by the usage cases (T6.4-4's mirror):
+ * valid sources, the discovered code source, the undiscovered stray `.mdx`,
+ * and — in the ordering variant — the failing Bad.mdx, exported for
+ * T6.6-3's preview sweep. */
+export const MOVE_USAGE_CONFIG = SPEC_AND_CODE_CONFIG;
+export const MOVE_USAGE_ORDERING_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [U5_A]: U5_A_SOURCE,
+  [U5_B]: U5_B_SOURCE,
+  [U5_BAD]: U5_BAD_SOURCE,
+  [U5_CODE]: U5_CODE_SOURCE,
+  [U5_STRAY]: U5_STRAY_SOURCE,
+};
+
+/**
+ * T6.5-5's parse-local nonexistence arms, T6.4-4's mirrored in the section
+ * form (SPEC 6.5: existence judged as in 6.4), each staged on a workspace of
+ * its own under MOVE_SOLO_CONFIG: an origin ID whose only would-be bearer
+ * spells no identity (SPEC 11.2) — its `id` attribute repeated on the tag,
+ * or, separately, its one `id` braced or valueless. Each file's findings are
+ * exactly one 14.17 (a repeated prop, or an `id` value not in quoted
+ * static-string form, is condition 17, never condition 1; SPEC 14), the
+ * premise each arm pins before its move; each destination names a valid new
+ * ID in an absent target file, so a product reading a spelling where none is
+ * finds the origin ID and meets the invalid-workspace refusal (exit 1)
+ * instead of the usage error. Exported for T6.6-3's preview twins, staged
+ * under the same MOVE_SOLO_CONFIG with the one-14.17 premise pinned before
+ * invoking.
+ */
+export const MOVE_SOLO_CONFIG = SPECS_ONLY_CONFIG;
+export const T6_5_5_SPELLS_NONE_ARMS: readonly SpellsNoneUsageArm[] = [
+  {
+    form: "repeated `id`",
+    why: "its `id` attribute repeated on the tag — a repeated prop",
+    files: { [U5_SOLO]: U5_SOLO_SOURCE },
+    argv: ["move", `${U5_SOLO}#solo`, "specs/New.mdx#solo2"],
+  },
+  {
+    form: 'braced `id={"x"}`, moving `x`',
+    why:
+      "its one `id` braced — a value not in quoted static-string form, " +
+      "the braced string `x` no spelling",
+    files: { [U5_BRACED]: U5_BRACED_SOURCE },
+    argv: ["move", `${U5_BRACED}#x`, "specs/New.mdx#x2"],
+  },
+  {
+    form: "valueless `<S id>`, moving `true`",
+    why:
+      "its one `id` valueless — a value not in quoted static-string form, " +
+      "`true`, the value JSX gives a bare attribute, no spelling",
+    files: { [U5_VALUELESS]: U5_VALUELESS_SOURCE },
+    argv: ["move", `${U5_VALUELESS}#true`, "specs/New.mdx#true2"],
+  },
+];
+
 const T6_5_5 = defineProductTest({
   id: "T6.5-5",
   title:
-    "usage errors (exit 2): a nonexistent origin file (either form) and a nonexistent origin ID are usage errors checked before source validation — the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4) — but an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1 (SPEC 6.5, 12.0, 14, 14.20)",
+    "usage errors (exit 2): a nonexistent origin file in either form — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set), its absence from the discovered set pinned through `ids --json` — a nonexistent origin ID, and a discovered code source as the origin in each form — both forms' origin operands name discovered spec sources, so a code-source origin is a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4); an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; origin-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2, nothing modified) — while an ID whose only would-be bearer spells no identity — its `id` attribute repeated on the tag, or, separately, braced (`id={\"x\"}`, moving `x`) or valueless (`<S id>`, moving `true`, the value JSX gives a bare attribute) — is nonexistent: exit 2, though that file carries a 14.17 finding, the usage error alone reported (the error document the entire stdout, no findings beside it); operand classification is by spelling alone: the three mixed-synopsis invocations — bare-file origin with pair destination, pair origin with bare-file destination, and a `#`-containing file-form destination classified as a pair — match neither synopsis (exit 2), and a destination operand containing U+FFFD (the file form's path, the section form's id part; either leg) or not valid UTF-8 (raw argv bytes, Linux leg) is a malformed argument value — a syntax-class usage error, exit 2 with the plain usage error's document (`code` null), byte-identical with the configuration file invalid or missing, never `refused-invalid-destination` or `refused-invalid-id` — the latter the stagings T6.5-4's unspellable-destination note sets aside — the existence, wrong-kind, mixed-synopsis, dead-letter, spells-no-identity, and refusal arms each proving nothing modified (SPEC 6.5, 6.4, 11.2, 12.0, 14, 14.20; H-5)",
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [U5_A]: U5_A_SOURCE, [U5_B]: U5_B_SOURCE },
+      SPEC_AND_CODE_CONFIG,
+      {
+        [U5_A]: U5_A_SOURCE,
+        [U5_B]: U5_B_SOURCE,
+        [U5_CODE]: U5_CODE_SOURCE,
+        [U5_STRAY]: U5_STRAY_SOURCE,
+      },
       async (workspace) => {
         const context = "T6.5-5 valid-workspace arm";
         await buildOk(product, workspace, `${context}: \`build\``);
-        for (const [argv, label] of U5_USAGE_CASES) {
-          await expectMoveUsageError(
-            product,
-            workspace,
-            argv,
-            `${context}, ${label}`,
+        // Staging premise: the stray file is outside the discovered set —
+        // `ids --json` lists the discovered spec sources (SPEC 12.3), and it
+        // lists `specs/A.mdx` but never `docs/Stray.mdx`. Pinning this makes
+        // the exit-2 assertions on the stray origin demonstrably a
+        // discovered-set judgement over a file present on disk, not a
+        // filesystem miss (as T6.4-4).
+        const idsLabel = `${context}: \`ids --json\` premise`;
+        const listed = decodeIdsReport(
+          await runJson(product, workspace, ["ids", "--json"], idsLabel),
+          idsLabel,
+        ).files.map((entry) => entry.file);
+        if (!listed.includes(U5_A) || listed.includes(U5_STRAY)) {
+          fail(
+            `${context}: staging premise — the discovered spec sources must ` +
+              `include ${U5_A} and exclude the stray ${U5_STRAY} (outside ` +
+              `every spec group, SPEC 7; a file named in an argument exists ` +
+              `as a member of the discovered set, SPEC 12.0), but \`ids ` +
+              `--json\` listed ${JSON.stringify(listed)}`,
           );
+        }
+        // Every usage error modifies nothing (SPEC 12.0): one whole-root
+        // byte compare around the existence table — derived files, sources,
+        // and the stray file alike (a product probing the filesystem for the
+        // stray origin would move it, or insert its subtree into B.mdx).
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            for (const [argv, label] of MOVE_USAGE_CASES) {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing (SPEC 6.5, 12.0)`,
+        );
+
+        // Wrong-kind origins (SPEC 6.5: both forms' origin operands name
+        // discovered spec sources), each inside a whole-root
+        // modifies-nothing snapshot compare: the operands name a real
+        // discovered code file and its real exported unit, so a product
+        // accepting a code-source origin would relocate the file (file
+        // form) or act on the named unit (section form).
+        for (const [argv, label] of MOVE_WRONG_KIND_CASES) {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label} — a code source bears no requirement ` +
+                  `IDs, so a code-source origin is a wrong-kind operand, ` +
+                  `judged like existence before any content question ` +
+                  `(SPEC 6.5, 6.4, 12.0)`,
+              );
+            },
+            `${context}, ${label}: the usage error modifies nothing ` +
+              `(SPEC 6.5, 12.0)`,
+          );
+        }
+
+        // The three mixed-synopsis invocations (the module-scope table's
+        // note): each asserted with a whole-root modifies-nothing snapshot
+        // compare around the command.
+        for (const [argv, label] of MOVE_MIXED_SYNOPSIS_CASES) {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}`,
+              );
+            },
+            `${context}, ${label}: the usage error modifies nothing ` +
+              `(SPEC 6.5, 12.0)`,
+          );
+        }
+
+        // Malformed destination operands — the stagings T6.5-4's
+        // unspellable-destination note sets aside (SPEC 6.5: a destination
+        // containing U+FFFD or not valid UTF-8 is unspellable as an
+        // argument): a destination operand containing U+FFFD (either leg;
+        // the file form and the section form's id part) and a non-UTF-8
+        // destination operand (raw argv bytes, Linux leg only — Linux argv
+        // is a byte channel, the driver's trampoline; other platforms
+        // cannot carry the argument at all, T1.5-2's platform note) are
+        // each a malformed argument value, a usage error of the syntax
+        // class judged before any refusal is evaluated: exit 2 with the
+        // plain usage error's document (`code` null) — never
+        // `refused-invalid-destination` or `refused-invalid-id` — reported
+        // without loading configuration (byte-identical with the
+        // configuration file invalid or missing, T12.0-10's discipline)
+        // and modifying nothing.
+        const twins = await stageConfigurationStateTwins({
+          [U5_A]: U5_A_SOURCE,
+          [U5_B]: U5_B_SOURCE,
+          [U5_CODE]: U5_CODE_SOURCE,
+          [U5_STRAY]: U5_STRAY_SOURCE,
+        });
+        try {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              for (const [argv, label] of MOVE_REPLACEMENT_DESTINATION_CASES) {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  [...argv, "--json"],
+                  `${context}, ${label} — a malformed argument value, never ` +
+                    `\`refused-invalid-destination\` or ` +
+                    `\`refused-invalid-id\` (SPEC 12.0, 6.5)`,
+                );
+              }
+              if (process.platform === "linux") {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  [...MOVE_NON_UTF8_ARGV, "--json"],
+                  `${context}, non-UTF-8 destination operand (raw argv ` +
+                    `bytes, Linux leg) — a malformed argument value, never ` +
+                    `\`refused-invalid-destination\` (SPEC 12.0, 6.5)`,
+                );
+              }
+            },
+            `${context}: the malformed destination operands modify nothing ` +
+              `(SPEC 6.5, 12.0)`,
+          );
+        } finally {
+          await twins.dispose();
         }
       },
     );
 
     // --- Ordering arm: the workspace also fails build validation ---
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      {
-        [U5_A]: U5_A_SOURCE,
-        [U5_B]: U5_B_SOURCE,
-        [U5_BAD]: U5_BAD_SOURCE,
-      },
+      MOVE_USAGE_CONFIG,
+      MOVE_USAGE_ORDERING_FILES,
       async (workspace) => {
         const context = "T6.5-5 ordering arm";
         // Staging premise: the workspace really fails build validation, so
@@ -1641,15 +5051,33 @@ const T6_5_5 = defineProductTest({
               `at least one validation finding (SPEC 14)`,
           );
         }
-        for (const [argv, label] of U5_USAGE_CASES) {
-          await expectMoveUsageError(
-            product,
-            workspace,
-            argv,
-            `${context}, ${label}, with unrelated validation errors present ` +
-              `— the existence checks precede source validation (SPEC 12.0)`,
-          );
-        }
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            for (const [argv, label] of MOVE_USAGE_CASES) {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}, with unrelated validation errors ` +
+                  `present — the existence checks precede source ` +
+                  `validation (SPEC 12.0)`,
+              );
+            }
+            for (const [argv, label] of MOVE_WRONG_KIND_CASES) {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}, with unrelated validation errors ` +
+                  `present — the wrong-kind operand is judged like ` +
+                  `existence, before source validation (SPEC 6.5, 6.4, ` +
+                  `12.0)`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing (SPEC 6.5, 12.0)`,
+        );
       },
     );
 
@@ -1692,6 +5120,110 @@ const T6_5_5 = defineProductTest({
         );
       },
     );
+
+    // --- Parse-local existence: duplicate spellings still establish it ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [U5_DUP]: U5_DUP_SOURCE },
+      async (workspace) => {
+        // Moving an ID two sections both spell is no usage error: the
+        // bearers establish existence, their undefined node identities
+        // notwithstanding (SPEC 6.5, 6.4, 11.2), and the duplicate-ID
+        // finding refuses instead — the invalid-workspace refusal, exit 1,
+        // reporting the workspace's numbered findings alone: exactly one
+        // 14.3 finding (duplicate identities are one finding locating every
+        // bearer, SPEC 14), nothing modified, the absent target file not
+        // created (creation is the successful section move's business,
+        // SPEC 6.5).
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          ["move", `${U5_DUP}#dup`, "specs/New.mdx#dup2"],
+          { finding: "14.3", locatedAt: { file: U5_DUP } },
+          "T6.5-5 parse-local existence, duplicate spellings (moving an " +
+            "ID two sections both spell is no usage error — the " +
+            "duplicate-ID finding refuses instead: exit 1, never exit 2; " +
+            "SPEC 6.5, 11.2, 14)",
+        );
+      },
+    );
+
+    // --- Parse-local existence: an undefined ancestor chain still
+    // establishes it ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [U5_ANC]: U5_ANC_SOURCE },
+      async (workspace) => {
+        // The sole bearer spells `kid` beneath an ancestor spelling no
+        // identity (no `id` attribute): the bearer establishes existence —
+        // its undefined ancestor chain notwithstanding (SPEC 6.5, 6.4,
+        // 11.2) — and the ancestor's finding refuses: exit 1 with exactly
+        // the one 14.1 finding (the bearer's structural check is masked by
+        // the parent's condition, SPEC 14 condition 2), never exit 2,
+        // nothing modified.
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          ["move", `${U5_ANC}#kid`, "specs/New.mdx#kid2"],
+          { finding: "14.1", locatedAt: { file: U5_ANC } },
+          "T6.5-5 parse-local existence, sole bearer beneath an ancestor " +
+            "spelling no identity (the bearer establishes existence and " +
+            "the ancestor's missing-id finding refuses: exit 1, never " +
+            "exit 2; SPEC 6.5, 11.2, 14)",
+        );
+      },
+    );
+
+    // --- Parse-local nonexistence: a would-be bearer spelling no
+    // identity — its `id` repeated, braced, or valueless ---
+    for (const arm of T6_5_5_SPELLS_NONE_ARMS) {
+      await withWorkspace(MOVE_SOLO_CONFIG, arm.files, async (workspace) => {
+        const context = `T6.5-5 spells-no-identity arm, ${arm.form}`;
+        // Staging premise: the would-be bearer leaves the file with exactly
+        // one 14.17 finding — a repeated prop, or an `id` value not in
+        // quoted static-string form, is condition 17, never 14.1, spells no
+        // identity, and has no children whose masked 14.2 could add
+        // findings (SPEC 11.2, 14). Pinning the premise makes the exit-2
+        // assertion below demonstrably run beside that file's finding: a
+        // product that reads a spelling where none is — the repeated value,
+        // the braced string, or the bare attribute's JSX value — or that
+        // reports the file's findings in the origin ID's place, exits 1
+        // here instead.
+        const findings = await buildFindings(
+          product,
+          workspace,
+          `${context}: \`build --json\` premise — the staged workspace ` +
+            `fails build validation (${arm.form}, SPEC 14.17)`,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.17": 1 },
+          `${context}: staging premise — the would-be bearer's invalid ` +
+            `\`id\` is the file's one finding (SPEC 14: a repeated prop, ` +
+            `or an \`id\` value not in quoted static-string form, is ` +
+            `condition 17, never condition 1)`,
+        );
+        // The usage error alone (H-5): exit 2, the error document the
+        // entire stdout — no findings beside it — and nothing modified, the
+        // absent target file not created (SPEC 12.0), the lock path aside
+        // (H-6).
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            await expectMoveUsageError(
+              product,
+              workspace,
+              arm.argv,
+              `${context}: an origin ID whose only would-be bearer spells ` +
+                `no identity (${arm.why}) is nonexistent — exit 2, though ` +
+                `that file carries a 14.17 finding, the usage error alone ` +
+                `reported (SPEC 6.5, 6.4, 11.2, 12.0; H-5)`,
+            );
+          },
+          `${context}: the usage error modifies nothing (SPEC 6.5, 12.0)`,
+        );
+      });
+    }
   },
 });
 
@@ -1699,7 +5231,7 @@ const T6_5_5 = defineProductTest({
 // T6.5-6 — identity terms
 // ---------------------------------------------------------------------------
 
-// The new-identity checks read in identity terms (SPEC 6.5). Two clauses
+// The new-identity checks read in identity terms (SPEC 6.5). Three clauses
 // admit no discriminating fixture, per TEST-SPEC T6.5-6, and are documented
 // rather than staged:
 // - The collision clause's after-the-removal qualifier: structural IDs (1.3)
@@ -1711,25 +5243,283 @@ const T6_5_5 = defineProductTest({
 //   reason: a move rewrites only valid workspaces and retargets every
 //   affected reference to identities that exist after the operation; it is
 //   exercised as the always-passing side of every successful move.
+// - The mirrored "structural parent rules remain satisfied" check, in both
+//   forms: the file form changes no ID and no within-file nesting; in the
+//   section form the target parent is located as the target file's section
+//   bearing `<new-id>` minus its final segment — absent, or lying within the
+//   moved subtree, it is `refused-missing-target-parent` (T6.5-4) — prefix
+//   replacement preserves the subtree's relative nesting, a single-segment
+//   `<new-id>` inserts at top level (exactly one segment, 1.3), and the
+//   origin's removal disturbs no remaining ID; on a workspace passing the
+//   valid-workspace precondition 1.3 therefore holds by construction after
+//   every non-refused move — the check is the always-passing side of every
+//   successful move (T6.5-1/2/3), and `refused-structural-parent` is staged
+//   through rename alone (T6.4-3, T14-7).
+//
+// The kept-ID move's fixture: the moved subtree `x` holds a descendant `x.c`
+// — its `id` attribute single-quoted, a spelling 2.7 admits, so a product
+// re-emitting the unchanged attribute in a normalized form is caught at the
+// byte compare — and a sibling `x.u` carrying the local reference
+// `d={"x.c"}` to it. The move changes every moved node's identity in its
+// file part alone: `x.c` keeps its ID, and the local spelling `"x.c"`, read
+// in the target file, already resolves to `specs/B.mdx#x.c` (2.2) — a
+// rewrite is made and reported exactly when it changes the construct's
+// characters (SPEC 6.5), so the preview reports the origin deletion and the
+// target insertion alone, with no `id-rewrite` and no `reference-rewrite`
+// nested inside the deletion, and the moved text lands byte-identical.
 const I6_A = "specs/A.mdx";
-const I6_A_SOURCE = [
-  '<S id="a">',
-  "Alpha text.",
-  "</S>",
-  "",
+const I6_B = "specs/B.mdx";
+
+/** The moved text: the `x` construct's own characters (SPEC 6.5, 1.1). */
+const I6_MOVED_TEXT = [
   '<S id="x">',
   "Ex text.",
+  "",
+  "<S id='x.c'>",
+  "Ex-c text.",
   "</S>",
   "",
+  '<S id="x.u" d={"x.c"}>',
+  "Ex-u text.",
+  "</S>",
+  "</S>",
 ].join("\n");
 
-const I6_B = "specs/B.mdx";
-const I6_B_SOURCE = ['<S id="b">', "Bee text.", "</S>", ""].join("\n");
+/** The origin's text before the construct: one section, then a blank line. */
+const I6_A_HEAD = ['<S id="a">', "Alpha text.", "</S>", "", ""].join("\n");
+const I6_A_SOURCE = I6_A_HEAD + I6_MOVED_TEXT + "\n";
+
+// Expected origin bytes after the move, composed from SPEC 6.5 and 3 — not
+// from any product output: the construct's own characters are deleted in
+// place, and the merged line that deletion leaves — holding only the closing
+// tag's terminator — is dropped with it; the blank line before the construct
+// was blank in the source and is kept (3 drops only lines a removal blanked).
+const I6_A_AFTER = I6_A_HEAD;
+
+/**
+ * The section `b`'s construct: the remaining bearer T6.5-6's same-file
+ * collision locates (SPEC 14). It opens the target file before the kept-ID
+ * move and after it — the move appends the moved text behind it, and
+ * T6.5-6 asserts the result byte-exact (I6_B_AFTER) before the refusal
+ * runs — so its byte window in the refusal's pre-operation coordinates is
+ * known exactly (the module-header window convention: any in-construct
+ * precision passes).
+ */
+const I6_B_BEARER = ['<S id="b">', "Bee text.", "</S>"].join("\n");
+const I6_B_BEARER_WINDOW = byteWindow("", I6_B_BEARER);
+
+const I6_B_SOURCE = I6_B_BEARER + "\n";
+
+// Expected target bytes: a top-level `<new-id>` inserts the moved text at
+// the end of the file followed by U+000A; the file's final line is
+// terminated, so the insertion point is at the start of a line and no
+// preceding U+000A is added (SPEC 6.5). The moved text is byte-identical to
+// the construct's own characters — no `id` attribute and no local-form
+// reference rewritten to its unchanged spelling (SPEC 6.5).
+const I6_B_AFTER = I6_B_SOURCE + I6_MOVED_TEXT + "\n";
+
+/**
+ * The identity-terms workspace as the kept-ID move leaves it — the
+ * post-move state T6.5-6 asserts byte-exact (composed above from SPEC 6.5
+ * and 3, never from product output): `specs/A.mdx` keeping `a` alone and
+ * `specs/B.mdx` holding `b` then the landed `x` subtree — the state
+ * T6.5-6's refusals are judged on. Exported with the refusal cases below
+ * for T6.6-3's preview twins, which stage this state directly (TEST-SPEC
+ * T6.6-3: "staged identically") rather than through the product's move —
+ * after T6.6-3's first invocation, so the entries are ledger records made
+ * from the strings T6.5-6 asserts (helpers/staged-mdx.ts); T6.6-7 and
+ * T12.0-15 stage it through the same sweep.
+ */
+export const MOVE_IDENTITY_CONFIG = SPECS_ONLY_CONFIG;
+export const MOVE_IDENTITY_FILES_AFTER: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [I6_A]: stagedMdx(
+    "T6.6-3/T6.6-7/T12.0-15 identity-terms twins specs/A.mdx",
+    I6_A_AFTER,
+  ),
+  [I6_B]: stagedMdx(
+    "T6.6-3/T6.6-7/T12.0-15 identity-terms twins specs/B.mdx",
+    I6_B_AFTER,
+  ),
+};
+
+/**
+ * The exact self-move, section form — `<target-file>#<new-id>` equal to
+ * `<file>#<id>` — refused as `refused-identity-unchanged` alone, no
+ * collision reason beside it (the after-removal check collides with
+ * nothing), concerning the unchanged identity (SPEC 6.5, 14, T14-7).
+ */
+export const MOVE_IDENTITY_SELF_MOVE_CASE: MoveRefusalCase = {
+  argv: ["move", `${I6_B}#x`, `${I6_B}#x`],
+  expected: {
+    finding: "refused-identity-unchanged",
+    identities: [`${I6_B}#x`],
+  },
+  reason:
+    "the exact self-move, section form — `<target-file>#<new-id>` equal " +
+    "to `<file>#<id>` — refused as identity-unchanged alone (SPEC 6.5)",
+};
+
+/**
+ * A same-file move whose `<new-id>` `b` collides with the ID `b` remaining
+ * in the target file after the removal: `refused-id-collision` locating
+ * exactly the remaining bearer — one location, within `b`'s construct, and
+ * none at the moved section `x` that would take the ID (SPEC 14: every
+ * colliding bearer, never the moved section), `path` null — its identity the
+ * sole `identities` entry (SPEC 6.5, 14, 12.7). The identities cannot tell
+ * the two apart (`x`'s would-be identity is the same string), so the
+ * located set does: the bearer's bytes are known exactly, T6.5-6 having
+ * asserted the post-move B.mdx byte-exact (I6_B_AFTER) with `b`'s construct
+ * at its start and the moved text after it.
+ */
+export const MOVE_IDENTITY_COLLISION_CASE: MoveRefusalCase = {
+  argv: ["move", `${I6_B}#x`, `${I6_B}#b`],
+  expected: {
+    finding: "refused-id-collision",
+    locatedAtEach: [{ file: I6_B, window: I6_B_BEARER_WINDOW }],
+    identities: [`${I6_B}#b`],
+  },
+  reason:
+    "same-file move whose <new-id> `b` collides with the ID `b` remaining " +
+    "in the target file after the removal (SPEC 6.5)",
+};
+
+/**
+ * The exact self-move, file form — `<new-file>` equal to `<old-file>`,
+ * compared byte-wise (12.0) — refused as `refused-identity-unchanged`
+ * alone: its only occupant is the origin the relocation would remove, so
+ * `refused-destination-exists` is never reported beside it (SPEC 6.5, 14);
+ * the concerned identity is the bare `<new-file>`, the root identity (14,
+ * 1.5). T6.6-3's "the exact self-move of either form" stages this form.
+ */
+export const MOVE_IDENTITY_FILE_SELF_MOVE_CASE: MoveRefusalCase = {
+  argv: ["move", I6_B, I6_B],
+  expected: {
+    finding: "refused-identity-unchanged",
+    identities: [I6_B],
+  },
+  reason:
+    "the exact self-move, file form — `<new-file>` equal to `<old-file>` " +
+    "— refused as identity-unchanged alone, never " +
+    "`refused-destination-exists` beside it, its only occupant being the " +
+    "origin the relocation would remove (SPEC 6.5, 14)",
+};
+
+/** T6.5-6's refusals on the post-move workspace, the file-form self-move beside them (T6.6-3). */
+export const MOVE_IDENTITY_REFUSAL_CASES: readonly MoveRefusalCase[] = [
+  MOVE_IDENTITY_SELF_MOVE_CASE,
+  MOVE_IDENTITY_COLLISION_CASE,
+  MOVE_IDENTITY_FILE_SELF_MOVE_CASE,
+];
+
+/**
+ * The preview's complete plan for the kept-ID move (SPEC 6.6, 12.7): in the
+ * origin, the `origin-deletion` alone — one range spanning the construct's
+ * own characters extended over the terminator of the merged line the
+ * deletion drops (6.6, 3) — and in the target, the `target-insertion` alone,
+ * zero-length at the end of the file.
+ */
+const I6_ORIGIN_DELETION: SourceRange = {
+  start: utf8Length(I6_A_HEAD),
+  end: utf8Length(I6_A_HEAD) + utf8Length(I6_MOVED_TEXT) + 1,
+};
+const I6_TARGET_INSERTION: SourceRange = {
+  start: utf8Length(I6_B_SOURCE),
+  end: utf8Length(I6_B_SOURCE),
+};
+const I6_EXPECTED_FILES: readonly ExpectedPreviewFile[] = [
+  {
+    file: I6_A,
+    edits: [{ class: "origin-deletion", range: I6_ORIGIN_DELETION }],
+  },
+  {
+    file: I6_B,
+    edits: [{ class: "target-insertion", range: I6_TARGET_INSERTION }],
+  },
+];
+
+/** The kept-ID move's mapping: three IDs kept, the file part changed. */
+const I6_MAPPING: readonly AppliedMappingPair[] = [
+  { from: `${I6_A}#x`, to: `${I6_B}#x` },
+  { from: `${I6_A}#x.c`, to: `${I6_B}#x.c` },
+  { from: `${I6_A}#x.u`, to: `${I6_B}#x.u` },
+];
+
+/**
+ * The kept-ID move's preview plan (TEST-SPEC T6.5-6): first the no-op
+ * discipline — a rewrite is made and reported exactly when it changes the
+ * construct's characters (SPEC 6.5), so no `id-rewrite` and no
+ * `reference-rewrite` may stand anywhere in the plan, the origin deletion's
+ * interior included — then the complete `files`, form-exact: the origin's
+ * one `origin-deletion` and the target's one `target-insertion`, in file
+ * path byte order, class-plus-range only (SPEC 6.6, 12.7).
+ */
+function assertKeptIdMovePlan(
+  files: readonly PreviewFileEntry[],
+  context: string,
+): void {
+  const noOps = files.flatMap((entry) =>
+    entry.edits
+      .filter(
+        (edit) =>
+          edit.class === "id-rewrite" || edit.class === "reference-rewrite",
+      )
+      .map(
+        (edit) =>
+          `${renderPathValue(entry.file)} ${edit.class} ` +
+          `[${String(edit.range.start)}, ${String(edit.range.end)})`,
+      ),
+  );
+  if (noOps.length > 0) {
+    fail(
+      `${context}: a cross-file section move keeping its ID rewrites no ` +
+        `\`id\` attribute and no local-form reference inside the moved ` +
+        `text — \`x.c\` keeps its ID, and \`"x.c"\` read in the target ` +
+        `file already resolves to ${I6_B}#x.c — because a rewrite is made ` +
+        `and reported exactly when it changes the construct's characters ` +
+        `(SPEC 6.5, 6.6); the plan reports ${String(noOps.length)} ` +
+        `no-op edit(s): ${noOps.join(", ")}`,
+    );
+  }
+  if (files.length !== I6_EXPECTED_FILES.length) {
+    fail(
+      `${context}: \`files\` must hold exactly one entry per file the move ` +
+        `would rewrite — the origin and the target — expected ` +
+        `[${I6_EXPECTED_FILES.map((entry) => entry.file).join(", ")}], got ` +
+        `[${files.map((entry) => renderPathValue(entry.file)).join(", ")}] ` +
+        `(SPEC 6.6, 12.7)`,
+    );
+  }
+  for (let i = 0; i < I6_EXPECTED_FILES.length; i += 1) {
+    const want = I6_EXPECTED_FILES[i]!;
+    const got = files[i]!;
+    if (got.file !== want.file) {
+      fail(
+        `${context}: files[${String(i)}] must be ${JSON.stringify(want.file)} ` +
+          `— entries under pre-operation paths, ordered by file path bytes ` +
+          `(SPEC 6.6, 12.7); got ${renderPathValue(got.file)}`,
+      );
+    }
+    assertSameJson(
+      projectEdits(got.edits),
+      projectEdits(want.edits),
+      `${context}: ${want.file} — exactly the edits the kept-ID move would ` +
+        `make there, class-plus-range only: the origin's \`origin-deletion\` ` +
+        `spanning the construct's own characters extended over the ` +
+        `terminator of the merged line the deletion drops, the target's ` +
+        `zero-length \`target-insertion\` at the end of the file ` +
+        `(SPEC 6.6, 6.5, 3, 12.7)`,
+    );
+  }
+}
 
 const T6_5_6 = defineProductTest({
   id: "T6.5-6",
   title:
-    "identity terms: a cross-file section move keeping its ID (`a.mdx#x` → `b.mdx#x`, no `x` in `b.mdx`) is valid — the new identity differs in its file part; the exact self-move (`<target-file>#<new-id>` equal to `<file>#<id>`) is refused with exit 1, modifies nothing, and appends no journal entry (journal byte-compared around the attempt); a same-file move whose `<new-id>` collides with an ID remaining in the target file after the removal is refused (SPEC 6.5, 1.5, 6.1)",
+    "identity terms: a cross-file section move keeping its ID (`a.mdx#x` → `b.mdx#x`, no `x` in `b.mdx`) is valid — the new identity differs in its file part — and rewrites no `id` attribute and no local-form reference inside the moved text: with the moved subtree holding a descendant `x.c` (its `id` single-quoted) and the local reference " +
+    'd={"x.c"}' +
+    ", the preview reports no `id-rewrite` and no `reference-rewrite` inside the origin deletion — its `files` exactly the origin's `origin-deletion` and the target's end-of-file `target-insertion`, its `mapping` the three kept IDs under the new file part — and the real move (its applied mapping the same) lands the moved text in `b.mdx` byte-identical (the construct's own characters, appended after U+000A discipline) with the origin's construct deleted in place and its emptied line dropped, `check` clean after it; a product rewriting attributes or references to their unchanged spellings, or reporting such no-op edits, fails; the exact self-move (`<target-file>#<new-id>` equal to `<file>#<id>`) is refused with exit 1 as exactly one refused-identity-unchanged finding concerning that identity (no collision reason beside it), modifies nothing, and appends no journal entry (journal byte-compared around the attempt); a same-file move whose `<new-id>` collides with an ID remaining in the target file after the removal is refused as exactly one refused-id-collision finding locating the remaining bearer; the collision clause's after-the-removal qualifier, the mirrored all-rewritten-references-resolve clause, and the mirrored structural-parent check admit no discriminating fixture and are documented at the module (SPEC 6.5, 6.6, 1.5, 6.1, 3, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1744,22 +5534,107 @@ const T6_5_6 = defineProductTest({
         // Valid: the cross-file move keeping its ID — the new identity
         // specs/B.mdx#x differs from specs/A.mdx#x in its file part
         // (SPEC 6.5: "a cross-file section move keeping its ID is
-        // therefore valid").
+        // therefore valid"). First its preview, whose plan makes the no-op
+        // discipline observable: no rewrite of an `id` attribute or a
+        // local-form reference whose characters the move leaves unchanged
+        // is reported (SPEC 6.5, 6.6).
+        const moveArgv = ["move", "specs/A.mdx#x", "specs/B.mdx#x"] as const;
+        const previewLabel = `T6.5-6 \`${moveArgv.join(" ")} --preview --json\``;
+        const preview = decodePreviewReport(
+          await runJson(
+            product,
+            workspace,
+            [...moveArgv, "--preview", "--json"],
+            previewLabel,
+          ),
+          previewLabel,
+        );
+        assertSameJson(
+          preview.findings,
+          [],
+          `${previewLabel}: a cross-file section move keeping its ID is ` +
+            `valid — the identity check compares identities, not IDs, and ` +
+            `${I6_B}#x differs from ${I6_A}#x in its file part — so the ` +
+            `preview completes with findings [] (SPEC 6.5, 1.5, 6.6)`,
+        );
+        if (preview.mapping === null || preview.files === null) {
+          fail(
+            `${previewLabel}: the completed preview reports its plan — ` +
+              `\`mapping\` and \`files\` non-null (SPEC 6.6, 12.7)`,
+          );
+        }
+        assertAppliedMapping(
+          preview.mapping,
+          I6_MAPPING,
+          `${previewLabel}: \`mapping\` is one entry per node of the moved ` +
+            `subtree — \`x\`, \`x.c\`, \`x.u\` — each ID kept and its file ` +
+            `part changed, ordered by \`from\` bytes (SPEC 6.5, 6.6, 12.7)`,
+        );
+        assertKeptIdMovePlan(preview.files, previewLabel);
+
+        // The real move: its applied mapping, then the bytes it leaves —
+        // the moved text landing byte-identical, the origin's construct
+        // deleted with 6.5's exact extent — and its soundness (`check`).
+        const moveLabel = `T6.5-6 \`${moveArgv.join(" ")} --json\``;
+        assertAppliedMapping(
+          decodeAppliedMappingReport(
+            await runJson(
+              product,
+              workspace,
+              [...moveArgv, "--json"],
+              moveLabel,
+            ),
+            moveLabel,
+          ),
+          I6_MAPPING,
+          `${moveLabel}: the successful move's report is its applied ` +
+            `mapping — exactly the identity pairs the preview planned and ` +
+            `the operation journaled (SPEC 6.5, 6.4, 6.6, 12.0)`,
+        );
+        await assertFileBytes(
+          workspace.path(I6_B),
+          I6_B_AFTER,
+          "T6.5-6: the target after the kept-ID move — the moved text lands " +
+            "byte-identical to the construct's own characters, its " +
+            "single-quoted descendant `id` attribute and its local " +
+            'reference `d={"x.c"}` untouched (a rewrite is made exactly ' +
+            "when it changes the construct's characters), inserted at the " +
+            "end of the file followed by U+000A with none added before it " +
+            "(the final line was terminated) (SPEC 6.5, 1.1; H-4, " +
+            "normalizing nothing)",
+        );
+        await assertFileBytes(
+          workspace.path(I6_A),
+          I6_A_AFTER,
+          "T6.5-6: the origin after the kept-ID move — the construct's own " +
+            "characters deleted in place, the merged line the deletion " +
+            "emptied dropped with its terminator, the pre-existing blank " +
+            "line kept, and no other byte changed (SPEC 6.5, 3; H-4, " +
+            "normalizing nothing)",
+        );
         await expectExit(
           product,
           workspace,
-          ["move", "specs/A.mdx#x", "specs/B.mdx#x"],
+          ["check"],
           0,
-          "T6.5-6 `move specs/A.mdx#x specs/B.mdx#x` — a cross-file section " +
-            "move keeping its ID is valid: the identity check compares " +
-            "identities, not IDs (SPEC 6.5, 1.5)",
+          "T6.5-6 `check` after the kept-ID move — the local reference the " +
+            "moved text carries resolves in the target file and nothing is " +
+            "stale (SPEC 6.5, 2.2, 12.2)",
         );
         await assertNodeIdentities(
           product,
           workspace,
-          [I6_A, `${I6_A}#a`, I6_B, `${I6_B}#b`, `${I6_B}#x`],
-          "the kept-ID move relocated the node: same ID, new file part " +
-            "(SPEC 6.5, 1.5)",
+          [
+            I6_A,
+            `${I6_A}#a`,
+            I6_B,
+            `${I6_B}#b`,
+            `${I6_B}#x`,
+            `${I6_B}#x.c`,
+            `${I6_B}#x.u`,
+          ],
+          "the kept-ID move relocated the subtree: every ID kept, the file " +
+            "part new (SPEC 6.5, 1.5)",
           "T6.5-6 post-move",
         );
         await assertJournalHoldsOneEntry(
@@ -1777,9 +5652,12 @@ const T6_5_6 = defineProductTest({
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["move", "specs/B.mdx#x", "specs/B.mdx#x"],
-          "T6.5-6 (the exact self-move — the new identity equals the old " +
-            "one, SPEC 6.5)",
+          MOVE_IDENTITY_SELF_MOVE_CASE.argv,
+          // Reported alone — no collision reason beside it: the
+          // after-removal check collides with nothing (SPEC 6.4, 14,
+          // T14-7) — concerning the unchanged identity.
+          MOVE_IDENTITY_SELF_MOVE_CASE.expected,
+          `T6.5-6 (${MOVE_IDENTITY_SELF_MOVE_CASE.reason})`,
         );
         assertBytesEqual(
           await readJournal(
@@ -1797,12 +5675,3176 @@ const T6_5_6 = defineProductTest({
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["move", "specs/B.mdx#x", "specs/B.mdx#b"],
-          "T6.5-6 (same-file move whose <new-id> `b` collides with the ID " +
-            "`b` remaining in the target file after the removal, SPEC 6.5)",
+          MOVE_IDENTITY_COLLISION_CASE.argv,
+          // The collision locates every colliding bearer and never the moved
+          // section that would take the ID (SPEC 14): the remaining bearer
+          // `b` alone. Its bytes are known exactly — the byte compare above
+          // pinned B.mdx as I6_B_AFTER, `b`'s construct at its start and the
+          // moved `x` after it — so the case asserts the complete located
+          // set: exactly one location, in B.mdx within `b`'s construct
+          // window, `path` null; a location at `x`, beside or instead of
+          // `b`'s, fails.
+          MOVE_IDENTITY_COLLISION_CASE.expected,
+          `T6.5-6 (${MOVE_IDENTITY_COLLISION_CASE.reason})`,
         );
       },
     );
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T6.5-7 — operation-side rewrite bytes for the real move
+// ---------------------------------------------------------------------------
+
+// The fixture (TEST-SPEC T6.5-7): the origin imports the target module under
+// two bindings (valid, SPEC 2.1 — multiple imports may bind one module under
+// different names), one declaration alone on its line (`TWO`), the other
+// (`TB`) following the retained, still-referenced third-module import
+// (`Keep`, referenced by `org.stay` OUTSIDE the moved subtree) on a shared
+// line. Every reference through the two bindings — the `d` chain
+// `d={TWO.hub}` and the embedding `{text(TB.aux)}` — lies inside the moved
+// subtree `org.mv`, which also holds the single-quoted local string
+// reference `d={'org.mv.leaf'}` to a moved descendant and spells that
+// descendant's `id` attribute single-quoted (`id='org.mv.leaf'`, SPEC 2.7:
+// single- or double-quoted alike); no reference to a moved node lies
+// outside the subtree, and no moved reference targets a node remaining in
+// the origin — so the rewrite adds no import anywhere, the one direction
+// free of implementation latitude (SPEC 6.5).
+//
+// Every fixture file, staged and composed alike, is held as its lines (a
+// final empty entry terminating the last one) and spelled by joining them
+// with one terminator kind: U+000A in the first run, then CRLF and lone CR
+// in the terminator-kind re-runs (`B7_KINDS` below; SPEC 3: each one
+// terminator) — the lines hold no terminator character of their own.
+const B7_ORIGIN = "specs/Origin.mdx";
+const B7_TARGET = "specs/Target.mdx";
+const B7_KEEP = "specs/Keep.mdx";
+
+const B7_ORIGIN_BEFORE_LINES: readonly string[] = [
+  'import TWO from "./Target.xspec"',
+  'import Keep from "./Keep.xspec"; import TB from "./Target.xspec"',
+  "",
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv" d={TWO.hub}>',
+  "Moved head text.",
+  "",
+  "{text(TB.aux)}",
+  "",
+  "<S id='org.mv.leaf'>",
+  "Moved leaf text.",
+  "</S>",
+  "",
+  "<S id=\"org.mv.use\" d={'org.mv.leaf'}>",
+  "Moved user text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="org.stay" d={Keep.keep}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+];
+
+const B7_TARGET_BEFORE_LINES: readonly string[] = [
+  '<S id="hub">',
+  "Hub text.",
+  "</S>",
+  "",
+  '<S id="aux">',
+  "Aux text.",
+  "</S>",
+  "",
+];
+
+const B7_KEEP_LINES: readonly string[] = [
+  '<S id="keep">',
+  "Keep text.",
+  "</S>",
+  "",
+];
+
+// Expected origin bytes, composed from the rules of SPEC 6.5 and 3 — not
+// from any product output:
+// - The own-line `TWO` declaration's own characters are deleted in place;
+//   its line, left empty purely by that deletion, is dropped with its whole
+//   terminator — both bytes of a CRLF (SPEC 6.5, 3) — a product leaving an
+//   emptied line behind fails here, as one whose edit layer splits lines on
+//   U+000A alone does in the lone-CR re-run.
+// - On the shared line, the removed `TB` declaration's own characters ALONE
+//   are deleted — the declaration spans `import TB from "./Target.xspec"`
+//   exactly (no trailing `;` exists to reach) — so the retained `Keep`
+//   import, its `;`, AND the separating U+0020 survive byte-for-byte: the
+//   kept line ends `"./Keep.xspec"; ` with a trailing space before its
+//   terminator (spelled as an explicit concatenation below so the byte is
+//   loud). A product normalizing whitespace around a removed declaration
+//   fails here.
+// - The moved text — the `org.mv` construct's own characters, opening `<`
+//   through the closing tag's `>` — is deleted in place; the merged line it
+//   leaves holds only the closing tag's terminator and is dropped (SPEC
+//   6.5, 3). Both surrounding blank lines were already blank in the source,
+//   so both are kept: two adjacent blank lines remain (rule of 3 drops only
+//   lines a removal blanked).
+// - No terminator is inserted into the origin: every terminator it keeps is
+//   a staged one, kept byte-for-byte, so its lines join with the staged kind.
+const B7_ORIGIN_AFTER_LINES: readonly string[] = [
+  'import Keep from "./Keep.xspec";' + " ",
+  "",
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="org.stay" d={Keep.keep}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+];
+
+// Expected target bytes, composed from the same rules:
+// - Top-level `<new-id>` (`mv`): the moved text is inserted at the end of
+//   the file, followed by U+000A whatever terminators the file holds (a
+//   product matching the file's terminator style where the moved text lands
+//   fails the CRLF and lone-CR re-runs); the existing final line is
+//   terminated — a lone CR is a terminator as a CRLF is (SPEC 3) — so the
+//   insertion point sits at the start of a line and no preceding U+000A is
+//   added (SPEC 6.5). The target's own lines keep their staged terminators,
+//   and the moved text carries its staged ones between its lines, each kept
+//   byte-for-byte (`b7TargetAfter`).
+// - Re-identification by prefix replacement `org.mv` → `mv` rewrites the
+//   three `id` attributes in place (SPEC 6.5).
+// - The imported references convert to local form — their targets `hub` and
+//   `aux` live in the target file — in 6.4's pinned spelling for converted
+//   references: double-quoted string literals, `d={"hub"}` and
+//   `{text("aux")}` (SPEC 6.5, 6.4). A product spelling a converted
+//   reference single-quoted fails here.
+// - The local reference stays local, re-identified by prefix replacement
+//   with its single-quote spelling preserved: `d={'mv.leaf'}` (SPEC 6.4:
+//   minimal in-place edits preserve quote style); the descendant's
+//   single-quoted `id` attribute is re-identified the same way, its quotes
+//   kept: `id='mv.leaf'` (SPEC 6.4 binds the `id`-attribute rewrite as it
+//   binds references — the double-quoted fallback applies only where a form
+//   cannot be kept, and `mv.leaf` holds no quote character). A product
+//   re-emitting a rewritten `id` attribute double-quoted fails here.
+// The moved text as it lands: the `org.mv` construct's own characters,
+// re-identified and converted, its last line the closing tag's (unterminated
+// here: the U+000A the move inserts after it is composed by `b7TargetAfter`).
+const B7_MOVED_AFTER_LINES: readonly string[] = [
+  '<S id="mv" d={"hub"}>',
+  "Moved head text.",
+  "",
+  '{text("aux")}',
+  "",
+  "<S id='mv.leaf'>",
+  "Moved leaf text.",
+  "</S>",
+  "",
+  "<S id=\"mv.use\" d={'mv.leaf'}>",
+  "Moved user text.",
+  "</S>",
+  "</S>",
+];
+
+/**
+ * The expected target bytes for the terminator `t` the fixture's files were
+ * staged with (SPEC 6.5, 3): the target's staged lines, each terminator
+ * kept, the last one included (the insertion point a line start, so none is
+ * added before the moved text); then the moved text, its staged terminators
+ * between its lines; then the one terminator the move inserts, U+000A.
+ */
+function b7TargetAfter(t: string): string {
+  return B7_TARGET_BEFORE_LINES.join(t) + B7_MOVED_AFTER_LINES.join(t) + X2_LF;
+}
+
+// The code-source counterpart (TEST-SPEC T6.5-7), fully composed — no
+// import is added, so no latitude: two `.ts` files of the configured code
+// group, each importing the origin module, the target module, and the
+// retained third module (SPEC 4: default bindings, `.xspec` specifiers
+// resolved as 2.1), whose only references through the origin binding
+// (`ORG`) are markers (SPEC 4.5) on nodes of the moved subtree — the moved
+// root `org.mv` and its descendant `org.mv.leaf` — beside a marker through
+// the target binding (`TGT.hub`) and one through the third (`Keep.keep`).
+// The variants differ in the origin declaration's line alone: alone on its
+// line (between the other two) in `src/own-line.ts`; following the third
+// module's declaration on a shared line in `src/shared-line.ts`. As in the
+// MDX fixture, the removed declaration carries no `;` — the declaration
+// spans `import ORG from "../specs/Origin.xspec"` exactly, so its extent
+// reaches no terminator character whose membership could be argued — while
+// the retained declarations keep theirs (TypeScript's grammar admits both,
+// a line break ending the `;`-less declaration).
+const B7_TS_OWN = "src/own-line.ts";
+const B7_TS_SHARED = "src/shared-line.ts";
+
+const B7_TS_OWN_BEFORE_LINES: readonly string[] = [
+  'import TGT from "../specs/Target.xspec";',
+  'import ORG from "../specs/Origin.xspec"',
+  'import Keep from "../specs/Keep.xspec";',
+  "",
+  "export function ownLine(): void {",
+  "  ORG.org.mv;",
+  "  ORG.org.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
+  "",
+];
+
+const B7_TS_SHARED_BEFORE_LINES: readonly string[] = [
+  'import Keep from "../specs/Keep.xspec"; import ORG from "../specs/Origin.xspec"',
+  'import TGT from "../specs/Target.xspec";',
+  "",
+  "export function sharedLine(): void {",
+  "  ORG.org.mv;",
+  "  ORG.org.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
+  "",
+];
+
+// Expected code bytes, composed from the rules of SPEC 6.4/6.5 and 3 — not
+// from any product output:
+// - The moved markers are rewritten through the EXISTING target binding
+//   (SPEC 6.5: an import is added only where the file lacks the binding):
+//   re-rooted at `TGT` with the prefix `org.mv` replaced by `mv`, dot access
+//   kept (SPEC 6.4: minimal in-place edits preserve access form; every
+//   segment is an identifier), so `ORG.org.mv` → `TGT.mv` and
+//   `ORG.org.mv.leaf` → `TGT.mv.leaf`, each marker's `;`, indentation, and
+//   trailing comment untouched.
+// - The origin binding is left without references, so its declaration is
+//   removed with 6.5's exact extent: in the own-line variant, the line left
+//   empty purely by the deletion is dropped with its whole terminator, both
+//   bytes of a CRLF (SPEC 6.5, 3); in the shared-line variant, the
+//   declaration's own characters ALONE are deleted, so the retained `Keep`
+//   import, its `;`, AND the separating U+0020 survive byte-for-byte — the
+//   kept line ends `"../specs/Keep.xspec"; ` with a trailing space before
+//   its terminator (an explicit concatenation below, so the byte is loud).
+// - The `TGT.hub` and `Keep.keep` markers, the retained imports, and every
+//   other byte are unchanged — every terminator kept byte-for-byte, none
+//   inserted, so the lines join with the staged kind: a product reprinting
+//   the code file on removal — re-indenting, dropping the comment, or
+//   normalizing `;`, whitespace, or terminators — fails here while passing
+//   every resolution-only assertion.
+const B7_TS_OWN_AFTER_LINES: readonly string[] = [
+  'import TGT from "../specs/Target.xspec";',
+  'import Keep from "../specs/Keep.xspec";',
+  "",
+  "export function ownLine(): void {",
+  "  TGT.mv;",
+  "  TGT.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
+  "",
+];
+
+const B7_TS_SHARED_AFTER_LINES: readonly string[] = [
+  'import Keep from "../specs/Keep.xspec";' + " ",
+  'import TGT from "../specs/Target.xspec";',
+  "",
+  "export function sharedLine(): void {",
+  "  TGT.mv;",
+  "  TGT.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
+  "",
+];
+
+const B7_MOVE_ARGV = [
+  "move",
+  "specs/Origin.mdx#org.mv",
+  "specs/Target.mdx#mv",
+] as const;
+
+/**
+ * One run of T6.5-7's fixtures — the MDX fixture and both code variants,
+ * staged together — with every line terminator of its staged files one kind
+ * (TEST-SPEC T6.5-7: each fixture recurs with every terminator CRLF, and
+ * again with every one a lone CR; SPEC 3: each one terminator).
+ */
+interface B7Kind {
+  /** The kind as the failure messages name it. */
+  readonly kind: string;
+  /** The terminator ending every line of every staged file. */
+  readonly terminator: string;
+  /** `xspec.config.ts`: one spec group and one code group (SPEC 7.2). */
+  readonly config: string | StagedTs;
+  /** The fixture's staged files, by workspace-relative path. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+}
+
+/**
+ * The shared configuration's bytes with every terminator respelled `t`: the
+ * configuration is one of the staged files the re-runs respell (its lines
+ * hold U+000A terminators alone, checked here).
+ */
+function b7ConfigSource(t: string): string {
+  const source = SPEC_AND_CODE_CONFIG.source;
+  if (typeof source !== "string" || source.includes(X2_CR)) {
+    throw new Error(
+      "T6.5-7: the shared configuration record is expected as text whose " +
+        "every terminator is U+000A",
+    );
+  }
+  return source.split(X2_LF).join(t);
+}
+
+/**
+ * A terminator-kind re-run's staging (SPEC 3, 6.5): every staged file — the
+ * configuration included — spelled with `t`. Its workspace is created after
+ * the body's first product invocation, so each file is a staged-source
+ * record (S-9's timing clause), registered here at module load.
+ */
+function b7TerminatorKind(kind: string, t: string): B7Kind {
+  const name = (what: string): string => `T6.5-7 ${kind} re-run ${what}`;
+  return {
+    kind,
+    terminator: t,
+    config: stagedTs(
+      name("xspec.config.ts — one spec group and one code group"),
+      b7ConfigSource(t),
+    ),
+    files: {
+      [B7_ORIGIN]: stagedMdx(
+        name(`${B7_ORIGIN} — the target module imported under two bindings`),
+        B7_ORIGIN_BEFORE_LINES.join(t),
+      ),
+      [B7_TARGET]: stagedMdx(
+        name(`${B7_TARGET} — the move's target`),
+        B7_TARGET_BEFORE_LINES.join(t),
+      ),
+      [B7_KEEP]: stagedMdx(
+        name(`${B7_KEEP} — the retained third module`),
+        B7_KEEP_LINES.join(t),
+      ),
+      [B7_TS_OWN]: stagedTs(
+        name(`${B7_TS_OWN} — the origin-module import alone on its line`),
+        B7_TS_OWN_BEFORE_LINES.join(t),
+      ),
+      [B7_TS_SHARED]: stagedTs(
+        name(`${B7_TS_SHARED} — the origin-module import on a shared line`),
+        B7_TS_SHARED_BEFORE_LINES.join(t),
+      ),
+    },
+  };
+}
+
+// The first run stages U+000A terminators (its workspace precedes every
+// product invocation, so its files are plain contents); the re-runs stage
+// CRLF and lone CR.
+const B7_KINDS: readonly B7Kind[] = [
+  {
+    kind: "LF",
+    terminator: X2_LF,
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [B7_ORIGIN]: B7_ORIGIN_BEFORE_LINES.join(X2_LF),
+      [B7_TARGET]: B7_TARGET_BEFORE_LINES.join(X2_LF),
+      [B7_KEEP]: B7_KEEP_LINES.join(X2_LF),
+      [B7_TS_OWN]: B7_TS_OWN_BEFORE_LINES.join(X2_LF),
+      [B7_TS_SHARED]: B7_TS_SHARED_BEFORE_LINES.join(X2_LF),
+    },
+  },
+  b7TerminatorKind("CRLF", X2_CRLF),
+  b7TerminatorKind("lone CR", X2_CR),
+];
+
+/**
+ * One run of T6.5-7's fixtures under `k`'s terminators: the staging, its
+ * `build`, the move, every staged file byte-asserted against bytes composed
+ * for `k` from the rules of SPEC 6.4/6.5 and 3 (never from product output),
+ * then `check`.
+ */
+async function runB7Kind(product: ProductBinding, k: B7Kind): Promise<void> {
+  const t = k.terminator;
+  const at = `T6.5-7 (${k.kind} terminators)`;
+  await withWorkspace(k.config, k.files, async (workspace) => {
+    // Premise: the staging is valid — most acutely, the shared lines' two
+    // import declarations parse as two bindings in MDX (SPEC 2.1) and in
+    // TypeScript (SPEC 4) alike, and every marker resolves (SPEC 4.5) — so
+    // a later failure is the move's, not the staging's.
+    await buildOk(product, workspace, `${at} \`build\` over the staging`);
+
+    await expectExit(
+      product,
+      workspace,
+      [...B7_MOVE_ARGV],
+      0,
+      `${at} \`move specs/Origin.mdx#org.mv specs/Target.mdx#mv\``,
+    );
+
+    await assertFileBytes(
+      workspace.path(B7_ORIGIN),
+      B7_ORIGIN_AFTER_LINES.join(t),
+      `${at}: the origin after the move — both target-module imports ` +
+        "left unreferenced are removed with 6.5's exact extent: the " +
+        "own-line declaration's line dropped with its whole terminator " +
+        "(both bytes of a CRLF), the shared-line declaration's own " +
+        "characters alone deleted, the retained import (its `;` and the " +
+        "separating space included) kept byte-for-byte on its kept line; " +
+        "the moved construct's emptied line dropped likewise, every other " +
+        "staged terminator kept byte-for-byte (SPEC 6.5, 2.1, 3; H-4, " +
+        "normalizing nothing: an edit layer splitting lines on U+000A " +
+        "alone leaves the lone-CR origin's emptied lines behind)",
+    );
+    await assertFileBytes(
+      workspace.path(B7_TARGET),
+      b7TargetAfter(t),
+      `${at}: the target after the move — the moved references convert ` +
+        'to local form as double-quoted string literals (`d={"hub"}`, ' +
+        '`{text("aux")}`), the local reference is re-identified by ' +
+        "prefix replacement with its single-quote spelling preserved " +
+        "(`d={'mv.leaf'}`), and the insertion adds exactly the rewritten " +
+        "moved text, its staged terminators kept, plus U+000A at end of " +
+        "file — never the file's own terminator style, and none before " +
+        "the moved text, the final line being terminated (SPEC 6.5, 6.4, " +
+        "3; H-4, normalizing nothing)",
+    );
+    await assertFileBytes(
+      workspace.path(B7_KEEP),
+      B7_KEEP_LINES.join(t),
+      `${at}: the retained third module's own file is an uninvolved ` +
+        "bystander — beyond the stated edits, the identity and reference " +
+        "rewrites, and the finishing regeneration, a move changes no " +
+        "bytes (SPEC 6.5)",
+    );
+
+    // The code-source counterpart: the import-removal rule binds code
+    // sources as it binds MDX, and the moved markers are rewritten through
+    // the binding the file already has.
+    await assertFileBytes(
+      workspace.path(B7_TS_OWN),
+      B7_TS_OWN_AFTER_LINES.join(t),
+      `${at}: the own-line code variant after the move — the ` +
+        "origin-module import, its binding left without references, is " +
+        "removed with 6.5's exact extent (its line dropped with its whole " +
+        "terminator, both bytes of a CRLF), the moved markers are " +
+        "rewritten through the existing target binding (`TGT.mv`, " +
+        "`TGT.mv.leaf`; no import added), and every other byte — the " +
+        "retained imports, the `TGT.hub` and `Keep.keep` markers, " +
+        "indentation, `;`, the trailing comment, and every staged " +
+        "terminator — is unchanged (SPEC 6.5, 6.4, 4.5, 3; H-4, " +
+        "normalizing nothing: a product reprinting the code file on " +
+        "removal fails here)",
+    );
+    await assertFileBytes(
+      workspace.path(B7_TS_SHARED),
+      B7_TS_SHARED_AFTER_LINES.join(t),
+      `${at}: the shared-line code variant after the move — the ` +
+        "origin-module declaration's own characters alone are deleted " +
+        "from the line it shares with the retained third-module import, " +
+        "which is kept byte-for-byte (its `;` and the separating space " +
+        "included) on its kept line, the moved markers are rewritten " +
+        "through the existing target binding, and every other byte, " +
+        "every staged terminator included, is unchanged (SPEC 6.5, 6.4, " +
+        "4.5, 3; H-4, normalizing nothing)",
+    );
+
+    // Soundness guard on the composed expectation itself: everything
+    // resolves after the move — if the product's bytes matched the expected
+    // bytes yet a reference or import failed to resolve, the COMPOSITION
+    // was defective, and it must fail loud rather than certify a broken
+    // rewrite (SPEC 6.5, 12.2).
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${at} \`check\` immediately after the move — every converted, ` +
+        "re-identified, and re-rooted reference (MDX references and TS " +
+        "markers alike) resolves and no staleness remains (SPEC 6.5, " +
+        "12.2, 14.10)",
+    );
+  });
+}
+
+const T6_5_7 = defineProductTest({
+  id: "T6.5-7",
+  title:
+    "operation-side rewrite bytes for the real move: import-edit extents and reference-conversion spellings byte-asserted against independently composed expected files, staged so no import is added (the one rewrite direction free of implementation latitude) — the own-line target-module import's line dropped with its terminator, the shared-line declaration's own characters alone deleted with the retained third-module import kept byte-for-byte on its kept line, the moved references converted to local form as double-quoted string literals, the single-quoted local reference and the single-quoted descendant `id` attribute each re-identified by prefix replacement with their quote spellings preserved; and the code-source counterpart — two `.ts` files whose origin-module import, its binding referenced only by markers on moved nodes, is removed with the same exact extent (own-line and shared-line variants) while the moved markers are rewritten through the existing target binding, each file byte-equal to its composed expectation; every fixture, the code variants included, recurs with every terminator of its staged files CRLF and again with every one a lone CR, the expected bytes composed by the same rules — the own-line declaration's line dropped with its whole terminator, both bytes of a CRLF, every other staged terminator kept byte-for-byte, and every terminator the move inserts U+000A (SPEC 6.5, 6.4, 3, 2.1, 2.7, 4.5; H-4, normalizing nothing)",
+  run: async (product) => {
+    for (const k of B7_KINDS) {
+      await runB7Kind(product, k);
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
+
+// T6.5-8 Added-import insertion discipline (TEST-SPEC T6.5-8): the
+// addition-side byte contract of SPEC 6.5 — an added import is inserted as
+// a line of its own, the declaration's characters followed by U+000A,
+// preceded by one when the insertion point is not at the start of a line,
+// judged over the composed text with the insertion's own result absent —
+// and the declaration's exact spelling, asserted with the identifier choice
+// alone left free and the offset confined by 6.5's preference (a line-start
+// admissible offset, which each arm's receiving file holds, is taken over
+// any other, so the mid-line form is never conforming here; T6.5-13 forces
+// it). Each arm's receiving file has its expected post-move bytes composed
+// from the rules of 6.4/6.5 and 3 up to exactly those two unknowns: the
+// fresh identifier is read off the rewritten reference (the one place
+// 6.4's pinned spellings make it observable) as TypeScript 5.9.3 at ESNext
+// reads an identifier — a non-ASCII letter or U+2EBF0 as readily as `a`
+// (helpers/ts-identifiers.ts; SPEC 1.4, 14.20) — and
+// `assertAddedImportInsertion` isolates the single inserted run by diff
+// against the composed bytes and reads it as byte-exactly 6.5's spelling —
+// `import <X> from "../specs/target.xspec"` in the TS arm (the canonical
+// ascent from `src/`), `"./target.xspec"` in the MDX origin arm,
+// `"./origin.xspec"` in the MDX target arm: single spaces, no statement
+// terminator, the specifier double-quoted — followed by U+000A at a
+// line-start offset, line starts judged by 3's terminators. Three
+// section-move arms over `specs/origin.mdx`, `specs/target.mdx`, and the
+// code file `src/c.ts`:
+// - TS: `src/c.ts` is `import O from "../specs/origin.xspec"`, U+000A, then
+//   a function `f` holding the markers `O.x`, on the moved `x`, and `O.w`,
+//   on the unmoved `w` (`move specs/origin.mdx#x specs/target.mdx#y`), so
+//   the rewrite needs a target-module binding the file lacks while the
+//   origin import keeps its remaining reference and stays. The start of
+//   line 2 is the file's one line-start admissible offset — offset 0
+//   follows no statement's end, and one after `f` is untimely for the moved
+//   marker, a non-import statement standing between it and `O`'s
+//   declaration (6.5) — so the run is pinned there.
+// - MDX origin: the origin file holds a retained third-module import
+//   (`Keep`, referenced by `org.stay`; grammar-permitted offsets exist
+//   beside it, and freshness is live against its binding) and, outside the
+//   moved subtree, a local string reference to a moved descendant
+//   (`d={"org.mv.leaf"}`), whose conversion to imported form
+//   (`<fresh>.mv.leaf`, dot access) makes the origin file itself gain the
+//   target module's import (`move specs/origin.mdx#org.mv
+//   specs/target.mdx#mv`, as in the MDX target arm).
+// - MDX target (the third conversion direction): the moved subtree holds a
+//   local string reference to an origin node outside it, `org.base-line`,
+//   whose second segment is not identifier-valid; the target file — an
+//   existing discovered source holding a retained `Keep` import but no
+//   import of the origin module — gains that import, the reference
+//   converting to imported form through the fresh binding in 6.4's pinned
+//   spellings (`<fresh>.org["base-line"]`: dot access, then double-quoted
+//   computed access), the moved text otherwise byte-identical; the origin
+//   loses the section and gains no import.
+// Every file the two unknowns do not touch is asserted byte-equal to its
+// composed expectation; the arm's edge set and a post-move `check` guard
+// the compositions' soundness (every rewritten reference resolves). Each
+// arm recurs with every line terminator of its staged files — the
+// configuration included — CRLF, and again with every one a lone CR
+// (`A8_KINDS`): the added run is still exactly the declaration followed by
+// U+000A, at a line start judged by 3's terminators — in the TS arm the
+// start of line 2, after the CRLF or lone CR ending line 1 — and every
+// staged terminator is kept byte-for-byte, the moved text's own included,
+// with U+000A after it; this fails a product matching the file's
+// terminator style, writing CRLF or CR after the declaration, and one
+// judging line starts by U+000A alone, for which no lone CR ends a line.
+const A8_ORIGIN = "specs/origin.mdx";
+const A8_TARGET = "specs/target.mdx";
+const A8_KEEP = "specs/keep.mdx";
+const A8_CODE = "src/c.ts";
+const A8_ORIGIN_MODULE = "specs/origin.xspec";
+const A8_TARGET_MODULE = "specs/target.xspec";
+
+/** The TS arm's move: the top-level `x` to the target's top-level `y`. */
+const A8_TS_ARGV = [
+  "move",
+  "specs/origin.mdx#x",
+  "specs/target.mdx#y",
+] as const;
+
+/** The MDX arms' move: `org.mv` to the target's top-level `mv`. */
+const A8_MDX_ARGV = [
+  "move",
+  "specs/origin.mdx#org.mv",
+  "specs/target.mdx#mv",
+] as const;
+
+// T6.5-8's files are held as line arrays (a final `""` for the final
+// terminator) joined with each run's terminator; every staging is a
+// staged-source record built at module load by `a8Kind` (the LF run's TS
+// arm is the body's first workspace, every later one follows a product
+// invocation: S-9's timing clause, helpers/staged-mdx.ts).
+
+/** A plain target file: one top-level section, no imports. */
+const A8_PLAIN_TARGET_LINES: readonly string[] = [
+  '<S id="tgt">',
+  "Target text.",
+  "</S>",
+  "",
+];
+
+/**
+ * The plain target's LF bytes — staged by T6.5-8's LF run and T6.5-9's code
+ * arm at `specs/target.mdx`, and by T6.6-2's move arm and T6.6-6 at
+ * `specs/Target.mdx`, so section-6.6.ts aliases this record (one record
+ * for identical bytes across tests).
+ */
+export const A8_PLAIN_TARGET = stagedMdx(
+  "T6.5-8/T6.5-9/T6.6-2/T6.6-6/T6.6-7 the plain target (specs/target.mdx in T6.5-8 and T6.5-9, specs/Target.mdx elsewhere)",
+  A8_PLAIN_TARGET_LINES.join(X2_LF),
+);
+
+/** The retained third module of the MDX arms (`Keep`). */
+const A8_KEEP_LINES: readonly string[] = [
+  '<S id="keep">',
+  "Keep text.",
+  "</S>",
+  "",
+];
+
+// TS arm. The origin's moved `x` and unmoved `w` are top-level leaves.
+const A8_TS_ORIGIN_LINES: readonly string[] = [
+  '<S id="x">',
+  "Origin x text.",
+  "</S>",
+  "",
+  '<S id="w">',
+  "Kept w text.",
+  "</S>",
+  "",
+];
+
+// Composed from SPEC 6.5 and 3: the moved construct's own characters are
+// deleted in place; the line that deletion leaves empty is dropped with its
+// whole terminator; the blank line after it was blank before the deletion
+// and stays, so the file opens with that terminator. No import is gained:
+// nothing left in the origin references a moved node.
+const A8_TS_ORIGIN_AFTER_LINES: readonly string[] = [
+  "",
+  '<S id="w">',
+  "Kept w text.",
+  "</S>",
+  "",
+];
+
+/** The TS arm's moved text, re-identified by prefix replacement `x` → `y`. */
+const A8_TS_MOVED_LINES: readonly string[] = [
+  '<S id="y">',
+  "Origin x text.",
+  "</S>",
+];
+
+/** Line 1 of `src/c.ts`: the origin import, exactly as T6.5-8 pins it. */
+const A8_CODE_LINE_1 = 'import O from "../specs/origin.xspec"';
+
+/**
+ * Line 2 of `src/c.ts`: `f`'s head, its parameter list empty (T6.5-9's
+ * parameter run fills it, `a9ParamCode`).
+ */
+const A8_CODE_F_HEAD = "function f() {";
+
+/**
+ * `src/c.ts` around its one variable part, the marker on the moved node
+ * (`O.x` before the move, `<fresh>.y` after): the origin import on line 1,
+ * then a function `f` holding that marker and `O.w` on the unmoved `w` —
+ * both attributed to `f` (4.6). The origin import keeps `O.w` and stays.
+ */
+function a8Code(marker: string): readonly string[] {
+  return [A8_CODE_LINE_1, A8_CODE_F_HEAD, `  ${marker};`, "  O.w;", "}", ""];
+}
+
+// The rewritten marker: a root not preceded by a `.` or by any code point a
+// permissive identifier run admits — so by no identifier part under
+// TypeScript 5.9.3 at ESNext, whatever its plane (`NO_RUN_BEFORE_SOURCE`;
+// `<U+00E9>a.y;` reads `<U+00E9>a`, never `a`) — then `.y;` (`O.w;` and the
+// declarations never match, nor does an unrewritten `O.x;`).
+const A8_CODE_REWRITTEN = rewrittenRootPattern(
+  String.raw`${NO_RUN_BEFORE_SOURCE}(?<!\.)`,
+  String.raw`\.y;`,
+);
+
+// MDX origin arm.
+const A8_ORG_ORIGIN_LINES: readonly string[] = [
+  'import Keep from "./keep.xspec"',
+  "",
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv">',
+  "Moved head text.",
+  "",
+  '<S id="org.mv.leaf">',
+  "Moved leaf text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="org.use" d={"org.mv.leaf"}>',
+  "Uses the moved leaf.",
+  "</S>",
+  "",
+  '<S id="org.stay" d={Keep.keep}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+];
+
+// The origin's expected post-move lines WITHOUT the added import (SPEC
+// 6.4/6.5, 3): the moved construct deleted in place with its emptied merged
+// line dropped (the two blank neighbours stay), the local reference to the
+// moved descendant converted to imported form in 6.4's pinned spelling —
+// rooted at the fresh binding, dot access for the identifier-valid segments
+// — and the retained `Keep` import kept byte-for-byte.
+function a8OrgOriginBase(root: string): readonly string[] {
+  return [
+    'import Keep from "./keep.xspec"',
+    "",
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    "",
+    `<S id="org.use" d={${root}.mv.leaf}>`,
+    "Uses the moved leaf.",
+    "</S>",
+    "",
+    '<S id="org.stay" d={Keep.keep}>',
+    "Staying text.",
+    "</S>",
+    "</S>",
+    "",
+  ];
+}
+
+/** The MDX origin arm's moved text, re-identified (`org.mv` → `mv`). */
+const A8_ORG_MOVED_LINES: readonly string[] = [
+  '<S id="mv">',
+  "Moved head text.",
+  "",
+  '<S id="mv.leaf">',
+  "Moved leaf text.",
+  "</S>",
+  "</S>",
+];
+
+const A8_ORG_REWRITTEN = rewrittenRootPattern(
+  String.raw`<S id="org\.use" d=\{`,
+  String.raw`\.mv\.leaf\}>`,
+);
+
+// MDX target arm. `org.base-line` is a valid ID (SPEC 1.4 forbids `.`, `#`,
+// whitespace, and control characters alone) whose second segment is not a
+// TypeScript identifier.
+const A8_TGT_ORIGIN_LINES: readonly string[] = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv" d={"org.base-line"}>',
+  "Moved text.",
+  "</S>",
+  "",
+  '<S id="org.base-line">',
+  "Base line text.",
+  "</S>",
+  "</S>",
+  "",
+];
+
+// Composed from SPEC 6.5 and 3 (as the TS arm's origin): the section gone,
+// its merged line dropped, the blank neighbours kept; no import gained.
+const A8_TGT_ORIGIN_AFTER_LINES: readonly string[] = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="org.base-line">',
+  "Base line text.",
+  "</S>",
+  "</S>",
+  "",
+];
+
+const A8_TGT_TARGET_LINES: readonly string[] = [
+  'import Keep from "./keep.xspec"',
+  "",
+  '<S id="tgt" d={Keep.keep}>',
+  "Target text.",
+  "</S>",
+  "",
+];
+
+// The MDX target arm's moved text (SPEC 6.4/6.5): its `id` re-identified
+// and its local reference to the origin node converted to imported form in
+// 6.4's pinned spellings — the fresh root, dot access for the
+// identifier-valid `org`, double-quoted computed access for `base-line` —
+// otherwise byte-identical.
+function a8TgtMoved(root: string): readonly string[] {
+  return [`<S id="mv" d={${root}.org["base-line"]}>`, "Moved text.", "</S>"];
+}
+
+const A8_TGT_REWRITTEN = rewrittenRootPattern(
+  String.raw`<S id="mv" d=\{`,
+  String.raw`\.org\["base-line"\]\}>`,
+);
+
+/**
+ * A target file after the section move (SPEC 6.5, 3): its staged lines
+ * joined with `t`, then the moved text — its own terminators the staged
+ * ones — inserted at the end of the file (a top-level `new-id`) and
+ * followed by U+000A, never the file's own terminator style; the staged
+ * final line is terminated, so the insertion point lies at a line start
+ * and no terminator precedes the moved text.
+ */
+function a8TargetAfter(
+  lines: readonly string[],
+  moved: readonly string[],
+  t: string,
+): string {
+  return lines.join(t) + moved.join(t) + X2_LF;
+}
+
+/** Names an added import may not bind in an MDX source (SPEC 2.1, 14.15). */
+const A8_MDX_RESERVED = ["S", "Spec", "text"].map((name) => ({
+  name,
+  why: "a compiler-provided name no import in an xspec source file may bind",
+}));
+
+/** One T6.5-8 arm: a receiving file gaining exactly one import. */
+interface AddedImportArm {
+  readonly label: string;
+  readonly config: StagedTs;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The section-form move the arm runs. */
+  readonly argv: readonly string[];
+  /** Workspace-relative path of the file gaining the import. */
+  readonly receiving: string;
+  /**
+   * Matches the one rewritten reference (`rewrittenRootPattern`); group 1
+   * is the fresh root's permissive run, judged when read.
+   */
+  readonly rewritten: RegExp;
+  /** The rewritten reference's expected spelling, for diagnoses. */
+  readonly rewrittenForm: string;
+  /** The receiving file's composed post-move bytes without the import. */
+  readonly base: (root: string) => string;
+  /** Workspace-relative module path the added import must designate. */
+  readonly expectedModule: string;
+  readonly moduleLabel: string;
+  /**
+   * The receiving file's one line-start admissible offset, where the test
+   * pins the run (the TS arm's start of line 2); undefined where the
+   * choice among line-start offsets is the product's.
+   */
+  readonly pinnedOffset:
+    { readonly offset: number; readonly where: string } | undefined;
+  /** Identifiers the fresh binding may not be, each with its reason. */
+  readonly forbiddenRoots: readonly { name: string; why: string }[];
+  /** Files whose post-move bytes are fully composed (no latitude). */
+  readonly composed: readonly {
+    rel: string;
+    expected: string;
+    why: string;
+  }[];
+  /** The workspace's complete edge set of this kind after the move. */
+  readonly edgeKind: "depends" | "references";
+  readonly edges: readonly GraphEdge[];
+}
+
+/**
+ * One run of T6.5-8's three arms with every line terminator of every staged
+ * file one kind (TEST-SPEC T6.5-8: each arm recurs with every terminator
+ * CRLF, and again with every one a lone CR; SPEC 3: each one terminator).
+ */
+interface A8Kind {
+  /** The kind as the failure messages name it. */
+  readonly kind: string;
+  readonly arms: readonly AddedImportArm[];
+}
+
+/**
+ * A shared configuration record's bytes with every terminator respelled
+ * `t`: the configuration is one of the staged files the re-runs respell
+ * (its lines hold U+000A terminators alone, checked here).
+ */
+function a8ConfigSource(config: StagedTs, t: string): string {
+  const source = config.source;
+  if (typeof source !== "string" || source.includes(X2_CR)) {
+    throw new Error(
+      `T6.5-8: the configuration record ${JSON.stringify(config.name)} is ` +
+        "expected as text whose every terminator is U+000A",
+    );
+  }
+  return source.split(X2_LF).join(t);
+}
+
+/**
+ * T6.5-8's three arms with every staged file — the configuration included
+ * — spelled with terminator `t`, each file a staged-source record
+ * registered here at module load (the LF run reuses the shared
+ * configuration records and the plain target's), and every composed
+ * expectation built by the same rules from the same lines.
+ */
+function a8Kind(kind: string, t: string): A8Kind {
+  const lf = t === X2_LF;
+  const name = (what: string): string =>
+    lf ? `T6.5-8 ${what}` : `T6.5-8 ${kind} re-run ${what}`;
+  const mdx = (what: string, lines: readonly string[]): StagedMdx =>
+    stagedMdx(name(what), lines.join(t));
+  const specAndCode = lf
+    ? SPEC_AND_CODE_CONFIG
+    : stagedTs(
+        name("xspec.config.ts — one spec group and one code group"),
+        a8ConfigSource(SPEC_AND_CODE_CONFIG, t),
+      );
+  const specsOnly = lf
+    ? SPECS_ONLY_CONFIG
+    : stagedTs(
+        name("xspec.config.ts — exactly one spec group"),
+        a8ConfigSource(SPECS_ONLY_CONFIG, t),
+      );
+  const plainTarget = lf
+    ? A8_PLAIN_TARGET
+    : mdx(`${A8_TARGET} — the plain target`, A8_PLAIN_TARGET_LINES);
+  const keep = mdx(`${A8_KEEP} — the retained third module`, A8_KEEP_LINES);
+  const keepAfter = {
+    rel: A8_KEEP,
+    expected: A8_KEEP_LINES.join(t),
+    why: "an uninvolved bystander, untouched, every staged terminator kept",
+  };
+  const appended =
+    "the re-identified moved text appended at end of file — its own " +
+    "staged terminators kept — plus U+000A, never the file's own " +
+    "terminator style, the file otherwise byte-identical";
+  const deleted =
+    "the moved section deleted in place with its emptied merged line " +
+    "dropped with its whole terminator, the blank neighbours and every " +
+    "other staged terminator kept, and no import gained";
+  const keepRoot = {
+    name: "Keep",
+    why: "the identifier the file's retained third-module import already binds",
+  };
+  return {
+    kind,
+    arms: [
+      {
+        label: "TS",
+        config: specAndCode,
+        files: {
+          [A8_ORIGIN]: mdx(
+            `TS arm ${A8_ORIGIN} — the moved x and the unmoved w`,
+            A8_TS_ORIGIN_LINES,
+          ),
+          [A8_TARGET]: plainTarget,
+          [A8_CODE]: stagedTs(
+            name(
+              `TS arm ${A8_CODE} — the origin import, then f holding O.x and O.w`,
+            ),
+            a8Code("O.x").join(t),
+          ),
+        },
+        argv: A8_TS_ARGV,
+        receiving: A8_CODE,
+        rewritten: A8_CODE_REWRITTEN,
+        rewrittenForm: "marker `<binding>.y;`",
+        base: (root) => a8Code(`${root}.y`).join(t),
+        expectedModule: A8_TARGET_MODULE,
+        moduleLabel: "the target module",
+        pinnedOffset: {
+          // All ASCII: the string length is the byte length.
+          offset: A8_CODE_LINE_1.length + t.length,
+          where: `the start of line 2, after the ${kind} terminator ending the origin import's line`,
+        },
+        forbiddenRoots: [
+          {
+            name: "O",
+            why: "the identifier the file's retained origin import already binds",
+          },
+          {
+            name: "f",
+            why: "the identifier the file's function declaration already binds",
+          },
+        ],
+        composed: [
+          {
+            rel: A8_ORIGIN,
+            expected: A8_TS_ORIGIN_AFTER_LINES.join(t),
+            why: deleted,
+          },
+          {
+            rel: A8_TARGET,
+            expected: a8TargetAfter(
+              A8_PLAIN_TARGET_LINES,
+              A8_TS_MOVED_LINES,
+              t,
+            ),
+            why: appended,
+          },
+        ],
+        edgeKind: "references",
+        edges: [
+          { from: `${A8_CODE}#f`, to: `${A8_TARGET}#y`, kind: "references" },
+          { from: `${A8_CODE}#f`, to: `${A8_ORIGIN}#w`, kind: "references" },
+        ],
+      },
+      {
+        label: "MDX origin",
+        config: specsOnly,
+        files: {
+          [A8_KEEP]: keep,
+          [A8_ORIGIN]: mdx(
+            `MDX-origin arm ${A8_ORIGIN} — a local reference to a moved descendant`,
+            A8_ORG_ORIGIN_LINES,
+          ),
+          [A8_TARGET]: plainTarget,
+        },
+        argv: A8_MDX_ARGV,
+        receiving: A8_ORIGIN,
+        rewritten: A8_ORG_REWRITTEN,
+        rewrittenForm: '`<S id="org.use" d={<binding>.mv.leaf}>`',
+        base: (root) => a8OrgOriginBase(root).join(t),
+        expectedModule: A8_TARGET_MODULE,
+        moduleLabel: "the target module",
+        pinnedOffset: undefined,
+        forbiddenRoots: [keepRoot, ...A8_MDX_RESERVED],
+        composed: [
+          {
+            rel: A8_TARGET,
+            expected: a8TargetAfter(
+              A8_PLAIN_TARGET_LINES,
+              A8_ORG_MOVED_LINES,
+              t,
+            ),
+            why: appended,
+          },
+          keepAfter,
+        ],
+        edgeKind: "depends",
+        edges: [
+          {
+            from: `${A8_ORIGIN}#org.use`,
+            to: `${A8_TARGET}#mv.leaf`,
+            kind: "depends",
+          },
+          {
+            from: `${A8_ORIGIN}#org.stay`,
+            to: `${A8_KEEP}#keep`,
+            kind: "depends",
+          },
+        ],
+      },
+      {
+        label: "MDX target",
+        config: specsOnly,
+        files: {
+          [A8_KEEP]: keep,
+          [A8_ORIGIN]: mdx(
+            `MDX-target arm ${A8_ORIGIN} — the moved section's local reference to org.base-line`,
+            A8_TGT_ORIGIN_LINES,
+          ),
+          [A8_TARGET]: mdx(
+            `MDX-target arm ${A8_TARGET} — the retained Keep import`,
+            A8_TGT_TARGET_LINES,
+          ),
+        },
+        argv: A8_MDX_ARGV,
+        receiving: A8_TARGET,
+        rewritten: A8_TGT_REWRITTEN,
+        rewrittenForm: '`<S id="mv" d={<binding>.org["base-line"]}>`',
+        base: (root) => a8TargetAfter(A8_TGT_TARGET_LINES, a8TgtMoved(root), t),
+        expectedModule: A8_ORIGIN_MODULE,
+        moduleLabel: "the origin module",
+        pinnedOffset: undefined,
+        forbiddenRoots: [keepRoot, ...A8_MDX_RESERVED],
+        composed: [
+          {
+            rel: A8_ORIGIN,
+            expected: A8_TGT_ORIGIN_AFTER_LINES.join(t),
+            why: deleted,
+          },
+          keepAfter,
+        ],
+        edgeKind: "depends",
+        edges: [
+          {
+            from: `${A8_TARGET}#mv`,
+            to: `${A8_ORIGIN}#org.base-line`,
+            kind: "depends",
+          },
+          { from: `${A8_TARGET}#tgt`, to: `${A8_KEEP}#keep`, kind: "depends" },
+        ],
+      },
+    ],
+  };
+}
+
+// The first run stages U+000A terminators (its TS arm's workspace precedes
+// every product invocation); the re-runs stage CRLF and lone CR.
+const A8_KINDS: readonly A8Kind[] = [
+  a8Kind("LF", X2_LF),
+  a8Kind("CRLF", X2_CRLF),
+  a8Kind("lone CR", X2_CR),
+];
+
+/**
+ * The identifier the receiving file's rewritten reference is rooted at —
+ * the value-unpinned fresh binding (SPEC 6.5), read off the one place 6.4's
+ * pinned spelling makes it observable, as TypeScript 5.9.3 at ESNext reads
+ * an identifier (SPEC 1.4, 14.20); diagnosed when the reference is not
+ * spelled as 6.4 pins it (or is rewritten more or less than once), or when
+ * its root reads as no identifier.
+ */
+function addedImportReferenceRoot(
+  text: string,
+  arm: AddedImportArm,
+  context: string,
+): string {
+  const matches = [...text.matchAll(arm.rewritten)];
+  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (root === undefined) {
+    fail(
+      `${context}: ${arm.receiving} must hold exactly one ` +
+        `${arm.rewrittenForm} — the reference to the moved node rewritten ` +
+        `through a binding of ${arm.moduleLabel} in 6.4's pinned spelling ` +
+        `(dot access for identifier-valid segments, double-quoted computed ` +
+        `access for the others; SPEC 6.5, 6.4); found ` +
+        `${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${arm.receiving}'s rewritten ${arm.rewrittenForm} must be ` +
+      `rooted at the added import's binding of ${arm.moduleLabel}`,
+  );
+}
+
+/**
+ * Stage one arm under one terminator kind, run the section-form move, and
+ * assert the receiving file is its composed post-move bytes with exactly
+ * one import of the needed module added under 6.5's line discipline —
+ * at the pinned offset where the arm pins one — binding the fresh
+ * identifier the rewritten reference uses; the fully composed files
+ * byte-equal; the edge set and a clean `check` as soundness guards.
+ */
+async function runAddedImportArm(
+  product: ProductBinding,
+  kind: string,
+  arm: AddedImportArm,
+): Promise<void> {
+  const context = `T6.5-8 ${arm.label} arm (${kind} terminators)`;
+  await withWorkspace(arm.config, arm.files, async (workspace) => {
+    // Premise: the staging is valid (every reference and marker resolves),
+    // so a later failure is the move's, not the staging's.
+    await buildOk(product, workspace, `${context} \`build\` over the staging`);
+    await expectExit(
+      product,
+      workspace,
+      [...arm.argv],
+      0,
+      `${context} \`${arm.argv.join(" ")}\``,
+    );
+
+    const text = await readSourceText(workspace, arm.receiving, context);
+    const root = addedImportReferenceRoot(text, arm, context);
+    for (const forbidden of arm.forbiddenRoots) {
+      if (root === forbidden.name) {
+        fail(
+          `${context}: the added import binds \`${forbidden.name}\`, ` +
+            `${forbidden.why} — an added import binds fresh identifiers ` +
+            `colliding with no binding already in the file (SPEC 6.5, ` +
+            `2.1, 4, 14.15)`,
+        );
+      }
+    }
+    // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns —
+    // the fresh identifier (now known) and the insertion offset (isolated
+    // by the helper, which reads the run at every admissible offset and
+    // accepts a line-start one alone, line starts judged by 3's
+    // terminators: each receiving file holds one; in the TS arm the one,
+    // the start of line 2, pinned).
+    const pinned = arm.pinnedOffset;
+    assertAddedImportInsertion(
+      {
+        rel: arm.receiving,
+        base: Buffer.from(arm.base(root), "utf8"),
+        actual: await workspace.readBytes(arm.receiving),
+        importerDir: posixPath.dirname(arm.receiving),
+        expectedModule: arm.expectedModule,
+        identifier: root,
+        ...(pinned === undefined ? {} : { pinnedOffset: pinned }),
+      },
+      `${context}: ${arm.receiving} after the move is its composed ` +
+        `post-move bytes, every staged terminator kept byte-for-byte, with ` +
+        `exactly one import of ${arm.moduleLabel} added as a line of its ` +
+        `own — byte-exactly 6.5's spelling (single spaces, no statement ` +
+        `terminator, the specifier double-quoted in its canonical relative ` +
+        `spelling) followed by U+000A, never the file's own terminator ` +
+        `style, at a line-start offset judged by 3's terminators, which the ` +
+        `file holds and 6.5 takes over any other` +
+        (pinned === undefined ? "" : ` — here ${pinned.where}`) +
+        ` — binding the fresh identifier the rewritten reference is rooted ` +
+        `at, no other byte inserted (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
+    );
+    for (const file of arm.composed) {
+      await assertFileBytes(
+        workspace.path(file.rel),
+        file.expected,
+        `${context}: ${file.rel} after the move — ${file.why} (SPEC 6.5, ` +
+          `6.4, 3; H-4, normalizing nothing)`,
+      );
+    }
+
+    // Soundness guards on the compositions: the rewritten reference resolves
+    // to the moved node's new identity through the added binding, and
+    // nothing else changed hands.
+    assertEdgeSetEqual(
+      await queryEdgesOfKind(product, workspace, arm.edgeKind, context),
+      arm.edges,
+      `${context}: the complete \`${arm.edgeKind}\` edge set after the ` +
+        `move — the rewritten reference reported under the moved node's ` +
+        `new identity, every other edge unchanged (SPEC 6.5, 5.2, 4.6)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context} \`check\` immediately after the move — the added import ` +
+        `and the rewritten reference resolve, the fresh binding collides ` +
+        `with nothing (14.15), and no staleness remains (SPEC 6.5, 12.2, ` +
+        `14.10)`,
+    );
+  });
+}
+
+const T6_5_8 = defineProductTest({
+  id: "T6.5-8",
+  title:
+    "added-import insertion discipline: the addition-side byte contract of 6.5 asserted value-blind — in three section-move arms over `specs/origin.mdx`, `specs/target.mdx`, and `src/c.ts` (a TS arm whose `src/c.ts` is `import O from \"../specs/origin.xspec\"`, U+000A, then a function `f` holding the markers `O.x` on the moved node and `O.w` on an unmoved one, so a target-module binding is added while the origin import stays, the start of line 2 the file's one line-start admissible offset; an MDX origin holding a retained third-module import and a local string reference to a moved descendant, converted to imported form so the origin itself gains the target module's import; an MDX target gaining the origin module's import for a moved local reference to an origin node with a non-identifier segment, converted to dot then double-quoted computed access) the receiving file's post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten reference) and the choice among the receiving file's line-start admissible offsets, and the single inserted run isolated by diff is byte-exactly 6.5's spelling of the declaration — `import <X> from \"../specs/target.xspec\"` in the TS arm, `\"./target.xspec\"` in the MDX origin arm, `\"./origin.xspec\"` in the MDX target arm: single spaces, no statement terminator, the specifier double-quoted in its canonical relative spelling — followed by U+000A at a line-start offset judged by 3's terminators (which each file holds, 6.5 taking it over any other, so the mid-line form is never conforming here), in the TS arm exactly the start of line 2, the fresh identifier its only unpinned run, no other byte inserted; the fully composed files byte-equal, the edge set exact, `check` clean; each arm recurs with every terminator of its staged files CRLF and again with every one a lone CR, the added run still exactly the declaration followed by U+000A at a line start judged by 3's terminators — in the TS arm the start of line 2, after the CRLF or lone CR ending line 1 — and every staged terminator kept byte-for-byte (SPEC 6.5, 6.4, 2.1, 3; H-4, normalizing nothing)",
+  run: async (product) => {
+    for (const k of A8_KINDS) {
+      for (const arm of k.arms) {
+        await runAddedImportArm(product, k.kind, arm);
+      }
+    }
+  },
+});
+
+// T6.5-9 — Fresh identifiers (TEST-SPEC T6.5-9). The freshness clauses of
+// 6.5 — an added import's identifiers are bound by no declaration already
+// in the file, in any scope and at value or type level alike, and equal no
+// name the file already references (2.1, 4) — span, in a code file, local
+// declarations as well as imports, and a breach is observable to xspec only
+// in part: an added import sharing its identifier with a value-level
+// declaration of the module scope is the collision of 14.15 (4.5), while
+// one sharing it with a `type` alias collides with nothing to xspec, and
+// even the consumer's compile reports that one only where the imported
+// default export has a type meaning. A product checking freshness against
+// import bindings alone passes T6.5-8's TS arm, whose receiving file leaves
+// every plausible identifier free. The code arm is that arm re-staged —
+// T6.5-8's `specs/origin.mdx` (`A8_TS_ORIGIN_LINES`), the plain
+// `specs/target.mdx`, `move specs/origin.mdx#x specs/target.mdx#y`, and
+// `src/c.ts` built around `a8Code` — in two runs. In the module-scope run
+// (`A9_FILES`, the body's first workspace) the receiving `src/c.ts`
+// additionally declares, at module scope, bindings pre-empting the
+// identifiers a product would plausibly derive: spelled from the target
+// file's basename `target` (as written, which is its lower-cased form,
+// upper-cased, `Spec`- and `SPEC`-suffixed, and capitalized besides) and
+// from the origin binding `O` with a digit (the digit is unspecified, so
+// the two smallest counters are both staged) and with an underscore
+// appended, as a local `const`, a `function`, a `class`, a `type` alias,
+// and non-spec import bindings, each used trivially; the file type-checks
+// clean before the move under standard tooling, under each of H-2's two
+// configurations, its whole program — the generated modules and companions it
+// reaches — included (a fixture self-check). Its import declarations —
+// T6.5-8's origin import on line 1, the non-spec lures' on line 2 — head it
+// before every other statement, with no blank line after them, so its
+// line-start admissible offsets are exactly the starts of lines 2 and 3, each
+// directly after one of them (6.5: offset 0 follows no statement's end, and
+// an added declaration after the first non-import statement would be untimely
+// for the moved marker, that statement standing between it and `O`'s
+// declaration). After the section move, the diff-isolated added run is
+// asserted as T6.5-8 asserts it, confined to those two offsets
+// (`assertAddedImportInsertion`'s `pinnedOffsets`); through H-2's
+// standard-tooling channel (`test/helpers/tooling.ts`), under each of its two
+// configurations, the rewritten file compiles with no diagnostics, its whole
+// program clean — a collision with the `const`, `function`, or `class` is
+// TS2440 (import declaration conflicts with local declaration), one with a
+// non-spec import binding TS2300 (duplicate identifier), and an unrewritten
+// or misrooted marker a type error against the regenerated modules — so the
+// added identifier equals none of the value-level pre-empted names; `query
+// edges` reports the moved marker's `references` edge to the moved node's
+// new identity and the unmoved marker's through the retained origin
+// binding; and `check` is clean (T6.5-3). The `type` alias's name is left
+// to T6.5-22(a), whose universal check in the subprocess driver judges the
+// added identifiers of every performed move (test/helpers/subprocess.ts):
+// standard tooling accepts a default import beside a same-named alias when
+// the imported default export has no type meaning, so compile-cleanliness
+// does not reach it, and this test asserts nothing of it itself.
+//
+// The parameter run (TEST-SPEC T6.5-9: "The run recurs with the same
+// spellings pre-empted by parameters of `f` alone"): a parameter is among
+// the declarations an added identifier must avoid (6.5: bound by no
+// declaration already in the file, in any scope; 2.4). Its `src/c.ts` is
+// T6.5-8's TS arm file (`a8Code`) with `f`'s parameter list holding every
+// spelling the module-scope run pre-empts — the value lures, the non-spec
+// import's bindings among them (`A9_VALUE_LURES`), and the alias's name
+// (`A9_TYPE_LURE`) — each typed `unknown`; no lure is declared at module
+// scope, and the workspace holds no `src/util.ts` and no util import. The
+// origin import alone heads the file, so its one line-start admissible
+// offset is the start of line 2 (T6.5-8's TS arm), where the added run is
+// pinned. The run is asserted alike: the premise `build`, the clean
+// whole-program compile under both configurations before the move, the
+// move, the clean compile after it, the diff-isolated added run, `query
+// edges` (the same two edges, both from `f`), and `check` clean. A product
+// checking freshness against module-scope declarations alone, or against
+// every declaration but parameters, binds a parameter's name: the moved
+// marker, standing in `f`, is then rooted at the parameter (4.5), its edge
+// silently dropped behind a clean `check` — the parameter and the added
+// top-level import declare the name in different scopes, so no 14.15 —
+// and it fails `query edges` and the compile, which reports the property
+// access on `unknown` (TS18046), as well as T6.5-22(a)'s universal check,
+// S-6's name analysis counting a parameter among the file's declarations
+// (helpers/oracles/name-analysis.ts). Its workspace is created after the
+// module-scope run's invocations, so its `src/c.ts` is a staged-source
+// record (S-9's timing clause), staged beside the module-scope run's origin
+// record and the plain target. In either run the pre-empted set is a lure,
+// not a bound: the identifier stays the product's choice (6.5's latitude),
+// and compile-cleanliness is the assertion whatever the choice.
+
+/** The code arm's non-spec module, whose bindings pre-empt `Target` and `O2`. */
+const A9_UTIL = "src/util.ts";
+const A9_UTIL_SOURCE = ["export default 1;", "export const O2 = 2;", ""].join(
+  "\n",
+);
+
+/** One pre-empting module-scope binding of the receiving code file. */
+interface PreemptedBinding {
+  readonly name: string;
+  /** The declaration kind holding the name. */
+  readonly kind: string;
+  /** The derivation it is spelled from. */
+  readonly derivation: string;
+}
+
+/**
+ * The value-level lures, the reach of the compile-cleanliness assertion:
+ * every derivation TEST-SPEC T6.5-9 enumerates but the alias's — from the
+ * target file's basename `target` and the origin binding `O` — and the
+ * capitalized basename, over the `const`, `function`, `class`, and
+ * non-spec import kinds. The likeliest derivation, the basename as written,
+ * is a local `const`, so a product checking freshness against import
+ * bindings alone takes it and draws TS2440.
+ */
+const A9_VALUE_LURES: readonly PreemptedBinding[] = [
+  {
+    name: "target",
+    kind: "a module-scope `const`",
+    derivation: "the target file's basename as written, its lower-cased form",
+  },
+  {
+    name: "TARGET",
+    kind: "a `function` declaration",
+    derivation: "the target file's basename upper-cased",
+  },
+  {
+    name: "targetSpec",
+    kind: "a `class` declaration",
+    derivation: "the target file's basename `Spec`-suffixed",
+  },
+  {
+    name: "Target",
+    kind: "a non-spec import binding (the default import of `src/util.ts`)",
+    derivation: "the target file's basename capitalized",
+  },
+  {
+    name: "O1",
+    kind: "a module-scope `const`",
+    derivation: "the origin binding's name with a digit appended",
+  },
+  {
+    name: "O2",
+    kind: "a non-spec import binding (a named import of `src/util.ts`)",
+    derivation: "the origin binding's name with a digit appended",
+  },
+  {
+    name: "O_",
+    kind: "a `function` declaration",
+    derivation: "the origin binding's name with an underscore appended",
+  },
+];
+
+/**
+ * The type-level lure: the alias's name, which compile-cleanliness does not
+ * reach in the module-scope run (left to T6.5-22(a)); in the parameter run a
+ * parameter like the rest.
+ */
+const A9_TYPE_LURE: PreemptedBinding = {
+  name: "targetSPEC",
+  kind: "a `type` alias",
+  derivation: "the target file's basename `SPEC`-suffixed",
+};
+
+/** Line 2 of `src/c.ts`: the non-spec lures' import declaration. */
+const A9_UTIL_IMPORT_LINE = 'import Target, { O2 } from "./util.js"';
+
+/**
+ * The lure declarations between the imports and `f`, every binding used
+ * trivially — rooted at local declarations, so none is a spec module
+ * reference (4.5) and none records an edge. The `type` alias pre-empts the
+ * basename `SPEC`-suffixed (`A9_TYPE_LURE`), left to T6.5-22(a).
+ */
+const A9_LURE_LINES: readonly string[] = [
+  "const target = Target + O2;",
+  "function TARGET(): number {",
+  "  return target * 2;",
+  "}",
+  "class targetSpec {",
+  "  readonly value = TARGET();",
+  "}",
+  `type ${A9_TYPE_LURE.name} = targetSpec;`,
+  `const O1: ${A9_TYPE_LURE.name} = new targetSpec();`,
+  "function O_(): number {",
+  "  return O1.value;",
+  "}",
+  "O_();",
+];
+
+/**
+ * The module-scope run's `src/c.ts` around its one variable part, the
+ * marker on the moved node (`O.x` before the move, `<fresh>.y` after):
+ * T6.5-8's TS arm file (`a8Code`) with the non-spec lures' import after its
+ * origin import and the lure declarations before `f`.
+ */
+function a9Code(marker: string): readonly string[] {
+  const lines = a8Code(marker);
+  return [
+    ...lines.slice(0, 1),
+    A9_UTIL_IMPORT_LINE,
+    ...A9_LURE_LINES,
+    ...lines.slice(1),
+  ];
+}
+
+/**
+ * The parameter run's pre-empted spellings, `f`'s parameters in order:
+ * every spelling the module-scope run pre-empts (TEST-SPEC T6.5-9: "the same
+ * spellings") — the value lures, the non-spec import's bindings among them,
+ * then the alias's name — read from those tables.
+ */
+const A9_PARAMETER_NAMES: readonly string[] = [
+  ...A9_VALUE_LURES.map((binding) => binding.name),
+  A9_TYPE_LURE.name,
+];
+
+/**
+ * The parameter run's `src/c.ts` around its one variable part, the marker
+ * on the moved node (`O.x` before the move, `<fresh>.y` after): T6.5-8's TS
+ * arm file (`a8Code`) with `f`'s parameter list holding every pre-empted
+ * spelling, each typed `unknown` (TEST-SPEC T6.5-9) — no module-scope lure,
+ * no non-spec import. The markers stand in `f`, so a parameter of a name
+ * the added import binds shadows that binding there (SPEC 4.5, 2.4).
+ */
+function a9ParamCode(marker: string): readonly string[] {
+  const [importLine, head, ...rest] = a8Code(marker);
+  if (importLine !== A8_CODE_LINE_1 || head !== A8_CODE_F_HEAD) {
+    throw new Error(
+      "T6.5-9 parameter run: a8Code no longer opens with the origin import " +
+        "and f's head — the parameter run's src/c.ts is composed from them " +
+        "(a harness defect)",
+    );
+  }
+  const parameters = A9_PARAMETER_NAMES.map((name) => `${name}: unknown`);
+  return [
+    importLine,
+    head.replace("()", `(${parameters.join(", ")})`),
+    ...rest,
+  ];
+}
+
+/** The import declarations heading the module-scope run's file, lines 1–2. */
+const A9_IMPORT_LINES: readonly string[] = [
+  A8_CODE_LINE_1,
+  A9_UTIL_IMPORT_LINE,
+];
+
+/** The one import declaration heading the parameter run's file, line 1. */
+const A9_PARAM_IMPORT_LINES: readonly string[] = [A8_CODE_LINE_1];
+
+/**
+ * A receiving file's line-start admissible offsets (SPEC 6.5): the start of
+ * the line directly after each import declaration heading it, as byte
+ * offsets into the composed text (every line U+000A-terminated).
+ */
+function a9AfterImportOffsets(
+  importLines: readonly string[],
+): readonly number[] {
+  return importLines.map((_, index) =>
+    importLines
+      .slice(0, index + 1)
+      .reduce(
+        (sum, line) => sum + Buffer.byteLength(line, "utf8") + X2_LF.length,
+        0,
+      ),
+  );
+}
+
+/** The module-scope run's: the starts of lines 2 and 3. */
+const A9_AFTER_IMPORT_OFFSETS = a9AfterImportOffsets(A9_IMPORT_LINES);
+
+/** The parameter run's one: the start of line 2. */
+const A9_PARAM_AFTER_IMPORT_OFFSETS = a9AfterImportOffsets(
+  A9_PARAM_IMPORT_LINES,
+);
+
+/**
+ * Module-load self-check (a failure is a harness defect, never a product
+ * verdict): a run's staged `src/c.ts` opens with exactly the import
+ * declarations its offsets are computed from, each a line of its own, and
+ * the line after them is no import declaration — so the offsets are the
+ * starts of the lines directly after the imports heading the file, every
+ * one of them.
+ */
+function a9CheckImportHead(
+  lines: readonly string[],
+  importLines: readonly string[],
+  run: string,
+): void {
+  const head = lines.slice(0, importLines.length);
+  const next = lines[importLines.length] ?? "";
+  if (
+    head.length !== importLines.length ||
+    head.some((line, index) => line !== importLines[index]) ||
+    next.startsWith("import ")
+  ) {
+    throw new Error(
+      `T6.5-9 ${run}: ${A8_CODE} must open with exactly the import ` +
+        `declarations ${JSON.stringify(importLines)}, its pinned line-start ` +
+        `admissible offsets computed from them (a harness defect)`,
+    );
+  }
+}
+a9CheckImportHead(a9Code("O.x"), A9_IMPORT_LINES, "module-scope run");
+a9CheckImportHead(a9ParamCode("O.x"), A9_PARAM_IMPORT_LINES, "parameter run");
+
+/** The code arm's origin, staged by both runs: T6.5-8's TS arm origin. */
+const A9_ORIGIN = stagedMdx(
+  "T6.5-9 code arm specs/origin.mdx — T6.5-8's TS arm origin, the moved x and the unmoved w",
+  A8_TS_ORIGIN_LINES.join(X2_LF),
+);
+
+/** The module-scope run's workspace, the body's first. */
+const A9_FILES: Readonly<Record<string, InitialFileContents>> = {
+  [A8_ORIGIN]: A9_ORIGIN,
+  [A8_TARGET]: A8_PLAIN_TARGET,
+  [A8_CODE]: a9Code("O.x").join(X2_LF),
+  [A9_UTIL]: A9_UTIL_SOURCE,
+};
+
+/**
+ * The parameter run's workspace, created after the module-scope run's
+ * invocations, so every file is a staged-source record (S-9's timing
+ * clause): the code arm's origin, the plain target, and `src/c.ts` — no
+ * `src/util.ts`.
+ */
+const A9_PARAM_FILES: Readonly<Record<string, InitialFileContents>> = {
+  [A8_ORIGIN]: A9_ORIGIN,
+  [A8_TARGET]: A8_PLAIN_TARGET,
+  [A8_CODE]: stagedTs(
+    "T6.5-9 parameter run src/c.ts — T6.5-8's TS arm file, f's parameters (each typed unknown) pre-empting the module-scope run's spellings, no module-scope lure",
+    a9ParamCode("O.x").join(X2_LF),
+  ),
+};
+
+/**
+ * The workspace's complete `references` edge set after the move, in either
+ * run: both markers stand in `f`.
+ */
+const A9_EDGES: readonly GraphEdge[] = [
+  { from: `${A8_CODE}#f`, to: `${A8_TARGET}#y`, kind: "references" },
+  { from: `${A8_CODE}#f`, to: `${A8_ORIGIN}#w`, kind: "references" },
+];
+
+/**
+ * The identifier the rewritten marker is rooted at — the value-unpinned
+ * fresh binding (SPEC 6.5), read off the one place 6.4's pinned spelling
+ * makes it observable (T6.5-8), as TypeScript 5.9.3 at ESNext reads an
+ * identifier (SPEC 1.4, 14.20); diagnosed when the marker is not spelled as
+ * 6.4 pins it, or is rewritten more or less than once, or when its root
+ * reads as no identifier.
+ */
+function a9RewrittenMarkerRoot(text: string, context: string): string {
+  const matches = [...text.matchAll(A8_CODE_REWRITTEN)];
+  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (root === undefined) {
+    fail(
+      `${context}: ${A8_CODE} must hold exactly one \`<fresh>.y;\` — the ` +
+        `marker on the moved node rewritten through a binding of the ` +
+        `target module in 6.4's pinned spelling (dot access, \`y\` being ` +
+        `identifier-valid; SPEC 6.5, 6.4); found ${String(matches.length)} ` +
+        `in ${JSON.stringify(text)}`,
+    );
+  }
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${A8_CODE}'s rewritten marker \`<fresh>.y;\` must be ` +
+      `rooted at the added import's binding of the target module`,
+  );
+}
+
+/**
+ * One run of T6.5-9's code arm — the module-scope run, or its recurrence
+ * with the same spellings pre-empted by parameters of `f` alone, "asserted
+ * alike" (TEST-SPEC T6.5-9): its staging, its line-start admissible
+ * offsets, and how its diagnoses name them.
+ */
+interface A9CodeRun {
+  /** The diagnoses' context. */
+  readonly context: string;
+  /** The workspace's files beside the configuration. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The run's `src/c.ts` around the marker on the moved node. */
+  readonly code: (marker: string) => readonly string[];
+  /** The line-start admissible offsets the added run is confined to. */
+  readonly offsets: readonly number[];
+  /** How the diagnoses name those offsets. */
+  readonly where: string;
+  /** What the pre-move compile vouches for in the staging (a premise). */
+  readonly premise: string;
+  /** What a finding located in `src/c.ts` at the move would point at. */
+  readonly moveFinding: string;
+  /** What the post-move compile's cleanliness rules out. */
+  readonly compile: string;
+}
+
+/**
+ * Run one code-arm run (`A9CodeRun`) on a fresh workspace: the premise
+ * `build` and the clean whole-program compile under each of H-2's
+ * configurations before the move; the move; the clean compile after it;
+ * T6.5-8's discipline on the diff-isolated added run, confined to the run's
+ * line-start admissible offsets (pinned where there is one), the fresh
+ * identifier read off the rewritten marker; the complete `references` edge
+ * set; and `check` clean.
+ */
+async function runA9CodeRun(
+  product: ProductBinding,
+  run: A9CodeRun,
+): Promise<void> {
+  const { context } = run;
+  await withWorkspace(SPEC_AND_CODE_CONFIG, run.files, async (workspace) => {
+    // Premise: the staging is valid (every reference and marker resolves).
+    await buildOk(product, workspace, `${context} \`build\` over the staging`);
+    // Fixture self-check, under each of H-2's two configurations: the
+    // pre-empting declarations are valid TypeScript and the generated
+    // origin module resolves, the whole program clean, so a later
+    // diagnostic is the move's, not the staging's.
+    await forEachConsumerProject(
+      { rootDir: workspace.root, rootFiles: [A8_CODE] },
+      (project) =>
+        assertTypeChecksClean(
+          project,
+          `${context} premise: ${A8_CODE} compiles clean before the move ` +
+            `under standard tooling — ${run.premise} and the generated ` +
+            `origin module and the companions it reaches resolve and ` +
+            `type-check clean (SPEC 4, 13.1; a fixture self-check)`,
+        ),
+    );
+
+    await expectExit(
+      product,
+      workspace,
+      [...A8_TS_ARGV],
+      0,
+      `${context} \`${A8_TS_ARGV.join(" ")}\` — a valid move over the ` +
+        `workspace the premise \`build\` accepted succeeds (SPEC 6.5)` +
+        run.moveFinding,
+    );
+
+    // The assertion T6.5-9 names: no diagnostics, whatever identifier the
+    // product chose, under each of H-2's two configurations. Fresh
+    // projects — the language service snapshots files on first access,
+    // and the move rewrote them.
+    await forEachConsumerProject(
+      { rootDir: workspace.root, rootFiles: [A8_CODE] },
+      (project) =>
+        assertTypeChecksClean(
+          project,
+          `${context}: ${A8_CODE} after the move compiles with no ` +
+            `diagnostics under standard tooling — ${run.compile}`,
+        ),
+    );
+
+    // T6.5-8's discipline on the diff-isolated run, confined to the file's
+    // line-start admissible offsets — the start of the line directly after
+    // each import heading it — with the fresh identifier read off the
+    // rewritten marker.
+    const text = await readSourceText(workspace, A8_CODE, context);
+    const root = a9RewrittenMarkerRoot(text, context);
+    const [only, ...others] = run.offsets;
+    const pin =
+      only !== undefined && others.length === 0
+        ? { pinnedOffset: { offset: only, where: run.where } }
+        : { pinnedOffsets: { offsets: run.offsets, where: run.where } };
+    const one = "pinnedOffset" in pin;
+    assertAddedImportInsertion(
+      {
+        rel: A8_CODE,
+        base: Buffer.from(run.code(`${root}.y`).join(X2_LF), "utf8"),
+        actual: await workspace.readBytes(A8_CODE),
+        importerDir: posixPath.dirname(A8_CODE),
+        expectedModule: A8_TARGET_MODULE,
+        identifier: root,
+        ...pin,
+      },
+      `${context}: ${A8_CODE} after the move is its pre-move bytes with ` +
+        `the moved marker rewritten in 6.4's pinned spelling and exactly ` +
+        `one import of the target module added as a line of its own — ` +
+        `byte-exactly 6.5's spelling (single spaces, no statement ` +
+        `terminator, the specifier double-quoted in its canonical ` +
+        `relative spelling) followed by U+000A, at ${run.where}, ` +
+        (one
+          ? "its one line-start admissible offset"
+          : "its line-start admissible offsets") +
+        `, which 6.5 takes over any other — binding the fresh identifier ` +
+        `the rewritten marker is rooted at, no other byte inserted (SPEC ` +
+        `6.5, 2.1, 6.4, 3; T6.5-8)`,
+    );
+
+    assertEdgeSetEqual(
+      await queryEdgesOfKind(product, workspace, "references", context),
+      A9_EDGES,
+      `${context}: the complete \`references\` edge set after the move — ` +
+        `the rewritten marker reported under the moved node's new ` +
+        `identity through the fresh binding, the unmoved marker's edge ` +
+        `through the retained origin binding, both attributed to the ` +
+        `file's function \`f\` (SPEC 6.5, 4.5, 4.6, 5.2)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context} \`check\` immediately after the move — the added import ` +
+        `and the rewritten marker resolve and no staleness remains (SPEC ` +
+        `6.5, 12.2, 14.10)`,
+    );
+  });
+}
+
+const A9_LURE_NAMES = A9_VALUE_LURES.map((binding) => binding.name).join(", ");
+const A9_PARAMETER_LIST = A9_PARAMETER_NAMES.join(", ");
+
+/** The module-scope run: the lures declared at module scope. */
+const A9_MODULE_SCOPE_RUN: A9CodeRun = {
+  context: "T6.5-9",
+  files: A9_FILES,
+  code: a9Code,
+  offsets: A9_AFTER_IMPORT_OFFSETS,
+  where:
+    "the start of the line directly after one of the import declarations " +
+    "heading the file",
+  premise:
+    `its pre-empting module-scope declarations (${A9_LURE_NAMES}, and the ` +
+    `\`type\` alias \`${A9_TYPE_LURE.name}\`) are valid TypeScript`,
+  moveFinding:
+    `; a finding located in ${A8_CODE} at this step points at the added ` +
+    `target-module import binding one of the pre-empted identifiers ` +
+    `(${A9_LURE_NAMES}), the file's pre-existing local uses of that name ` +
+    `then read as value-level uses of a spec binding (SPEC 6.5, 4.5, 14.18)`,
+  compile:
+    `the added target-module import binds an identifier colliding with ` +
+    `none of the file's value-level module-scope bindings (pre-empted: ` +
+    `${A9_LURE_NAMES}; a collision is TS2440 "Import declaration conflicts ` +
+    `with local declaration" or TS2300 "Duplicate identifier"), and the ` +
+    `rewritten marker resolves against the regenerated modules, whose ` +
+    `program type-checks clean (SPEC 6.5, 2.1, 4, 4.5)`,
+};
+
+/**
+ * The parameter run (TEST-SPEC T6.5-9): the same spellings pre-empted by
+ * parameters of `f` alone, each typed `unknown`, no module-scope lure.
+ */
+const A9_PARAMETER_RUN: A9CodeRun = {
+  context: "T6.5-9 parameter run",
+  files: A9_PARAM_FILES,
+  code: a9ParamCode,
+  offsets: A9_PARAM_AFTER_IMPORT_OFFSETS,
+  where:
+    "the start of line 2, directly after the origin import heading the file",
+  premise:
+    `\`f\`'s parameters (${A9_PARAMETER_LIST}), each typed \`unknown\` and ` +
+    `none used, are valid TypeScript`,
+  moveFinding:
+    ` — the parameters and the added top-level import declare their names ` +
+    `in different scopes, so no binding collides (SPEC 4.5)`,
+  compile:
+    `the added target-module import binds an identifier none of \`f\`'s ` +
+    `parameters binds (pre-empted: ${A9_PARAMETER_LIST}; a parameter is ` +
+    `among the declarations an added identifier avoids, in any scope: one ` +
+    `spelling the added binding's name shadows it at the moved marker ` +
+    `standing in \`f\`, rooting the marker at the parameter typed ` +
+    `\`unknown\`, whose property access the compile reports as TS18046 ` +
+    `"'<name>' is of type 'unknown'"), and the rewritten marker resolves ` +
+    `against the regenerated modules, whose program type-checks clean ` +
+    `(SPEC 6.5, 2.1, 2.4, 4, 4.5)`,
+};
+
+// Spec-source arm (TEST-SPEC T6.5-9): the freshness rule's other clauses —
+// an added import's identifiers are distinct from the others added there
+// and, in a spec source, none of the compiler-provided names `S`, `Spec`,
+// `text` (SPEC 6.5, 2.1). A spec target lacking imports of two third
+// modules, `specs/S.mdx` and `specs/text.mdx`, both referenced by the moved
+// text through the origin's bindings (T6.5-10's shape), so that a product
+// deriving identifiers from basenames would bind `S` and `text` (14.15) and
+// one deriving them from a fixed stem would bind one identifier twice
+// (14.15: two imports binding one identifier). After the move `check` is
+// clean, `view` lists the two added declarations under `imports` with
+// distinct `name`s and targets `specs/S.mdx` and `specs/text.mdx`, each
+// moved reference is rooted at the binding of its own module (`query edges`
+// under the new identities), and the declarations stand contiguous in one
+// ESM block (T6.5-13(g)): the target's post-move bytes are composed from the
+// rules of 6.4/6.5 and 3 up to the two fresh identifiers and their order —
+// both read from the result — and the single inserted run is byte-exactly
+// the two declarations on contiguous lines, each followed by U+000A, at a
+// line-start admissible offset (SPEC 6.5: added declarations sharing one
+// offset stand contiguous, in a spec source one ESM block).
+const S9_ORIGIN = "specs/a.mdx";
+const S9_TARGET = "specs/b.mdx";
+/** The third module whose basename is the compiler-provided `S` (2.1). */
+const S9_S = "specs/S.mdx";
+const S9_S_MODULE = "specs/S.xspec";
+/** The third module whose basename is the compiler-provided `text` (2.1). */
+const S9_TEXT = "specs/text.mdx";
+const S9_TEXT_MODULE = "specs/text.xspec";
+const S9_MOVE_ARGV = ["move", "specs/a.mdx#a.mv", "specs/b.mdx#mv"] as const;
+
+const S9_S_SOURCE = ['<S id="foo">', "Foo text.", "</S>", ""].join("\n");
+const S9_TEXT_SOURCE = ['<S id="bar">', "Bar text.", "</S>", ""].join("\n");
+// The spec-source arm follows the code arm's invocations, so its four
+// sources are ledger records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) — S and text kept as strings for the untouched-file
+// compare, their records made from them.
+const S9_S_STAGED = stagedMdx(
+  "T6.5-9 spec-source arm specs/S.mdx",
+  S9_S_SOURCE,
+);
+const S9_TEXT_STAGED = stagedMdx(
+  "T6.5-9 spec-source arm specs/text.mdx",
+  S9_TEXT_SOURCE,
+);
+
+/**
+ * The moved subtree's lines: the head's `d` reference to `S.mdx`'s `foo`
+ * and the leaf's embedding of `text.mdx`'s `bar`, each rooted at a binding
+ * of its own module (`SM` and `TM` in the origin; the two fresh identifiers
+ * in the target), spelled with the subtree's ID prefix.
+ */
+function s9MovedLines(
+  prefix: string,
+  sRoot: string,
+  textRoot: string,
+): string[] {
+  return [
+    `<S id="${prefix}" d={${sRoot}.foo}>`,
+    "Moved head text.",
+    "",
+    `<S id="${prefix}.leaf">`,
+    "Moved leaf text, as specified:",
+    "",
+    `{text(${textRoot}.bar)}`,
+    "</S>",
+    "</S>",
+  ];
+}
+
+// The origin binds both modules under names free in the target (`SM`, `TM`)
+// and keeps a reference through each outside the moved subtree (`a.stay`),
+// so both declarations stay byte-for-byte after the move (SPEC 6.5) and the
+// arm turns on the target's additions alone.
+const S9_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-9 spec-source arm specs/a.mdx",
+  [
+    'import SM from "./S.xspec"',
+    'import TM from "./text.xspec"',
+    "",
+    '<S id="a">',
+    "Origin holder text.",
+    "",
+    ...s9MovedLines("a.mv", "SM", "TM"),
+    "",
+    '<S id="a.stay" d={SM.foo}>',
+    "Staying text, as specified:",
+    "",
+    "{text(TM.bar)}",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// Composed from SPEC 6.5 and 3, no latitude: the moved construct deleted in
+// place, its two emptied lines dropped with their terminators, the blank
+// neighbours kept; both imports kept, their bindings still referenced.
+const S9_ORIGIN_AFTER = [
+  'import SM from "./S.xspec"',
+  'import TM from "./text.xspec"',
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="a.stay" d={SM.foo}>',
+  "Staying text, as specified:",
+  "",
+  "{text(TM.bar)}",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const S9_TARGET_BEFORE = stagedMdx(
+  "T6.5-9 spec-source arm specs/b.mdx",
+  ['<S id="b">', "Target text.", "</S>", ""].join("\n"),
+);
+
+/**
+ * The target's expected post-move bytes WITHOUT the added declarations
+ * (SPEC 6.4/6.5, 3): the moved text appended at end of file plus U+000A,
+ * re-identified by prefix replacement, each third-module reference
+ * re-rooted at the fresh binding of its own module, otherwise byte-identical.
+ */
+const S9_TARGET_BASE = (sRoot: string, textRoot: string): string =>
+  [
+    '<S id="b">',
+    "Target text.",
+    "</S>",
+    ...s9MovedLines("mv", sRoot, textRoot),
+    "",
+  ].join("\n");
+
+const S9_REWRITTEN_DEPENDS = rewrittenRootPattern(
+  String.raw`<S id="mv" d=\{`,
+  String.raw`\.foo\}>`,
+);
+const S9_REWRITTEN_EMBEDS = rewrittenRootPattern(
+  String.raw`\{text\(`,
+  String.raw`\.bar\)\}`,
+);
+
+/** The complete `depends` and `embeds` edge sets after the move (SPEC 6.5, 5.2). */
+const S9_DEPENDS: readonly GraphEdge[] = [
+  { from: `${S9_ORIGIN}#a.stay`, to: `${S9_S}#foo`, kind: "depends" },
+  { from: `${S9_TARGET}#mv`, to: `${S9_S}#foo`, kind: "depends" },
+];
+const S9_EMBEDS: readonly GraphEdge[] = [
+  { from: `${S9_ORIGIN}#a.stay`, to: `${S9_TEXT}#bar`, kind: "embeds" },
+  { from: `${S9_TARGET}#mv.leaf`, to: `${S9_TEXT}#bar`, kind: "embeds" },
+];
+
+/**
+ * The identifier one of the target's rewritten third-module references is
+ * rooted at, read off 6.4's pinned spelling as TypeScript 5.9.3 at ESNext
+ * reads an identifier (SPEC 1.4, 14.20); diagnosed when the reference is
+ * not spelled as 6.4 pins it, or is present more or less than once, or
+ * when its root reads as no identifier.
+ */
+function s9ReferenceRoot(
+  text: string,
+  pattern: RegExp,
+  form: string,
+  context: string,
+): string {
+  const matches = [...text.matchAll(pattern)];
+  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (root === undefined) {
+    fail(
+      `${context}: ${S9_TARGET} must hold exactly one ${form} — the moved ` +
+        `reference rewritten through a binding of its own module in 6.4's ` +
+        `pinned spelling, its access form kept (SPEC 6.5, 6.4); found ` +
+        `${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${S9_TARGET}'s rewritten ${form} must be rooted at the ` +
+      `binding of its own module an added import supplies`,
+  );
+}
+
+const T6_5_9 = defineProductTest({
+  id: "T6.5-9",
+  title:
+    "fresh identifiers in code: T6.5-8's TS arm re-staged (its `specs/origin.mdx`, the plain `specs/target.mdx`, `move specs/origin.mdx#x specs/target.mdx#y`) with a receiving `src/c.ts` that also declares at module scope — as a local `const`, a `function`, a `class`, a `type` alias, and non-spec import bindings, each used trivially — the identifiers a product would plausibly derive for the added target-module import (the target file's basename as written, lower- and upper-cased, `Spec`- and `SPEC`-suffixed, and capitalized; the origin binding's name with a digit and with an underscore appended), the file compiling clean before the move under standard tooling, under both of H-2's configurations, its import declarations — the origin's, then the non-spec lures' — heading it with no blank line after them; after the section move the rewritten file compiles with no diagnostics, its whole program clean, through H-2's standard-tooling channel under both of its configurations (a collision with the `const`, `function`, or `class` is TS2440, with a non-spec import binding TS2300, an unrewritten or misrooted marker a type error against the regenerated modules), so the added identifier is none of the value-level pre-empted names, the `type` alias's name left to T6.5-22(a); the diff-isolated added run is asserted as T6.5-8 asserts it — byte-exactly `import <X> from \"../specs/target.xspec\"` followed by U+000A, the fresh identifier read off the rewritten marker, at the start of the line directly after one of the file's import declarations (the start of line 2 or 3, its line-start admissible offsets); `query edges` reports the moved marker's `references` edge to the moved node's new identity and the unmoved marker's through the retained origin binding, and `check` is clean (SPEC 6.5, 2.1, 4, 4.5, 6.4, 3); the run recurs with the same spellings pre-empted by parameters of `f` alone — T6.5-8's TS arm file with `f`'s parameter list holding every pre-empted spelling, the alias's name and the non-spec import's bindings included, each typed `unknown`, no lure declared at module scope and no non-spec import, the file compiling clean before the move under both configurations — and is asserted alike: after the move the rewritten file compiles with no diagnostics under both configurations, so the added identifier is none of the parameters' names (one would shadow the added binding at the moved marker standing in `f`, rooting the marker at the parameter typed `unknown`, a property access on `unknown` the compile reports, its edge dropped behind a clean `check`), the diff-isolated added run is byte-exactly the declaration followed by U+000A at the start of line 2, the file's one line-start admissible offset, `query edges` reports the same two edges, and `check` is clean (SPEC 6.5, 2.4, 4.5); spec-source arm: a spec target lacking imports of two third modules, `specs/S.mdx` and `specs/text.mdx`, both referenced by the moved text through the origin's bindings, so that a product deriving identifiers from basenames would bind `S` and `text` (14.15) and one deriving them from a fixed stem would bind one identifier twice — after the move `check` is clean, `view` lists the two added declarations under `imports` with distinct `name`s and targets `specs/S.mdx` and `specs/text.mdx`, each moved reference is rooted at the binding of its own module (`query edges` under the new identities), and the declarations stand contiguous in one ESM block (T6.5-13(g)), the single inserted run being byte-exactly the two declarations on contiguous lines, each followed by U+000A, at a line-start offset, in the order the product fixed (SPEC 6.5, 2.1, 11.4)",
+  run: async (product) => {
+    // The code arm: the module-scope run, then its recurrence with the
+    // same spellings pre-empted by parameters of `f` alone.
+    await runA9CodeRun(product, A9_MODULE_SCOPE_RUN);
+    await runA9CodeRun(product, A9_PARAMETER_RUN);
+    {
+      // Spec-source arm: the freshness rule's distinctness and reserved-name
+      // clauses, observable to xspec (14.15) and through `view` (11.4).
+      const context = "T6.5-9 spec-source arm";
+      await withWorkspace(
+        SPECS_MD_CONFIG,
+        {
+          [S9_S]: S9_S_STAGED,
+          [S9_TEXT]: S9_TEXT_STAGED,
+          [S9_ORIGIN]: S9_ORIGIN_BEFORE,
+          [S9_TARGET]: S9_TARGET_BEFORE,
+        },
+        async (workspace) => {
+          // Premise: the staging is valid (every reference resolves), so a
+          // later failure is the move's, not the staging's.
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` over the staging`,
+          );
+          await expectExit(
+            product,
+            workspace,
+            [...S9_MOVE_ARGV],
+            0,
+            `${context} \`move specs/a.mdx#a.mv specs/b.mdx#mv\` — a valid ` +
+              `move over the workspace the premise \`build\` accepted ` +
+              `succeeds (SPEC 6.5); a 14.15 finding at this step points at ` +
+              `an added import binding \`S\` or \`text\` (a ` +
+              `compiler-provided name, 2.1) or at two added imports binding ` +
+              `one identifier (SPEC 6.5, 2.1, 14.15)`,
+          );
+          await expectExit(
+            product,
+            workspace,
+            ["check"],
+            0,
+            `${context} \`check\` immediately after the move — the two ` +
+              `added imports bind distinct identifiers, none of them a ` +
+              `compiler-provided name (no 14.15), every rewritten reference ` +
+              `resolves through its binding, and no staleness remains (SPEC ` +
+              `6.5, 2.1, 12.2, 14.10, 14.15)`,
+          );
+
+          // The fresh identifiers, read off the rewritten references in
+          // 6.4's pinned spelling: one per module.
+          const text = await readSourceText(workspace, S9_TARGET, context);
+          const sRoot = s9ReferenceRoot(
+            text,
+            S9_REWRITTEN_DEPENDS,
+            '`<S id="mv" d={<binding>.foo}>`',
+            context,
+          );
+          const textRoot = s9ReferenceRoot(
+            text,
+            S9_REWRITTEN_EMBEDS,
+            "`{text(<binding>.bar)}`",
+            context,
+          );
+          if (sRoot === textRoot) {
+            fail(
+              `${context}: both moved references are rooted at ` +
+                `\`${sRoot}\` while they need bindings of two modules, ` +
+                `${S9_S}'s and ${S9_TEXT}'s — the identifiers of the imports ` +
+                `added to one file are distinct from each other (SPEC 6.5, ` +
+                `2.1; two imports binding one identifier is 14.15)`,
+            );
+          }
+          for (const [root, module] of [
+            [sRoot, S9_S],
+            [textRoot, S9_TEXT],
+          ] as const) {
+            const reserved = A8_MDX_RESERVED.find(
+              (entry) => entry.name === root,
+            );
+            if (reserved !== undefined) {
+              fail(
+                `${context}: the import added for ${module}'s module binds ` +
+                  `\`${reserved.name}\`, ${reserved.why} — in a spec source ` +
+                  `an added import's identifiers are none of the ` +
+                  `compiler-provided names, whatever the module's basename ` +
+                  `(SPEC 6.5, 2.1, 14.15)`,
+              );
+            }
+          }
+
+          // `view`: the two added declarations, distinct names, each the
+          // binding the moved reference to its module is rooted at.
+          const viewLabel = `${context} \`view ${S9_TARGET} --json\``;
+          const view = decodeViewReport(
+            await runJson(
+              product,
+              workspace,
+              ["view", S9_TARGET, "--json"],
+              viewLabel,
+            ),
+            { text: false },
+            viewLabel,
+          );
+          assertSameJson(
+            view.findings,
+            [],
+            `${viewLabel}: a \`view\` of the rewritten target on the valid ` +
+              `workspace the move left reports findings [] (SPEC 11.4, 6.5)`,
+          );
+          const fileView = view.views.length === 1 ? view.views[0] : undefined;
+          if (fileView === undefined || fileView.file !== S9_TARGET) {
+            fail(
+              `${viewLabel}: \`views\` holds exactly the one requested, ` +
+                `parseable file ${S9_TARGET} (SPEC 11.4); got ` +
+                `[${view.views.map((entry) => renderPathValue(entry.file)).join(", ")}]`,
+            );
+          }
+          const listed = fileView.imports.map((entry) => ({
+            name: entry.name,
+            target: entry.target,
+          }));
+          const names = new Map<string, string | null>();
+          for (const entry of listed) {
+            if (typeof entry.target === "string")
+              names.set(entry.target, entry.name);
+          }
+          if (
+            listed.length !== 2 ||
+            names.size !== 2 ||
+            names.get(S9_S) !== sRoot ||
+            names.get(S9_TEXT) !== textRoot
+          ) {
+            fail(
+              `${viewLabel}: \`imports\` lists exactly the two added ` +
+                `declarations — the file having lacked any import — with ` +
+                `distinct \`name\`s, each the binding the moved reference ` +
+                `to its module is rooted at (\`${sRoot}\` for ${S9_S}, ` +
+                `\`${textRoot}\` for ${S9_TEXT}), and \`target\`s the two ` +
+                `third modules (SPEC 6.5, 2.1, 11.4); got ` +
+                `${JSON.stringify(listed)}`,
+            );
+          }
+
+          // Contiguous in one ESM block (T6.5-13(g)): the two declarations,
+          // in the order the product fixed (read from the result), are the
+          // single run inserted into the composed base — each followed by
+          // U+000A, no empty line between — at a line-start offset.
+          const importerDir = posixPath.dirname(S9_TARGET);
+          const sDeclaration = `import ${sRoot} from "${canonicalSpecifier(importerDir, S9_S_MODULE)}"`;
+          const textDeclaration = `import ${textRoot} from "${canonicalSpecifier(importerDir, S9_TEXT_MODULE)}"`;
+          const ordered =
+            text.indexOf(sDeclaration) < text.indexOf(textDeclaration)
+              ? [sDeclaration, textDeclaration]
+              : [textDeclaration, sDeclaration];
+          const readings = assertExactDeclarationInsertion(
+            {
+              rel: S9_TARGET,
+              base: Buffer.from(S9_TARGET_BASE(sRoot, textRoot), "utf8"),
+              actual: await workspace.readBytes(S9_TARGET),
+              declaration: ordered.join("\n"),
+            },
+            `${context}: ${S9_TARGET} after the move is its composed ` +
+              `post-move bytes with the two added declarations as one ` +
+              `inserted run — \`${ordered[0]}\`, U+000A, \`${ordered[1]}\`, ` +
+              `U+000A: 6.5's exact spelling, on contiguous lines with no ` +
+              `empty line between, one ESM block (T6.5-13(g)), in the order ` +
+              `the product fixed — and no other byte inserted (SPEC 6.5, ` +
+              `2.1, 6.4, 3)`,
+          );
+          if (!readings.some((reading) => reading.atLineStart)) {
+            fail(
+              `${context}: the added declarations' run is inserted at no ` +
+                `line-start offset of ${S9_TARGET} — an admissible offset ` +
+                `at the start of a line, the file's end after its final ` +
+                `terminator included, is taken over any other (SPEC 6.5); ` +
+                `read at offset(s) ` +
+                `${readings.map((reading) => String(reading.offset)).join(", ")}`,
+            );
+          }
+
+          await assertRewrittenSpecDerives(workspace, S9_TARGET, context);
+
+          await assertFileBytes(
+            workspace.path(S9_ORIGIN),
+            S9_ORIGIN_AFTER,
+            `${context}: ${S9_ORIGIN} after the move — the moved section ` +
+              `deleted in place with its emptied lines dropped, the blank ` +
+              `neighbours kept, both imports kept byte-for-byte, their ` +
+              `bindings still referenced by \`a.stay\` (SPEC 6.5, 2.1, 3; ` +
+              `H-4, normalizing nothing)`,
+          );
+          for (const [rel, source] of [
+            [S9_S, S9_S_SOURCE],
+            [S9_TEXT, S9_TEXT_SOURCE],
+          ] as const) {
+            await assertFileBytes(
+              workspace.path(rel),
+              source,
+              `${context}: ${rel} after the move — a third module whose ` +
+                `node is referenced but not moved, untouched (SPEC 6.5; H-4)`,
+            );
+          }
+          assertEdgeSetEqual(
+            await queryEdgesOfKind(product, workspace, "depends", context),
+            S9_DEPENDS,
+            `${context}: the complete \`depends\` edge set after the move — ` +
+              `the moved head's \`d={…foo}\` reported under its new ` +
+              `identity to ${S9_S}#foo through the binding added for that ` +
+              `module, \`a.stay\`'s edge unchanged (SPEC 6.5, 5.2)`,
+          );
+          assertEdgeSetEqual(
+            await queryEdgesOfKind(product, workspace, "embeds", context),
+            S9_EMBEDS,
+            `${context}: the complete \`embeds\` edge set after the move — ` +
+              `the moved leaf's \`{text(…bar)}\` reported under its new ` +
+              `identity to ${S9_TEXT}#bar through the binding added for ` +
+              `that module, \`a.stay\`'s edge unchanged (SPEC 6.5, 5.2, 2.3)`,
+          );
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` after the move — the rewritten workspace ` +
+              `is valid, the embedding's expansion included (SPEC 6.5, ` +
+              `12.1, 3)`,
+          );
+        },
+      );
+    }
+  },
+});
+
+// T6.5-10 — Third-module bindings carried with moved text (TEST-SPEC
+// T6.5-10). A reference inside the moved text need not target a moved node
+// to need rewriting: an imported-form reference to a node of a spec module
+// `X` that is neither origin nor target — `d={X.foo}`, `{text(X["bar-baz"])}`
+// — is bound by the origin file's import of `X`, which the moved text leaves
+// behind, so in the target file it needs a binding of `X`'s module (SPEC
+// 6.5: an import is added when a rewritten reference needs a module binding
+// its file lacks — and only then, the reading T6.5-7's TS arm pins for
+// markers rewritten through an existing binding). T6.5-7 keeps its
+// third-module reference outside the moved subtree and T6.5-8's conversions
+// are local↔imported alone, so no fixture of theirs meets this shape. Four
+// section-move arms over three spec sources in one directory — origin
+// `specs/a.mdx`, target `specs/b.mdx`, and `specs/x.mdx`; (c) and its
+// sibling adding a fourth, `specs/z.mdx` — each moving
+// `a.mv` to the top-level `mv` of the target, where the moved head carries
+// `d={X.foo}` and the moved leaf embeds `{text(X["bar-baz"])}` (a
+// double-quoted computed segment: `bar-baz` is a valid ID, 1.4, that is not
+// a TypeScript identifier, 2.4), and no reference to a moved node lies
+// outside the subtree:
+// - (a) value-blind, T6.5-8's discipline: the target, an existing discovered
+//   source, holds no import of `x.mdx`'s module, and the origin's only
+//   references through `X` lie inside the moved subtree. The target's
+//   post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the
+//   fresh identifier — read off the rewritten `d` reference in 6.4's pinned
+//   spelling and cross-checked against the rewritten embedding; `X` itself
+//   admissible, being fresh in that file — and the insertion offset,
+//   `assertAddedImportInsertion` isolating the single inserted run as
+//   byte-exactly `import <X> from "./x.xspec"` followed by U+000A at a
+//   line-start offset (6.5's spelling and line discipline, T6.5-8); the
+//   origin loses the section and, its `X` binding left
+//   without references, its own-line `X` declaration with the line's
+//   terminator (6.5's exact extent, T6.5-7), and is otherwise
+//   byte-identical.
+// - (b) byte-composable, no latitude: the target already imports `x.mdx`'s
+//   module as `Z`, referenced by a section of its own, and the origin keeps
+//   a reference through `X` outside the moved subtree. No import is added
+//   (the file lacks no binding of the module), each moved reference is
+//   re-rooted to `Z` with quote style and access form kept (`X.foo` →
+//   `Z.foo`, `X["bar-baz"]` → `Z["bar-baz"]`; 6.4: minimal in-place edits),
+//   the origin's `X` declaration stays byte-for-byte, and the rewritten
+//   origin and target are each asserted byte-equal to composed expectations.
+// - (c) the identifier bound to another module, value-blind ((a)'s
+//   discipline): the target holds `import X from "./z.xspec"`, `z.mdx` a
+//   fourth source spelling `q` and `foo`, and uses that binding in a section
+//   of its own (`d={X.q}`) while holding no binding of `x.mdx`'s module, the
+//   origin staged as (a). `z.mdx`'s `foo` is the lure for a product that
+//   keeps a moved spelling wherever the target binds its root identifier,
+//   whatever module the binding designates. The single added run is
+//   byte-exactly `import <F> from "./x.xspec"` plus U+000A at a line-start
+//   offset, `<F>` read from the declaration and asserted distinct from `X`
+//   (6.5, 2.1: fresh), each moved spelling re-rooted to `<F>` with its
+//   access form kept, the target's own `X.q` and its `z` declaration
+//   byte-untouched, the origin as in (a).
+// - (c)'s sibling: the target additionally binds `x.mdx`'s module as `Z`,
+//   used by a section of its own ((b)'s shape, the origin staged as (b)):
+//   nothing added, each moved spelling re-rooted to `Z`, `X.q` and both
+//   declarations byte-untouched — (b)'s whole-file contract.
+// In (a) and (c) the rewritten target is additionally judged under the
+// stock MDX 3 grammar (S-9): 6.5 adds a declaration only at an admissible
+// offset, and a product's own `check` cannot judge that where its grammar
+// is wider than 14.20's; and the preview's rewrite reporting follows the
+// identifier the real run chose (6.5: a rewrite is made, and reported,
+// exactly when it changes the construct's characters, read with the chosen
+// binding in place): inside the origin deletion's range its
+// `reference-rewrite` edits are exactly the two moved spellings' occurrence
+// spans when that identifier is not `X` and none when it is, the target's
+// `import-addition` reported either way.
+// In every arm `x.mdx` is a bystander asserted untouched, `query edges`
+// reports the moved nodes' `depends` and `embeds` edges under their new
+// identities to `x.mdx`'s unchanged nodes (the complete set of each kind),
+// and `check` and `build` are clean (6.5: a successful move's finishing
+// regeneration runs on a valid workspace; Markdown emission is enabled so
+// the embedding's expansion is regenerated as well, 3). A product converting
+// only between local and imported forms leaves `X.foo` unbound in the
+// target — an invalid workspace behind a reported success — and fails (a)
+// and (b); one adding a second import of a module the target already binds
+// fails (b)'s whole-file contract and (c)'s sibling's; one rooting by
+// identifier name rather than by module passes (a), where `X` is free, and
+// (b), where it is absent, and fails (c)'s byte and edge contracts.
+const C10_ORIGIN = "specs/a.mdx";
+const C10_TARGET = "specs/b.mdx";
+const C10_THIRD = "specs/x.mdx";
+const C10_THIRD_MODULE = "specs/x.xspec";
+
+const C10_MOVE_ARGV = ["move", "specs/a.mdx#a.mv", "specs/b.mdx#mv"] as const;
+
+// The third module: `foo` (identifier-valid) and `bar-baz` (a valid ID that
+// is not a TypeScript identifier, reachable only by computed access; SPEC
+// 1.4, 2.4). Neither is moved, so both keep their identities.
+const C10_THIRD_SOURCE = [
+  '<S id="foo">',
+  "Foo text.",
+  "</S>",
+  "",
+  '<S id="bar-baz">',
+  "Bar baz text.",
+  "</S>",
+  "",
+].join("\n");
+// T6.5-10's stagings: arm (a)'s workspace is the body's first; arms (b),
+// (c), and (c)'s sibling follow its invocations, so every `.mdx` source is a
+// ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
+// (a)'s converted uniformly — the third and fourth sources and (a)'s origin
+// kept as strings for the untouched-file compares and the occurrence spans,
+// their records made from them; identical bytes staged by several arms are
+// one record each.
+const C10_THIRD_STAGED = stagedMdx(
+  "T6.5-10 every arm's third module specs/x.mdx",
+  C10_THIRD_SOURCE,
+);
+
+/**
+ * The moved subtree's lines, spelled with its ID prefix (`a.mv` in the
+ * origin, `mv` after re-identification in the target) and the binding its
+ * third-module references are rooted at (`X` in the origin; the fresh
+ * identifier or the existing `Z` in the target), the access forms kept:
+ * dot access for `foo`, double-quoted computed access for `bar-baz` (SPEC
+ * 6.5, 6.4, 2.4).
+ */
+function c10MovedLines(prefix: string, root: string): string[] {
+  return [
+    `<S id="${prefix}" d={${root}.foo}>`,
+    "Moved head text.",
+    "",
+    `<S id="${prefix}.leaf">`,
+    "Moved leaf text, as specified:",
+    "",
+    `{text(${root}["bar-baz"])}`,
+    "</S>",
+    "</S>",
+  ];
+}
+
+// Arm (a). The origin's `X` import is the first line, alone; its only
+// references through `X` are the moved subtree's two.
+const C10_A_ORIGIN_BEFORE = [
+  'import X from "./x.xspec"',
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  ...c10MovedLines("a.mv", "X"),
+  "</S>",
+  "",
+].join("\n");
+const C10_A_ORIGIN_STAGED = stagedMdx(
+  "T6.5-10 arms (a) and (c) specs/a.mdx",
+  C10_A_ORIGIN_BEFORE,
+);
+
+// Composed from SPEC 6.5 and 3, no latitude: the moved construct deleted in
+// place, the lines holding its opening and closing tags (left empty) dropped
+// with their terminators, the blank neighbours kept; the `X` binding left
+// without references, so its declaration is deleted in place and its
+// emptied line dropped with its U+000A — the blank line that followed it
+// stays, so the file now opens with that terminator (T6.5-7's exact extent).
+const C10_A_ORIGIN_AFTER = [
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  "</S>",
+  "",
+].join("\n");
+
+const C10_A_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (a) specs/b.mdx",
+  ['<S id="b">', "Target text.", "</S>", ""].join("\n"),
+);
+
+// The target's expected post-move bytes WITHOUT the added import (SPEC
+// 6.4/6.5): the moved text appended at end of file (the insertion point at
+// the start of a line, so no preceding terminator) plus U+000A, its `id`s
+// re-identified by prefix replacement, each third-module reference re-rooted
+// at the fresh binding with its access form kept, otherwise byte-identical.
+const C10_A_TARGET_BASE = (root: string): string =>
+  ['<S id="b">', "Target text.", "</S>", ...c10MovedLines("mv", root), ""].join(
+    "\n",
+  );
+
+const C10_REWRITTEN_DEPENDS = rewrittenRootPattern(
+  String.raw`<S id="mv" d=\{`,
+  String.raw`\.foo\}>`,
+);
+const C10_REWRITTEN_EMBEDS = rewrittenRootPattern(
+  String.raw`\{text\(`,
+  String.raw`\["bar-baz"\]\)\}`,
+);
+
+// Arm (b). The origin keeps `a.stay`'s reference through `X` outside the
+// moved subtree; the target already binds `x.mdx`'s module as `Z`, used by
+// its own section.
+const C10_B_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-10 arms (b) and (c)-sibling specs/a.mdx",
+  [
+    'import X from "./x.xspec"',
+    "",
+    '<S id="a">',
+    "Origin holder text.",
+    "",
+    ...c10MovedLines("a.mv", "X"),
+    "",
+    '<S id="a.stay" d={X.foo}>',
+    "Staying text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// Composed from SPEC 6.5 and 3: the moved construct deleted in place with
+// its two emptied lines dropped, the blank neighbours kept; the `X` binding
+// keeps `a.stay`'s reference, so its declaration stays byte-for-byte.
+const C10_B_ORIGIN_AFTER = [
+  'import X from "./x.xspec"',
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="a.stay" d={X.foo}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const C10_B_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (b) specs/b.mdx",
+  [
+    'import Z from "./x.xspec"',
+    "",
+    '<S id="b" d={Z.foo}>',
+    "Target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// Composed from SPEC 6.5 and 6.4, no latitude: the moved text appended at
+// end of file plus U+000A, re-identified, each third-module reference
+// re-rooted at the existing `Z` binding with quote style and access form
+// kept; no import added, the existing import and `b` byte-for-byte.
+const C10_B_TARGET_AFTER = [
+  'import Z from "./x.xspec"',
+  "",
+  '<S id="b" d={Z.foo}>',
+  "Target text.",
+  "</S>",
+  ...c10MovedLines("mv", "Z"),
+  "",
+].join("\n");
+
+// Arm (c) and its sibling. The fourth source `z.mdx` spells `q` and `foo` —
+// `foo` the lure for a product that keeps a moved spelling wherever the
+// target binds its root identifier, whatever module the binding designates:
+// `X.foo` left untouched then names `z.mdx`'s `foo`, a silent retarget
+// behind a reported success, `check` clean.
+const C10_FOURTH = "specs/z.mdx";
+const C10_FOURTH_SOURCE = [
+  '<S id="q">',
+  "Q text.",
+  "</S>",
+  "",
+  '<S id="foo">',
+  "Foo lure text.",
+  "</S>",
+  "",
+].join("\n");
+const C10_FOURTH_STAGED = stagedMdx(
+  "T6.5-10 arms (c) and (c)-sibling specs/z.mdx",
+  C10_FOURTH_SOURCE,
+);
+
+// (c): the target binds `X` itself to `z.mdx`'s module, used by its own
+// section, and holds no binding of `x.mdx`'s module; the origin is (a)'s.
+const C10_C_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (c) specs/b.mdx",
+  [
+    'import X from "./z.xspec"',
+    "",
+    '<S id="b" d={X.q}>',
+    "Target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// The target's expected post-move bytes WITHOUT the added import (SPEC
+// 6.4/6.5, 3): the moved text appended at end of file plus U+000A,
+// re-identified, each third-module reference re-rooted at the fresh binding
+// with its access form kept (`<F>.foo`, `<F>["bar-baz"]`), the target's own
+// `X.q` and its `z` declaration byte-untouched.
+const C10_C_TARGET_BASE = (root: string): string =>
+  [
+    'import X from "./z.xspec"',
+    "",
+    '<S id="b" d={X.q}>',
+    "Target text.",
+    "</S>",
+    ...c10MovedLines("mv", root),
+    "",
+  ].join("\n");
+
+// (c)'s sibling: the target additionally binds `x.mdx`'s module as `Z`,
+// used by a section of its own ((b)'s shape; the origin staged as (b)), so
+// nothing is added and each moved spelling is re-rooted to `Z` — (b)'s
+// whole-file contract, `X.q` and both declarations byte-untouched.
+const C10_CS_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (c) sibling specs/b.mdx",
+  [
+    'import X from "./z.xspec"',
+    'import Z from "./x.xspec"',
+    "",
+    '<S id="b" d={X.q}>',
+    "Target text.",
+    "</S>",
+    "",
+    '<S id="c" d={Z.foo}>',
+    "Other text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const C10_CS_TARGET_AFTER = [
+  'import X from "./z.xspec"',
+  'import Z from "./x.xspec"',
+  "",
+  '<S id="b" d={X.q}>',
+  "Target text.",
+  "</S>",
+  "",
+  '<S id="c" d={Z.foo}>',
+  "Other text.",
+  "</S>",
+  ...c10MovedLines("mv", "Z"),
+  "",
+].join("\n");
+
+/** The target's own section's edge to the fourth source, standing as before. */
+const C10_TARGET_OWN_DEPENDS: GraphEdge = {
+  from: `${C10_TARGET}#b`,
+  to: `${C10_FOURTH}#q`,
+  kind: "depends",
+};
+
+/** The moved nodes' edges under their new identities (SPEC 6.5, 5.2). */
+const C10_MOVED_DEPENDS: GraphEdge = {
+  from: `${C10_TARGET}#mv`,
+  to: `${C10_THIRD}#foo`,
+  kind: "depends",
+};
+const C10_MOVED_EMBEDS: GraphEdge = {
+  from: `${C10_TARGET}#mv.leaf`,
+  to: `${C10_THIRD}#bar-baz`,
+  kind: "embeds",
+};
+
+/**
+ * The identifier one of the target's rewritten third-module references is
+ * rooted at, read off 6.4's pinned spelling as TypeScript 5.9.3 at ESNext
+ * reads an identifier (SPEC 1.4, 14.20); diagnosed when the reference is
+ * not spelled as 6.4 pins it, or is present more or less than once, or
+ * when its root reads as no identifier.
+ */
+function c10ReferenceRoot(
+  text: string,
+  pattern: RegExp,
+  form: string,
+  context: string,
+): string {
+  const matches = [...text.matchAll(pattern)];
+  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (root === undefined) {
+    fail(
+      `${context}: ${C10_TARGET} must hold exactly one ${form} — the moved ` +
+        `reference to ${C10_THIRD}'s node rewritten through a binding of ` +
+        `its module in 6.4's pinned spelling, its access form kept (dot ` +
+        `access for the identifier-valid segment, double-quoted computed ` +
+        `access for the other; SPEC 6.5, 6.4); found ` +
+        `${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  return expectFreshIdentifier(
+    root,
+    `${context}: ${C10_TARGET}'s rewritten ${form} must be rooted at a ` +
+      `binding of ${C10_THIRD}'s module`,
+  );
+}
+
+/**
+ * The guards shared by both arms after the move: the third module untouched,
+ * the complete `depends` and `embeds` edge sets exact — the moved nodes'
+ * edges reported under their new identities to `x.mdx`'s unchanged nodes —
+ * and `check` and `build` clean on the rewritten workspace.
+ */
+async function c10AssertPostMove(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  edges: { depends: readonly GraphEdge[]; embeds: readonly GraphEdge[] },
+  context: string,
+): Promise<void> {
+  await assertFileBytes(
+    workspace.path(C10_THIRD),
+    C10_THIRD_SOURCE,
+    `${context}: ${C10_THIRD} after the move — the third module, whose ` +
+      `nodes are referenced but not moved, untouched (SPEC 6.5; H-4)`,
+  );
+  assertEdgeSetEqual(
+    await queryEdgesOfKind(product, workspace, "depends", context),
+    edges.depends,
+    `${context}: the complete \`depends\` edge set after the move — the ` +
+      `moved head's \`d={…foo}\` reported under its new identity to ` +
+      `${C10_THIRD}#foo, every other edge unchanged (SPEC 6.5, 5.2)`,
+  );
+  assertEdgeSetEqual(
+    await queryEdgesOfKind(product, workspace, "embeds", context),
+    edges.embeds,
+    `${context}: the complete \`embeds\` edge set after the move — the ` +
+      `moved leaf's \`{text(…["bar-baz"])}\` reported under its new ` +
+      `identity to ${C10_THIRD}#bar-baz (SPEC 6.5, 5.2, 2.3)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["check"],
+    0,
+    `${context} \`check\` immediately after the move — every rewritten ` +
+      `reference resolves through its file's binding of ${C10_THIRD}'s ` +
+      `module and no staleness remains (SPEC 6.5, 12.2, 14.10)`,
+  );
+  await buildOk(
+    product,
+    workspace,
+    `${context} \`build\` after the move — the rewritten workspace is ` +
+      `valid, the embedding's expansion included (SPEC 6.5, 12.1, 3)`,
+  );
+}
+
+/**
+ * The moved spellings' occurrence spans in the (a)-staged origin (SPEC 5.7:
+ * a `d` reference occurrence spans that one reference's own expression; an
+ * MDX embedding occurrence spans the entire `{text(...)}` container), in
+ * pre-operation byte coordinates — the origin is ASCII, so string indices
+ * are byte offsets — ordered by range start as 12.7 orders edits.
+ */
+function c10MovedOccurrenceSpans(): readonly { start: number; end: number }[] {
+  const origin = C10_A_ORIGIN_BEFORE;
+  const head = '<S id="a.mv" d={X.foo}>';
+  const headAt = origin.indexOf(head);
+  const embed = '{text(X["bar-baz"])}';
+  const embedAt = origin.indexOf(embed);
+  if (headAt < 0 || embedAt < 0) {
+    throw new Error(
+      "T6.5-10 fixture: the moved spellings are not in the origin",
+    );
+  }
+  const dAt = headAt + head.indexOf("X.foo");
+  return [
+    { start: dAt, end: dAt + "X.foo".length },
+    { start: embedAt, end: embedAt + embed.length },
+  ];
+}
+
+/**
+ * The preview's plan for the move (SPEC 6.6, 12.7): findings [] — a preview
+ * succeeds exactly when the real operation would proceed — and its `files`,
+ * kept for the rewrite reporting, which is read against the identifier the
+ * real run then chooses.
+ */
+async function c10PreviewFiles(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<readonly PreviewFileEntry[]> {
+  const label = `${context} \`${C10_MOVE_ARGV.join(" ")} --preview --json\``;
+  const preview = decodePreviewReport(
+    await runJson(
+      product,
+      workspace,
+      [...C10_MOVE_ARGV, "--preview", "--json"],
+      label,
+    ),
+    label,
+  );
+  assertSameJson(
+    preview.findings,
+    [],
+    `${label}: a valid move's preview completes with findings [] (SPEC 6.5, 6.6)`,
+  );
+  if (preview.mapping === null || preview.files === null) {
+    fail(
+      `${label}: the completed preview reports its plan — \`mapping\` and ` +
+        `\`files\` non-null (SPEC 6.6, 12.7)`,
+    );
+  }
+  return preview.files;
+}
+
+/**
+ * The preview's rewrite reporting for a move carrying third-module
+ * references into a target lacking the module's binding (SPEC 6.5: a
+ * rewrite is made, and reported, exactly when it changes the construct's
+ * characters, read with the chosen binding in place, an added declaration's
+ * included; 6.6): inside the origin deletion's range (T6.6-4(b)), the
+ * `reference-rewrite` edits are exactly the two moved spellings' occurrence
+ * spans when the identifier the real run chose differs from `X`, and none
+ * when it is `X` — the spellings then already resolving in the form they are
+ * rooted at, neither rewritten nor reported — while the target's one
+ * `import-addition` is reported either way, a zero-length range at its
+ * insertion offset (6.6). Other classes (the origin deletion itself, the
+ * `id-rewrite`s of the re-identification, the target insertion) are T6.6-4's.
+ */
+function c10AssertPreviewRewrites(
+  files: readonly PreviewFileEntry[],
+  root: string,
+  context: string,
+): void {
+  const label = `${context} preview`;
+  const origin = files.find((entry) => entry.file === C10_ORIGIN);
+  const target = files.find((entry) => entry.file === C10_TARGET);
+  if (origin === undefined || target === undefined) {
+    fail(
+      `${label}: \`files\` holds an entry for the origin ${C10_ORIGIN} (its ` +
+        `deletion and the moved text's rewrites) and one for the target ` +
+        `${C10_TARGET} (its insertion and import addition) (SPEC 6.6, 12.7); ` +
+        `got [${files.map((entry) => renderPathValue(entry.file)).join(", ")}]`,
+    );
+  }
+  const deletions = origin.edits.filter(
+    (edit) => edit.class === "origin-deletion",
+  );
+  const deletion = deletions.length === 1 ? deletions[0]?.range : undefined;
+  if (deletion === undefined) {
+    fail(
+      `${label}: ${C10_ORIGIN} — exactly one \`origin-deletion\` edit, the ` +
+        `one range spanning every byte the origin edit removes (SPEC 6.6); ` +
+        `got ${String(deletions.length)}`,
+    );
+  }
+  const rewrites = origin.edits
+    .filter((edit) => edit.class === "reference-rewrite")
+    .map((edit) => ({ start: edit.range.start, end: edit.range.end }));
+  assertSameJson(
+    rewrites,
+    root === "X" ? [] : c10MovedOccurrenceSpans(),
+    root === "X"
+      ? `${label}: ${C10_ORIGIN} — the real run rooted the moved spellings ` +
+          `at \`X\`, the identifier they already spell, so no ` +
+          `\`reference-rewrite\` is reported: a rewrite is made, and ` +
+          `reported, exactly when it changes the construct's characters, ` +
+          `read with the chosen binding in place (SPEC 6.5, 6.6)`
+      : `${label}: ${C10_ORIGIN} — the real run rooted the moved spellings ` +
+          `at \`${root}\`, so its \`reference-rewrite\` edits are exactly ` +
+          `the two moved spellings' occurrence spans (5.7: the \`d\` ` +
+          `reference's own expression \`X.foo\`; the whole ` +
+          `\`{text(X["bar-baz"])}\` container), in pre-operation ` +
+          `coordinates, ordered by range start (SPEC 6.5, 6.6, 12.7)`,
+  );
+  for (const rewrite of rewrites) {
+    if (rewrite.start < deletion.start || rewrite.end > deletion.end) {
+      fail(
+        `${label}: ${C10_ORIGIN} — the moved text's rewrites locate inside ` +
+          `the origin deletion's range [${String(deletion.start)}, ` +
+          `${String(deletion.end)}) (SPEC 6.6; T6.6-4(b)); ` +
+          `[${String(rewrite.start)}, ${String(rewrite.end)}) does not`,
+      );
+    }
+  }
+  const additions = target.edits.filter(
+    (edit) => edit.class === "import-addition",
+  );
+  if (
+    additions.length !== 1 ||
+    additions[0]?.range.start !== additions[0]?.range.end
+  ) {
+    fail(
+      `${label}: ${C10_TARGET} — exactly one \`import-addition\` edit, the ` +
+        `declaration the target needs for ${C10_THIRD}'s module, a ` +
+        `zero-length range at its insertion offset (SPEC 6.5, 6.6); got ` +
+        `${JSON.stringify(additions.map((edit) => edit.range))}`,
+    );
+  }
+}
+
+const T6_5_10 = defineProductTest({
+  id: "T6.5-10",
+  title:
+    "third-module bindings carried with moved text: four section-move arms over three spec sources in one directory (origin `a.mdx`, target `b.mdx`, and `x.mdx`; (c) and its sibling adding a fourth, `z.mdx`), the moved subtree holding a `d={X.foo}` reference and a `{text(X[\"bar-baz\"])}` embedding through the origin's `X` binding and no reference to a moved node lying outside it — (a) value-blind: the target holds no import of `x.mdx`'s module and the origin's only `X` references lie in the moved subtree, so the target's post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten references in 6.4's pinned spelling, `X` itself admissible) and the insertion offset, the single inserted run isolated by diff being byte-exactly `import <X> from \"./x.xspec\"` followed by U+000A at a line-start offset (6.5's spelling and line discipline, T6.5-8), each moved reference rooted at its binding with access form kept, while the origin loses the section and its own-line `X` declaration with the line's terminator and is otherwise byte-identical; (b) byte-composable: the target already imports `x.mdx`'s module as `Z`, referenced by its own section, and the origin keeps an `X` reference outside the subtree, so no import is added, `X.foo` → `Z.foo` and `X[\"bar-baz\"]` → `Z[\"bar-baz\"]`, the origin's `X` declaration stays, and both files are byte-equal to composed expectations; in both arms `x.mdx` is untouched, `query edges` reports the moved nodes' `depends` and `embeds` edges under their new identities to `x.mdx`'s unchanged nodes, and `check` and `build` are clean; (c) the identifier bound to another module, value-blind: the target holds `import X from \"./z.xspec\"`, `z.mdx` a fourth source spelling `q` and `foo` (the lure for a product rooting by identifier name rather than by module), and uses it in a section of its own (`d={X.q}`) while holding no binding of `x.mdx`'s module, the origin staged as (a) — the single added run is byte-exactly `import <F> from \"./x.xspec\"` plus U+000A at a line-start offset with `<F>` distinct from `X`, each moved spelling re-rooted to `<F>` with its access form kept, `X.q` and the `z` declaration byte-untouched, the origin as in (a); and its sibling, the target additionally binding `x.mdx`'s module as `Z` used by a section of its own (the origin staged as (b)), adding nothing and re-rooting each moved spelling to `Z` — (b)'s whole-file contract; in (a) and (c) the rewritten target derives under the stock MDX 3 grammar (the added declaration at an admissible offset, S-9) and the preview's rewrite reporting follows the identifier the real run chose — inside the origin deletion's range exactly the two moved spellings' occurrence spans as `reference-rewrite`s when it is not `X` and none when it is, the target's one `import-addition` either way — and the moved nodes' edges go to `x.mdx`'s nodes alone, the target's own edge to `specs/z.mdx#q` standing as before (SPEC 6.5, 6.4, 6.6, 2.1, 3, 5.7; H-4, normalizing nothing)",
+  run: async (product) => {
+    {
+      const context = "T6.5-10 arm (a) value-blind";
+      await withWorkspace(
+        SPECS_MD_CONFIG,
+        {
+          [C10_THIRD]: C10_THIRD_STAGED,
+          [C10_ORIGIN]: C10_A_ORIGIN_STAGED,
+          [C10_TARGET]: C10_A_TARGET_BEFORE,
+        },
+        async (workspace) => {
+          // Premise: the staging is valid (every reference resolves), so a
+          // later failure is the move's, not the staging's.
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` over the staging`,
+          );
+          const files = await c10PreviewFiles(product, workspace, context);
+          await expectExit(
+            product,
+            workspace,
+            [...C10_MOVE_ARGV],
+            0,
+            `${context} \`move specs/a.mdx#a.mv specs/b.mdx#mv\``,
+          );
+
+          const text = await readSourceText(workspace, C10_TARGET, context);
+          const root = c10ReferenceRoot(
+            text,
+            C10_REWRITTEN_DEPENDS,
+            '`<S id="mv" d={<binding>.foo}>`',
+            context,
+          );
+          const embedRoot = c10ReferenceRoot(
+            text,
+            C10_REWRITTEN_EMBEDS,
+            '`{text(<binding>["bar-baz"])}`',
+            context,
+          );
+          if (embedRoot !== root) {
+            fail(
+              `${context}: the moved references are rooted at different ` +
+                `identifiers — the \`d\` reference at ${JSON.stringify(root)}, ` +
+                `the embedding at ${JSON.stringify(embedRoot)} — while both ` +
+                `were bound by the origin's one \`X\` import and need the ` +
+                `one binding of ${C10_THIRD}'s module the added import ` +
+                `supplies (SPEC 6.5, 2.1)`,
+            );
+          }
+          for (const forbidden of A8_MDX_RESERVED) {
+            if (root === forbidden.name) {
+              fail(
+                `${context}: the added import binds \`${forbidden.name}\`, ` +
+                  `${forbidden.why} — an added import binds fresh ` +
+                  `identifiers colliding with no binding already in the ` +
+                  `file (SPEC 6.5, 2.1, 14.15)`,
+              );
+            }
+          }
+          // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns —
+          // the fresh identifier (now known) and the insertion offset
+          // (isolated by the helper, which reads the run at every
+          // admissible offset and accepts a line-start one alone: the
+          // target holds one, its end after the final terminator).
+          assertAddedImportInsertion(
+            {
+              rel: C10_TARGET,
+              base: Buffer.from(C10_A_TARGET_BASE(root), "utf8"),
+              actual: await workspace.readBytes(C10_TARGET),
+              importerDir: posixPath.dirname(C10_TARGET),
+              expectedModule: C10_THIRD_MODULE,
+              identifier: root,
+            },
+            `${context}: ${C10_TARGET} after the move is its composed ` +
+              `post-move bytes with exactly one import of ${C10_THIRD}'s ` +
+              `module added as a line of its own — byte-exactly 6.5's ` +
+              `spelling followed by U+000A at a line-start offset, which ` +
+              `the file holds and 6.5 takes over any other — binding the ` +
+              `identifier the moved references are rooted at, no other ` +
+              `byte inserted (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
+          );
+          await assertRewrittenSpecDerives(workspace, C10_TARGET, context);
+          c10AssertPreviewRewrites(files, root, context);
+          await assertFileBytes(
+            workspace.path(C10_ORIGIN),
+            C10_A_ORIGIN_AFTER,
+            `${context}: ${C10_ORIGIN} after the move — the moved section ` +
+              `deleted in place with its emptied lines dropped, the blank ` +
+              `neighbours kept, and the \`X\` import, its binding left ` +
+              `without references, deleted in place with its emptied line's ` +
+              `U+000A (6.5's exact extent), otherwise byte-identical (SPEC ` +
+              `6.5, 2.1, 3; H-4, normalizing nothing)`,
+          );
+          await c10AssertPostMove(
+            product,
+            workspace,
+            { depends: [C10_MOVED_DEPENDS], embeds: [C10_MOVED_EMBEDS] },
+            context,
+          );
+        },
+      );
+    }
+    {
+      const context = "T6.5-10 arm (b) byte-composable";
+      await withWorkspace(
+        SPECS_MD_CONFIG,
+        {
+          [C10_THIRD]: C10_THIRD_STAGED,
+          [C10_ORIGIN]: C10_B_ORIGIN_BEFORE,
+          [C10_TARGET]: C10_B_TARGET_BEFORE,
+        },
+        async (workspace) => {
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` over the staging`,
+          );
+          await expectExit(
+            product,
+            workspace,
+            [...C10_MOVE_ARGV],
+            0,
+            `${context} \`move specs/a.mdx#a.mv specs/b.mdx#mv\``,
+          );
+          await assertFileBytes(
+            workspace.path(C10_TARGET),
+            C10_B_TARGET_AFTER,
+            `${context}: ${C10_TARGET} after the move — the re-identified ` +
+              `moved text appended at end of file plus U+000A, its ` +
+              `third-module references re-rooted at the existing \`Z\` ` +
+              `binding with quote style and access form kept (\`X.foo\` → ` +
+              `\`Z.foo\`, \`X["bar-baz"]\` → \`Z["bar-baz"]\`), no import ` +
+              `added (the file lacks no binding of the module), otherwise ` +
+              `byte-identical (SPEC 6.5, 6.4, 2.1; H-4, normalizing nothing)`,
+          );
+          await assertFileBytes(
+            workspace.path(C10_ORIGIN),
+            C10_B_ORIGIN_AFTER,
+            `${context}: ${C10_ORIGIN} after the move — the moved section ` +
+              `deleted in place with its emptied lines dropped, the blank ` +
+              `neighbours kept, and the \`X\` import kept byte-for-byte, its ` +
+              `binding keeping \`a.stay\`'s reference (SPEC 6.5, 2.1, 3; ` +
+              `H-4, normalizing nothing)`,
+          );
+          await c10AssertPostMove(
+            product,
+            workspace,
+            {
+              depends: [
+                C10_MOVED_DEPENDS,
+                {
+                  from: `${C10_TARGET}#b`,
+                  to: `${C10_THIRD}#foo`,
+                  kind: "depends",
+                },
+                {
+                  from: `${C10_ORIGIN}#a.stay`,
+                  to: `${C10_THIRD}#foo`,
+                  kind: "depends",
+                },
+              ],
+              embeds: [C10_MOVED_EMBEDS],
+            },
+            context,
+          );
+        },
+      );
+    }
+    {
+      const context = "T6.5-10 arm (c) identifier bound to another module";
+      await withWorkspace(
+        SPECS_MD_CONFIG,
+        {
+          [C10_THIRD]: C10_THIRD_STAGED,
+          [C10_FOURTH]: C10_FOURTH_STAGED,
+          [C10_ORIGIN]: C10_A_ORIGIN_STAGED,
+          [C10_TARGET]: C10_C_TARGET_BEFORE,
+        },
+        async (workspace) => {
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` over the staging`,
+          );
+          const files = await c10PreviewFiles(product, workspace, context);
+          await expectExit(
+            product,
+            workspace,
+            [...C10_MOVE_ARGV],
+            0,
+            `${context} \`move specs/a.mdx#a.mv specs/b.mdx#mv\``,
+          );
+
+          const text = await readSourceText(workspace, C10_TARGET, context);
+          const root = c10ReferenceRoot(
+            text,
+            C10_REWRITTEN_DEPENDS,
+            '`<S id="mv" d={<binding>.foo}>`',
+            context,
+          );
+          const embedRoot = c10ReferenceRoot(
+            text,
+            C10_REWRITTEN_EMBEDS,
+            '`{text(<binding>["bar-baz"])}`',
+            context,
+          );
+          if (embedRoot !== root) {
+            fail(
+              `${context}: the moved references are rooted at different ` +
+                `identifiers — the \`d\` reference at ${JSON.stringify(root)}, ` +
+                `the embedding at ${JSON.stringify(embedRoot)} — while both ` +
+                `were bound by the origin's one \`X\` import and need the ` +
+                `one binding of ${C10_THIRD}'s module the added import ` +
+                `supplies (SPEC 6.5, 2.1)`,
+            );
+          }
+          if (root === "X") {
+            fail(
+              `${context}: the moved spellings stay rooted at \`X\`, which ` +
+                `the target binds to ${C10_FOURTH}'s module — \`X.foo\` read ` +
+                `there names ${C10_FOURTH}#foo, a silent retarget behind a ` +
+                `reported success — while the added import binds a fresh ` +
+                `identifier colliding with no binding already in the file ` +
+                `and each moved reference is re-rooted to it (SPEC 6.5, 2.1, ` +
+                `6.4)`,
+            );
+          }
+          for (const forbidden of A8_MDX_RESERVED) {
+            if (root === forbidden.name) {
+              fail(
+                `${context}: the added import binds \`${forbidden.name}\`, ` +
+                  `${forbidden.why} — an added import binds fresh ` +
+                  `identifiers colliding with no binding already in the ` +
+                  `file (SPEC 6.5, 2.1, 14.15)`,
+              );
+            }
+          }
+          assertAddedImportInsertion(
+            {
+              rel: C10_TARGET,
+              base: Buffer.from(C10_C_TARGET_BASE(root), "utf8"),
+              actual: await workspace.readBytes(C10_TARGET),
+              importerDir: posixPath.dirname(C10_TARGET),
+              expectedModule: C10_THIRD_MODULE,
+              identifier: root,
+            },
+            `${context}: ${C10_TARGET} after the move is its composed ` +
+              `post-move bytes — the target's own \`X.q\` and its \`z\` ` +
+              `declaration byte-untouched, each moved spelling re-rooted to ` +
+              `the fresh identifier with its access form kept — with ` +
+              `exactly one import of ${C10_THIRD}'s module added as a line ` +
+              `of its own, byte-exactly 6.5's spelling followed by U+000A ` +
+              `at a line-start offset, binding that identifier, no other ` +
+              `byte inserted (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
+          );
+          await assertRewrittenSpecDerives(workspace, C10_TARGET, context);
+          c10AssertPreviewRewrites(files, root, context);
+          await assertFileBytes(
+            workspace.path(C10_ORIGIN),
+            C10_A_ORIGIN_AFTER,
+            `${context}: ${C10_ORIGIN} after the move — as in (a): the ` +
+              `moved section deleted in place with its emptied lines ` +
+              `dropped, the blank neighbours kept, and the \`X\` import, its ` +
+              `binding left without references, deleted with its line's ` +
+              `U+000A, otherwise byte-identical (SPEC 6.5, 2.1, 3; H-4, ` +
+              `normalizing nothing)`,
+          );
+          await assertFileBytes(
+            workspace.path(C10_FOURTH),
+            C10_FOURTH_SOURCE,
+            `${context}: ${C10_FOURTH} after the move — the fourth source, ` +
+              `whose \`q\` the target's own section references and whose ` +
+              `\`foo\` is the lure, untouched (SPEC 6.5; H-4)`,
+          );
+          await c10AssertPostMove(
+            product,
+            workspace,
+            {
+              depends: [C10_MOVED_DEPENDS, C10_TARGET_OWN_DEPENDS],
+              embeds: [C10_MOVED_EMBEDS],
+            },
+            context,
+          );
+        },
+      );
+    }
+    {
+      const context = "T6.5-10 arm (c) sibling: the module also bound as `Z`";
+      await withWorkspace(
+        SPECS_MD_CONFIG,
+        {
+          [C10_THIRD]: C10_THIRD_STAGED,
+          [C10_FOURTH]: C10_FOURTH_STAGED,
+          [C10_ORIGIN]: C10_B_ORIGIN_BEFORE,
+          [C10_TARGET]: C10_CS_TARGET_BEFORE,
+        },
+        async (workspace) => {
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` over the staging`,
+          );
+          await expectExit(
+            product,
+            workspace,
+            [...C10_MOVE_ARGV],
+            0,
+            `${context} \`move specs/a.mdx#a.mv specs/b.mdx#mv\``,
+          );
+          await assertFileBytes(
+            workspace.path(C10_TARGET),
+            C10_CS_TARGET_AFTER,
+            `${context}: ${C10_TARGET} after the move — the re-identified ` +
+              `moved text appended at end of file plus U+000A, each moved ` +
+              `spelling re-rooted to the existing \`Z\` binding of ` +
+              `${C10_THIRD}'s module with quote style and access form kept, ` +
+              `nothing added (the file lacks no binding of the module), ` +
+              `\`X.q\` and both declarations byte-untouched — (b)'s ` +
+              `whole-file contract (SPEC 6.5, 6.4, 2.1; H-4, normalizing ` +
+              `nothing)`,
+          );
+          await assertFileBytes(
+            workspace.path(C10_ORIGIN),
+            C10_B_ORIGIN_AFTER,
+            `${context}: ${C10_ORIGIN} after the move — as in (b): the ` +
+              `moved section deleted in place with its emptied lines ` +
+              `dropped, the blank neighbours kept, and the \`X\` import kept ` +
+              `byte-for-byte, its binding keeping \`a.stay\`'s reference ` +
+              `(SPEC 6.5, 2.1, 3; H-4, normalizing nothing)`,
+          );
+          await assertFileBytes(
+            workspace.path(C10_FOURTH),
+            C10_FOURTH_SOURCE,
+            `${context}: ${C10_FOURTH} after the move — the fourth source ` +
+              `untouched (SPEC 6.5; H-4)`,
+          );
+          await c10AssertPostMove(
+            product,
+            workspace,
+            {
+              depends: [
+                C10_MOVED_DEPENDS,
+                C10_TARGET_OWN_DEPENDS,
+                {
+                  from: `${C10_TARGET}#c`,
+                  to: `${C10_THIRD}#foo`,
+                  kind: "depends",
+                },
+                {
+                  from: `${C10_ORIGIN}#a.stay`,
+                  to: `${C10_THIRD}#foo`,
+                  kind: "depends",
+                },
+              ],
+              embeds: [C10_MOVED_EMBEDS],
+            },
+            context,
+          );
+        },
+      );
+    }
   },
 });
 
@@ -1814,4 +8856,8 @@ export const section65Tests: readonly ProductTestEntry[] = [
   T6_5_4,
   T6_5_5,
   T6_5_6,
+  T6_5_7,
+  T6_5_8,
+  T6_5_9,
+  T6_5_10,
 ];

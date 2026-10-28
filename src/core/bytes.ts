@@ -17,6 +17,9 @@ export interface ByteRange {
   readonly end: number;
 }
 
+/** The code units `compareBytes` skips natively at a time. */
+const COMPARE_CHUNK = 256;
+
 /**
  * Three-way comparison of two strings equivalent to lexicographic byte
  * comparison of their UTF-8 encodings (SPEC 12.0: byte-wise, case-sensitive,
@@ -28,6 +31,23 @@ export interface ByteRange {
 export function compareBytes(a: string, b: string): -1 | 0 | 1 {
   const shorter = Math.min(a.length, b.length);
   let index = 0;
+  // Identical runs are skipped natively, a chunk at a time: identities
+  // sharing a long prefix (a deep section chain's share their whole
+  // ancestry) would otherwise cost the walk below their full length per
+  // comparison. Identical units hold identical code points, save that a
+  // high surrogate ending the run may pair with what follows it, so the
+  // walk resumes on it, the code point boundary there.
+  while (
+    index + COMPARE_CHUNK <= shorter &&
+    a.slice(index, index + COMPARE_CHUNK) ===
+      b.slice(index, index + COMPARE_CHUNK)
+  ) {
+    index += COMPARE_CHUNK;
+  }
+  if (index > 0) {
+    const last = a.charCodeAt(index - 1);
+    if (last >= 0xd800 && last <= 0xdbff) index -= 1;
+  }
   while (index < shorter) {
     // Identical prefixes so far, so `index` is a code point boundary in both.
     const codePointA = a.codePointAt(index)!;
@@ -54,6 +74,15 @@ export function sortByBytes<T>(
   key: (item: T) => string,
 ): T[] {
   return [...items].sort((a, b) => compareBytes(key(a), key(b)));
+}
+
+/**
+ * The set form of a string list (SPEC 12.7's tag-set value form): each
+ * distinct string once, in byte order (SPEC 12.0) — a repeated element
+ * collapses, whatever the input's order.
+ */
+export function byteOrderedSet(items: readonly string[]): string[] {
+  return [...new Set(items)].sort(compareBytes);
 }
 
 /** The length in bytes of one code point's UTF-8 encoding. */

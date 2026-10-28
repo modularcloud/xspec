@@ -7,33 +7,74 @@
 // `query node` and `show --json` (SPEC 12.4) lives in ./query-core.ts.
 
 import * as path from "node:path";
-import type { JsonObject, JsonValue } from "../../core/canonical-json.js";
-import { canonicalJson } from "../../core/canonical-json.js";
-import type { ByteRange } from "../../core/bytes.js";
+import type {
+  JsonObject,
+  JsonStreamValue,
+  JsonValue,
+} from "../../core/canonical-json.js";
 import {
-  containsControl,
-  containsWhitespace,
-  FORBIDDEN_SEGMENT_NAMES,
-} from "../../core/text.js";
+  canonicalJson,
+  canonicalJsonChunks,
+} from "../../core/canonical-json.js";
+import type { ByteRange } from "../../core/bytes.js";
+import type { CompiledGlob } from "../../core/glob.js";
+import { compileGlob } from "../../core/glob.js";
+import { gatherChunks } from "../../core/text-chunks.js";
+import type { BaselineFailure } from "../../workspace/baseline.js";
 import type { TestHoldSpec } from "../../workspace/lock.js";
 import type { Invocation } from "../args.js";
-import { flagValue } from "../args.js";
-import type { CliWriter } from "../io.js";
+import { flagValue, jsonOutputInEffect } from "../args.js";
+import type { CliWriter, CommandIo } from "../io.js";
+import {
+  emitCodedRefusal,
+  emitErrorDocument,
+  usageErrorFinding,
+} from "../report.js";
 
 /**
  * SPEC 12.0: usage errors — unknown identities, unknown groups, invalid
- * flag values — exit 2 with the diagnostic on standard error and nothing on
- * standard output (the exit-2 error prevents emitting the single JSON
- * document). Diagnostics echo argv tokens and static text only, keeping
- * output byte-deterministic (SPEC 12.0).
+ * flag values — exit 2 with the diagnostic on standard error. With JSON
+ * output in effect (a `--json` read as a flag, or a JSON-only surface),
+ * the 12.7 error document — `{"error": …}` holding one code-less,
+ * path-less finding form — is the entire standard output; without it,
+ * standard output stays empty. Diagnostics echo argv tokens and static
+ * text only, keeping output byte-deterministic (SPEC 12.0).
  */
 export function usageError(
-  stderr: CliWriter,
-  command: string,
+  invocation: Invocation,
+  io: CommandIo,
   message: string,
 ): 2 {
-  stderr.write(`xspec: ${command}: ${message}\n`);
+  io.stderr.write(`xspec: ${invocation.command}: ${message}\n`);
+  if (jsonOutputInEffect(invocation)) {
+    emitErrorDocument(
+      io.stdout,
+      usageErrorFinding(`${invocation.command}: ${message}`),
+    );
+  }
   return 2;
+}
+
+/**
+ * SPEC 6.3 → 12.0, 12.7: report a baseline's failed resolution, exit 2 —
+ * a journal error in the current journal as the coded usage error carrying
+ * condition 13's stable code and concerned path (the diagnostic on
+ * standard error and, with JSON output in effect, the error document,
+ * `emitCodedRefusal`), every other failure as a plain usage error, `code`
+ * and `path` null, its message prefixed by `subject` where the caller
+ * names what failed (a session's recorded baseline).
+ */
+export function reportBaselineFailure(
+  invocation: Invocation,
+  io: CommandIo,
+  failure: BaselineFailure,
+  subject = "",
+): 2 {
+  if (failure.kind === "journal-error") {
+    emitCodedRefusal(io, jsonOutputInEffect(invocation), failure.finding);
+    return 2;
+  }
+  return usageError(invocation, io, `${subject}${failure.message}`);
 }
 
 /** SPEC 12.0: emit the single JSON document — the entire standard output. */
@@ -43,51 +84,116 @@ export function emitDocument(stdout: CliWriter, document: JsonValue): 0 {
 }
 
 /**
+ * SPEC 12.0: emit the single JSON document — the entire standard output,
+ * byte for byte `emitDocument`'s — in bounded chunks
+ * (`canonicalJsonChunks`), each written once the stream has taken the one
+ * before, so a document whose deferred arrays are produced as it renders
+ * (`JsonDeferredArray`) never exists whole, in memory or as one string
+ * (SPEC 10.7: `review export` presents every item of a session, an answer
+ * that can outgrow both; SPEC 8.2: a coverage report holds one covering
+ * path per covered node). A chunk the stream fails to take ends the
+ * emission there, the failure left to the stream's own error report.
+ */
+export async function emitDocumentStreamed(
+  stdout: CliWriter,
+  document: JsonStreamValue,
+): Promise<0> {
+  await writeChunks(stdout, canonicalJsonChunks(document));
+  return 0;
+}
+
+/**
+ * SPEC 12.0: emit a human report given as consecutive pieces — the entire
+ * standard output, byte for byte the pieces' concatenation — gathered into
+ * chunks of bounded size (core/text-chunks.ts `gatherChunks`), each
+ * written once the stream has taken the one before, so a report whose
+ * pieces are produced as it is written never exists whole as one string,
+ * whose length V8 caps near 2^29 (SPEC 8.2: a coverage report holds one
+ * covering path per covered node, quadratic in a long dependency chain's
+ * length). A chunk the stream fails to take ends the emission there, as
+ * for `emitDocumentStreamed`.
+ */
+export async function emitTextStreamed(
+  stdout: CliWriter,
+  pieces: Iterable<string>,
+): Promise<void> {
+  await writeChunks(stdout, gatherChunks(pieces));
+}
+
+/**
+ * Write `chunks` in order, each once the stream has taken the one before
+ * (`CliWriter`'s callback): the backpressure under which a streamed answer
+ * builds no chunk ahead of the stream. A chunk the stream fails to take
+ * ends the writing there, the failure left to the stream's own error
+ * report.
+ */
+async function writeChunks(
+  stdout: CliWriter,
+  chunks: Iterable<string>,
+): Promise<void> {
+  for (const chunk of chunks) {
+    const failed = await new Promise<boolean>((resolve) => {
+      stdout.write(chunk, (error) => {
+        resolve(error !== undefined && error !== null);
+      });
+    });
+    if (failed) break;
+  }
+}
+
+/**
  * The invocation's `--test-hold <path>` value as the workspace layer's hold
  * spec, or undefined when the flag was not given. SPEC 12.0/13.5: the value
  * is a filesystem path resolved against the working directory; the verbatim
  * token is kept for diagnostics (argv tokens only — never resolved paths).
+ * Against a working directory with no path (`cwd` null, cli/bin.ts) only an
+ * absolute value designates a path: a relative one resolves against a
+ * directory that holds nothing and leads nowhere, so the hold file cannot
+ * be created there — 13.5's usage error, met where creation is attempted
+ * (`absolutePath` null; workspace/lock.ts).
  */
 export function testHoldSpecOf(
   invocation: Invocation,
-  cwd: string,
+  cwd: string | null,
 ): TestHoldSpec | undefined {
   const given = flagValue(invocation, "--test-hold");
   if (given === undefined) {
     return undefined;
   }
-  return { given, absolutePath: path.resolve(cwd, given) };
+  if (path.isAbsolute(given)) {
+    return { given, absolutePath: path.resolve(given) };
+  }
+  return {
+    given,
+    absolutePath: cwd === null ? null : path.resolve(cwd, given),
+  };
 }
 
 /**
- * Why `id` is not a valid requirement ID (SPEC 1.4), or null when it is.
- * Shared by `rename` and the section form of `move` (SPEC 6.4, 6.5: the new
- * ID is valid). Segment splitting on `.` makes the no-`.` rule structural;
- * each segment must be non-empty, free of `#`, whitespace, and control
- * characters, and none of the forbidden names.
+ * The invocation's `--file <glob>` value compiled under the glob rules of
+ * SPEC 7 (plain mode), or undefined when the flag was not given (11.1,
+ * 11.3, 11.4, 12.3). The parser has already refused a pattern outside the
+ * workspace root — plain mode's one compile error — as a usage error of
+ * 12.0's syntax class, decided by its spelling alone before the
+ * configuration is loaded (cli/args.ts), so every value reaching a handler
+ * compiles.
  */
-export function requirementIdProblem(id: string): string | null {
-  for (const segment of id.split(".")) {
-    if (segment.length === 0) {
-      return "it has an empty segment";
-    }
-    if (FORBIDDEN_SEGMENT_NAMES.has(segment)) {
-      return (
-        `its segment ${JSON.stringify(segment)} is one of the forbidden ` +
-        `names ("$", "__proto__", "prototype", "constructor", "then")`
-      );
-    }
-    if (segment.includes("#")) {
-      return `its segment ${JSON.stringify(segment)} contains "#"`;
-    }
-    if (containsWhitespace(segment)) {
-      return `its segment ${JSON.stringify(segment)} contains whitespace`;
-    }
-    if (containsControl(segment)) {
-      return `its segment ${JSON.stringify(segment)} contains a control character`;
-    }
+export function compileFileFlag(
+  invocation: Invocation,
+): CompiledGlob | undefined {
+  const pattern = flagValue(invocation, "--file");
+  if (pattern === undefined) {
+    return undefined;
   }
-  return null;
+  const compiled = compileGlob(pattern, "plain");
+  if (!compiled.ok) {
+    // Unreachable: the parser refuses every outside-root `--file` value.
+    throw new Error(
+      `xspec internal error: '${invocation.command}' received a --file ` +
+        `value the parser should have refused (${compiled.error.kind})`,
+    );
+  }
+  return compiled.glob;
 }
 
 /** A source range (SPEC 1.7) as JSON data. */

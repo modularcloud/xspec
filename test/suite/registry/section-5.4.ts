@@ -41,24 +41,33 @@ import {
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. No code
 // groups exist in any fixture here, so impacted code never enters play.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// T5.4-1 and T5.4-2 each stage it again in a workspace created after their
+// first invocations, so it is a staged-source record (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T5.4-1/T5.4-2 xspec.config.ts — exactly one spec group, every workspace's",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -154,17 +163,17 @@ async function readSource(
 }
 
 /**
- * Replace exactly one occurrence of `search` — the manual "author edits the
- * file" step of these fixtures. The anchors are spec-mandated rewrite forms
+ * Diagnose that `search` occurs exactly once in `content` — the anchor of
+ * the manual "author edits the file" step of these fixtures, which
+ * `TestWorkspace.edit()` then stages (the first occurrence replaced in the
+ * product-rewritten bytes, judged at staging time under the path's S-9
+ * declaration: no harness constant equals those bytes, so the staged-source
+ * ledger has nothing to hold). The anchors are spec-mandated rewrite forms
  * (SPEC 6.4), so a missing or ambiguous anchor is a diagnosed assertion
- * failure about the product's rewriting, never a harness crash (H-8).
+ * failure about the product's rewriting, never a harness crash (H-8) —
+ * checked here, before `edit()`'s own plain refusal could see it.
  */
-function replaceOnce(
-  content: string,
-  search: string,
-  replacement: string,
-  context: string,
-): string {
+function anchorOnce(content: string, search: string, context: string): void {
   const first = content.indexOf(search);
   if (first === -1) {
     fail(
@@ -180,9 +189,6 @@ function replaceOnce(
         JSON.stringify(content),
     );
   }
-  return (
-    content.slice(0, first) + replacement + content.slice(first + search.length)
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -198,15 +204,18 @@ function replaceOnce(
 // distinguish references to them: both bearers walk back to the same string
 // `a` (N1: `b` → entry `a→b` extends the chain to `a` at the journal start;
 // N2: the same entry maps `a` away, ending the walk just after it).
-const REINTRO_ROOT = "specs/A.mdx";
-const REINTRO_N1 = "specs/A.mdx#b"; // old-`a`, renamed
-const REINTRO_N2 = "specs/A.mdx#a"; // the reintroduced identity
-const REINTRO_DEP = "specs/A.mdx#dep";
-const REINTRO_E = "specs/A.mdx#e";
-const REINTRO_F = "specs/A.mdx#f";
-const REINTRO_G = "specs/A.mdx#g";
+// T5.5-5's tie-break arm (section-5.5.ts) stages this fixture again — its
+// baseline, the rename, and its state after N2 is authored — so the
+// fixture's path, identities, baseline, and appended authorship are exported.
+export const REINTRO_ROOT = "specs/A.mdx";
+export const REINTRO_N1 = "specs/A.mdx#b"; // old-`a`, renamed
+export const REINTRO_N2 = "specs/A.mdx#a"; // the reintroduced identity
+export const REINTRO_DEP = "specs/A.mdx#dep";
+export const REINTRO_E = "specs/A.mdx#e";
+export const REINTRO_F = "specs/A.mdx#f";
+export const REINTRO_G = "specs/A.mdx#g";
 
-const REINTRO_BASELINE = [
+export const REINTRO_BASELINE = [
   '<S id="a">',
   "Alpha behavior.",
   "</S>",
@@ -230,7 +239,7 @@ const REINTRO_BASELINE = [
 // layout, SPEC 1.6, 3), and `g`, whose own-content runs around its one
 // embedding are byte-identical to `f`'s ("Twin: " and " end.\n") while the
 // embedding targets N2 where `f`'s targets N1.
-const REINTRO_APPENDED = [
+export const REINTRO_APPENDED = [
   "",
   '<S id="a">',
   "Alpha behavior.",
@@ -242,25 +251,36 @@ const REINTRO_APPENDED = [
   "",
 ].join("\n");
 
+// The rename-rewritten file's last bytes — `f`'s closing run (" end.", the
+// closing tag, the terminator), which the rename leaves in place (SPEC 6.4:
+// minimal in-place edits) — the anchor behind which the appended authorship
+// is staged through `TestWorkspace.edit()`.
+const REINTRO_TAIL = " end.\n</S>\n";
+
 // Fixture 2 — the journaled variant: the vacated identity is re-borne through
 // the journal (`rename a→b`, then `rename c→a`) rather than by authorship.
 // `w` depends on both bearers.
 const JOURNALED_W = "specs/A.mdx#w";
 
-const JOURNALED_BASELINE = [
-  '<S id="a">',
-  "Alpha behavior.",
-  "</S>",
-  "",
-  '<S id="c">',
-  "Gamma behavior.",
-  "</S>",
-  "",
-  '<S id="w" d={["a", "c"]}>',
-  "Depends on both.",
-  "</S>",
-  "",
-].join("\n");
+// Created after fixture 1's invocations: a staged-source record (S-9,
+// test/self/s9-staged-sources.test.ts).
+const JOURNALED_BASELINE = stagedMdx(
+  "T5.4-1 specs/A.mdx the journaled-variant baseline (fixture 2)",
+  [
+    '<S id="a">',
+    "Alpha behavior.",
+    "</S>",
+    "",
+    '<S id="c">',
+    "Gamma behavior.",
+    "</S>",
+    "",
+    '<S id="w" d={["a", "c"]}>',
+    "Depends on both.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T5_4_1 = defineProductTest({
   id: "T5.4-1",
@@ -294,13 +314,35 @@ const T5_4_1 = defineProductTest({
           REINTRO_ROOT,
           "T5.4-1 reading the product-rewritten source after the rename",
         );
-        const respelled = replaceOnce(
+        anchorOnce(
           renamed,
           'Embeds: {text("b")}',
-          'Embeds: {text("a")}',
           'T5.4-1 re-spelling `e`\'s embedding back to "a" after authoring N2',
         );
-        await workspace.file(REINTRO_ROOT, respelled + REINTRO_APPENDED);
+        await workspace.edit(
+          REINTRO_ROOT,
+          'Embeds: {text("b")}',
+          'Embeds: {text("a")}',
+        );
+        // The appended authorship (N2 and `g`): an edit extending the file's
+        // last bytes, `f`'s closing run, which the rename must have left as
+        // the file's end (SPEC 6.4: minimal in-place edits) — diagnosed.
+        const appendContext =
+          "T5.4-1 appending N2 and `g` after the rename-rewritten `f`";
+        anchorOnce(renamed, REINTRO_TAIL, appendContext);
+        if (!renamed.endsWith(REINTRO_TAIL)) {
+          fail(
+            `${appendContext}: expected the rewritten source to end with ` +
+              `${JSON.stringify(REINTRO_TAIL)} (SPEC 6.4: minimal in-place ` +
+              `edits leave the file's tail in place); source: ` +
+              JSON.stringify(renamed),
+          );
+        }
+        await workspace.edit(
+          REINTRO_ROOT,
+          REINTRO_TAIL,
+          REINTRO_TAIL + REINTRO_APPENDED,
+        );
         await buildOk(
           product,
           workspace,
@@ -584,16 +626,21 @@ const SPELLING_B_SOURCE = ['<S id="b">', "Target behavior.", "</S>", ""].join(
 // the two static quote styles (SPEC 2.4).
 const MOVE_T = "specs/A.mdx#t";
 const MOVE_R = "specs/A.mdx#r";
-const MOVE_A_SOURCE = [
-  '<S id="t">',
-  "Target behavior.",
-  "</S>",
-  "",
-  '<S id="r" d={"t"}>',
-  "Referrer behavior.",
-  "</S>",
-  "",
-].join("\n");
+// The move fixture is created after the rename fixture's invocations: a
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const MOVE_A_SOURCE = stagedMdx(
+  "T5.4-2 specs/A.mdx the move fixture",
+  [
+    '<S id="t">',
+    "Target behavior.",
+    "</S>",
+    "",
+    '<S id="r" d={"t"}>',
+    "Referrer behavior.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T5_4_2 = defineProductTest({
   id: "T5.4-2",
@@ -693,15 +740,12 @@ const T5_4_2 = defineProductTest({
           "specs/A.mdx",
           "T5.4-2 reading the source for the manual computed→dot re-spelling",
         );
-        await workspace.file(
-          "specs/A.mdx",
-          replaceOnce(
-            current,
-            'B["b3"]',
-            "B.b3",
-            "T5.4-2 manually re-spelling the computed access to dot access",
-          ),
+        anchorOnce(
+          current,
+          'B["b3"]',
+          "T5.4-2 manually re-spelling the computed access to dot access",
         );
+        await workspace.edit("specs/A.mdx", 'B["b3"]', "B.b3");
         await buildOk(
           product,
           workspace,
@@ -796,17 +840,14 @@ const T5_4_2 = defineProductTest({
         "specs/A.mdx",
         "T5.4-2 reading the source for the manual quote-style re-spelling",
       );
-      await workspace.file(
-        "specs/A.mdx",
-        replaceOnce(
-          current,
-          'd={"t"}',
-          "d={'t'}",
-          "T5.4-2 manually re-spelling the local string between quote styles " +
-            "(the move back must have produced a double-quoted local " +
-            "reference, SPEC 6.4)",
-        ),
+      anchorOnce(
+        current,
+        'd={"t"}',
+        "T5.4-2 manually re-spelling the local string between quote styles " +
+          "(the move back must have produced a double-quoted local " +
+          "reference, SPEC 6.4)",
       );
+      await workspace.edit("specs/A.mdx", 'd={"t"}', "d={'t'}");
       await buildOk(
         product,
         workspace,

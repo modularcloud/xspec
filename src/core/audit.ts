@@ -5,12 +5,13 @@
 // module generates the items of an `audit` session — one `subtree-coherence`
 // item per requirement node, root nodes included, with the node's ancestor
 // chain as context, an empty origin, and scope as in 10.5: the node and all
-// its descendants (the stored scope is the node, the subtree root). Audit
-// requires no baseline and reviews the entire workspace, so its generators
-// take no creation parameters (SPEC 10.7: an audit session records none) and
-// every generated node enters with no baseline identity — an audit item's
-// `baseline` is the current graph's values at the moment it enters the
-// session (SPEC 10.2).
+// its current descendants (the scope root is the node; the nodes beneath it
+// ride along as `scopeDescendants`, which an item stores as its scope as
+// last assigned, SPEC 10.4). Audit requires no baseline and reviews the
+// entire workspace, so its generators take no creation parameters (SPEC
+// 10.7: an audit session records none) and every generated node enters
+// with no baseline identity — an audit item's `baseline` is the current
+// graph's values at the moment it enters the session (SPEC 10.2).
 //
 // Blocking, not order, enforces bottom-up review (SPEC 10.6): each item's
 // `blockedBy` is the set of its child sections' items — after a `split`, the
@@ -35,8 +36,13 @@ import type {
   DecompositionContentSource,
   GeneratedBlockerRef,
   GeneratedItem,
+  GeneratedNode,
 } from "./review-derive.js";
-import { currentAncestorChain } from "./review-derive.js";
+import {
+  currentAncestorChain,
+  currentChildren,
+  currentDescendants,
+} from "./review-derive.js";
 
 /** The output of one audit generator run (SPEC 10.6). */
 export interface AuditGeneration {
@@ -81,16 +87,25 @@ class AuditItemBuilder {
 
   /**
    * The node's `subtree-coherence` item (SPEC 10.6): context the ancestor
-   * chain, origin empty, scope the node and all its descendants (the stored
-   * scope is the node), `blockedBy` its child sections' items. One builder
-   * serves the main generation and the decomposition replay's per-child
-   * items ("its context the child's ancestor chain, as in 10.5 and 10.6",
-   * SPEC 10.7), so the two always coincide.
+   * chain, origin empty, scope the node and all its current descendants
+   * (the scope root is the node, the nodes beneath it in document order
+   * its `scopeDescendants`), `blockedBy` its child sections' items. One
+   * builder serves the main generation and the decomposition replay's
+   * per-child items ("its context the child's ancestor chain, as in 10.5
+   * and 10.6", SPEC 10.7), so the two always coincide. `scopeResolves` is
+   * the content source's resolution argument (DecompositionContentSource
+   * doc): a stored scope that no longer canonically resolves (SPEC 10.4)
+   * takes in no descendants, so a dangling scope never takes in the
+   * subtree of the distinct node that recaptured its spelling — as its
+   * children (`scopeChildren`) are none.
    */
-  subtreeCoherenceItem(identity: string): GeneratedItem {
+  subtreeCoherenceItem(identity: string, scopeResolves = true): GeneratedItem {
     return {
       kind: "subtree-coherence",
       scope: { identity, baselineIdentity: null, deleted: false },
+      scopeDescendants: scopeResolves
+        ? currentDescendants(this.graph, identity)
+        : [],
       context: currentAncestorChain(this.graph, identity),
       // SPEC 10.6: an empty origin.
       origin: [],
@@ -103,34 +118,35 @@ class AuditItemBuilder {
 
   contentSource(): DecompositionContentSource {
     return {
-      subtreeCoherenceItem: (scopeIdentity): GeneratedItem =>
-        this.subtreeCoherenceItem(scopeIdentity),
+      // SPEC 10.7: in an audit session a scope root's children are its
+      // current ones alone (10.6: the node and all its current
+      // descendants), each a current-graph node; a stored scope that no
+      // longer canonically resolves (SPEC 10.4) has none, so a dangling
+      // scope never enumerates the children of the distinct node that
+      // recaptured its spelling.
+      scopeChildren: (scopeIdentity, scopeResolves = true): GeneratedNode[] =>
+        scopeResolves ? currentChildren(this.graph, scopeIdentity) : [],
+      subtreeCoherenceItem: (scopeIdentity, scopeResolves): GeneratedItem =>
+        this.subtreeCoherenceItem(scopeIdentity, scopeResolves),
       // SPEC 10.7: the decomposed scope root's `parent-consistency` item —
       // for its own text, context the child subtrees, blocked by the child
-      // items; its origin is the originating nodes within its scope and
-      // context — empty in an `audit` session.
-      splitParentConsistencyItem: (
-        scopeIdentity,
-        childIdentities,
-      ): GeneratedItem => ({
+      // items; each decomposition item's origin "is empty in an `audit`
+      // session".
+      splitParentConsistencyItem: (scopeIdentity, children): GeneratedItem => ({
         kind: "parent-consistency",
         scope: {
           identity: scopeIdentity,
           baselineIdentity: null,
           deleted: false,
         },
-        context: childIdentities.map((identity) => ({
-          identity,
-          baselineIdentity: null,
-          deleted: false,
-        })),
+        context: [...children],
         origin: [],
         reason:
           `review the own text of ${scopeIdentity} against its child ` +
           `subtrees — split from its subtree review (SPEC 10.7)`,
-        blockedBy: childIdentities.map((identity) => ({
+        blockedBy: children.map((child) => ({
           kind: "subtree-coherence" as const,
-          scope: identity,
+          scope: child.identity,
         })),
       }),
     };

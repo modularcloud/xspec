@@ -10,14 +10,31 @@
 //     assertion failure (H-8) naming its seed and how to replay it.
 //   * TEST-SPEC 16 shrinking — a forced failure is shrunk to the minimal
 //     counterexample (scalar and structured demos), deterministically (E-5:
-//     the identical failure is reported twice in a row).
+//     the identical failure is reported twice in a row). A failure that
+//     declines shrinking (a hang-guard kill, each re-observation costing a
+//     full guard) is reported as drawn when the drawn trial fails so, and
+//     ends the shrink as the reported counterexample when a shrink
+//     candidate does: re-observed at most once, its seed reported (H-10,
+//     S-3).
 //   * E-5 seed modes — the fixed default seed set (the CI mode) is used when
 //     nothing overrides it; XSPEC_PROPERTY_SEED=<uint32> replays exactly that
 //     seed; XSPEC_PROPERTY_SEED=random (the optional local mode) reports its
 //     seed and that report reproduces the run.
-//   * H-8 classification — generator defects and non-assertion property
+//   * H-8 classification — generator defects (on a trial's draw or on a
+//     shrink candidate's replayed choices alike) and non-assertion property
 //     errors surface as plain harness errors (with the seed for
-//     reproduction), never as diagnosed assertion failures.
+//     reproduction), never as diagnosed assertion failures; a hang-guard
+//     kill a body lets through (`ProductRunTimeoutError`) is reported as the
+//     hang it is, with the seed, unshrunk, the kill its cause (S-3).
+//   * S-9 per-draw check (TEST-SPEC 16 preamble) — a draw whose staged MDX
+//     does not derive, or whose staged code source or configuration file is
+//     not well-formed TypeScript (a `TS_DEFAULT_SUFFIXES` name, or an entry
+//     marked `"code-source"`; rejected, or accepted read one way only), is a
+//     harness error carrying the seed, raised before the body sees the draw
+//     (the initial trial and shrunk candidates alike), never a diagnosed
+//     failure and never a skipped draw; a workspace-builder refusal thrown
+//     inside the body is attributed the same way, naming the refused
+//     staging.
 //
 // Every checkProperty call here injects env (and, where relevant, report and
 // entropy) — the ambient process environment must not leak into self-test
@@ -25,8 +42,11 @@
 // unannotated: checkProperty's positional signature must keep inferring T
 // for exactly this style (see the checkProperty doc comment).
 
+import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
 import { fail, HarnessAssertionError } from "../helpers/assertions.js";
+import { isHangGuardKill } from "../helpers/hang-guards.js";
+import { HarnessStagingError } from "../helpers/permissions.js";
 import {
   checkProperty,
   DEFAULT_PROPERTY_SEEDS,
@@ -36,6 +56,7 @@ import {
   resolveSeedPlan,
   type Choices,
 } from "../helpers/property.js";
+import { ProductRunTimeoutError } from "../helpers/subprocess.js";
 
 /** A moderately rich generator exercising every primitive draw. */
 function demoValue(choices: Choices): unknown {
@@ -145,6 +166,112 @@ test("a forced failure reports its seed and shrinks to the minimal counterexampl
   expect(error.message).toContain("counterexample: 100");
   // The reported assertion is the shrunk counterexample's, not the original's.
   expect(error.assertionMessage).toBe("generated value 100 is >= 100");
+});
+
+test("a failure that declines shrinking is reported as drawn, with its seed (P-11's killed invocations)", async () => {
+  let executions = 0;
+  const thrown = await captureRejection(
+    checkProperty(
+      "demo: every value stays below 100, unshrunk",
+      (choices) => choices.intInclusive(0, 100000),
+      (value) => {
+        executions += 1;
+        if (value >= 100) {
+          fail(`generated value ${String(value)} is >= 100`, {
+            shrinkable: false,
+          });
+        }
+      },
+      { runs: 50, seeds: [123456], env: {} },
+    ),
+  );
+
+  // Still a diagnosed falsification naming its seed (H-8, H-10) …
+  expect(thrown).toBeInstanceOf(PropertyFalsifiedError);
+  const error = thrown as PropertyFalsifiedError;
+  expect(error.seed).toBe(123456);
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=123456`);
+
+  // … but no shrink candidate was executed: the property ran exactly once per
+  // trial up to the failing one, and the counterexample is the drawn value …
+  expect(error.shrinkDeclined).toBe(true);
+  expect(error.shrinkSteps).toBe(0);
+  expect(error.shrinkExecutions).toBe(0);
+  expect(executions).toBe(error.trial);
+  expect(error.value).toBe(error.initialValue);
+  expect(error.value).toBeGreaterThanOrEqual(100);
+  expect(error.assertionMessage).toBe(
+    `generated value ${String(error.value)} is >= 100`,
+  );
+
+  // … and the report says so rather than claiming minimality.
+  expect(error.message).toContain("reported as drawn");
+  expect(error.message).not.toContain("already minimal");
+
+  // The default is unchanged: a plain failure shrinks.
+  expect(new HarnessAssertionError("plain").shrinkable).toBe(true);
+});
+
+test("a shrink candidate whose failure declines shrinking ends the shrink as the reported counterexample (P-8's and P-11's killed invocations)", async () => {
+  // The drawn failure (a value of 1000 or more) is shrinkable, but shrinking
+  // it toward 0 passes through 100–999, where the failure declines
+  // shrinking: a stand-in for an invocation the hang guard killed, each
+  // re-observation of which would cost a full guard (S-3).
+  const declining: number[] = [];
+  let lastGenerated: number | undefined;
+  let lastExecuted: number | undefined;
+  const thrown = await captureRejection(
+    checkProperty(
+      "demo: values from 100 up fail, those below 1000 unshrunk",
+      (choices) => {
+        const value = choices.intInclusive(0, 1_000_000);
+        lastGenerated = value;
+        return value;
+      },
+      (value) => {
+        lastExecuted = value;
+        if (value < 100) return;
+        if (value < 1000) {
+          declining.push(value);
+          fail(`stand-in hang-guard kill on ${String(value)}`, {
+            shrinkable: false,
+          });
+        }
+        fail(`generated value ${String(value)} is >= 1000`);
+      },
+      { runs: 50, seeds: [123456], env: {}, maxShrinkExecutions: 100 },
+    ),
+  );
+
+  // A diagnosed falsification naming its seed (H-8, H-10) …
+  expect(thrown).toBeInstanceOf(PropertyFalsifiedError);
+  expect(thrown).toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as PropertyFalsifiedError;
+  expect(error.seed).toBe(123456);
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=123456`);
+
+  // … whose drawn failure was shrinkable, and was shrunk …
+  expect(error.initialValue).toBeGreaterThanOrEqual(1000);
+  expect(error.shrinkDeclined).toBe(false);
+  expect(error.shrinkSteps).toBeGreaterThan(0);
+
+  // … until the first candidate whose failure declines shrinking: accepted
+  // as the counterexample, it ended the shrink — the only execution in
+  // 100–999, and the last execution and the last replay of all.
+  expect(declining).toHaveLength(1);
+  expect(error.value).toBe(declining[0]);
+  expect(lastExecuted).toBe(declining[0]);
+  expect(lastGenerated).toBe(declining[0]);
+  expect(error.assertionMessage).toBe(
+    `stand-in hang-guard kill on ${String(declining[0])}`,
+  );
+  expect(error.shrinkStopped).toBe(true);
+
+  // The report says shrinking stopped there, never claiming minimality.
+  expect(error.message).toContain(`counterexample: ${String(declining[0])}`);
+  expect(error.message).toContain(`shrunk from: ${String(error.initialValue)}`);
+  expect(error.message).toContain("shrinking stopped at this counterexample");
+  expect(error.message).not.toContain("already minimal");
 });
 
 test("structured counterexamples shrink, deterministically across runs (TEST-SPEC 16, E-5)", async () => {
@@ -278,6 +405,59 @@ test("non-assertion property errors are harness errors carrying the seed (H-8)",
   expect(error.cause).toBeInstanceOf(TypeError);
 });
 
+test("a hang-guard kill a body lets through ends the property at once, reported as a hang with the seed and the input, unshrunk, the kill its cause (S-3, H-10)", async () => {
+  let executions = 0;
+  const thrown = await captureRejection(
+    checkProperty(
+      "hanging body",
+      (choices) => choices.intInclusive(0, 9),
+      () => {
+        executions += 1;
+        throw new ProductRunTimeoutError("stand-in run timed out");
+      },
+      { runs: 3, seeds: [7], env: {}, render: (value) => `value ${value}` },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(executions).toBe(1);
+  expect(error.message).toContain(
+    "did not terminate within its own hang guard while running trial 1 of 3 with seed 7",
+  );
+  expect(error.message).toContain(
+    "a hang, which ends the property, reported unshrunk",
+  );
+  expect(error.message).toContain("input: value ");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.cause).toBeInstanceOf(ProductRunTimeoutError);
+  expect(isHangGuardKill(error)).toBe(true);
+
+  // A shrink candidate's kill ends the shrink — and the property — where it
+  // stands: the drawn trial fails diagnosed, and the first candidate's run
+  // hangs.
+  let propertyExecutions = 0;
+  const shrinking = await captureRejection(
+    checkProperty(
+      "hanging shrink candidate",
+      (choices) => choices.intInclusive(0, 1000),
+      (value) => {
+        propertyExecutions += 1;
+        if (propertyExecutions === 1) fail(`drawn failure: ${String(value)}`);
+        throw new ProductRunTimeoutError("candidate hung");
+      },
+      { runs: 1, seeds: [7], env: {} },
+    ),
+  );
+  expect(shrinking).not.toBeInstanceOf(HarnessAssertionError);
+  const shrinkError = shrinking as Error;
+  expect(shrinkError.message).toContain(
+    "did not terminate within its own hang guard while shrinking (on a shrunk input) with seed 7",
+  );
+  expect(shrinkError.cause).toBeInstanceOf(ProductRunTimeoutError);
+  expect(propertyExecutions).toBe(2);
+});
+
 test("generator defects are harness errors, never diagnosed failures (H-8)", async () => {
   const cases: ReadonlyArray<readonly [string, (choices: Choices) => unknown]> =
     [
@@ -308,6 +488,54 @@ test("generator defects are harness errors, never diagnosed failures (H-8)", asy
   }
 });
 
+test("a generator that throws while a falsification is shrunk is a harness error carrying the property, the seed, and the replay variable — never an escaped raw error (H-10, H-8)", async () => {
+  // Below 5 the generator's own guard throws (a generator defect that only a
+  // shrink candidate reaches); every value it returns falsifies the
+  // property. Seed 271828183's first draw is at least 5 (asserted), so the
+  // initial trial generates cleanly and fails the body, and shrinking then
+  // replays smaller choices: the empty tape (the one entry deleted) cannot
+  // replay — a discarded candidate, never a harness error — and the zeroed
+  // entry reaches the guard. The rejection's cause being the guard's own
+  // error shows both.
+  const name = "generator guard reached while shrinking";
+  const generatorErrors: Error[] = [];
+  const bodies: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      name,
+      (choices) => {
+        const value = choices.intInclusive(0, 1000);
+        if (value < 5) {
+          const error = new Error(
+            `generator guard: value ${String(value)} unsupported`,
+          );
+          generatorErrors.push(error);
+          throw error;
+        }
+        return value;
+      },
+      (value) => {
+        bodies.push(value);
+        fail(`falsified on ${String(value)}`);
+      },
+      { runs: 1, seeds: [271828183], env: {} },
+    ),
+  );
+  expect(bodies.length).toBeGreaterThan(0);
+  expect(bodies[0]).toBeGreaterThanOrEqual(5);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while shrinking");
+  expect(error.message).toContain(JSON.stringify(name));
+  expect(error.message).toContain("with seed 271828183");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=271828183`);
+  expect(generatorErrors).toHaveLength(1);
+  expect(error.message).toContain(generatorErrors[0].message);
+  expect(error.cause).toBe(generatorErrors[0]);
+  expect(bodies.filter((value) => value < 5)).toEqual([]);
+});
+
 test("listOf stays within its bounds across generation", async () => {
   const lengths: number[] = [];
   await checkProperty(
@@ -329,4 +557,262 @@ test("listOf stays within its bounds across generation", async () => {
   // bounds assertion above is not vacuous.
   expect(lengths).toContain(2);
   expect(lengths).toContain(5);
+});
+
+// ---------------------------------------------------------------------------
+// S-9's per-draw check (TEST-SPEC 16 preamble, 17 S-9).
+
+const LF = String.fromCodePoint(0x000a);
+const WELL_FORMED_MDX = `<S id="a">ok</S>${LF}`;
+const UNCLOSED_MDX = `<S id="a">${LF}${LF}never closed${LF}`;
+const WELL_FORMED_CONFIG =
+  `import { defineConfig } from "xspec"${LF}${LF}` +
+  `export default defineConfig({${LF}  specs: {${LF}` +
+  `    main: ["specs/**/*.mdx"]${LF}  }${LF}})${LF}`;
+/** A configuration missing its closing brace: rejected both ways. */
+const UNCLOSED_CONFIG = WELL_FORMED_CONFIG.replace(`})${LF}`, `)${LF}`);
+const WELL_FORMED_CODE = `import A from "../specs/A.xspec"${LF}${LF}A.a${LF}`;
+const ILL_FORMED_CODE = `import A from${LF}`;
+/** Accepted read as module code only (a top-level `await`, SPEC 14.20). */
+const MODULE_ONLY_CODE = `await /re/;${LF}`;
+
+test("S-9 per-draw check: a draw staging a non-deriving MDX source is a harness error carrying the seed, raised before the body runs on it", async () => {
+  const seen: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "ill-formed draw",
+      (choices) => choices.intInclusive(0, 3),
+      (value) => {
+        seen.push(value);
+      },
+      {
+        runs: 8,
+        seeds: [7],
+        env: {},
+        drawSources: (value) => [
+          ["notes.txt", "not judged: neither MDX nor a code source"],
+          [
+            "specs/A.mdx",
+            value === 2 ? UNCLOSED_MDX : WELL_FORMED_MDX,
+            `draw ${String(value)}`,
+          ],
+        ],
+      },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while checking trial");
+  expect(error.message).toContain("S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.message).toContain("specs/A.mdx (draw 2)");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("mdx-derivability");
+  // The body never ran on the ill-formed draw: the check precedes it.
+  expect(seen).not.toContain(2);
+  expect(seen.length).toBeGreaterThan(0);
+});
+
+test("S-9 per-draw check: a generator whose every draw is well-formed runs unhindered, unjudged entries ignored", async () => {
+  let ran = 0;
+  await checkProperty(
+    "well-formed draws",
+    (choices) => choices.pick(["S", "Spec"] as const),
+    () => {
+      ran += 1;
+    },
+    {
+      runs: 5,
+      seeds: [7],
+      env: {},
+      drawSources: (tag) => [
+        ["specs/A.mdx", `<${tag} id="a">ok</${tag}>${LF}`],
+        ["specs/B.mdx", Buffer.from(WELL_FORMED_MDX, "utf8")],
+        ["notes.txt", UNCLOSED_MDX],
+        ["xspec.config.ts", WELL_FORMED_CONFIG],
+        ["src/app.tsx", `export const a = <${tag} id="a" />;${LF}`],
+        [
+          "src/cap$[x]",
+          Buffer.from(WELL_FORMED_CODE, "utf8"),
+          undefined,
+          "code-source",
+        ],
+        ["src/unmarked", ILL_FORMED_CODE],
+      ],
+    },
+  );
+  expect(ran).toBe(5);
+});
+
+test("S-9 per-draw check: a draw staging a configuration that is not well-formed TypeScript is a harness error carrying the seed, raised before the body runs on it", async () => {
+  const seen: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "ill-formed configuration draw",
+      (choices) => choices.intInclusive(0, 3),
+      (value) => {
+        seen.push(value);
+      },
+      {
+        runs: 8,
+        seeds: [7],
+        env: {},
+        drawSources: (value) => [
+          ["specs/A.mdx", WELL_FORMED_MDX],
+          [
+            "xspec.config.ts",
+            value === 2 ? UNCLOSED_CONFIG : WELL_FORMED_CONFIG,
+            `draw ${String(value)}`,
+          ],
+        ],
+      },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while checking trial");
+  expect(error.message).toContain("S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.message).toContain("xspec.config.ts (draw 2)");
+  expect(error.message).toContain("not well-formed TypeScript");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("ts-derivability");
+  // The body never ran on the ill-formed draw: the check precedes it.
+  expect(seen).not.toContain(2);
+  expect(seen.length).toBeGreaterThan(0);
+});
+
+test("S-9 per-draw check: a code source marked `code-source` is judged at a name the default does not reach — text accepted read one way only is a harness error too", async () => {
+  let ran = 0;
+  const thrown = await captureRejection(
+    checkProperty(
+      "one-way code source draw",
+      (choices) => choices.intInclusive(0, 3),
+      () => {
+        ran += 1;
+      },
+      {
+        runs: 4,
+        seeds: [7],
+        env: {},
+        drawSources: () => [
+          ["src/unmarked", MODULE_ONLY_CODE],
+          ["src/cap$[x]", MODULE_ONLY_CODE, "capture source", "code-source"],
+        ],
+      },
+    ),
+  );
+  expect(ran).toBe(0);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while checking trial 1 of 4");
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain("src/cap$[x] (capture source)");
+  expect(error.message).toContain("accepted read as module code only");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("ts-derivability");
+  expect((error.cause as HarnessStagingError).path).toBe(
+    "src/cap$[x] (capture source)",
+  );
+});
+
+test("S-9 per-draw check: a shrunk candidate's configuration is judged before the body runs on it — an ill-formed one is a harness error, never a rejected candidate", async () => {
+  const bodies: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "shrinks into an ill-formed configuration",
+      (choices) => choices.intInclusive(0, 9),
+      (value) => {
+        bodies.push(value);
+        fail(`falsified on ${String(value)}`);
+      },
+      {
+        runs: 1,
+        seeds: [7],
+        env: {},
+        drawSources: (value) => [
+          [
+            "xspec.config.ts",
+            value === 0 ? UNCLOSED_CONFIG : WELL_FORMED_CONFIG,
+          ],
+        ],
+      },
+    ),
+  );
+  expect(bodies.length).toBeGreaterThan(0);
+  expect(bodies[0]).not.toBe(0);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while shrinking (S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("ts-derivability");
+  expect(bodies).not.toContain(0);
+});
+
+test("S-9 per-draw check: a shrunk candidate is checked before the body runs on it — a non-deriving one is a harness error, never a rejected candidate", async () => {
+  // Value 0 stages an ill-formed source; every other value falsifies the
+  // property. Seed 7's first draw is non-zero (asserted), so the initial
+  // trial passes the check, fails the body, and shrinking then tries 0.
+  const bodies: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "shrinks into an ill-formed draw",
+      (choices) => choices.intInclusive(0, 9),
+      (value) => {
+        bodies.push(value);
+        fail(`falsified on ${String(value)}`);
+      },
+      {
+        runs: 1,
+        seeds: [7],
+        env: {},
+        drawSources: (value) => [
+          ["specs/A.mdx", value === 0 ? UNCLOSED_MDX : WELL_FORMED_MDX],
+        ],
+      },
+    ),
+  );
+  expect(bodies.length).toBeGreaterThan(0);
+  expect(bodies[0]).not.toBe(0);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while shrinking (S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect(bodies).not.toContain(0);
+});
+
+test("a workspace-builder refusal thrown inside the body is a harness error carrying the seed and naming the refused staging (H-8, S-9)", async () => {
+  const thrown = await captureRejection(
+    checkProperty(
+      "builder refusal",
+      (choices) => choices.intInclusive(0, 9),
+      () => {
+        throw new HarnessStagingError(
+          "mdx-derivability",
+          "specs/A.mdx",
+          "declared well-formed (S-9's default) but the stock MDX 3 parser rejects it",
+        );
+      },
+      { runs: 3, seeds: [7], env: {} },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while running trial 1 of 3");
+  expect(error.message).toContain(
+    "the workspace builder refused the mdx-derivability staging of specs/A.mdx",
+  );
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
 });

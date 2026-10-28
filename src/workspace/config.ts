@@ -8,21 +8,27 @@
 //
 // IMPLEMENTATION (Architecture): this workspace-layer module owns the I/O —
 // locating and reading the file; parsing and validation are the pure core's
-// (src/core/config.ts). Diagnostics never carry absolute paths (SPEC 12.0):
-// findings name the configuration file by its base name, and the `--config`
-// value is echoed as given.
+// (src/core/config.ts). Findings name the configuration file by its
+// anchored spelling relative to the invocation working directory (SPEC 14:
+// a configuration error's concerned path is the 11.6 anchoring form) — a
+// pure function of invocation input, never an environment-dependent
+// absolute path (SPEC 12.0; the Windows drive-mismatch case of 11.6 is the
+// sole absolute form).
 //
 // This module statically imports the TypeScript-based parser, so it is
-// loaded on demand (cli/main.ts imports it dynamically): the store-backed
-// read fast path (./fast-read.ts) answers without it, recovering the parsed
-// configuration recorded in the graph data under the configuration file's
-// content hash instead (SPEC 12.0 determinism — identical bytes parse
-// identically).
+// loaded on demand (cli/main.ts imports it dynamically, once the
+// configuration is located): `version` (SPEC 12.6), which consults no
+// configuration, and a failed location never load the compiler.
 
 import type { Configuration, ConfigurationResult } from "../core/config.js";
 import { parseConfiguration } from "../core/config.js";
 import type { Finding } from "../core/findings.js";
+import { pathFinding } from "../core/findings.js";
 import { sha256Hex } from "../core/hash.js";
+import {
+  beginsWithByteOrderMark,
+  firstInvalidUtf8,
+} from "../core/source-text.js";
 import type { LocatedWorkspace } from "./locate.js";
 import { locateWorkspace } from "./locate.js";
 
@@ -35,11 +41,24 @@ export interface LoadedWorkspace {
    * file's directory (SPEC 7). Never rendered into output (SPEC 12.0).
    */
   readonly root: string;
-  /** The configuration file's base name, for diagnostics. */
+  /** The configuration file's base name, for workspace-relative reads. */
   readonly configFileName: string;
   /**
-   * SHA-256 (hex) of the configuration file's exact bytes — the graph
-   * data's recorded-parse key (SPEC 13.3; ./fast-read.ts).
+   * The configuration file in the anchoring form of 11.6, relative to the
+   * invocation working directory — the concerned path of every
+   * configuration error this invocation reports (SPEC 14, 12.0).
+   */
+  readonly configAnchor: string;
+  /**
+   * The workspace root in the anchoring form of 11.6, relative to the
+   * invocation working directory — the inventory's `root` (SPEC 11.6) and
+   * the concerned path of a refused read of the root directory (SPEC 14.25).
+   */
+  readonly rootAnchor: string;
+  /**
+   * SHA-256 (hex) of the configuration file's exact bytes — recorded in
+   * the graph data among its derivation inputs (./pipeline.ts
+   * `workspaceInputsOf`; graph data's content is opaque, SPEC 13.3).
    */
   readonly configHash: string;
   readonly configuration: Configuration;
@@ -57,9 +76,12 @@ export type WorkspaceLoadResult =
 export function parseLocatedWorkspace(
   located: LocatedWorkspace,
 ): WorkspaceLoadResult {
+  // SPEC 14: the parse findings' concerned path is the configuration file
+  // in the anchoring form of 11.6, relative to the invocation working
+  // directory.
   const parsed = parseConfigurationBytes(
     located.configBytes,
-    located.configFileName,
+    located.configAnchor,
   );
   if (!parsed.ok) {
     return { ok: false, findings: parsed.findings };
@@ -69,6 +91,8 @@ export function parseLocatedWorkspace(
     workspace: {
       root: located.root,
       configFileName: located.configFileName,
+      configAnchor: located.configAnchor,
+      rootAnchor: located.rootAnchor,
       configHash: sha256Hex(located.configBytes),
       configuration: parsed.configuration,
     },
@@ -78,10 +102,11 @@ export function parseLocatedWorkspace(
 /**
  * Locate, read, and validate the project configuration (SPEC 7, 14.14).
  * `configFlag` is the `--config <path>` value when given, resolved against
- * `cwd` (SPEC 12.0); otherwise the upward search from `cwd` applies.
+ * `cwd` (SPEC 12.0); otherwise the upward search from `cwd` applies. `cwd`
+ * is `null` for a working directory with no path (./locate.ts).
  */
 export async function loadWorkspace(
-  cwd: string,
+  cwd: string | null,
   configFlag: string | undefined,
 ): Promise<WorkspaceLoadResult> {
   const location = await locateWorkspace(cwd, configFlag);
@@ -95,33 +120,49 @@ export async function loadWorkspace(
  * Decode and parse a configuration file's exact bytes (SPEC 7, 14.14) — the
  * I/O-free tail of `loadWorkspace`, shared with baseline reconstruction
  * (SPEC 6.3), which reads the configuration content as it stood at a git
- * ref instead of from the filesystem.
+ * ref instead of from the filesystem. `configFileName` labels the file in
+ * the findings' concerned-path member: the current configuration passes its
+ * anchored spelling (SPEC 14), the baseline its tree-relative name.
  */
 export function parseConfigurationBytes(
   bytes: Uint8Array,
   configFileName: string,
 ): ConfigurationResult {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return {
-      ok: false,
-      findings: [
-        {
-          condition: 14,
-          file: configFileName,
-          message:
-            `not valid UTF-8 — the configuration must be well-formed ` +
-            `TypeScript (SPEC 7, 14.14)`,
-        },
-      ],
-    };
+  // SPEC 7: the file's bytes MUST be valid UTF-8 and MUST NOT begin with a
+  // byte-order mark, as a source file's must (1.6); a file violating this
+  // encoding rule is a configuration error (14.14) — whatever TypeScript,
+  // which skips a leading mark, would make of the text. The mark is judged
+  // first, on the bytes: it is the file's first byte.
+  if (beginsWithByteOrderMark(bytes)) {
+    return encodingFailure(
+      `the configuration file begins with a UTF-8 byte-order mark (bytes ` +
+        `EF BB BF) — its bytes must be UTF-8 without a byte-order mark; ` +
+        `remove the mark (SPEC 7, 14.14)`,
+      configFileName,
+    );
   }
-  // A leading byte-order mark is valid in a TypeScript file; strip it so
-  // the parser sees the module text. (The SPEC 14.20 BOM rule constrains
-  // discovered sources, not the configuration.)
-  if (text.startsWith("\uFEFF")) text = text.slice(1);
-
+  const invalidAt = firstInvalidUtf8(bytes);
+  if (invalidAt !== -1) {
+    return encodingFailure(
+      `the configuration file is not valid UTF-8 (first invalid byte at ` +
+        `offset ${String(invalidAt)}) — its bytes must be valid UTF-8; ` +
+        `re-encode the file as UTF-8 (SPEC 7, 14.14)`,
+      configFileName,
+    );
+  }
+  // Validated above: decoding strips nothing and replaces nothing, so the
+  // text is exactly the file's characters.
+  const text = new TextDecoder("utf-8", {
+    fatal: true,
+    ignoreBOM: true,
+  }).decode(bytes);
   return parseConfiguration(text, configFileName);
+}
+
+/** A configuration file's one encoding-rule finding (SPEC 7, 14.14). */
+function encodingFailure(
+  message: string,
+  configFileName: string,
+): ConfigurationResult {
+  return { ok: false, findings: [pathFinding(14, message, configFileName)] };
 }

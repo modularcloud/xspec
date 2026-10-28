@@ -1,79 +1,653 @@
-// TEST-SPEC §6.6 (manual restructuring) — SUITE-24: T6.6-1.
+// TEST-SPEC §6.6 (previews) — SUITE-24: T6.6-2, T6.6-3, T6.6-4, T6.6-5,
+// T6.6-6, T6.6-7. (T6.6-1 is retired.)
 //
-// Registered product-facing body (C-2 "one code path"): it builds its own
-// fresh workspaces (H-1), drives the product strictly as a subprocess (H-2),
-// asserts exact exit codes (H-5), decodes output through the H-3 adapters,
-// and rejects a product only via diagnosed assertion failures (H-8).
+// Registered product-facing bodies (C-2 "one code path"): each builds its own
+// fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
+// asserts exact exit codes (H-5), decodes output through the H-3 layer, and
+// rejects a product only via diagnosed assertion failures (H-8).
 //
-// SPEC 6.6: renames or moves performed by editing files directly, without the
-// commands, produce no journal entries and are treated as deletions plus
-// additions. The manually renamed node's text is kept byte-identical across
-// the edit, so a product inferring continuity (journaling the edit, or
-// mapping the old identity onto the new one) is maximally tempted — and
-// diagnosed by the journal and impact assertions.
+// SPEC 6.6: `xspec rename … --preview` and `xspec move … --preview` perform
+// the full validation and planning of the operation and report its
+// consequences while modifying nothing — no sources, no journal, no derived
+// files, no graph data. A preview succeeds exactly when the real operation
+// would proceed, its output is byte-deterministic (12.0), and under `--json`
+// it emits the preview document form of 12.7 — `{"findings", "mapping",
+// "files", "delta"}`, a form-exact surface (H-3, adapters/forms.ts) — whose
+// `mapping` is the complete identity mapping the operation would journal.
 //
 // Conservative operationalizations (noted per H-4):
-// - "No journal entry" is realized through SPEC 6.1's strongest observable:
-//   the journal file comes into existence with the first journaled operation,
-//   and a manual edit is none — so `.xspec/journal` is asserted absent after
-//   the direct edit and after every subsequent command (successful and
-//   failing `build`s, `impact`).
-// - "A deletion plus an addition (not continuity)" is asserted as the
-//   complete per-node impact table of the fixture, in the SUITE-20
-//   conventions: entries merged per node identity (SPEC 9.3 fixes the
-//   grouping, not the adapter-level granularity); an uncategorized, undeleted
-//   node has no requirement entry (the T1.5-1 convention); the old identity
-//   reports as deleted and `changed` only, the new one as added — `changed`
-//   only, not deleted (SPEC 5.6's added/deleted convention); the propagated
-//   `descendant-changed` attributions are pinned exactly per T5.6-2's
-//   precedent (the parent to the added and the removed child; the file root
-//   to the parent and both children); the originating category `changed` is
-//   attribution-bounded by the originating-node set, the empty list accepted.
-//   A product treating the edit as continuity reports no categories at all —
-//   or maps the vacated identity forward — and fails the table.
-// - The 14.5 findings are located within the reference-bearing opening tag's
-//   byte window (the T2.4-4 operationalization for unresolved-`d` findings).
+// - T6.6-2 "every byte of the workspace identical afterward" is a
+//   whole-workspace-root byte snapshot compare around every preview
+//   invocation (assertLeavesUnchanged), run after a premise `build` so
+//   sources, generated modules, Markdown output, and graph data are all
+//   present under the compare — a preview that refreshes derived state or
+//   regenerates anything fails it. The journal premise (absent before the
+//   first journaled operation, SPEC 6.1) makes the same compare realize "an
+//   absent journal stays absent".
+// - T6.6-2 "byte-deterministic across repeated runs" is H-6's
+//   same-command-twice protocol (assertRunTwiceDeterministic:
+//   byte-identical stdout, stderr, exit outcome, and workspace byte state
+//   across the two runs), applied to the `--json` form and to the bare
+//   (human) form alike — SPEC 6.6 pins determinism for preview output as
+//   such, not for one output form. Human-form content is otherwise
+//   unasserted (H-3: human reports are asserted only for required
+//   information; this test requires none of it).
+// - T6.6-2 "a subsequent real run on the same state performs the previewed
+//   plan" is operationalized exactly as the TEST-SPEC entry states it: the
+//   real operation on the untouched workspace succeeds (exit 0, `--json`,
+//   a single JSON document as the entire stdout, 12.0) and its
+//   performed-operation document (T6.4-1's protocol; the form-exact 12.7
+//   form, exactly `{"findings", "mapping"}` with `findings` `[]`, H-3)
+//   carries a `mapping` equal to the preview's, pair for pair in order — both
+//   documents' `from`-byte order is decode-enforced (SPEC 12.7), and the raw
+//   decoded arrays compare as ordered arrays. The mapping's fixture-expected
+//   CONTENT is T6.6-4's business — here the contract is the equality.
+// - A successful preview's `mapping`, `files`, and `delta` are non-`null`
+//   (`null` is the refusal encoding, SPEC 6.6/12.7, and T6.6-2 stages
+//   workspaces where the real operation would proceed); `files` and `delta`
+//   content is T6.6-4's and T6.6-5's business.
+// - T6.6-3 "the same findings (same stable codes, locations, identities;
+//   14)": the real refused invocation runs first on the identical staging —
+//   the refusal-case stagings and expectation tables are imported from
+//   section-6.4.ts/section-6.5.ts (TEST-SPEC §6.6 "staged identically"), its
+//   per-arm code counts re-pinned (the arm still isolates its staged
+//   cause(s); the concerned-data assertions stay T6.4-3's/T6.5-4's) — and
+//   the `--preview` invocation's findings are compared to it element-wise
+//   over every finding member except `message`: code, locations, concerned
+//   path, identities — the members SPEC 14/12.7 make contractual. Message
+//   composition is deterministic but unpinned (12.0/12.7), and the preview
+//   and the real run are distinct invocations, so equal wording is not
+//   contract (H-4). Both arrays come out of the form-exact decode in 12.7's
+//   total findings order, whose keys precede the message tie-break exactly
+//   on the compared members, so element-wise comparison is exact.
+// - T6.6-3 "modifying nothing" over each refusal twin
+//   (expectRefusedPreviewEquivalence): a whole-root compare spans the real
+//   refusal and its preview, the lock path left out — the real operation is
+//   a mutating command's run, its acquisition's and release's writes there
+//   no modification (TEST-SPEC H-6, SPEC 13.5) — and the preview runs
+//   inside its own compare against its pre-invocation state, the state the
+//   real refusal left (its end recorded by then, helpers/acquiring-runs.ts),
+//   which keeps the lock path in: a preview acquires nothing, so whatever
+//   occupied the lock path before it occupies it afterwards byte-identical,
+//   nothing added beside it (H-6, SPEC 6.6, 13.4).
+// - T6.6-3's T6.5-6, T6.5-16, and T6.5-17 twins: the identity-terms
+//   refusals run on T6.5-6's post-move workspace staged directly from the
+//   bytes that test asserts (section-6.5.ts's MOVE_IDENTITY_* exports) —
+//   the exact self-move of either form, the file form refused as
+//   identity-unchanged alone (SPEC 6.5, 14), and the same-file
+//   after-removal collision — and every refused arm of T6.5-16 (its alone
+//   arms included) and of T6.5-17 is staged from the arm tables
+//   section-6.5-iii.ts exports (R16_REFUSED_ARMS, R16_ALONE_ARMS,
+//   M17_REFUSED_ARMS under R16_CONFIG), the premise re-pinning each arm's
+//   code set alone — the finding's concerned data and the S-9 premises stay
+//   the home test's — before the equivalence compare. T6.5-20's refused
+//   stagings run through section-6.5-iv.ts's own staging code
+//   (`d20RefusedStagings`, `runD20RefusedStaging`): the companion legs read
+//   as the home test reads them, each staging before any build or after its
+//   premise `build` as the home test stages it, the code set
+//   (`refused-invalid-destination` alone) re-pinned before the compare.
+//   T6.5-21's refused stagings — (a), its two-reason move included, and
+//   (b) — run likewise through `D21_REFUSED_STAGINGS` and
+//   `runD21RefusedStaging`, each move's code set re-pinned before the
+//   compare.
+//   The invalid-workspace precondition's refused-writes staging runs
+//   through T6.4-6's own staging code (section-6.4.ts's REFUSED_WRITES_*
+//   exports and `stageRefusedWrites`, its premise `build --json` pinning
+//   the one condition-22 finding concerning `out`), its real rename and
+//   file-form move — the latter T6.5-4's precondition arm — each twinned;
+//   T6.5-4's single-casing arm runs on its own workspace (MOVE_CASING_*).
+//   T14-7's own stagings are staged from section-14.ts's exported tables,
+//   in T14-7's order: its two spelled refused-invalid-id command lines
+//   (`IntrinsicInvalidIdArm`) in T6.4-3's and T6.5-4's workspaces after the
+//   home tables' loops, as T14-7 runs them; then, each on a fresh workspace
+//   (`T147RefusalStaging` through `expectT147StagingPreviewTwins`, and the
+//   four `T14_7_REFUSED_CYCLE_ARMS`), the plain file at a destination-path
+//   component, the both-collide-and-cycle move, the destination spellings
+//   `./a.mdx`, `specs//b.mdx`, and `specs/../specs/b.mdx` in either form,
+//   the refused-cycle arms — the import the move would add, with the local
+//   reference spelled once and twice, the sibling chain, and the dependency
+//   cycle a containment would make — the identities over invalid paths, and
+//   the staged-to-collide workspace: the control collision, the exact
+//   self-move of either form, and, `specs/Bad.mdx` broken by the staging's
+//   `then`, the invalid-workspace rename. Each case's code set is re-pinned
+//   before the compare; the concerned data and T14-7's `query node` checks
+//   stay T14-7's.
+//   The U+FFFD destination operands (T6.5-5's
+//   MOVE_REPLACEMENT_DESTINATION_CASES, either leg) join the usage sweep
+//   below.
+// - T6.6-3 usage errors "exit 2 identically (argument checks precede either
+//   way)": each T6.4-4/T6.5-5 usage-error invocation runs once — the real
+//   invocation, then the `--preview` one — on the ordering-shaped staging
+//   (unrelated validation errors present) where its source test stages one,
+//   so exit 2 across the pair realizes the precedence clause; the
+//   parse-local spells-no-identity arms — each home test's exported rows,
+//   the would-be bearer's `id` repeated, braced, or valueless, each on a
+//   workspace of its own — re-pin their one-14.17 premise first (T6.4-4's
+//   protocol; runSpellsNoneUsageArm), and every sweep sits inside a whole-root
+//   modifies-nothing compare (SPEC 12.0), which leaves the lock path out —
+//   each real invocation is a mutating command's run (TEST-SPEC H-6) — while
+//   each `--preview` invocation runs inside its own compare against the
+//   state the real invocation left, which keeps it in (H-6: a preview
+//   acquires nothing; expectUsageErrorEitherWay).
+// - T6.6-3 scheduling: the runs-while-held arm shares T13.5-2's staging and
+//   the 13.5 suite's drive-during-hold choreography (CERTIFICATIONS.md's
+//   Exclusions note binds exactly this sharing): command 1 held through
+//   T13.5-2's own `whileCommand1Holds`, the preview run through the step
+//   T13.5-4's reads and `build` take while held (`nonMutatingRunWhileHeld`,
+//   section-13.5.ts; the wait for the command's exit while the hold stands
+//   certified via VIOL-CORE-BUILDWAIT) — the same second command T13.5-2
+//   asserts is refused exit 2 without `--preview` here runs to completion
+//   exit 0 with it while command 1 is held. "Takes no exclusivity" is
+//   operationalized as that observable (SPEC 6.6: completes while another
+//   mutating command holds exclusivity — never the mutual-exclusion
+//   refusal, never blocked; a blocking product is killed at the hang bound
+//   and fails diagnosed, H-8/H-10), plus the held-state comparison against
+//   command 1's pre-invocation state once it holds and again once the
+//   preview has exited, and the inclusion check around the preview (H-6:
+//   the holder's entry byte-identical and alone, nothing added beside it) —
+//   helpers/lock-state.ts's machinery, which reads the held run's entry
+//   under H-4's grant and walks every other path with the lock path pruned,
+//   so an entry its product made unreadable is read, its mode restored at
+//   once. `--test-hold` + `--preview` is asserted for both operations and
+//   both flag orders: exit 2, the 12.7 error document under --json, no hold
+//   file created, nothing modified.
+// - T6.6-3's acquisition arms (SPEC 6.6: acquisition and its every outcome
+//   apply to the real operation only), each on a fresh CORE_DECL workspace,
+//   freshly built, nothing at `.xspec/lock` before its staging, the preview
+//   (`rename specs/A.mdx a a2 --preview --json`) run first and the real
+//   operation (`rename specs/A.mdx a a2 --json`) second on the same staging
+//   — the real operation's release can clear it (T13.5-10(d)). An
+//   unobstructed twin, freshly built, answers the preview (exit 0, findings
+//   [], its plan non-null) and then the real operation (exit 0: a premise,
+//   so each arm's exit 2 is its staging's alone). (a) `.xspec/lock` a
+//   symbolic link to a directory outside the workspace holding a file
+//   (helpers/lock-staging.ts `stageLeftover`); an empty leftover lock
+//   directory `r-x`; one `-wx`; and a lock directory holding a subdirectory
+//   holding a file, the subdirectory `-wx` (helpers/acquisition-staging.ts,
+//   T13.5-10(d)'s stagings, each verified on the harness itself, E-1): the
+//   preview exits 0, its stdout byte-identical to the twin's; its staging's
+//   modes restored, the lock path holds exactly the staging's record,
+//   nothing added beside it (`assertLockPathHolds`), every link's target
+//   untouched, every other path byte-identical; then, the modes changed
+//   again and verified anew (`reapply`), the real operation exits 2 with the
+//   error document's `code` `"write-failure"` (the first two) or
+//   `"read-failure"` (the last two) and `path` `".xspec/lock"`, every path
+//   but the lock path byte-identical (H-6, the lock path pruned from both
+//   walks). (b) `.xspec` a plain file (section-13.5-ii.ts `obstructArea`):
+//   the preview exits 1 with exactly T10.1-6's condition-22 finding
+//   concerning `.xspec`, `locations` [], `mapping`, `files`, and `delta`
+//   `null`; the real operation exits 2, `"write-failure"` at `".xspec"`;
+//   nothing modified across both, the plain file byte-unchanged. (c) a
+//   plain file at `.xspec/lock`, and separately a directory holding a file
+//   and a FIFO in a lock directory: the preview exits 0, its stdout
+//   byte-identical to the twin's; then — in the lock directory, the
+//   held-state comparison's count half first (the staged occupants and no
+//   entry) — the inclusion check against the lock path captured before the
+//   preview (`captureLockPath`/`assertLockPathAsCaptured`, the machinery
+//   VIOL-CORE-READERENTRY's note names), each staging in place, each FIFO a
+//   FIFO, every other path byte-identical; then the real operation exits 0,
+//   nothing left at `.xspec/lock` (T13.5-10(b): acquisition removes the
+//   leftovers). Every run is bounded (`runBounded`): a product opening the
+//   staged FIFO blocks and fails diagnosed at the hang guard (H-8).
+// - T6.6-4 asserts the preview REPORT's content byte-precisely: expected
+//   `mapping` and `files` are composed as complete exact lists from the
+//   staged fixture bytes alone — locator helpers compute byte offsets from
+//   the same strings the workspace stages (never from product output), and
+//   multi-byte characters sit before every located construct so byte
+//   offsets diverge from code-point and UTF-16 counts — and compared
+//   list-for-list: an extra file entry, a missing edit, a phantom class, or
+//   a one-byte range drift each fail; the rename arm's descendants `z` and
+//   `c` stand in document order opposite to `from`-byte order, so a mapping
+//   in document order fails the decoder's 12.7 order check and the exact
+//   list alike, and its `core.twice` spells one affected reference twice in
+//   one `d` array — one edge (SPEC 2.2), two occurrences (5.7) — so a
+//   product reporting one `reference-rewrite` per edge, or both at one
+//   entry, fails the exact list (TEST-SPEC T6.6-4). Judgment calls pinned here
+//   (H-4): an `id`-attribute rewrite spans the attribute's own characters
+//   (`id="…"`, name through closing quote — SPEC 6.6 "the `id` attribute's own
+//   characters", the construct-spelling reading its sibling clauses use for
+//   the self-closing tag and the specifier literal, quotes included); the
+//   self-closing target parent's insertion point maps to the tag's END in
+//   pre-operation coordinates (every byte the operation adds — the appended
+//   paired closing tag and the inserted text alike — attaches at that offset,
+//   the only stable pre-operation anchor); an import addition's offset is
+//   implementation latitude (SPEC 6.5), so the preview asserts it
+//   structurally (exactly one such edit, zero-length, within the file) and
+//   arm (b) pins it against the real operation's bytes by reconstruction:
+//   the preview runs inside a whole-root modifies-nothing compare, the real
+//   operation then executes on that pinned pre-operation state (TEST-SPEC's
+//   "running the operation on a copy", H-4), and the rewritten file must
+//   equal the pre-operation bytes with the known reference rewrite applied
+//   and one added-import line — `\n`-preceded exactly when the offset is
+//   mid-line (SPEC 6.5) — spliced in at exactly the previewed offset. The
+//   12.7 edit comparator (range start, then range end, then class-name
+//   bytes) is enforced by decodePreviewReport on every decoded document,
+//   and arm (e) makes its final tie-break a pinned observation: identical
+//   ranges arise only between zero-length insertion points, where 6.5's
+//   line-start preference puts an import addition at the target
+//   insertion's offset, so TEST-SPEC T6.6-4 names T6.5-13's (b) (a
+//   self-closing target parent's tag end), (d) both variants (the end of a
+//   paragraph-ended file), and (g) (two declarations added at one offset)
+//   — restaged here byte for byte from section-6.5-iii's exported
+//   `A13_TIE_BREAK_ARMS`, the receiving file's edit list compared entry for
+//   entry (`import-addition` before `target-insertion` at one offset;
+//   (g)'s two `import-addition` entries adjacent, their count the
+//   observation), then the whole plan once the real operation on the
+//   preview-pinned state has bound the fresh identifiers (the origin's
+//   deletion with the `id-rewrite` and each embedding's `reference-rewrite`
+//   nested inside it, the latter reported exactly when the chosen binding
+//   changes the spelling, SPEC 6.5), the receiving and other files
+//   byte-asserted against T6.5-13's composed forms. Delta content is
+//   T6.6-5's business — asserted here, in JSON, only as the decode's
+//   success encoding (non-null beside `mapping` and `files`); the
+//   human-form check (the last bullet) asks the human report for every
+//   delta path the decoded document carries. T6.6-4(b)'s clause that an
+//   `import-removal` spans a TypeScript declaration from its first
+//   decorator or modifier where it carries any is pinned by T6.5-26's
+//   previews (section-6.5-vi.ts): no staging here holds a decorated or
+//   modified declaration — arm (b)'s removed import stands in a spec source.
+// - T6.6-5 asserts the delta's content record-based, every expected set
+//   composed from the `recorded` set the inventory reports right after
+//   each premise build — before graph data is deleted or the configuration
+//   changed (TEST-SPEC T6.6-5; SPEC 11.6: the record-supplied datum, the
+//   recorded derived-file paths, companions included). After a successful
+//   build that datum is the plain list (13.3: a record exists and is
+//   readable), and each recorded path is attributed to exactly one staged
+//   source — its module or a companion under the 13.1 name shape
+//   `DIR/NAME.xspec.<suffix>` (the suffix set is the product's own, H-4:
+//   read from the record, never assumed) or, the build having emitted
+//   Markdown, its 13.2/7.3 destination `DIR/NAME.md` next to the source
+//   (`outDir` unset) — every source's module and, with emission, its
+//   Markdown named; each slip fails diagnosed (H-8). A moved or created
+//   file's derived paths are the origin's recorded entries re-based: each
+//   entry's `DIR/NAME` replaced by the destination's directory and name,
+//   its suffix kept (SPEC 13.1: per-source derived paths are defined by the
+//   `NAME.mdx` name shape alone). The premise build's own writes stay a
+//   premise check alone — the module written, with emission the Markdown,
+//   and every write attributable to graph data (T13.3-2's key rule, shared
+//   from section-13.3.ts) or exactly one staged source, SPEC 13.1–13.3
+//   enumerating what `build` writes — which arms the presence
+//   discrimination below; no expectation is composed from the writes, and
+//   nothing requires them equal to the record (T11.6-3 pins the record's
+//   content). With the record present, `removed` is exactly the moved
+//   file's recorded module, companions, and Markdown and `generated` those
+//   entries re-based to the destination; a rename reports [] both ways;
+//   the created target (T6.6-4(d)'s staging, no emission) reports the new
+//   file's module and companions, re-based from the origin's recorded
+//   entries, under `generated` and `removed` []. The record-deleted arm
+//   (T13.3-2's operational definition) asserts the record-based rule from
+//   both directions: `generated` equal to the FULL post-move regeneration
+//   set — every path the build recorded, the moved file's re-based to its
+//   destination: the staying sources' paths listed although their files
+//   sit on disk, the origin's still-on-disk paths in neither direction —
+//   and `removed` exactly [] (nothing recorded), so a presence-based
+//   product fails both set equalities. An absent record is
+//   nothing-recorded, the empty-record SUCCESS path (SPEC 6.6: findings [],
+//   delta a plain value) — never the 14.23 unavailability of T6.6-6, which
+//   covers recorded state that exists but cannot be read — and the preview
+//   never refreshes it (whole-root compare around the invocation; graph
+//   data asserted still absent afterward). The lagging-record arm builds
+//   WITHOUT emission and reads the record before enabling `markdown.emit`
+//   in the configuration, then takes the same move preview with no
+//   rebuild: the record holds modules and companions alone (a recorded
+//   Markdown path is attributable to no source, emission having been
+//   disabled, 7.3) — a lagging record alone is never staleness (SPEC 13.3),
+//   and a preview never refreshes it — so `generated` is exactly the
+//   destination's module and companions (the origin's recorded entries
+//   re-based) and its Markdown together with every OTHER discovered
+//   source's Markdown emit destination (the paths the current
+//   configuration generates that the stale record lacks; the staying
+//   sources' recorded modules and companions regenerate in place, in
+//   neither direction; the origin's Markdown, never recorded and not
+//   generated post-move, in neither) and `removed` exactly the origin's
+//   recorded module and companions, no Markdown among them — a product
+//   composing either direction from the configuration alone, or from
+//   presence, fails a set equality; whole-root compare around the
+//   invocation.
+// - T6.6-6 stages the unreadable record through the H-3 corrupt-record
+//   adapter (record-staging.ts): shape-blind garbage — files present, their
+//   bytes readable as no record, not even valid UTF-8 — over every
+//   product-written plain file of T13.3-2's operational path set, applied
+//   only after the premise `build` wrote them (never fabricated, H-3); the
+//   staging's reachability is positively controlled by the condition-23
+//   finding the arm itself asserts (CERTIFICATIONS.md's Exclusions note on
+//   the shape-blind 14.23 stagings). "The full preview — `mapping` and
+//   `files` complete … every other part of the preview report emitted in
+//   full" (SPEC 14.23, TEST-SPEC T6.6-6) is operationalized as deep
+//   equality against the intact-record run of the same preview first, on
+//   the byte-identical sources: the staging is latitude-free — the moved
+//   subtree is self-contained and nothing outside it references a moved
+//   node, so the plan holds no import addition (SPEC 6.5's one preview
+//   latitude) and is fully determined by sources + operation — with the
+//   exact expected mapping pinned on both runs and re-pinned as the real
+//   run's applied mapping (the preview's `mapping` IS the complete identity
+//   mapping the operation then journals, SPEC 6.6). The condition-23
+//   finding's `locations` are asserted exactly []: 14.23's concern is the
+//   concerned-path member — the graph-data area, `.xspec` spelled
+//   workspace-relative with no trailing separator (SPEC 11.6), no path
+//   inside it named (the record's layout is deliberately unenumerated,
+//   13.3) — and a path-concerned condition is an unlocated one (T12.7-1:
+//   `locations` [] for unlocated conditions, `path` the concerned path).
+//   Both corrupt-state previews — the full move preview (its human form
+//   beside it, the next bullet) and the refused identity-unchanged rename
+//   preview — run inside ONE whole-root modifies-nothing compare (a preview
+//   writes nothing and never refreshes the record, SPEC 6.6/13.3, so the
+//   corrupt state persists byte for byte), which makes the subsequent real
+//   move run on literally "the same state"; its exit-0 success, applied
+//   mapping, and `check` exit 0 realize "not refused — it proceeds, its
+//   finishing regeneration replacing the corrupt record" (SPEC 6.6, 6.4,
+//   14.10; T12.2-2's protocol). The refused preview's one finding,
+//   `refused-identity-unchanged`, is asserted with the identity it concerns
+//   (TEST-SPEC line 9's rule): its `identities` exactly the unchanged
+//   identity `specs/Origin.mdx#org`, the sole element, in 1.5's form over
+//   the rename's file (SPEC 14, 1.5).
+// - T6.6-4's, T6.6-5's, and T6.6-6's human form (T12.0-1's information
+//   parity, a robust-matching add-on beside the decoded comparison that is
+//   T6.6-7's, the last bullet; SPEC 12.0: the JSON form carries the same
+//   information as the human report; 6.6: a preview reports the complete
+//   identity mapping, every file the operation would rewrite, relocate, or
+//   create with every edit classed and located, and the derived-file
+//   delta): every successful
+//   preview the three tests decode — each `runPreviewJson` run, and
+//   T6.6-6's corrupt-record move preview — is followed directly, at the
+//   same state and inside whatever modifies-nothing compare the caller
+//   holds, by the same argv without `--json`, which exits as the `--json`
+//   run does (0; 1 at T6.6-6's corrupt record, the answer carrying its
+//   condition-23 finding). Once the test's JSON assertions on the document
+//   have run — for T6.6-4(e), once the whole plan is asserted past the real
+//   operation — the human report must mention what the decoded document
+//   carries (a product-to-itself comparison, H-4;
+//   `assertHumanPreviewReport`, through helpers/adapters/human.ts): every
+//   mapping pair's `from` and `to` identity, every file entry's path, and
+//   every delta path in either direction (identity-or-path boundaries, so
+//   the Markdown path `specs/Mv.md` never counts inside `specs/Mv.mdx`, nor
+//   a root's path inside its sections' identities); then, in a separate
+//   call with every identity and path the document carries blanked out
+//   (the findings' concerned paths, location files, and identities among
+//   them), every edit's class (the preview edit classes, SPEC-named tokens)
+//   and, where the delta is explicitly unavailable, `unavailable` (14.23);
+//   then, in a third, the start and end of every edit's range (whole
+//   numbers, SPEC 1.7, matched with the document's digit-holding data
+//   blanked out — identities and paths, T6.6-5's `specs/sub/Mv2.mdx` and
+//   `pal2` among them, and the findings' message lines — save a datum that
+//   is itself a whole number, `digitHoldingData` from section-10.7-i.ts).
+//   A finding's message is free text, never compared (H-3), and blanked for
+//   the numbers alone, so its citation digits (the built product's
+//   condition-23 message cites `SPEC 14.23, 13.3`) never stand in for an
+//   offset: unlike T14-1's findings, a successful preview's one possible
+//   finding is unlocated (condition 23, locations []), so no offset of its
+//   own is asked. The delta's direction words are no SPEC-named tokens and
+//   are not asked, and T6.6-6's refused preview, a refusal, reports
+//   findings alone, its human form T6.6-7's. Limits: no mention is
+//   associated with another, so which file holds which edit, which class
+//   and range belong together, which `from` maps to which `to`, and which
+//   delta direction lists a path stay with the JSON assertions and T6.6-7's
+//   decode; an identity
+//   counts wherever the report prints it; a message the report rewords is
+//   not blanked, so its digits may then stand in for an offset; and a token
+//   counts wherever it stands outside the blanked data, a finding's message
+//   included — the built product's condition-23 message says the recorded
+//   derived-file paths are "unavailable", and robust matching cannot tell
+//   which line carries the token, so a report dropping its delta lines
+//   passes T6.6-6 (FIX_PLAN Task 10's scratch build `t9jd0c10-nodelta`),
+//   while T6.6-4 (at its file-form arm) and T6.6-5 (at its first arm) fail
+//   it, naming the delta paths.
+// - T6.6-7 (the human form, H-3's report forms; SPEC 12.0: the JSON form
+//   carries the same information as the human report): each preview of
+//   T6.6-2, T6.6-4, T6.6-5, and T6.6-6 is restaged identically — the same
+//   configuration and sources, the premise `build`, and then T6.6-5's
+//   graph-data deletion and emission-enabling configuration edit and
+//   T6.6-6's shape-blind corruption — a state two tests share twinned once
+//   (T6.6-4(d)'s created-target move is T6.6-5's; T6.6-4(c)'s workspace,
+//   its configuration then enabling emission with no rebuild, is T6.6-5's
+//   lagging record); each refused preview of T6.6-3 is restaged through
+//   T6.6-3's own refusal stagings (`runT663RefusalStagings`, handed
+//   T6.6-7's twin in place of the equivalence — and, exported, T12.0-15's
+//   human twin of each refused real operation, section-12.0-iv.ts), and
+//   acquisition arm (b)'s on its staging (`runT667AreaArm`). At each state
+//   `expectHumanPreviewTwin` runs the `--preview --json` invocation — its
+//   exit the staging's premise: 0, or 1 at T6.6-6's corrupt record and at
+//   every refusal — and then the same argv without `--json`, both inside
+//   one whole-root modifies-nothing compare keeping the lock path in (a
+//   preview acquires nothing, H-6): the human run exits as its twin, its
+//   standard error byte-identical (SPEC 12.0; T12.0-2), and its report,
+//   decoded by the human preview decoder (helpers/adapters/human-reports.ts:
+//   fitted to the built product's layout, value-blind, failing loudly),
+//   carries the twin's decoded document (`assertHumanPreviewReportCarries`)
+//   — every finding's code, locations, concerned path, and identities; no
+//   plan beside a refusal's findings; otherwise the mapping's pairs, every
+//   file with each of its edits' class and range, and the delta's two
+//   directions or its unavailability — each a multiset, order free (SPEC
+//   fixes no order for the human report; 12.7's orders are the JSON
+//   form's). T6.5-4's barred destination `specs/a<U+000A>b.mdx`, its
+//   refusal's concerned path printed as it stands, is read through the
+//   decoder's line-feed continuation. The twin compares the two forms
+//   whatever the twin carries: the content is the home tests', and T6.6-3's
+//   real refusals are not rerun, their human reports T12.0-15's (TEST-SPEC
+//   T6.6-7). Every staged-source record the restagings stage names T6.6-7.
 
-import type {
-  ChangeCategory,
-  ImpactReport,
-} from "../../helpers/adapters/index.js";
-import { decodeImpactReport } from "../../helpers/adapters/index.js";
-import { fail, parseJsonStdout } from "../../helpers/assertions.js";
-import { defineProductTest } from "../../helpers/registry.js";
-import type { ProductTestEntry } from "../../helpers/registry.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { Buffer } from "node:buffer";
+import type { AcquisitionStaging } from "../../helpers/acquisition-staging.js";
 import {
+  stageUnlistableLeftoverDirectory,
+  stageUnlistableLockDirectory,
+  stageUnwritableLockDirectory,
+} from "../../helpers/acquisition-staging.js";
+import { EXCLUDE_LOCK_PATH, LOCK_PATH } from "../../helpers/lock-path.js";
+import type { StagedLeftover } from "../../helpers/lock-staging.js";
+import {
+  AREA_PATH,
+  assertFifosIntact,
+  assertOutsideTargetsUntouched,
+  assertStagingInPlace,
+  stageLeftover,
+} from "../../helpers/lock-staging.js";
+import {
+  assertHeldState,
+  assertLockDirectoryEntries,
+  assertLockPathAbsent,
+  assertLockPathAsCaptured,
+  assertLockPathHolds,
+  captureLockPath,
+} from "../../helpers/lock-state.js";
+import { defineProductTest } from "../../helpers/registry.js";
+import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
+import type { ProductTestEntry } from "../../helpers/registry.js";
+import type {
+  AppliedMappingPair,
+  Finding,
+  PathValue,
+  PreviewDeltaDatum,
+  PreviewEdit,
+  PreviewEditClass,
+  PreviewFileEntry,
+  PreviewReport,
+  SourceRange,
+  SpecNamedToken,
+} from "../../helpers/adapters/index.js";
+import {
+  GRAPH_DATA_AREA_PATH,
+  assertHumanPreviewReportCarries,
+  assertReportMentions,
+  corruptGraphDataShapeBlind,
+  decodeFindingsReport,
+  decodeInventoryRecordedDatum,
+  decodePerformedOperationReport,
+  decodePreviewReport,
+  identityMention,
+  numberMention,
+  renderPathValue,
+  specTokenMention,
+} from "../../helpers/adapters/index.js";
+import {
+  assertBytesEqual,
+  assertExitCode,
+  assertFileBytes,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
+import { assertRunTwiceDeterministic } from "../../helpers/determinism.js";
+import { expectFreshIdentifier } from "../../helpers/import-insertion.js";
+import type { DirectorySnapshot } from "../../helpers/snapshot.js";
+import {
+  assertLeavesUnchanged,
+  assertSnapshotsEqual,
+  displaySnapshotPath,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
+import type {
+  ArgvValue,
+  ProductBinding,
+  RunResult,
+} from "../../helpers/subprocess.js";
+import { pathExists, runProduct } from "../../helpers/subprocess.js";
+import { IDENTIFIER_RUN_SOURCE } from "../../helpers/ts-identifiers.js";
+import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import type { SpellsNoneUsageArm } from "./section-6.4.js";
+import {
+  REFUSED_WRITES_CASES,
+  REFUSED_WRITES_CONFIG,
+  REFUSED_WRITES_FILES,
+  RENAME_REFUSAL_CASES,
+  RENAME_REFUSAL_CONFIG,
+  RENAME_REFUSAL_FILES,
+  RENAME_USAGE_CASES,
+  RENAME_USAGE_CONFIG,
+  RENAME_USAGE_ORDERING_FILES,
+  T6_4_4_SPELLS_NONE_ARMS,
+  stageRefusedWrites,
+} from "./section-6.4.js";
+import type { RefusalExpectation } from "./section-6.5.js";
+import {
+  A8_PLAIN_TARGET,
+  MOVE_CASING_CASE,
+  MOVE_CASING_CONFIG,
+  MOVE_CASING_FILES,
+  MOVE_DERIVED_LINK_CASE,
+  MOVE_DERIVED_LINK_FILES,
+  MOVE_DERIVED_PATH_CASE,
+  MOVE_DERIVED_PATH_CONFIG,
+  MOVE_DERIVED_PATH_FILES,
+  MOVE_IDENTITY_CONFIG,
+  MOVE_IDENTITY_FILES_AFTER,
+  MOVE_IDENTITY_REFUSAL_CASES,
+  MOVE_LINK_OUTSIDE_CASES,
+  MOVE_LINK_OUTSIDE_FILES,
+  MOVE_MIXED_SYNOPSIS_CASES,
+  MOVE_NON_UTF8_ARGV,
+  MOVE_PRECONDITION_BREAK,
+  MOVE_PRECONDITION_BREAK_FILE,
+  MOVE_PRECONDITION_CASE,
+  MOVE_PRECONDITION_FILES,
+  MOVE_REFUSAL_CASES,
+  MOVE_REFUSAL_CONFIG,
+  MOVE_REFUSAL_FILES,
+  MOVE_REPLACEMENT_DESTINATION_CASES,
+  MOVE_SOLO_CONFIG,
+  MOVE_USAGE_CASES,
+  MOVE_USAGE_CONFIG,
+  MOVE_USAGE_ORDERING_FILES,
+  MOVE_WRONG_KIND_CASES,
+  T6_5_5_SPELLS_NONE_ARMS,
+  stageMoveDerivedLinkComponent,
+  stageMoveLinkOutsideComponent,
+  stageMoveRefusalOccupants,
+} from "./section-6.5.js";
+import type { A13TieBreakArm } from "./section-6.5-iii.js";
+import {
+  A13_TIE_BREAK_ARMS,
+  M17_REFUSED_ARMS,
+  R16_ALONE_ARMS,
+  R16_CONFIG,
+  R16_REFUSED_ARMS,
+  a13ReadAddedIdentifiers,
+} from "./section-6.5-iii.js";
+import {
+  D21_REFUSED_STAGINGS,
+  d20RefusedStagings,
+  runD20RefusedStaging,
+  runD21RefusedStaging,
+} from "./section-6.5-iv.js";
+import { digitHoldingData } from "./section-10.7-i.js";
+import {
+  assertGraphDataPresent,
+  deleteGraphData,
+  isGraphDataKey,
+} from "./section-13.3.js";
+import { obstructArea } from "./section-13.5-ii.js";
+import {
+  CORE_DECL,
+  holdPathFor,
+  nonMutatingRunWhileHeld,
+  runBounded,
+  whileCommand1Holds,
+} from "./section-13.5.js";
+import type {
+  IntrinsicInvalidIdArm,
+  T147RefusalCase,
+  T147RefusalStaging,
+} from "./section-14.js";
+import {
+  T14_7_COMPONENT_STAGING,
+  T14_7_INTRINSIC_MOVE_ARM,
+  T14_7_INTRINSIC_RENAME_ARM,
+  T14_7_INVALID_PATH_STAGING,
+  T14_7_INVALID_WORKSPACE_STAGING,
+  T14_7_MULTI_STAGING,
+  T14_7_REFUSED_CYCLE_ARMS,
+  T14_7_SPELLING_STAGING,
+} from "./section-14.js";
+import {
+  assertAppliedMapping,
   assertConditionCounts,
-  assertFindingLocated,
+  assertFindingConcernsPath,
+  assertRefusalIdentities,
   assertSameJson,
   buildFindings,
   buildOk,
-  byteWindow,
+  expectErrorDocument,
   expectExit,
+  runJson,
 } from "./support.js";
 
-// Exactly one spec group (SPEC 7). No code groups exist in these fixtures, so
-// no code location can be impacted.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// One spec group with Markdown emission (SPEC 7, 7.3), so the premise
+// `build` materializes every derived-file kind — generated modules, Markdown
+// output, and graph data — and the modifies-nothing compare covers them all.
+// A staged-source record: T6.6-2 stages it in a workspace created after a
+// product invocation, and T6.6-5 by `file()` after one (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_MD_CONFIG = stagedTs(
+  "T6.6-2/T6.6-5/T6.6-7 xspec.config.ts — one spec group with Markdown emission",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
-  }
+  },
+  markdown: { emit: true }
 })
-`;
+`,
+);
 
 const JOURNAL_PATH = ".xspec/journal";
 
-/** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * The record-accepting initial `files`: the sets section-6.4.ts,
+ * section-6.5.ts, and section-6.5-iii.ts export, and this module's own
+ * initial files of every workspace a body creates after its first product
+ * invocation, stage their `.mdx` entries as staged-source records
+ * (helpers/staged-mdx.ts; S-9's before-any-product clause).
+ */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  config: string | StagedTs,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
-    files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...files },
+    files: { "xspec.config.ts": config, ...files },
   });
   try {
     return await body(workspace);
@@ -83,437 +657,5235 @@ async function withWorkspace<T>(
 }
 
 /**
- * Assert the journal file does not exist (SPEC 6.6, 6.1): manual
- * restructuring is never journaled, and the file comes into existence only
- * with the first journaled `rename`/`move` — so after direct edits and the
- * commands run on them, nothing may occupy `.xspec/journal`.
+ * The T6.6-2 preview protocol over one operation whose real run would
+ * proceed: inside one whole-root modifies-nothing compare (SPEC 6.6 — no
+ * sources, no journal, no derived files, no graph data), run the `--preview
+ * --json` invocation twice (H-6 byte determinism) asserting exit 0, decode
+ * the first run's stdout as the form-exact 12.7 preview document, assert
+ * `findings` is exactly `[]` and the plan members are non-`null`, then run
+ * the bare `--preview` form twice (H-6 again, exit 0). Returns the preview's
+ * `mapping` for the caller's real-run equality assertion.
  */
-async function assertNoJournal(
-  workspace: TestWorkspace,
-  moment: string,
-  context: string,
-): Promise<void> {
-  const kind = await workspace.kind(JOURNAL_PATH);
-  if (kind !== "absent") {
-    fail(
-      `${context}: ${moment}, ${JOURNAL_PATH} holds a ${kind} — a rename ` +
-        `performed by editing the file directly produces no journal entry, ` +
-        `and the journal file comes into existence only with the first ` +
-        `journaled operation (SPEC 6.6, 6.1)`,
-    );
-  }
-}
-
-/**
- * `impact --base <ref> --json`: exit 0 (impact is informational, SPEC 9.3;
- * H-5) with exactly one JSON document, decoded as the impact report (H-3).
- */
-async function impactAgainst(
+async function expectInertPreview(
   product: ProductBinding,
   workspace: TestWorkspace,
-  ref: string,
+  operationArgv: readonly string[],
   context: string,
-): Promise<ImpactReport> {
-  const result = await expectExit(
-    product,
-    workspace,
-    ["impact", "--base", ref, "--json"],
-    0,
-    context,
+): Promise<readonly AppliedMappingPair[]> {
+  const jsonArgv = [...operationArgv, "--preview", "--json"];
+  const bareArgv = [...operationArgv, "--preview"];
+  return await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const { first } = await assertRunTwiceDeterministic({
+        binding: product,
+        run: { cwd: workspace.root, argv: jsonArgv },
+        context:
+          `${context}: \`${jsonArgv.join(" ")}\` byte determinism across ` +
+          `repeated runs (SPEC 6.6, 12.0; H-6)`,
+      });
+      assertExitCode(
+        first,
+        0,
+        `${context}: \`${jsonArgv.join(" ")}\` — the preview succeeds ` +
+          `exactly when the real operation would proceed, and this staging ` +
+          `is a valid operation on a valid workspace (SPEC 6.6)`,
+      );
+      const report = decodePreviewReport(
+        parseJsonStdout(
+          first,
+          `${context}: \`${jsonArgv.join(" ")}\` — a single JSON document ` +
+            `as the entire stdout (SPEC 12.0)`,
+        ),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: a preview whose real operation would proceed reports ` +
+          `findings [] (SPEC 6.6, 12.7)`,
+      );
+      if (
+        report.mapping === null ||
+        report.files === null ||
+        report.delta === null
+      ) {
+        fail(
+          `${context}: a successful preview reports its plan — \`mapping\`, ` +
+            `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, ` +
+            `12.7); got mapping ${report.mapping === null ? "null" : "present"}, ` +
+            `files ${report.files === null ? "null" : "present"}, delta ` +
+            `${report.delta === null ? "null" : "present"}`,
+        );
+      }
+      const bare = await assertRunTwiceDeterministic({
+        binding: product,
+        run: { cwd: workspace.root, argv: bareArgv },
+        context:
+          `${context}: \`${bareArgv.join(" ")}\` byte determinism across ` +
+          `repeated runs (SPEC 6.6, 12.0; H-6 — determinism binds preview ` +
+          `output as such, the bare form included)`,
+      });
+      assertExitCode(
+        bare.first,
+        0,
+        `${context}: \`${bareArgv.join(" ")}\` — the bare-form preview of a ` +
+          `proceeding operation succeeds too (SPEC 6.6, 12.0)`,
+      );
+      return report.mapping;
+    },
+    `${context}: every preview invocation modifies nothing — sources, ` +
+      `journal (an absent journal stays absent), derived files, and graph ` +
+      `data untouched (SPEC 6.6)`,
   );
-  return decodeImpactReport(parseJsonStdout(result, context), context);
-}
-
-/** Expected attribution for one category of one node (module header, H-4). */
-interface ExpectedCategory {
-  readonly category: ChangeCategory;
-  /** Attribution pinned exactly. Exactly one of `exact`/`within`. */
-  readonly exact?: readonly string[];
-  /** Attribution bounded: the merged `attributedTo` must be a subset. */
-  readonly within?: readonly string[];
-}
-
-/** The complete expectation for one node identity of the fixture. */
-interface ExpectedNodeImpact {
-  /** Current identity; the baseline identity for the deleted node. */
-  readonly identity: string;
-  /** Whether entries naming the node must flag it deleted (default false). */
-  readonly deleted?: boolean;
-  /** The node's exact category set; empty = must receive no category. */
-  readonly categories: readonly ExpectedCategory[];
 }
 
 /**
- * Assert an impact report's requirement-level content against the complete
- * per-node expectation table of the fixture (SPEC 5.6, 6.6, 9.1, 9.3) — the
- * SUITE-20 conventions restated in the module header.
+ * The staging premises shared by both arms: the staged workspace builds
+ * (derived files and graph data now exist under the compare) and no journal
+ * exists before the first journaled operation (SPEC 6.1) — so the
+ * modifies-nothing compare around the previews realizes "an absent journal
+ * stays absent", and the real run at the end is the first journaled
+ * operation.
  */
-function assertImpactTable(
-  report: ImpactReport,
-  expectations: readonly ExpectedNodeImpact[],
+async function assertPreviewPremises(
+  product: ProductBinding,
+  workspace: TestWorkspace,
   context: string,
-): void {
-  const expectedBy = new Map<string, ExpectedNodeImpact>();
-  for (const expectation of expectations) {
-    if (expectedBy.has(expectation.identity)) {
-      throw new Error(
-        `fixture bug: duplicate expectation for ${expectation.identity}`,
-      );
-    }
-    for (const category of expectation.categories) {
-      if ((category.exact === undefined) === (category.within === undefined)) {
-        throw new Error(
-          `fixture bug: category ${category.category} of ` +
-            `${expectation.identity} must declare exactly one of exact/within`,
-        );
-      }
-    }
-    expectedBy.set(expectation.identity, expectation);
-  }
-
-  // Merge the report per node identity (SPEC 9.3 fixes the grouping, not the
-  // adapter-level entry granularity — the SUITE-20 convention).
-  interface MergedNode {
-    readonly deletedFlags: Set<boolean>;
-    readonly attributions: Map<ChangeCategory, string[]>;
-  }
-  const actualBy = new Map<string, MergedNode>();
-  for (const entry of report.requirements) {
-    for (const identity of entry.nodes) {
-      const expected = expectedBy.get(identity);
-      if (expected === undefined) {
-        fail(
-          `${context}: the report names ${JSON.stringify(identity)}, which is ` +
-            `no current node of the fixture and no staged deleted identity ` +
-            `(in the workspace-relative identity form of SPEC 1.5); ` +
-            `entry: ${JSON.stringify(entry)}`,
-        );
-      }
-      let merged = actualBy.get(identity);
-      if (merged === undefined) {
-        merged = { deletedFlags: new Set(), attributions: new Map() };
-        actualBy.set(identity, merged);
-      }
-      merged.deletedFlags.add(entry.deleted);
-      for (const category of entry.categories) {
-        const attributed = merged.attributions.get(category.category) ?? [];
-        attributed.push(...category.attributedTo);
-        merged.attributions.set(category.category, attributed);
-      }
-    }
-  }
-
-  for (const expected of expectations) {
-    const merged = actualBy.get(expected.identity);
-    const expectedNames = expected.categories
-      .map((category) => category.category)
-      .sort();
-
-    if (expectedNames.length === 0) {
-      if (merged !== undefined) {
-        fail(
-          `${context}: ${expected.identity} must receive no category ` +
-            `(SPEC 5.6) and so appear in no requirement entry (SPEC 9.3 ` +
-            `groups output by category; the T1.5-1 convention), but the ` +
-            `report names it with categories ` +
-            `${JSON.stringify([...merged.attributions.keys()].sort())}`,
-        );
-      }
-      continue;
-    }
-    if (merged === undefined) {
-      fail(
-        `${context}: ${expected.identity} must carry exactly the categories ` +
-          `${JSON.stringify(expectedNames)} — a manual rename is a deletion ` +
-          `plus an addition, never continuity (SPEC 6.6, 5.6) — but no ` +
-          `requirement entry names it`,
-      );
-    }
-
-    const expectedDeleted = expected.deleted ?? false;
-    for (const flag of merged.deletedFlags) {
-      if (flag !== expectedDeleted) {
-        fail(
-          `${context}: ${expected.identity} must be reported ` +
-            `${expectedDeleted ? "as deleted, under its baseline identity" : "as present, not deleted"} ` +
-            `(SPEC 6.6, 5.6, 9.3); an entry naming it has deleted: ${String(flag)}`,
-        );
-      }
-    }
-
-    assertSameJson(
-      [...merged.attributions.keys()].sort(),
-      expectedNames,
-      `${context}: the exact category set of ${expected.identity} (SPEC 5.6 — ` +
-        `categories are independent flags; none missing, none extra)`,
+): Promise<void> {
+  await buildOk(product, workspace, `${context} premise \`build\``);
+  const journalKind = await workspace.kind(JOURNAL_PATH);
+  if (journalKind !== "absent") {
+    fail(
+      `${context}: staging premise — no journal file exists before the ` +
+        `first journaled operation (SPEC 6.1); found ${journalKind} at ` +
+        `${JOURNAL_PATH}`,
     );
-
-    for (const category of expected.categories) {
-      const attributed = [
-        ...new Set(merged.attributions.get(category.category) ?? []),
-      ].sort();
-      if (category.exact !== undefined) {
-        assertSameJson(
-          attributed,
-          [...category.exact].sort(),
-          `${context}: the ${category.category} category of ` +
-            `${expected.identity} must be attributed to exactly its ` +
-            `originating node(s) (SPEC 5.6, 9.1)`,
-        );
-      } else {
-        for (const identity of attributed) {
-          if (!category.within?.includes(identity)) {
-            fail(
-              `${context}: the ${category.category} category of ` +
-                `${expected.identity} is attributed to ` +
-                `${JSON.stringify(identity)}, which is no originating node ` +
-                `of this change (SPEC 5.6: every category is attributed to ` +
-                `its originating nodes); originating nodes: ` +
-                JSON.stringify([...(category.within ?? [])].sort()),
-            );
-          }
-        }
-      }
-    }
   }
+}
 
+/**
+ * The subsequent real run on the same (untouched) state: exit 0 with
+ * `--json`, its performed-operation document decoded form-exact (SPEC 12.7:
+ * exactly `{"findings", "mapping"}`, `findings` `[]`; T6.4-1's protocol)
+ * and its `mapping` asserted equal — as the ordered array, pair for pair —
+ * to the preview's `mapping` (T6.6-2: byte-equal mappings).
+ */
+async function assertRealRunPerformsPlan(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  operationArgv: readonly string[],
+  previewMapping: readonly AppliedMappingPair[],
+  context: string,
+): Promise<void> {
+  const argv = [...operationArgv, "--json"];
+  const performed = decodePerformedOperationReport(
+    await runJson(
+      product,
+      workspace,
+      argv,
+      `${context}: \`${argv.join(" ")}\``,
+    ),
+    context,
+  );
   assertSameJson(
-    report.code,
-    { direct: [], transitive: [] },
-    `${context}: no code groups are configured, so no code location is ` +
-      `impacted (SPEC 9.2)`,
+    performed.mapping,
+    previewMapping,
+    `${context}: a subsequent real run on the same state performs the ` +
+      `previewed plan — its performed-operation document's \`mapping\` ` +
+      `(T6.4-1's report, form-exact per 12.7) is byte-equal to the ` +
+      `preview's \`mapping\`, the raw decoded arrays compared pair for ` +
+      `pair in order (SPEC 6.6, 6.4, 6.5, 12.7; T6.6-2)`,
   );
 }
 
 // ---------------------------------------------------------------------------
-// T6.6-1 — manual restructuring
+// T6.6-2 — modifies nothing
 // ---------------------------------------------------------------------------
 
-// Impact arm: `a.mid` is manually renamed to `a.neo` by overwriting the file;
-// everything but the one `id` attribute — the renamed node's text included —
-// is byte-identical across the edit, and nothing references the node, so the
-// edited workspace stays valid and the deletion-plus-addition semantics are
-// observable in isolation. `a.keep` is the untouched sibling that must stay
-// uncategorized.
-const I1_FILE = "specs/A.mdx";
-const I1_TOP = "specs/A.mdx#a";
-const I1_MID = "specs/A.mdx#a.mid";
-const I1_NEO = "specs/A.mdx#a.neo";
-const I1_KEEP = "specs/A.mdx#a.keep";
+// Rename arm: `core.mid` is mid-tree with a descendant (the mapping holds
+// two pairs by prefix replacement) and is referenced by a sibling's local
+// `d` and `text(...)` (SPEC 6.4 rewrites them), so the previewed plan spans
+// several edits while the workspace stays a single file — the real rename is
+// unambiguously valid: `core.hub` collides with nothing, its parent `core`
+// exists, and the workspace has no findings.
+const P1_CORE = "specs/Core.mdx";
+const P1_CORE_SOURCE = [
+  '<S id="core">',
+  "Core holder text.",
+  "",
+  '<S id="core.mid" d={"core.plain"}>',
+  "Mid text.",
+  "",
+  '<S id="core.mid.leaf">',
+  "Leaf text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="core.sib" d={"core.mid"}>',
+  'Sib embeds: {text("core.mid.leaf")}',
+  "</S>",
+  "",
+  '<S id="core.plain">',
+  "Plain text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+const P1_RENAME_ARGV = ["rename", P1_CORE, "core.mid", "core.hub"] as const;
 
-const impactArmSource = (midId: string): string =>
+// Section-form move arm: `org.mv` moves into the existing Target.mdx as
+// top-level `tm`. The subtree carries an internal local reference — on the
+// moved root, pointing down at its own child, so the combined
+// contains/depends graph stays acyclic (SPEC 5.3) — re-identified in place
+// by the move, and is referenced from the staying `org.stay` (converted to
+// imported form by the real move, an import added), so the previewed plan
+// again spans several files — and the move is unambiguously valid: `tm`
+// collides with nothing in Target.mdx, a single-segment `<new-id>` needs no
+// target parent, and no cycle arises (Target.mdx imports nothing).
+const P2_ORIGIN = "specs/Origin.mdx";
+const P2_TARGET = "specs/Target.mdx";
+const P2_ORIGIN_SOURCE = stagedMdx(
+  "T6.6-2/T6.6-7 move arm specs/Origin.mdx",
   [
-    '<S id="a">',
-    "Holder text.",
+    '<S id="org">',
+    "Origin holder text.",
     "",
-    `<S id="${midId}">`,
-    "Mid text staying byte-identical across the manual rename.",
+    '<S id="org.mv" d={"org.mv.k1"}>',
+    "Moved root text.",
+    "",
+    '<S id="org.mv.k1">',
+    "Moved kid.",
+    "</S>",
     "</S>",
     "",
-    '<S id="a.keep">',
-    "Keeper text.",
+    '<S id="org.stay" d={"org.mv.k1"}>',
+    "Stays behind.",
     "</S>",
     "</S>",
     "",
-  ].join("\n");
+  ].join("\n"),
+);
+// The plain target — the bytes T6.5-8 and T6.5-9 stage at
+// `specs/target.mdx`, so section-6.5.ts's record (one record for identical
+// bytes across tests).
+const P2_TARGET_SOURCE = A8_PLAIN_TARGET;
+const P2_MOVE_ARGV = [
+  "move",
+  `${P2_ORIGIN}#org.mv`,
+  `${P2_TARGET}#tm`,
+] as const;
 
-// The originating nodes of the manual edit (SPEC 5.6: those carrying
-// `changed` — the deleted old node, the added new node, and the parent whose
-// own content lost one child reference and gained another).
-const I1_ORIGINATORS = [I1_MID, I1_NEO, I1_TOP];
-
-// Validation arm: the manually renamed node has two dependents referencing
-// the old identity — a same-file local string and a cross-file imported
-// chain — each staged as an exact prefix + opening-tag construct so the 14.5
-// findings' locations are pinned to byte windows (SPEC 14; the T2.4-4
-// operationalization).
-const V2_ORIGIN = "specs/B.mdx";
-const V2_WATCH = "specs/Watch.mdx";
-
-function originSource(
-  midId: string,
-  depRef: string,
-): { text: string; prefix: string; construct: string } {
-  const prefix = [
-    '<S id="b">',
-    "Holder text.",
-    "",
-    `<S id="${midId}">`,
-    "Mid text.",
-    "</S>",
-    "",
-    "",
-  ].join("\n");
-  const construct = `<S id="b.dep" d={"${depRef}"}>`;
-  const text = `${prefix}${construct}\nSame-file dependent text.\n</S>\n</S>\n`;
-  return { text, prefix, construct };
-}
-
-function watchSource(ref: string): {
-  text: string;
-  prefix: string;
-  construct: string;
-} {
-  const prefix = 'import B from "./B.xspec"\n\n';
-  const construct = `<S id="watch" d={B.${ref}}>`;
-  const text = `${prefix}${construct}\nCross-file dependent text.\n</S>\n`;
-  return { text, prefix, construct };
-}
-
-const T6_6_1 = defineProductTest({
-  id: "T6.6-1",
+const T6_6_2 = defineProductTest({
+  id: "T6.6-2",
   title:
-    "manual restructuring: renaming an ID by editing the file directly produces no journal entry, impact reports a deletion plus an addition (not continuity), and dependents referencing the old identity fail validation (14.5) until rewritten (SPEC 6.6, 6.1, 5.6, 9.3, 14)",
+    "modifies nothing: a rename `--preview` and a section-form move `--preview` on workspaces where the real operation would proceed exit 0 with findings [] and leave every byte of the workspace identical — sources, journal (an absent journal stays absent), derived files, and graph data untouched; a subsequent real run on the same state performs the previewed plan, its applied mapping (T6.4-1's report) equal to the preview's `mapping`; preview output is byte-deterministic across repeated runs (H-6) and, under `--json`, the form-exact 12.7 preview document (SPEC 6.6, 6.4, 6.5, 6.1, 12.0, 12.7; H-3)",
   run: async (product) => {
-    // --- Impact arm: deletion plus addition, never continuity ---
+    // Arm 1 — rename preview.
     await withWorkspace(
-      { [I1_FILE]: impactArmSource("a.mid") },
+      SPECS_MD_CONFIG,
+      { [P1_CORE]: P1_CORE_SOURCE },
       async (workspace) => {
-        const context = "T6.6-1 impact arm";
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("pre-edit baseline");
-        await buildOk(product, workspace, `${context}: \`build\``);
-        await assertNoJournal(
-          workspace,
-          "before any journaled operation (staging premise)",
-          context,
-        );
-
-        // The manual rename: only the one `id` attribute changes; the node's
-        // text is byte-identical, tempting continuity inference (SPEC 6.6).
-        await workspace.file(I1_FILE, impactArmSource("a.neo"));
-
-        await buildOk(
+        await assertPreviewPremises(product, workspace, "T6.6-2 rename arm");
+        const previewMapping = await expectInertPreview(
           product,
           workspace,
-          `${context}: \`build\` after the direct edit — nothing references ` +
-            `the vacated identity, so the workspace stays valid`,
+          P1_RENAME_ARGV,
+          "T6.6-2 rename arm",
         );
-        await assertNoJournal(
+        await assertRealRunPerformsPlan(
+          product,
           workspace,
-          "after the direct edit and the `build` over it",
-          context,
+          P1_RENAME_ARGV,
+          previewMapping,
+          "T6.6-2 rename arm",
         );
-
-        const label = `${context}: \`impact --base <pre-edit ref> --json\``;
-        assertImpactTable(
-          await impactAgainst(product, workspace, base, label),
-          [
-            // The old identity: deleted and `changed` only — a manual rename
-            // is treated as a deletion plus an addition (SPEC 6.6, 5.6).
-            {
-              identity: I1_MID,
-              deleted: true,
-              categories: [{ category: "changed", within: I1_ORIGINATORS }],
-            },
-            // The new identity: added, `changed` only — and not deleted.
-            {
-              identity: I1_NEO,
-              categories: [{ category: "changed", within: I1_ORIGINATORS }],
-            },
-            // The parent: its own content lost the child reference to the
-            // old identity and gained one to the new (5.5: child constructs
-            // hash by canonical identity, and no journal maps them) —
-            // `changed` — plus `descendant-changed` attributed to the
-            // removed and the added child (T5.6-2's precedent).
-            {
-              identity: I1_TOP,
-              categories: [
-                { category: "changed", within: I1_ORIGINATORS },
-                { category: "descendant-changed", exact: [I1_MID, I1_NEO] },
-              ],
-            },
-            // The file root: `descendant-changed` attributed to P and C.
-            {
-              identity: I1_FILE,
-              categories: [
-                {
-                  category: "descendant-changed",
-                  exact: [I1_TOP, I1_MID, I1_NEO],
-                },
-              ],
-            },
-            // The untouched sibling: no category.
-            { identity: I1_KEEP, categories: [] },
-          ],
-          label,
-        );
-        await assertNoJournal(workspace, "after `impact --base`", context);
       },
     );
 
-    // --- Validation arm: dependents fail 14.5 until rewritten ---
-    const staleOrigin = originSource("b.neo", "b.mid");
-    const staleWatch = watchSource("b.mid");
+    // Arm 2 — section-form move preview.
     await withWorkspace(
+      SPECS_MD_CONFIG,
       {
-        [V2_ORIGIN]: originSource("b.mid", "b.mid").text,
-        [V2_WATCH]: staleWatch.text,
+        [P2_ORIGIN]: P2_ORIGIN_SOURCE,
+        [P2_TARGET]: P2_TARGET_SOURCE,
       },
       async (workspace) => {
-        const context = "T6.6-1 validation arm";
-        await buildOk(product, workspace, `${context}: \`build\``);
-        await assertNoJournal(
-          workspace,
-          "before any journaled operation (staging premise)",
-          context,
-        );
-
-        // The manual rename, leaving both dependents naming the old identity.
-        await workspace.file(V2_ORIGIN, staleOrigin.text);
-
-        const staleLabel = `${context}: \`build --json\` with the dependents still naming the vacated identity`;
-        const findings = await buildFindings(product, workspace, staleLabel);
-        assertConditionCounts(
-          findings,
-          { "14.5": 2 },
-          `${staleLabel} — each dependent's \`d\` reference to the vacated ` +
-            `identity is an unknown dependency: the manual rename carries no ` +
-            `continuity, so the references resolve to nothing (SPEC 6.6, 14.5)`,
-        );
-        for (const [file, source, surface] of [
-          [V2_ORIGIN, staleOrigin, "same-file local string reference"],
-          [V2_WATCH, staleWatch, "cross-file imported chain reference"],
-        ] as const) {
-          const located = findings.filter((finding) => finding.file === file);
-          if (located.length !== 1) {
-            fail(
-              `${staleLabel}: expected exactly one 14.5 finding naming ` +
-                `${file} (the ${surface}); got ${String(located.length)} — ` +
-                `findings: ${JSON.stringify(findings)}`,
-            );
-          }
-          assertFindingLocated(
-            located[0]!,
-            { file, window: byteWindow(source.prefix, source.construct) },
-            `${staleLabel}: the 14.5 finding for the ${surface}`,
-          );
-        }
-        await assertNoJournal(
-          workspace,
-          "after the direct edit and the failing `build`",
-          context,
-        );
-
-        // "Until rewritten": manually retarget both dependents to the new
-        // identity — validation passes again, and still no journal entry.
-        await workspace.file(V2_ORIGIN, originSource("b.neo", "b.neo").text);
-        await workspace.file(V2_WATCH, watchSource("b.neo").text);
-        await buildOk(
+        await assertPreviewPremises(product, workspace, "T6.6-2 move arm");
+        const previewMapping = await expectInertPreview(
           product,
           workspace,
-          `${context}: \`build\` after rewriting both dependents to the new ` +
-            `identity — the workspace validates again (SPEC 6.6, 14.5)`,
+          P2_MOVE_ARGV,
+          "T6.6-2 move arm",
         );
-        await assertNoJournal(
+        await assertRealRunPerformsPlan(
+          product,
           workspace,
-          "after the dependents were rewritten and the `build` over them",
-          context,
+          P2_MOVE_ARGV,
+          previewMapping,
+          "T6.6-2 move arm",
         );
       },
     );
   },
 });
 
-/** TEST-SPEC §6.6, in canonical ID order (SUITE-24). */
-export const section66Tests: readonly ProductTestEntry[] = [T6_6_1];
+// ---------------------------------------------------------------------------
+// T6.6-3 — refusal and scheduling equivalence
+// ---------------------------------------------------------------------------
+
+/** Normalize a case's expected refusal finding(s) to a list (SPEC 14: an arm
+ * staging several applicable reasons expects one finding per reason). */
+function expectationsOf(
+  expected: RefusalExpectation | readonly RefusalExpectation[],
+): readonly RefusalExpectation[] {
+  const expectations: readonly RefusalExpectation[] = Array.isArray(expected)
+    ? expected
+    : [expected];
+  return expectations;
+}
+
+/**
+ * The comparable projection of one 12.7 finding for T6.6-3's same-findings
+ * assertion: every member except `message` — code, locations, concerned
+ * path, identities (module header, H-4).
+ */
+function comparableFinding(finding: Finding): unknown {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+    identities: finding.identities,
+  };
+}
+
+/**
+ * One T6.6-3 refusal-equivalence arm over a staging where the real operation
+ * is refused (its home test's staging, staged identically): run the real
+ * invocation with `--json` — exit 1, the form-exact 12.7 findings-only
+ * report, its per-arm code counts re-pinned — then the `--preview --json`
+ * invocation: exit 1, the 12.7 preview document form kept with `mapping`,
+ * `files`, and `delta` null (the refusal encoding), and the same findings
+ * (module header's projection) as the real refusal (SPEC 6.6, 12.7, 14).
+ * Neither modifies anything (module header; TEST-SPEC H-6): one whole-root
+ * compare spans both runs, the lock path left out — the real operation is a
+ * mutating command's run, its acquisition's and release's writes there no
+ * modification (SPEC 13.5) — and the preview runs inside its own compare
+ * against its pre-invocation state, the state the real run left (its end
+ * recorded by then, helpers/acquiring-runs.ts), which keeps the lock path
+ * in: a preview acquires nothing, so whatever occupied the lock path before
+ * it occupies it afterwards byte-identical, nothing added beside it (SPEC
+ * 6.6, 13.4).
+ */
+async function expectRefusedPreviewEquivalence(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  expected: RefusalExpectation | readonly RefusalExpectation[],
+  context: string,
+): Promise<void> {
+  const expectations = expectationsOf(expected);
+  const counts: Record<string, number> = {};
+  for (const expectation of expectations) {
+    counts[expectation.finding] = (counts[expectation.finding] ?? 0) + 1;
+  }
+  const command = argv.join(" ");
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      // The real operation on this state — the reference report.
+      const real = await expectExit(
+        product,
+        workspace,
+        [...argv, "--json"],
+        1,
+        `${context}: \`${command} --json\` — the real operation is refused ` +
+          `on this staging, exit 1 (SPEC 6.4, 6.5, 12.0; the twinned refusal's ` +
+          `home test)`,
+      );
+      const realFindings = decodeFindingsReport(
+        parseJsonStdout(real, `${context}: \`${command} --json\``),
+        `${context}: \`${command} --json\` — a refused operation's report ` +
+          `is the form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+      ).findings;
+      assertConditionCounts(
+        realFindings,
+        counts,
+        `${context}: staging premise — the arm still isolates exactly its ` +
+          `staged refusal cause(s), one finding per applicable reason ` +
+          `(SPEC 14; the concerned-data assertions live in the refusal's home ` +
+          `test)`,
+      );
+
+      // The `--preview` invocation on the identical state: refused exactly
+      // when — reporting what, and exiting as — the real operation is
+      // refused (SPEC 6.6). Its own compare starts from the state the real
+      // run left: no mutating command's run acts between its snapshots, so
+      // the lock path stays in it (H-6).
+      const previewArgv = [...argv, "--preview", "--json"];
+      const previewCommand = previewArgv.join(" ");
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const preview = await expectExit(
+            product,
+            workspace,
+            previewArgv,
+            1,
+            `${context}: \`${previewCommand}\` — a preview is refused ` +
+              `exactly when, and exits as, the real operation would be ` +
+              `refused (SPEC 6.6, 12.0)`,
+          );
+          const report = decodePreviewReport(
+            parseJsonStdout(preview, `${context}: \`${previewCommand}\``),
+            `${context}: \`${previewCommand}\` — a refused preview keeps ` +
+              `the 12.7 preview document form (SPEC 12.7, H-3)`,
+          );
+          if (
+            report.mapping !== null ||
+            report.files !== null ||
+            report.delta !== null
+          ) {
+            fail(
+              `${context}: a refused preview reports the refusal findings ` +
+                `alone — its \`mapping\`, \`files\`, and \`delta\` are null ` +
+                `(SPEC 6.6, 12.7); got mapping ` +
+                `${report.mapping === null ? "null" : "present"}, files ` +
+                `${report.files === null ? "null" : "present"}, delta ` +
+                `${report.delta === null ? "null" : "present"}`,
+            );
+          }
+          assertSameJson(
+            report.findings.map(comparableFinding),
+            realFindings.map(comparableFinding),
+            `${context}: the refused preview reports the same findings as ` +
+              `the real refusal — same stable codes, locations, concerned ` +
+              `paths, and identities, element-wise in 12.7's total findings ` +
+              `order (message composition unpinned, H-4) (SPEC 6.6, 14, 12.7)`,
+          );
+        },
+        `${context}: \`${previewCommand}\` — the refused preview modifies ` +
+          `nothing, compared against its own pre-invocation state (the ` +
+          `state the real refusal left) with the lock path included: a ` +
+          `preview acquires nothing, so it writes nothing there (SPEC 6.6, ` +
+          `13.4; TEST-SPEC H-6)`,
+      );
+    },
+    `${context}: \`${command}\` — neither the refused operation nor its ` +
+      `refused \`--preview\` modifies anything across both runs, the lock ` +
+      `path left out: the real operation's acquisition and release count ` +
+      `as no modification (SPEC 6.4, 6.5, 6.6, 13.5; TEST-SPEC H-6)`,
+  );
+}
+
+/**
+ * One refusal's twin in T6.6-3's refusal stagings
+ * (`runT663RefusalStagings`), handed the staged workspace, the refused
+ * operation's argv — neither `--preview` nor `--json` among it — its
+ * expected refusal finding(s), the home test's code set, and the
+ * diagnostic context: T6.6-3's `expectRefusedPreviewEquivalence` (the real
+ * refusal, then its `--preview`), T6.6-7's human twin of the refused
+ * preview (`expectHumanRefusedPreviewTwin`), or T12.0-15's human twin of
+ * the refused real operation (section-12.0-iv.ts). Exported with
+ * `runT663RefusalStagings` for T12.0-15.
+ */
+export type RefusalStagingTwin = (
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  expected: RefusalExpectation | readonly RefusalExpectation[],
+  context: string,
+) => Promise<void>;
+
+/**
+ * One twin of a T6.5-16/T6.5-17 arm (their exported arm tables, staged
+ * identically: the pre-move files under those arms' configuration, the
+ * premise `build` laying down the derived files the modifies-nothing
+ * compare covers), through `twin` — for T6.6-3 the real refusal, then its
+ * `--preview` (expectRefusedPreviewEquivalence). The premise re-pins the
+ * arm's code set alone — `refused-invalid-rewrite` or
+ * `refused-moved-import` beside every other applicable reason, or an alone
+ * arm's reasons — while the finding's concerned data and the S-9 premises
+ * stay the home test's; the equivalence compare then covers every
+ * contractual member (SPEC 6.5, 6.6, 14).
+ */
+async function expectRefusedArmPreviewTwin(
+  product: ProductBinding,
+  twin: RefusalStagingTwin,
+  files: Readonly<Record<string, InitialFileContents>>,
+  argv: readonly string[],
+  codes: readonly string[],
+  context: string,
+): Promise<void> {
+  await withWorkspace(R16_CONFIG, files, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context}: \`build\` over the staging — the pre-move workspace is ` +
+        `valid, every staged file well-formed (SPEC 6.4, 6.5, 14.20)`,
+    );
+    await twin(
+      product,
+      workspace,
+      argv,
+      codes.map((finding) => ({ finding })),
+      context,
+    );
+  });
+}
+
+/**
+ * The twin of one of T14-7's two spelled refused-invalid-id command lines
+ * (section-14.ts's exported `IntrinsicInvalidIdArm`), run as T14-7 runs
+ * it: in the home workspace after the home table's loop, every refusal
+ * there modifying nothing — through `twin`, the running test `testId`
+ * naming its context. The premise re-pins refused-invalid-id alone; the
+ * identity and the prefix-produced identities' absence stay T14-7's (SPEC
+ * 6.6, 14).
+ */
+async function expectIntrinsicInvalidIdPreviewTwin(
+  product: ProductBinding,
+  twin: RefusalStagingTwin,
+  testId: string,
+  workspace: TestWorkspace,
+  arm: IntrinsicInvalidIdArm,
+): Promise<void> {
+  await twin(
+    product,
+    workspace,
+    arm.argv,
+    { finding: "refused-invalid-id", identities: [arm.identity] },
+    `${testId} ${arm.argv[0] ?? ""} refusal (T14-7 \`${arm.spelled}\`: ` +
+      `${arm.reason})`,
+  );
+}
+
+/** The diagnostic context of a twin of one of T14-7's own refusal cases. */
+function t147TwinContext(testId: string, kase: T147RefusalCase): string {
+  return `${testId} ${kase.argv[0] ?? ""} refusal (T14-7 ${kase.reason})`;
+}
+
+/**
+ * The twins of one of T14-7's own refusal stagings (section-14.ts's
+ * exported `T147RefusalStaging`, staged identically: a fresh workspace of
+ * its configuration and files, the premise `build`, each case in order,
+ * then the `then` restaging and its cases), each refused operation through
+ * `twin` — for T6.6-3 the real refusal and then its `--preview`
+ * (expectRefusedPreviewEquivalence) — the running test `testId` naming the
+ * contexts. The premise re-pins each case's code set alone; the concerned
+ * data and the `query node` checks stay T14-7's (SPEC 6.6, 14).
+ */
+async function expectT147StagingPreviewTwins(
+  product: ProductBinding,
+  twin: RefusalStagingTwin,
+  testId: string,
+  staging: T147RefusalStaging,
+): Promise<void> {
+  await withWorkspace(staging.config, staging.files, async (workspace) => {
+    await buildOk(product, workspace, `${testId} (T14-7) ${staging.build}`);
+    for (const kase of staging.cases) {
+      await twin(
+        product,
+        workspace,
+        kase.argv,
+        kase.expected,
+        t147TwinContext(testId, kase),
+      );
+    }
+    if (staging.then !== undefined) {
+      await workspace.file(staging.then.file, staging.then.contents);
+      for (const kase of staging.then.cases) {
+        await twin(
+          product,
+          workspace,
+          kase.argv,
+          kase.expected,
+          t147TwinContext(testId, kase),
+        );
+      }
+    }
+  });
+}
+
+/**
+ * One T6.6-3 usage-error-equivalence pair (T6.4-4/T6.5-5, staged
+ * identically): the real invocation and then the `--preview` one, each with
+ * `--json` — exit 2 exactly, the single 12.7 error document as the entire
+ * stdout (12.0, H-5), and a usage error message on stderr (presence, not
+ * wording). Argument checks precede either way (SPEC 6.6, 12.0). The
+ * `--preview` invocation runs inside its own compare against its
+ * pre-invocation state, the state the real invocation left (its end
+ * recorded by then, helpers/acquiring-runs.ts), which keeps the lock path
+ * in: a preview acquires nothing (TEST-SPEC H-6). Each caller's whole-root
+ * compare around its pairs leaves the lock path out, the real invocations
+ * being mutating commands' runs (H-6). Accepts raw-byte argv elements for
+ * the Linux-leg non-UTF-8 destination case.
+ */
+async function expectUsageErrorEitherWay(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly ArgvValue[],
+  context: string,
+): Promise<void> {
+  const expectUsageError = async (
+    fullArgv: readonly ArgvValue[],
+    what: string,
+  ): Promise<void> => {
+    const label = `${context} (${what})`;
+    const result = await runProduct(product, {
+      cwd: workspace.root,
+      argv: fullArgv,
+    });
+    assertExitCode(
+      result,
+      2,
+      `${label}: the usage error is exit 2 with \`--preview\` exactly as ` +
+        `without it — argument checks precede either way (SPEC 6.6, 12.0)`,
+    );
+    expectErrorDocument(
+      result,
+      `${label}: under --json, the exit-2 error document is the entire ` +
+        `stdout — no report, no validation findings (SPEC 12.0, 12.7, H-5)`,
+    );
+    if (result.stderrBytes.length === 0) {
+      fail(
+        `${label}: usage error messages are standard-error content ` +
+          `(SPEC 12.0), but stderr is empty`,
+      );
+    }
+  };
+  await expectUsageError([...argv, "--json"], "real invocation");
+  // The preview's own compare starts from the state the real invocation
+  // left: no mutating command's run acts between its snapshots, so the lock
+  // path stays in it (H-6).
+  await assertLeavesUnchanged(
+    workspace.root,
+    () =>
+      expectUsageError(
+        [...argv, "--preview", "--json"],
+        "`--preview` invocation",
+      ),
+    `${context} (\`--preview\` invocation): the usage error modifies ` +
+      `nothing, compared against its own pre-invocation state (the state ` +
+      `the real invocation left) with the lock path included: a preview ` +
+      `acquires nothing, so it writes nothing there (SPEC 12.0, 6.6, 13.4; ` +
+      `TEST-SPEC H-6)`,
+  );
+}
+
+/**
+ * One spells-no-identity usage arm (T6.4-4/T6.5-5's parse-local
+ * nonexistence, staged identically from the home test's exported row; the
+ * caller stages `arm.files` under the home test's configuration): pin the
+ * one-14.17 premise — a repeated `id`, or one `id` whose value is not in
+ * quoted static-string form (braced or valueless), is condition 17, never
+ * 14.1, and spells no identity (SPEC 11.2, 14) — then assert the operation
+ * and its preview are exit 2, though that file carries a 14.17 finding, the
+ * usage error alone reported, modifying nothing: a whole-root compare around
+ * the pair, the lock path left out, and the preview's own compare inside
+ * it, the lock path included (expectUsageErrorEitherWay; TEST-SPEC H-5,
+ * H-6).
+ */
+async function runSpellsNoneUsageArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  arm: SpellsNoneUsageArm,
+  context: string,
+): Promise<void> {
+  const findings = await buildFindings(
+    product,
+    workspace,
+    `${context}: \`build --json\` premise — the staged workspace fails ` +
+      `build validation (${arm.form}, SPEC 14.17)`,
+  );
+  assertConditionCounts(
+    findings,
+    { "14.17": 1 },
+    `${context}: staging premise — the would-be bearer's invalid \`id\` is ` +
+      `the file's one finding (SPEC 14: a repeated prop, or an \`id\` value ` +
+      `not in quoted static-string form, is condition 17, never condition 1)`,
+  );
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      await expectUsageErrorEitherWay(
+        product,
+        workspace,
+        arm.argv,
+        `${context} — the origin ID's only would-be bearer spells no ` +
+          `identity (${arm.why}), so the ID is nonexistent: exit 2, though ` +
+          `that file carries a 14.17 finding, the usage error alone ` +
+          `reported (SPEC 6.4, 6.5, 11.2, 12.0; H-5)`,
+      );
+    },
+    `${context}: the usage errors modify nothing, previewed or not ` +
+      `(SPEC 12.0)`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T6.6-3 — scheduling: the equivalence is over workspace state, never
+// scheduling
+// ---------------------------------------------------------------------------
+
+/**
+ * The second command T13.5-2 asserts is refused exit 2 while its command 1
+ * holds, here as a preview under `--json`: it runs to completion (SPEC 6.6,
+ * 13.5).
+ */
+const SCHEDULING_PREVIEW: readonly string[] = [
+  "rename",
+  "specs/A.mdx",
+  "g",
+  "g2",
+  "--preview",
+  "--json",
+];
+
+/**
+ * T6.6-3's scheduling arms (module header), on one fresh CORE_DECL
+ * workspace, freshly built. The runs-while-held arm: T13.5-2's command 1
+ * (`rename specs/A.mdx a a2 --test-hold <path>`) held through T13.5-2's own
+ * choreography (section-13.5.ts `whileCommand1Holds`: its hold awaited,
+ * then lifted, command 1 completing exit 0), the held-state comparison made
+ * once it holds against its pre-invocation state; then the preview run as
+ * T13.5-4's reads and `build` run while held (section-13.5.ts
+ * `nonMutatingRunWhileHeld`: the lock path captured, the preview bounded
+ * and awaited while the hold stands, no busy condition on its stdout, exit
+ * 0 with its full successful report, command 1 still running as it exits,
+ * then the held-state comparison and the inclusion check — every path but
+ * the lock path byte-identical, the holder's entry byte-identical and the
+ * lock directory's only one, read under H-4's grant). Then `--test-hold`
+ * combined with `--preview`, both operations and both flag orders: exit 2,
+ * the 12.7 error document, no hold file created, nothing modified. Exported
+ * for scratch probes.
+ */
+export async function runT663SchedulingArms(
+  product: ProductBinding,
+): Promise<void> {
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    await buildOk(product, workspace, "T6.6-3 scheduling staging `build`");
+    // Command 1's pre-invocation state: the held-state comparison's
+    // baseline (TEST-SPEC §13.5's preamble).
+    const preInvocation = await snapshotDirectory(workspace.root);
+    const context1 =
+      "T6.6-3 held command 1 `rename specs/A.mdx a a2 --test-hold <path>` " +
+      "(T13.5-2's staging)";
+    await whileCommand1Holds(
+      product,
+      workspace,
+      "hold-t663-primary.tmp",
+      context1,
+      async (command1) => {
+        await assertHeldState(
+          workspace.root,
+          { baseline: preInvocation, heldRuns: 1 },
+          `${context1}, once it holds, against its pre-invocation state`,
+        );
+        // The same second command T13.5-2 asserts is refused exit 2
+        // without `--preview` runs to completion with it (SPEC 6.6, 13.5).
+        const context = `T6.6-3 \`${SCHEDULING_PREVIEW.join(" ")}\` while command 1 is held`;
+        await nonMutatingRunWhileHeld(product, workspace, {
+          argv: SCHEDULING_PREVIEW,
+          context,
+          busyRule:
+            `a preview never meets the mutual-exclusion refusal — the ` +
+            `stable code "workspace-busy" of 14.26 is the refused mutating ` +
+            `command's alone (SPEC 6.6, 13.5, 14.26; TEST-SPEC T14-4)`,
+          judge: (result) => {
+            assertExitCode(
+              result,
+              0,
+              `${context}: a preview invocation is a non-mutating command ` +
+                `under 13.5 — it takes no exclusivity, so while another ` +
+                `mutating command is held it runs to completion, never ` +
+                `meeting the mutual-exclusion refusal (exit 2) T13.5-2 ` +
+                `asserts for the same second command without --preview, ` +
+                `and never blocking (SPEC 6.6, 13.5)`,
+            );
+            const report = decodePreviewReport(
+              parseJsonStdout(result, context),
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context}: the preview runs to completion with its full ` +
+                `successful report — findings [] (SPEC 6.6)`,
+            );
+            if (
+              report.mapping === null ||
+              report.files === null ||
+              report.delta === null
+            ) {
+              fail(
+                `${context}: the completed preview reports its plan — ` +
+                  `\`mapping\`, \`files\`, and \`delta\` non-null (SPEC ` +
+                  `6.6, 12.7)`,
+              );
+            }
+          },
+          held: "command 1",
+          holder: command1,
+          preInvocation,
+          heldNote:
+            "a preview acquires nothing and writes nothing: SPEC 6.6, 13.5, " +
+            "13.4",
+        });
+      },
+    );
+
+    // `--test-hold` combined with `--preview` is a usage error (SPEC 6.6:
+    // a preview acquires no exclusivity and does not take the
+    // acquisition-tied test seam; 12.0): exit 2, the 12.7 error document
+    // under --json, no hold file created, nothing modified. Both
+    // operations, both flag orders; the operands stay valid (command 1's
+    // rename completed above, leaving `a2` and the untouched `g`), so the
+    // exit 2 is attributable to the flag combination alone.
+    const combinedArms: readonly {
+      readonly name: string;
+      readonly build: (holdPath: string) => readonly string[];
+    }[] = [
+      {
+        name: "rename, `--preview --test-hold`",
+        build: (holdPath) => [
+          "rename",
+          "specs/A.mdx",
+          "g",
+          "g2",
+          "--preview",
+          "--test-hold",
+          holdPath,
+        ],
+      },
+      {
+        name: "move, `--test-hold … --preview`",
+        build: (holdPath) => [
+          "move",
+          "specs/A.mdx",
+          "specs/Moved.mdx",
+          "--test-hold",
+          holdPath,
+          "--preview",
+        ],
+      },
+    ];
+    let combinedIndex = 0;
+    for (const arm of combinedArms) {
+      combinedIndex += 1;
+      const holdPath = holdPathFor(
+        workspace,
+        `hold-t663-combined-${String(combinedIndex)}.tmp`,
+      );
+      const argv = arm.build(holdPath);
+      const context = `T6.6-3 (${arm.name}) \`${argv.join(" ")} --json\``;
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const result = await runBounded(
+            product,
+            workspace.root,
+            [...argv, "--json"],
+            context,
+          );
+          assertExitCode(
+            result,
+            2,
+            `${context}: supplying --test-hold together with --preview is ` +
+              `a usage error — a preview acquires no exclusivity and does ` +
+              `not take the acquisition-tied test seam (SPEC 6.6, 13.5, ` +
+              `12.0)`,
+          );
+          expectErrorDocument(
+            result,
+            `${context}: under --json, the exit-2 error document is the ` +
+              `entire stdout (SPEC 12.0, 12.7, H-5)`,
+          );
+          if (result.stderrBytes.length === 0) {
+            fail(
+              `${context}: usage error messages are standard-error ` +
+                `content (SPEC 12.0), but stderr is empty`,
+            );
+          }
+          if (await pathExists(holdPath)) {
+            fail(
+              `${context}: no hold file may be created at the path — the ` +
+                `flag combination is refused, not honored (SPEC 6.6, 13.5)`,
+            );
+          }
+        },
+        `${context}: the usage error modifies nothing (SPEC 12.0)`,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T6.6-3 — acquisition's every other outcome lies outside the equivalence
+// ---------------------------------------------------------------------------
+
+/**
+ * The operation every acquisition arm previews and then performs: CORE_DECL's
+ * `rename specs/A.mdx a a2` (T13.5-2's command 1, T13.5-10's first command),
+ * succeeding on the unobstructed twin.
+ */
+const ACQUISITION_RENAME: readonly string[] = [
+  "rename",
+  "specs/A.mdx",
+  "a",
+  "a2",
+];
+
+/** Its preview under `--json`: the 12.7 preview document (SPEC 6.6). */
+const ACQUISITION_PREVIEW: readonly string[] = [
+  ...ACQUISITION_RENAME,
+  "--preview",
+  "--json",
+];
+
+/** The real operation under `--json`: an exit-2 answer's error document. */
+const ACQUISITION_REAL: readonly string[] = [...ACQUISITION_RENAME, "--json"];
+
+/** 14.24's stable code: a write acquisition makes, refused (SPEC 14). */
+const WRITE_FAILURE_CODE = "write-failure";
+
+/** 14.25's stable code: a read acquisition makes, refused (SPEC 14). */
+const READ_FAILURE_CODE = "read-failure";
+
+/** What each plain file the acquisition arms stage as a leftover holds. */
+const ACQUISITION_LEFTOVER_FILE_BYTES = "A leftover the harness staged.\n";
+
+/** What the plain file (b) stages at `.xspec` holds. */
+const AREA_OCCUPANT_FILE_BYTES =
+  "Not the graph-data area: an occupant left for manual deletion.\n";
+
+/** Stage a fresh CORE_DECL workspace, run `body`, dispose (H-1). */
+async function withCoreWorkspace<T>(
+  body: (workspace: TestWorkspace) => Promise<T>,
+): Promise<T> {
+  const workspace = await TestWorkspace.create(CORE_DECL);
+  try {
+    return await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * A freshly built valid workspace: `build` on CORE_DECL's staging, exit 0,
+ * and nothing at `.xspec/lock` once it has run (SPEC 13.4: no write but
+ * acquisition and release touches the lock path) — so whatever an arm
+ * stages there is the arm's alone.
+ */
+async function buildLeftoverFree(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(product, workspace, `${context} staging \`build\``);
+  await assertLockPathAbsent(
+    workspace.root,
+    `${context}: once \`build\` has run, before anything is staged (SPEC ` +
+      `13.4: no write but acquisition and release touches the lock path)`,
+  );
+}
+
+/** The unobstructed twin's answer each arm's preview is compared with. */
+export interface T663UnobstructedTwin {
+  /** `rename specs/A.mdx a a2 --preview --json` there: exit 0. */
+  readonly preview: RunResult;
+}
+
+/**
+ * The unobstructed twin (TEST-SPEC T6.6-3(a), (c)): a fresh CORE_DECL
+ * workspace, freshly built, nothing at the lock path. The preview — exit 0,
+ * the form-exact 12.7 preview document, findings [], its plan non-null —
+ * whose stdout each arm's preview must equal byte for byte (12.0: identical
+ * workspace bytes, identical answers; H-6 across directories, the document's
+ * paths workspace-relative); then the real operation, exit 0 — a staging
+ * premise: the operation succeeds where nothing occupies the lock path, so
+ * each arm's exit 2 is its staging's alone — and nothing at `.xspec/lock`
+ * once it has ended (SPEC 13.5: release on every normal end). Exported for
+ * scratch probes.
+ */
+export async function t663UnobstructedTwin(
+  product: ProductBinding,
+): Promise<T663UnobstructedTwin> {
+  return await withCoreWorkspace(async (workspace) => {
+    const context = "T6.6-3 the unobstructed twin";
+    await buildLeftoverFree(product, workspace, context);
+    const previewContext = `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\``;
+    const preview = await runBounded(
+      product,
+      workspace.root,
+      ACQUISITION_PREVIEW,
+      previewContext,
+    );
+    assertExitCode(
+      preview,
+      0,
+      `${previewContext}: staging premise — the preview of an operation ` +
+        `succeeding there succeeds (SPEC 6.6, 6.4)`,
+    );
+    const report = decodePreviewReport(
+      parseJsonStdout(preview, previewContext),
+      previewContext,
+    );
+    assertSameJson(
+      report.findings,
+      [],
+      `${previewContext}: a preview whose real operation would proceed ` +
+        `reports findings [] (SPEC 6.6, 12.7)`,
+    );
+    if (
+      report.mapping === null ||
+      report.files === null ||
+      report.delta === null
+    ) {
+      fail(
+        `${previewContext}: a successful preview reports its plan — ` +
+          `\`mapping\`, \`files\`, and \`delta\` non-null (SPEC 6.6, 12.7)`,
+      );
+    }
+    const realContext = `${context}: \`${ACQUISITION_REAL.join(" ")}\``;
+    const real = await runBounded(
+      product,
+      workspace.root,
+      ACQUISITION_REAL,
+      realContext,
+    );
+    assertExitCode(
+      real,
+      0,
+      `${realContext}: staging premise — the real operation succeeds where ` +
+        `nothing occupies the lock path, so each arm's exit 2 is its ` +
+        `staging's alone (SPEC 6.4, 13.5)`,
+    );
+    await assertLockPathAbsent(
+      workspace.root,
+      `${realContext}, once it has ended (SPEC 13.5: release on every ` +
+        `normal end)`,
+    );
+    return { preview };
+  });
+}
+
+/** One staging of (a) in effect: its record, its modes' undoing and redoing. */
+interface OutcomeStaging {
+  /** What was staged at the lock path or in the lock directory. */
+  readonly leftover: StagedLeftover;
+  /** Reinstate every mode the staging changed; idempotent. */
+  restore(): Promise<void>;
+  /** Change them again, verified anew (helpers/acquisition-staging.ts). */
+  reapply(): Promise<void>;
+}
+
+/** One staging of (a): its description, its refusal's code, its staging. */
+export interface T663AcquisitionOutcomeArm {
+  readonly what: string;
+  /**
+   * The real operation's stable code at `.xspec/lock` (SPEC 14.24, 14.25):
+   * a write or a read of acquisition the environment refuses.
+   */
+  readonly code: typeof WRITE_FAILURE_CODE | typeof READ_FAILURE_CODE;
+  /**
+   * Stage it on a freshly built workspace, verified on the harness itself
+   * (E-1, H-11: an ineffective staging is a harness error, never a pass or a
+   * skip).
+   */
+  readonly stage: (workspace: TestWorkspace) => Promise<OutcomeStaging>;
+}
+
+/** An acquisition staging's record, which (a)'s stagings each make. */
+function outcomeStaging(
+  staging: AcquisitionStaging,
+  what: string,
+): OutcomeStaging {
+  const { leftover } = staging;
+  if (leftover === undefined) {
+    throw new Error(`T6.6-3(a): the staging of ${what} recorded no leftover`);
+  }
+  return {
+    leftover,
+    restore: () => staging.restore(),
+    reapply: () => staging.reapply(),
+  };
+}
+
+/**
+ * (a)'s stagings, each made separately (TEST-SPEC T6.6-3(a)): the first two
+ * a write failure at `.xspec/lock` (SPEC 13.5: a link at the lock path is
+ * removed by nothing, 14.24; the entry's addition refused, 14.24), the last
+ * two a read failure there (the lock directory's listing refused once the
+ * entry is added; the leftover's listing refused at its removal — 14.25),
+ * the stagings T13.5-10(a) and (d) make (helpers/lock-staging.ts,
+ * helpers/acquisition-staging.ts). Exported for scratch probes.
+ */
+export const T6_6_3_ACQUISITION_OUTCOME_ARMS: readonly T663AcquisitionOutcomeArm[] =
+  [
+    {
+      what:
+        "`.xspec/lock` a symbolic link to a directory outside the " +
+        "workspace holding a file",
+      code: WRITE_FAILURE_CODE,
+      stage: async (workspace) => ({
+        leftover: await stageLeftover(workspace, LOCK_PATH, {
+          kind: "symlink",
+          target: { kind: "dir" },
+        }),
+        // No mode changed: nothing to restore or reapply.
+        restore: async () => undefined,
+        reapply: async () => undefined,
+      }),
+    },
+    {
+      what:
+        "an empty leftover lock directory refusing writes (`r-x`, T14-9's " +
+        "discipline)",
+      code: WRITE_FAILURE_CODE,
+      stage: async (workspace) =>
+        outcomeStaging(
+          await stageUnwritableLockDirectory(workspace),
+          "an `r-x` lock directory",
+        ),
+    },
+    {
+      what:
+        "an empty leftover lock directory unlistable but writable (`-wx`, " +
+        "T14-10's discipline)",
+      code: READ_FAILURE_CODE,
+      stage: async (workspace) =>
+        outcomeStaging(
+          await stageUnlistableLockDirectory(workspace),
+          "a `-wx` lock directory",
+        ),
+    },
+    {
+      what:
+        "a lock directory holding a subdirectory that holds a file, the " +
+        "subdirectory unlistable (`-wx`, T13.5-10(d))",
+      code: READ_FAILURE_CODE,
+      stage: async (workspace) =>
+        outcomeStaging(
+          await stageUnlistableLeftoverDirectory(workspace),
+          "a `-wx` subdirectory in a lock directory",
+        ),
+    },
+  ];
+
+/**
+ * One staging of (a) (TEST-SPEC T6.6-3(a)), on a fresh workspace, freshly
+ * built, the staging made and verified. The preview first, bounded (one
+ * blocking on the staging fails diagnosed at the hang guard, H-8): exit 0,
+ * its stdout byte-identical to the unobstructed twin's — a read of
+ * acquisition the environment refuses applies to the real operation only
+ * (SPEC 6.6), so a product whose preview examines the lock directory and
+ * reports the refusal (14.25), as `inventory`, `check`, and `ids` may
+ * (T13.4-12), fails the read-failure pair — and the staging untouched: its
+ * modes restored, the lock path holds exactly what was staged — kind, name,
+ * content, and a link's target alike — nothing added beside it (H-6's
+ * inclusion, against the staging's record: helpers/lock-state.ts
+ * `assertLockPathHolds`), every link's target outside the workspace
+ * untouched, and every other path byte-identical (SPEC 6.6: a preview
+ * modifies nothing). Then, its modes changed again and verified anew, the
+ * real operation second — its release can clear the staging (T13.5-10(d)) —
+ * exit 2, its error document's `code` the arm's and `path` `".xspec/lock"`
+ * (SPEC 13.5, 14.24, 14.25), and every path but the lock path byte-identical
+ * (H-6: acquisition's and release's writes there are no modification; the
+ * lock path pruned from both walks, an unlistable staging admitting none).
+ * Exported for scratch probes.
+ */
+export async function runT663AcquisitionOutcomeArm(
+  product: ProductBinding,
+  twin: T663UnobstructedTwin,
+  arm: T663AcquisitionOutcomeArm,
+): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const root = workspace.root;
+    const context = `T6.6-3(a) ${arm.what}`;
+    await buildLeftoverFree(product, workspace, context);
+    const staging = await arm.stage(workspace);
+    try {
+      const before = await snapshotDirectory(root, EXCLUDE_LOCK_PATH);
+
+      const previewContext =
+        `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\`, run first on ` +
+        `the staging`;
+      const preview = await runBounded(
+        product,
+        root,
+        ACQUISITION_PREVIEW,
+        previewContext,
+      );
+      await staging.restore();
+      assertExitCode(
+        preview,
+        0,
+        `${previewContext}: the preview answers as the real operation ` +
+          `would once holding exclusivity — acquisition and its every ` +
+          `outcome, a read or write of acquisition the environment refuses ` +
+          `included, apply to the real operation only (SPEC 6.6, 13.5, ` +
+          `14.24, 14.25) — so it succeeds as on the unobstructed twin, exit 0`,
+      );
+      assertBytesEqual(
+        preview.stdoutBytes,
+        twin.preview.stdoutBytes,
+        `${previewContext}: its answer byte-identical to the same preview's ` +
+          `on the unobstructed twin — the counterfactual of 6.6 yields the ` +
+          `twin's answer whatever the lock path holds, coordination state ` +
+          `no validation or planning consults (SPEC 6.6, 13.4, 13.5; 12.0)`,
+      );
+      await assertLockPathHolds(
+        root,
+        { staged: [staging.leftover] },
+        `${previewContext}, once it has exited, its staging's modes ` +
+          `restored to inspect it: the staging untouched — a preview ` +
+          `acquires nothing and writes nothing (SPEC 6.6, 13.4; H-6)`,
+      );
+      await assertOutsideTargetsUntouched(
+        [staging.leftover],
+        `${previewContext}: nothing written, removed, or added through a ` +
+          `link (SPEC 13.4)`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(root, EXCLUDE_LOCK_PATH),
+        `${previewContext}: modifies nothing — every path but the lock ` +
+          `path byte-identical (SPEC 6.6)`,
+      );
+
+      await staging.reapply();
+      const realContext =
+        `${context}: \`${ACQUISITION_REAL.join(" ")}\`, run second on the ` +
+        `same staging`;
+      const real = await runBounded(
+        product,
+        root,
+        ACQUISITION_REAL,
+        realContext,
+      );
+      await staging.restore();
+      assertExitCode(
+        real,
+        2,
+        `${realContext}: the real operation meets acquisition's ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "write" : "read"} failure ` +
+          `there — a usage error, exit 2 (SPEC 13.5, ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "14.24" : "14.25"}, 12.0)`,
+      );
+      const finding = expectErrorDocument(real, realContext);
+      assertSameJson(
+        { code: finding.code, path: finding.path },
+        { code: arm.code, path: LOCK_PATH },
+        `${realContext}: the error document carries acquisition's ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "write" : "read"} failure — ` +
+          `the stable code "${arm.code}" and the concerned path ` +
+          `"${LOCK_PATH}" (SPEC 13.5, 12.7, ` +
+          `${arm.code === WRITE_FAILURE_CODE ? "14.24" : "14.25"}) — ` +
+          `message: ${JSON.stringify(finding.message)}`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(root, EXCLUDE_LOCK_PATH),
+        `${realContext}: modifies nothing — every path but the lock path ` +
+          `byte-identical (SPEC 13.5, 12.0; H-6: acquisition's and ` +
+          `release's writes there are no modification)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+  });
+}
+
+/**
+ * (b) (TEST-SPEC T6.6-3(b)), on a fresh workspace, freshly built, `.xspec` a
+ * plain file in place of the area's directory (section-13.5-ii.ts
+ * `obstructArea`, T13.5-10(a)'s staging). The preview first: it answers as
+ * the real operation would once holding exclusivity — the invalid-workspace
+ * refusal (SPEC 6.4, 6.6), its gate meeting graph data's write path
+ * obstructed: exit 1, the form-exact 12.7 preview document with `mapping`,
+ * `files`, and `delta` `null`, its findings exactly T10.1-6's condition-22
+ * finding concerning `.xspec`, `locations` [] (SPEC 14.22, 13.4) — nothing
+ * modified, the plain file byte-unchanged. Then the real operation: exit 2,
+ * `code` `"write-failure"`, `path` `".xspec"` (SPEC 13.5, 14.24: acquisition
+ * fails at the area's own occupant), nothing written, the plain file
+ * byte-unchanged — the pair pinning the boundary. Exported for scratch
+ * probes.
+ */
+export async function runT663AreaArm(product: ProductBinding): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const root = workspace.root;
+    const context = "T6.6-3(b) `.xspec` a plain file";
+    await buildLeftoverFree(product, workspace, context);
+    const staged = await obstructArea(
+      workspace,
+      { kind: "file", content: AREA_OCCUPANT_FILE_BYTES },
+      context,
+    );
+    const before = await snapshotDirectory(root);
+
+    const previewContext =
+      `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\`, run first on the ` +
+      `staging`;
+    const preview = await runBounded(
+      product,
+      root,
+      ACQUISITION_PREVIEW,
+      previewContext,
+    );
+    assertExitCode(
+      preview,
+      1,
+      `${previewContext}: the preview answers as the real operation would ` +
+        `once holding exclusivity — the invalid-workspace refusal, exit 1 ` +
+        `(SPEC 6.6, 6.4, 14.22, 12.0) — never acquisition's write failure, ` +
+        `which applies to the real operation only`,
+    );
+    const report = decodePreviewReport(
+      parseJsonStdout(preview, previewContext),
+      `${previewContext} — a refused preview keeps the 12.7 preview ` +
+        `document form (SPEC 12.7, H-3)`,
+    );
+    if (
+      report.mapping !== null ||
+      report.files !== null ||
+      report.delta !== null
+    ) {
+      fail(
+        `${previewContext}: a refused preview reports the refusal findings ` +
+          `alone — its \`mapping\`, \`files\`, and \`delta\` are null ` +
+          `(SPEC 6.6, 12.7); got mapping ` +
+          `${report.mapping === null ? "null" : "present"}, files ` +
+          `${report.files === null ? "null" : "present"}, delta ` +
+          `${report.delta === null ? "null" : "present"}`,
+      );
+    }
+    const findingsContext =
+      `${previewContext}: its findings exactly T10.1-6's condition-22 ` +
+      `finding concerning ${GRAPH_DATA_AREA_PATH} — a directory component ` +
+      `of graph data's write path occupied by a non-directory (SPEC 14.22, ` +
+      `13.4)`;
+    assertConditionCounts(report.findings, { "14.22": 1 }, findingsContext);
+    const [finding] = report.findings;
+    if (finding === undefined) {
+      throw new Error("T6.6-3(b): assertConditionCounts admitted no finding");
+    }
+    assertFindingConcernsPath(finding, GRAPH_DATA_AREA_PATH, findingsContext);
+    assertSameJson(
+      finding.locations,
+      [],
+      `${findingsContext}: a path-concerned condition is unlocated — ` +
+        `locations [] (SPEC 12.7)`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(root),
+      `${previewContext}: modifies nothing (SPEC 6.6)`,
+    );
+    await assertStagingInPlace(
+      [staged],
+      `${previewContext}: the plain file at ${AREA_PATH} byte-unchanged`,
+    );
+
+    const realContext =
+      `${context}: \`${ACQUISITION_REAL.join(" ")}\`, run second on the ` +
+      `same staging`;
+    const real = await runBounded(product, root, ACQUISITION_REAL, realContext);
+    assertExitCode(
+      real,
+      2,
+      `${realContext}: acquisition removes nothing and fails with the write ` +
+        `failure of 14.24 where the area's own path holds anything but a ` +
+        `directory — a usage error, exit 2 (SPEC 13.5, 13.4, 12.0)`,
+    );
+    const error = expectErrorDocument(real, realContext);
+    assertSameJson(
+      { code: error.code, path: error.path },
+      { code: WRITE_FAILURE_CODE, path: AREA_PATH },
+      `${realContext}: the error document carries acquisition's write ` +
+        `failure — the stable code "${WRITE_FAILURE_CODE}" and the ` +
+        `concerned path "${AREA_PATH}" (SPEC 13.5, 12.7, 14.24) — message: ` +
+        JSON.stringify(error.message),
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(root),
+      `${realContext}: nothing written (SPEC 13.5, 12.0)`,
+    );
+    await assertStagingInPlace(
+      [staged],
+      `${realContext}: the plain file at ${AREA_PATH} byte-unchanged, left ` +
+        `for manual deletion (SPEC 13.5, 13.4)`,
+    );
+  });
+}
+
+/** One leftover staging of (c): its description and its staging. */
+export interface T663SurvivingLeftover {
+  readonly what: string;
+  /**
+   * Whether the leftovers are the lock directory's occupants (each at
+   * `.xspec/lock/<name>`), counted apart from entries.
+   */
+  readonly inLockDirectory: boolean;
+  /** Stage it on a freshly built workspace, verified on the harness itself. */
+  readonly stage: (
+    workspace: TestWorkspace,
+  ) => Promise<readonly StagedLeftover[]>;
+}
+
+/**
+ * (c)'s leftovers (TEST-SPEC T6.6-3(c)), each recording no identifier —
+ * outside 13.5's gap — and each one acquisition removes (SPEC 13.5: a plain
+ * file at the lock path; in the lock directory, anything that is no entry,
+ * a directory with all it holds; T13.5-10(b)). No plain file of the
+ * harness's own naming lies at the lock directory's top level
+ * (helpers/lock-staging.ts refuses one). Exported for scratch probes.
+ */
+export const T6_6_3_SURVIVING_LEFTOVERS: readonly T663SurvivingLeftover[] = [
+  {
+    what: "a plain file at `.xspec/lock`",
+    inLockDirectory: false,
+    stage: async (workspace) => [
+      await stageLeftover(workspace, LOCK_PATH, {
+        kind: "file",
+        content: ACQUISITION_LEFTOVER_FILE_BYTES,
+      }),
+    ],
+  },
+  {
+    what: "a directory holding a file, and a FIFO, in a lock directory",
+    inLockDirectory: true,
+    stage: async (workspace) => [
+      await stageLeftover(workspace, `${LOCK_PATH}/leftover-directory`, {
+        kind: "dir",
+        entries: [
+          {
+            name: "file",
+            node: { kind: "file", content: ACQUISITION_LEFTOVER_FILE_BYTES },
+          },
+        ],
+      }),
+      await stageLeftover(workspace, `${LOCK_PATH}/leftover-fifo`, {
+        kind: "fifo",
+      }),
+    ],
+  },
+];
+
+/**
+ * One leftover staging of (c) (TEST-SPEC T6.6-3(c)), on a fresh workspace,
+ * freshly built, the leftover staged and verified, the lock path captured.
+ * The preview first, bounded (a preview opening the FIFO — an open with no
+ * writer blocks — fails diagnosed at the hang guard, H-8; the harness never
+ * opens one): exit 0, its stdout byte-identical to the unobstructed twin's
+ * — the leftover-free twin's (SPEC 6.6, 13.4) — and every leftover
+ * byte-untouched, acquiring nothing and so removing nothing: in a lock
+ * directory, the count half of the held-state comparison — the staged
+ * occupants as staged and no entry beside them — then, everywhere, the
+ * inclusion check (H-6; the lock-path inclusion VIOL-CORE-READERENTRY's
+ * note names, helpers/lock-state.ts `assertLockPathAsCaptured`): the lock
+ * path as captured, kind, name, and content alike, nothing added beside it;
+ * each staging in place and each FIFO a FIFO; every other path
+ * byte-identical (SPEC 6.6). Then the real operation second, on the same
+ * leftovers: exit 0, acquisition removing every leftover (SPEC 13.5;
+ * T13.5-10(b)), and nothing at `.xspec/lock` once it has ended (release on
+ * every normal end) — where a product acquiring for previews would already
+ * have removed them. Exported for scratch probes.
+ */
+export async function runT663LeftoverArm(
+  product: ProductBinding,
+  twin: T663UnobstructedTwin,
+  leftover: T663SurvivingLeftover,
+): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const root = workspace.root;
+    const context = `T6.6-3(c) ${leftover.what}`;
+    await buildLeftoverFree(product, workspace, context);
+    const staged = await leftover.stage(workspace);
+    const before = await snapshotDirectory(root, EXCLUDE_LOCK_PATH);
+    const capture = await captureLockPath(root);
+
+    const previewContext =
+      `${context}: \`${ACQUISITION_PREVIEW.join(" ")}\`, run first on the ` +
+      `leftovers`;
+    const preview = await runBounded(
+      product,
+      root,
+      ACQUISITION_PREVIEW,
+      previewContext,
+    );
+    assertExitCode(
+      preview,
+      0,
+      `${previewContext}: the preview answers as on the leftover-free twin, ` +
+        `exit 0 — a run holding exclusivity has removed every leftover, so ` +
+        `no staged state of the lock path survives into the counterfactual ` +
+        `of 6.6 (SPEC 6.6, 13.5, 13.4)`,
+    );
+    assertBytesEqual(
+      preview.stdoutBytes,
+      twin.preview.stdoutBytes,
+      `${previewContext}: its answer byte-identical to the same preview's ` +
+        `on the leftover-free twin (SPEC 6.6, 13.4; 12.0)`,
+    );
+    if (leftover.inLockDirectory) {
+      await assertLockDirectoryEntries(
+        root,
+        { entries: 0, staged },
+        `${previewContext}, once it has exited: the lock directory holds ` +
+          `the staged leftovers as staged and no entry beside them — a ` +
+          `preview acquires nothing, so it removes nothing and adds nothing ` +
+          `(SPEC 6.6, 13.5, 13.4)`,
+      );
+    }
+    await assertLockPathAsCaptured(
+      capture,
+      `${previewContext}, once it has exited: every leftover byte-untouched ` +
+        `— a preview acquires nothing and so removes nothing, where a ` +
+        `product acquiring for previews removes them (SPEC 6.6, 13.5; ` +
+        `T13.5-10(b))`,
+    );
+    await assertStagingInPlace(
+      staged,
+      `${previewContext}: each leftover in place, byte-identical`,
+    );
+    await assertFifosIntact(
+      staged,
+      `${previewContext}: each staged FIFO still a FIFO in place`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(root, EXCLUDE_LOCK_PATH),
+      `${previewContext}: modifies nothing — every path but the lock path ` +
+        `byte-identical (SPEC 6.6)`,
+    );
+
+    const realContext =
+      `${context}: \`${ACQUISITION_REAL.join(" ")}\`, run second on the ` +
+      `same leftovers`;
+    const real = await runBounded(product, root, ACQUISITION_REAL, realContext);
+    assertExitCode(
+      real,
+      0,
+      `${realContext}: acquisition removes every leftover and proceeds — a ` +
+        `leftover recording no identifier lies outside 13.5's gap and MUST ` +
+        `NOT block later commands (SPEC 13.5; T13.5-10(b)) — so the ` +
+        `operation succeeds as on the unobstructed twin`,
+    );
+    await assertLockPathAbsent(
+      root,
+      `${realContext}, once it has ended: the leftovers removed at ` +
+        `acquisition and the run released (SPEC 13.5; T13.5-10(b))`,
+    );
+  });
+}
+
+/**
+ * Acquisition's every other outcome, each arm staged beside the real
+ * operation, its preview run first (TEST-SPEC T6.6-3; module header): the
+ * unobstructed twin, then (a)'s four stagings, (b), and (c)'s two leftover
+ * stagings, each on a fresh workspace. Exported for scratch probes.
+ */
+export async function runT663AcquisitionArms(
+  product: ProductBinding,
+): Promise<void> {
+  const twin = await t663UnobstructedTwin(product);
+  for (const arm of T6_6_3_ACQUISITION_OUTCOME_ARMS) {
+    await runT663AcquisitionOutcomeArm(product, twin, arm);
+  }
+  await runT663AreaArm(product);
+  for (const leftover of T6_6_3_SURVIVING_LEFTOVERS) {
+    await runT663LeftoverArm(product, twin, leftover);
+  }
+}
+
+/**
+ * T6.6-3's refusal stagings, in its order (the module header): each refusal
+ * of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7
+ * staged identically — the invalid-workspace precondition (T6.4-6's
+ * refused-writes staging among it), the exact self-move of either form,
+ * the same-file after-removal collision, and T14-7's own stagings included
+ * — each refused operation handed to `twin` on its staged workspace, which
+ * every twin leaves as it found it (each refusal modifies nothing, or the
+ * twin runs on copies of the state): T6.6-3's
+ * `expectRefusedPreviewEquivalence` (the real refusal, then its
+ * `--preview`), T6.6-7's human twin of the refused preview
+ * (`expectHumanRefusedPreviewTwin`), or T12.0-15's human twin of the
+ * refused real operation (section-12.0-iv.ts, which imports this sweep).
+ * `testId` names the running test in every context, and `runs` what `twin`
+ * runs, in the diagnosis of the compare around the outside-root link arms'
+ * target directory, which holds for each.
+ */
+export async function runT663RefusalStagings(
+  product: ProductBinding,
+  twin: RefusalStagingTwin,
+  testId: string,
+  runs: string,
+): Promise<void> {
+  // --- Refusal equivalence: T6.4-3's cases, staged identically ---
+  await withWorkspace(
+    RENAME_REFUSAL_CONFIG,
+    RENAME_REFUSAL_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} rename-refusal staging \`build\` (the T6.4-3 protocol: ` +
+          "derived files sit under the modifies-nothing compares)",
+      );
+      for (const { argv, expected, reason } of RENAME_REFUSAL_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} rename refusal (${reason})`,
+        );
+      }
+      // T14-7's spelled `rename specs/A.mdx a a.then`, staged as T14-7
+      // stages it: here, after the home table's loop.
+      await expectIntrinsicInvalidIdPreviewTwin(
+        product,
+        twin,
+        testId,
+        workspace,
+        T14_7_INTRINSIC_RENAME_ARM,
+      );
+    },
+  );
+
+  // --- Refusal equivalence: T6.5-4's cases, staged identically ---
+  await withWorkspace(
+    MOVE_REFUSAL_CONFIG,
+    MOVE_REFUSAL_FILES,
+    async (workspace) => {
+      // Occupants before the premise `build`, which must still pass
+      // (T6.5-4's staging note).
+      await stageMoveRefusalOccupants(workspace);
+      await buildOk(
+        product,
+        workspace,
+        `${testId} move-refusal staging \`build\` (occupants staged before it; ` +
+          "T6.5-4's protocol)",
+      );
+      for (const { argv, expected, reason } of MOVE_REFUSAL_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} move refusal (${reason})`,
+        );
+      }
+      // T14-7's spelled `move specs/A.mdx#x 'specs/B.mdx#x y'`, staged as
+      // T14-7 stages it: here, after the home table's loop.
+      await expectIntrinsicInvalidIdPreviewTwin(
+        product,
+        twin,
+        testId,
+        workspace,
+        T14_7_INTRINSIC_MOVE_ARM,
+      );
+    },
+  );
+
+  // T6.5-4's single-casing arm, staged identically on its own workspace
+  // (section-6.5.ts's MOVE_CASING_* exports): the file-form move to
+  // `specs/B.MDX`, in a spec group through the glob `specs/*.MDX` yet
+  // lacking `.mdx` byte-wise (SPEC 12.0: no case folding) — the real move
+  // and its preview each refused-invalid-destination concerning that path.
+  await withWorkspace(
+    MOVE_CASING_CONFIG,
+    MOVE_CASING_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} casing staging \`build\` — the glob specs/*.MDX matches no ` +
+          "staged file, so the refusal previewed below is the move's own " +
+          "(T6.5-4's single-casing arm)",
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_CASING_CASE.argv,
+        MOVE_CASING_CASE.expected,
+        `${testId} move refusal (${MOVE_CASING_CASE.reason})`,
+      );
+    },
+  );
+
+  // T6.5-4's outside-root link-component arms, staged identically on
+  // their own workspace: the real operation and the preview alike leave
+  // the link's target directory outside the root byte-identical.
+  await withWorkspace(
+    MOVE_REFUSAL_CONFIG,
+    MOVE_LINK_OUTSIDE_FILES,
+    async (workspace) => {
+      const outside = await stageMoveLinkOutsideComponent(workspace);
+      await buildOk(
+        product,
+        workspace,
+        `${testId} outside-root link staging \`build\` (the link staged before ` +
+          "it lies under no current source's write path; T6.5-4's protocol)",
+      );
+      for (const { argv, expected, reason } of MOVE_LINK_OUTSIDE_CASES) {
+        await assertLeavesUnchanged(
+          outside,
+          () =>
+            twin(
+              product,
+              workspace,
+              argv,
+              expected,
+              `${testId} move refusal (${reason})`,
+            ),
+          `${testId} move refusal (${reason}): the link's target directory ` +
+            `outside the workspace root stays byte-identical across ${runs} ` +
+            `(SPEC 6.5, 6.6, 13.4)`,
+        );
+      }
+    },
+  );
+
+  // T6.5-4's derived-path arm, staged identically on its own workspace.
+  await withWorkspace(
+    MOVE_DERIVED_PATH_CONFIG,
+    MOVE_DERIVED_PATH_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} derived-path staging \`build\` — the occupant lies under no ` +
+          "current source's write path (T6.5-4's derived-path arm), so " +
+          "the refusal previewed below is the move's own",
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_DERIVED_PATH_CASE.argv,
+        MOVE_DERIVED_PATH_CASE.expected,
+        `${testId} move refusal (${MOVE_DERIVED_PATH_CASE.reason})`,
+      );
+    },
+  );
+
+  // T6.5-4's derived-path link sibling, staged identically on its own
+  // workspace.
+  await withWorkspace(
+    MOVE_DERIVED_PATH_CONFIG,
+    MOVE_DERIVED_LINK_FILES,
+    async (workspace) => {
+      await stageMoveDerivedLinkComponent(workspace);
+      await buildOk(
+        product,
+        workspace,
+        `${testId} derived-path link-sibling staging \`build\` — the link ` +
+          "mdout/new lies under no current source's write path (T6.5-4's " +
+          "sibling arm), so the refusal previewed below is the move's own",
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_DERIVED_LINK_CASE.argv,
+        MOVE_DERIVED_LINK_CASE.expected,
+        `${testId} move refusal (${MOVE_DERIVED_LINK_CASE.reason})`,
+      );
+    },
+  );
+
+  // T6.5-4's valid-workspace precondition arm, staged identically: the
+  // invalid-workspace refusal previews as it refuses — the workspace's
+  // numbered findings alone (SPEC 6.6, 6.4, 6.5, 14).
+  await withWorkspace(
+    MOVE_REFUSAL_CONFIG,
+    MOVE_PRECONDITION_FILES,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} precondition staging \`build\` over the staged workspace`,
+      );
+      await workspace.file(
+        MOVE_PRECONDITION_BREAK_FILE,
+        MOVE_PRECONDITION_BREAK,
+      );
+      await twin(
+        product,
+        workspace,
+        MOVE_PRECONDITION_CASE.argv,
+        MOVE_PRECONDITION_CASE.expected,
+        `${testId} move refusal (${MOVE_PRECONDITION_CASE.reason})`,
+      );
+    },
+  );
+
+  // The precondition's refused-writes staging, staged identically through
+  // T6.4-6's own staging code (section-6.4.ts's REFUSED_WRITES_* exports
+  // and `stageRefusedWrites`: `out` replaced by a plain file after
+  // `build`, the premise `build --json` pinning its one condition-22
+  // finding): the real rename and file-form move — the latter T6.5-4's
+  // precondition arm — each refused with the condition-22 finding
+  // concerning `out` alone, no refusal reason beside it, and each preview
+  // alike (SPEC 6.6, 6.4, 6.5, 13.3, 14.22).
+  await withWorkspace(
+    REFUSED_WRITES_CONFIG,
+    REFUSED_WRITES_FILES,
+    async (workspace) => {
+      await stageRefusedWrites(
+        product,
+        workspace,
+        `${testId} refused-writes staging (T6.4-6's)`,
+      );
+      for (const { argv, expected, reason } of REFUSED_WRITES_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} ${argv[0] ?? ""} refusal (${reason})`,
+        );
+      }
+    },
+  );
+
+  // --- Refusal equivalence: T6.5-6's identity-terms refusals, staged
+  // identically — the post-kept-ID-move workspace that test asserts
+  // byte-exact, staged directly from those bytes (SPEC 6.5, 6.6): the
+  // exact self-move of either form (the file form refused as
+  // identity-unchanged alone) and the same-file after-removal collision,
+  // each reported alike by the real operation and its preview ---
+  await withWorkspace(
+    MOVE_IDENTITY_CONFIG,
+    MOVE_IDENTITY_FILES_AFTER,
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} identity-terms staging \`build\` (T6.5-6's post-move ` +
+          "workspace, staged directly; the derived files sit under the " +
+          "modifies-nothing compares)",
+      );
+      for (const { argv, expected, reason } of MOVE_IDENTITY_REFUSAL_CASES) {
+        await twin(
+          product,
+          workspace,
+          argv,
+          expected,
+          `${testId} move refusal (${reason})`,
+        );
+      }
+    },
+  );
+
+  // --- Refusal equivalence: T6.5-16's `refused-invalid-rewrite` arms —
+  // every refused shape beside the reasons reported with it, and the
+  // alone arms refused for another reason with no would-be text judged —
+  // staged identically from the exported arm tables (SPEC 6.5, 6.6, 14)
+  // ---
+  for (const arm of R16_REFUSED_ARMS) {
+    await expectRefusedArmPreviewTwin(
+      product,
+      twin,
+      arm.files,
+      arm.argv,
+      ["refused-invalid-rewrite", ...(arm.beside ?? [])],
+      `${testId} move refusal (T6.5-16 ${arm.key})`,
+    );
+  }
+  for (const arm of R16_ALONE_ARMS) {
+    await expectRefusedArmPreviewTwin(
+      product,
+      twin,
+      arm.files,
+      arm.argv,
+      arm.codes,
+      `${testId} move refusal (T6.5-16 ${arm.key})`,
+    );
+  }
+
+  // --- Refusal equivalence: T6.5-17's `refused-moved-import` arms,
+  // staged identically from the exported arm table (SPEC 6.5, 6.6, 14) ---
+  for (const arm of M17_REFUSED_ARMS) {
+    await expectRefusedArmPreviewTwin(
+      product,
+      twin,
+      arm.files,
+      arm.argv,
+      ["refused-moved-import", ...(arm.beside ?? [])],
+      `${testId} move refusal (T6.5-17 ${arm.key})`,
+    );
+  }
+
+  // --- Refusal equivalence: T6.5-20's refused stagings, staged
+  // identically from the exported table through the home test's own
+  // staging code — the companion legs read as the home test reads them,
+  // each staging before any build or after its premise `build` as the
+  // home test stages it (SPEC 6.5, 6.6, 14) ---
+  for (const staging of await d20RefusedStagings(
+    product,
+    `${testId} (T6.5-20)`,
+  )) {
+    await runD20RefusedStaging(
+      product,
+      staging,
+      `${testId} move refusal (T6.5-20 ${staging.key})`,
+      (workspace, move, context) =>
+        twin(
+          product,
+          workspace,
+          move.argv,
+          { finding: "refused-invalid-destination" },
+          context,
+        ),
+    );
+  }
+
+  // --- Refusal equivalence: T6.5-21's refused stagings — (a) with its
+  // two-reason move, and (b) — staged identically from the exported table
+  // through the home test's own staging code, (a) after its premise
+  // `build` and (b) before any build as the home test stages them, the
+  // code set re-pinned before the compare (SPEC 6.5, 6.6, 14) ---
+  for (const staging of D21_REFUSED_STAGINGS) {
+    await runD21RefusedStaging(
+      product,
+      staging,
+      `${testId} move refusal (T6.5-21 ${staging.key})`,
+      (workspace, move, context) =>
+        twin(
+          product,
+          workspace,
+          move.argv,
+          move.findings.map((expected) => ({ finding: expected.code })),
+          context,
+        ),
+    );
+  }
+
+  // --- Refusal equivalence: T14-7's own stagings, staged identically
+  // from section-14.ts's exported tables, in T14-7's order — its two
+  // spelled refused-invalid-id command lines twinned above, in the home
+  // workspaces — each case's code set re-pinned before the compare (SPEC
+  // 6.5, 6.4, 6.6, 14): the plain file at a directory component of the
+  // destination path; the both-collide-and-cycle section move (every
+  // applicable reason together); the destination spellings `./a.mdx`,
+  // `specs//b.mdx`, and `specs/../specs/b.mdx`, in the file form and as a
+  // section form's target path (refused-invalid-destination alone);
+  // `refused-cycle` located at the spellings rooted at an import the move
+  // would add — the local reference spelled once, then twice (`d={["x",
+  // "x"]}`), and the sibling chain whose characters need not change — and
+  // at the dependency cycle a containment would make; the identities over
+  // invalid paths; and, on the staged-to-collide workspace, the control
+  // collision, the exact self-move of either form, and — `specs/Bad.mdx`
+  // broken — the invalid-workspace rename, its numbered finding alone ---
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_COMPONENT_STAGING,
+  );
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_MULTI_STAGING,
+  );
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_SPELLING_STAGING,
+  );
+  for (const arm of T14_7_REFUSED_CYCLE_ARMS) {
+    await withWorkspace(arm.config, arm.files, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${testId} (T14-7 ${arm.name}): staging \`build\` over the valid ` +
+          `workspace`,
+      );
+      await twin(
+        product,
+        workspace,
+        arm.argv,
+        arm.expected,
+        `${testId} move refusal (T14-7 ${arm.name})`,
+      );
+    });
+  }
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_INVALID_PATH_STAGING,
+  );
+  await expectT147StagingPreviewTwins(
+    product,
+    twin,
+    testId,
+    T14_7_INVALID_WORKSPACE_STAGING,
+  );
+}
+
+const T6_6_3 = defineProductTest({
+  id: "T6.6-3",
+  title:
+    "refusal and scheduling equivalence: each refusal of T6.4-3, T6.5-4, T6.5-6, T6.5-16, T6.5-17, T6.5-20, T6.5-21, and T14-7 — the invalid-workspace precondition (T6.5-4's arm and, on T6.4-6's refused-writes staging — `out` a plain file — the real rename and file-form move, each refused with the condition-22 finding concerning `out` alone), the exact self-move of either form (the file form refused as identity-unchanged alone, never `refused-destination-exists` beside it), the same-file after-removal collision, T6.5-4's single-casing move to `specs/B.MDX`, every `refused-invalid-rewrite` and `refused-moved-import` arm with the reasons reported beside it, T6.5-16's alone arms, T6.5-21's two-reason move, and T14-7's own stagings — `refused-cycle` located at the spellings rooted at an import the move would add (the local reference spelled once and twice, `d={[\"x\", \"x\"]}`, and the sibling chain whose characters need not change) and at the dependency cycle a containment would make, the non-canonical destination spellings `./a.mdx`, `specs//b.mdx`, and `specs/../specs/b.mdx` in either form, the identities over invalid paths, its two spelled refused-invalid-id command lines, the plain file at a destination-path component, the both-collide-and-cycle move, and on its staged-to-collide workspace the control collision, the self-moves, and the invalid-workspace rename — included — staged identically (T6.5-6's post-move workspace staged directly from the bytes it asserts; T6.5-16's, T6.5-17's, T6.5-20's, and T6.5-21's arms from their exported tables — T6.5-20's companion legs read as its home test reads them, each T6.5-20 and T6.5-21 staging before any build or after a `build` as its home test stages it; T6.4-6's through its own staging code; T14-7's from its exported stagings, its spelled command lines in the home workspaces after the home tables' loops), the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 — the U+FFFD destination operands of either leg and the Linux leg's non-UTF-8 operand included — exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside each spells-no-identity origin's one 14.17 finding, the would-be bearer's `id` repeated, braced (`id={\"x\"}`), or valueless (`<S id>`) in each operation, the usage error alone reported, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal; the held-state comparison holds once command 1 holds and again once the preview has exited, the holder's entry byte-identical and alone (read under H-4's grant), nothing added beside it — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file; acquisition's every other outcome lies outside the equivalence likewise, each arm staged beside the real operation (`rename specs/A.mdx a a2`), its preview run first: (a) with, each staged separately, `.xspec/lock` a symbolic link to a directory, an empty leftover lock directory `r-x`, one `-wx`, and a lock directory holding a subdirectory that holds a file, the subdirectory `-wx` (each verified on the harness itself), the `--preview` answers byte-identically to its run on an unobstructed twin, exit 0, the staging untouched, while the real operation exits 2, `path` `\".xspec/lock\"`, `code` `\"write-failure\"` under the first two and `\"read-failure\"` under the last two; (b) with `.xspec` a plain file, the preview gives the invalid-workspace refusal — exit 1, exactly T10.1-6's condition-22 finding concerning `.xspec`, `mapping`, `files`, and `delta` `null` — while the real operation exits 2, `code` `\"write-failure\"`, `path` `\".xspec\"`; (c) with a plain file at `.xspec/lock`, and separately a directory and a FIFO in a lock directory, the preview answers as on the leftover-free twin and leaves every leftover byte-untouched, no entry added (H-6's inclusion), while the real operation then succeeds, removing them (SPEC 6.6, 6.4, 6.5, 13.4, 13.5, 12.0, 12.7, 14, 14.22, 14.24, 14.25)",
+  run: async (product) => {
+    // --- Refusal equivalence: T6.6-3's refusal stagings (module header) ---
+    await runT663RefusalStagings(
+      product,
+      expectRefusedPreviewEquivalence,
+      "T6.6-3",
+      "the real operation and its preview",
+    );
+
+    // --- Usage-error equivalence: T6.4-4's usage errors on its
+    // ordering-shaped staging ---
+    await withWorkspace(
+      RENAME_USAGE_CONFIG,
+      RENAME_USAGE_ORDERING_FILES,
+      async (workspace) => {
+        const context = "T6.6-3 rename usage";
+        const findings = await buildFindings(
+          product,
+          workspace,
+          `${context}: \`build --json\` premise — the staged workspace ` +
+            `fails build validation (unresolved d reference, SPEC 14.5), ` +
+            `so exit 2 across each pair realizes "argument checks precede ` +
+            `either way" (T6.4-4's ordering arm)`,
+        );
+        if (findings.length === 0) {
+          fail(
+            `${context}: staging premise — the failing \`build\` must ` +
+              `report at least one validation finding (SPEC 14)`,
+          );
+        }
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            for (const [argv, label] of RENAME_USAGE_CASES) {
+              await expectUsageErrorEitherWay(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing, previewed or not ` +
+            `(SPEC 12.0)`,
+        );
+      },
+    );
+    // T6.4-4's spells-no-identity arms — the would-be bearer's `id`
+    // repeated, braced, or valueless — each on a workspace of its own under
+    // the same specs-only configuration (RENAME_REFUSAL_CONFIG, T6.4-4's).
+    for (const arm of T6_4_4_SPELLS_NONE_ARMS) {
+      await withWorkspace(
+        RENAME_REFUSAL_CONFIG,
+        arm.files,
+        async (workspace) => {
+          await runSpellsNoneUsageArm(
+            product,
+            workspace,
+            arm,
+            `T6.6-3 rename usage, spells-no-identity arm, ${arm.form}`,
+          );
+        },
+      );
+    }
+
+    // --- Usage-error equivalence: T6.5-5's usage errors on its
+    // ordering-shaped staging ---
+    await withWorkspace(
+      MOVE_USAGE_CONFIG,
+      MOVE_USAGE_ORDERING_FILES,
+      async (workspace) => {
+        const context = "T6.6-3 move usage";
+        const findings = await buildFindings(
+          product,
+          workspace,
+          `${context}: \`build --json\` premise — the staged workspace ` +
+            `fails build validation (unresolved d reference, SPEC 14.5), ` +
+            `so exit 2 across each pair realizes "argument checks precede ` +
+            `either way" (T6.5-5's ordering arm)`,
+        );
+        if (findings.length === 0) {
+          fail(
+            `${context}: staging premise — the failing \`build\` must ` +
+              `report at least one validation finding (SPEC 14)`,
+          );
+        }
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            // T6.5-5's usage tables, the U+FFFD destination operands of
+            // either leg included: malformed argument values, exit 2
+            // before any refusal is evaluated (SPEC 12.0, 6.5; T12.0-5).
+            for (const [argv, label] of [
+              ...MOVE_USAGE_CASES,
+              ...MOVE_WRONG_KIND_CASES,
+              ...MOVE_MIXED_SYNOPSIS_CASES,
+              ...MOVE_REPLACEMENT_DESTINATION_CASES,
+            ]) {
+              await expectUsageErrorEitherWay(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}`,
+              );
+            }
+            // The non-UTF-8 destination operand (raw argv bytes) — Linux
+            // leg only, as staged in T6.5-5.
+            if (process.platform === "linux") {
+              await expectUsageErrorEitherWay(
+                product,
+                workspace,
+                MOVE_NON_UTF8_ARGV,
+                `${context}, non-UTF-8 destination operand (raw argv ` +
+                  `bytes, Linux leg — T6.5-5's staging)`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing, previewed or not ` +
+            `(SPEC 12.0)`,
+        );
+      },
+    );
+    // T6.5-5's spells-no-identity arms — T6.4-4's three would-be bearers
+    // as section-form move origins — each on a workspace of its own under
+    // the same specs-only configuration (MOVE_SOLO_CONFIG, T6.5-5's).
+    for (const arm of T6_5_5_SPELLS_NONE_ARMS) {
+      await withWorkspace(MOVE_SOLO_CONFIG, arm.files, async (workspace) => {
+        await runSpellsNoneUsageArm(
+          product,
+          workspace,
+          arm,
+          `T6.6-3 move usage, spells-no-identity arm, ${arm.form}`,
+        );
+      });
+    }
+
+    // --- Scheduling: the equivalence is over workspace state, never
+    // scheduling (SPEC 6.6) — T13.5-2's staging and choreography ---
+    await runT663SchedulingArms(product);
+
+    // --- Acquisition's every other outcome lies outside the equivalence
+    // likewise (SPEC 6.6), each arm staged beside the real operation, its
+    // preview run first ---
+    await runT663AcquisitionArms(product);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T6.6-4 — report content: the ten 12.7 edit classes, byte-precise
+// ---------------------------------------------------------------------------
+
+/** Byte length of `text` in UTF-8 — fixture offsets are byte offsets (1.7). */
+function utf8Length(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * Character index of exactly one occurrence of `fragment` in `haystack`.
+ * Absent or ambiguous fragments fail loud as staging defects (harness
+ * errors, never product failures): every located construct must be unique
+ * in its container, or a precomputed offset could silently name the wrong
+ * bytes.
+ */
+function uniqueCharIndex(
+  haystack: string,
+  fragment: string,
+  where: string,
+): number {
+  const first = haystack.indexOf(fragment);
+  if (first === -1) {
+    throw new Error(
+      `T6.6-4 staging locator (${where}): fragment ${JSON.stringify(fragment)} not found`,
+    );
+  }
+  if (haystack.indexOf(fragment, first + 1) !== -1) {
+    throw new Error(
+      `T6.6-4 staging locator (${where}): fragment ${JSON.stringify(fragment)} is ambiguous`,
+    );
+  }
+  return first;
+}
+
+/** Byte span of the unique `fragment` within `source` (SPEC 1.7). */
+function uniqueSpan(
+  source: string,
+  fragment: string,
+  where: string,
+): SourceRange {
+  const start = utf8Length(
+    source.slice(0, uniqueCharIndex(source, fragment, where)),
+  );
+  return { start, end: start + utf8Length(fragment) };
+}
+
+/**
+ * Byte span of `fragment` within the unique `container` within `source` —
+ * for constructs whose own spelling recurs in the file (a `d` entry equal to
+ * an `id` attribute's quoted value), located unambiguously through their
+ * containing construct.
+ */
+function spanWithin(
+  source: string,
+  container: string,
+  fragment: string,
+  where: string,
+): SourceRange {
+  const containerIndex = uniqueCharIndex(
+    source,
+    container,
+    `${where} (container)`,
+  );
+  const inner = uniqueCharIndex(container, fragment, `${where} (fragment)`);
+  const start =
+    utf8Length(source.slice(0, containerIndex)) +
+    utf8Length(container.slice(0, inner));
+  return { start, end: start + utf8Length(fragment) };
+}
+
+/**
+ * Byte spans of every occurrence of `fragment` within the unique `container`
+ * within `source`, in document order — for one spelling repeated inside one
+ * construct (a `d` array naming one target twice: one edge, an occurrence
+ * per entry, SPEC 2.2, 5.7), each occurrence located at its own entry.
+ * `count` is the number of occurrences the staging means: any other number,
+ * overlapping ones included, fails loud as a staging defect (harness error,
+ * never a product failure), as {@link uniqueCharIndex}'s do.
+ */
+function spansWithin(
+  source: string,
+  container: string,
+  fragment: string,
+  count: number,
+  where: string,
+): readonly SourceRange[] {
+  const containerStart = utf8Length(
+    source.slice(0, uniqueCharIndex(source, container, `${where} (container)`)),
+  );
+  const indices: number[] = [];
+  for (
+    let at = container.indexOf(fragment);
+    at !== -1;
+    at = container.indexOf(fragment, at + 1)
+  ) {
+    indices.push(at);
+  }
+  const overlapping = indices.some(
+    (at, i) => i > 0 && at < indices[i - 1]! + fragment.length,
+  );
+  if (indices.length !== count || overlapping) {
+    throw new Error(
+      `T6.6-4 staging locator (${where}): fragment ${JSON.stringify(fragment)} ` +
+        `must occur exactly ${String(count)} times, none overlapping, in ` +
+        `${JSON.stringify(container)}; found ${String(indices.length)}` +
+        `${overlapping ? " (overlapping)" : ""}`,
+    );
+  }
+  return indices.map((at) => {
+    const start = containerStart + utf8Length(container.slice(0, at));
+    return { start, end: start + utf8Length(fragment) };
+  });
+}
+
+/** The zero-length insertion-point range at a byte offset (SPEC 6.6, 12.7). */
+function insertionPoint(offset: number): SourceRange {
+  return { start: offset, end: offset };
+}
+
+/** One expected preview edit — same information as the decoded form. */
+interface ExpectedEdit {
+  readonly class: PreviewEditClass;
+  readonly range: SourceRange;
+}
+
+/**
+ * The pinned 12.7 edit order — range start, then range end, then class-name
+ * bytes — applied to composed EXPECTED lists so they meet the product's
+ * decode-enforced order; the order assertion itself lives in
+ * decodePreviewReport (form-exact, H-3), so sorting the expectation is
+ * composition, not tautology.
+ */
+function editsInPinnedOrder(
+  edits: readonly ExpectedEdit[],
+): readonly ExpectedEdit[] {
+  return [...edits].sort(
+    (a, b) =>
+      a.range.start - b.range.start ||
+      a.range.end - b.range.end ||
+      Buffer.compare(
+        Buffer.from(a.class, "utf8"),
+        Buffer.from(b.class, "utf8"),
+      ),
+  );
+}
+
+/** Readable projection for exact edit-list comparison diagnoses. */
+function projectEdits(edits: readonly (PreviewEdit | ExpectedEdit)[]): unknown {
+  return edits.map((edit) => ({
+    class: edit.class,
+    start: edit.range.start,
+    end: edit.range.end,
+  }));
+}
+
+/**
+ * Staging self-check: every claimed-nested expected edit lies inside the
+ * origin deletion's range — the containment geometry SPEC 6.6 states for the
+ * moved text's own rewrites. A violation is a defect in THIS fixture's
+ * arithmetic, never a product failure, so it throws a plain error.
+ */
+function assertComposedWithin(
+  outer: SourceRange,
+  nested: readonly ExpectedEdit[],
+  where: string,
+): void {
+  for (const edit of nested) {
+    if (edit.range.start < outer.start || edit.range.end > outer.end) {
+      throw new Error(
+        `T6.6-4 staging self-check (${where}): composed ${edit.class} edit ` +
+          `[${String(edit.range.start)}, ${String(edit.range.end)}) must nest inside ` +
+          `the origin deletion [${String(outer.start)}, ${String(outer.end)}) ` +
+          `(SPEC 6.6: containment is geometry)`,
+      );
+    }
+  }
+}
+
+/**
+ * One expected `files` entry. When `importAdditionLatitude` is set, the
+ * entry must carry — beyond the exact `edits` — exactly one
+ * `import-addition` edit whose offset is the product's own choice (SPEC 6.5
+ * implementation latitude, exercised deterministically): asserted
+ * zero-length and within the file, its offset captured for the caller.
+ */
+interface ExpectedPreviewFile {
+  readonly file: string;
+  readonly edits: readonly ExpectedEdit[];
+  readonly importAdditionLatitude?: { readonly sourceByteLength: number };
+}
+
+interface ExpectedPreviewPlan {
+  readonly mapping: readonly AppliedMappingPair[];
+  readonly files: readonly ExpectedPreviewFile[];
+}
+
+/**
+ * Assert a successful preview's plan content exactly (T6.6-4): findings
+ * `[]`; `mapping` equal to the complete expected identity mapping, pair for
+ * pair in the decode-enforced `from`-byte order; `files` equal entry for
+ * entry — same files, same edits, byte-precise ranges against the
+ * precomputed pre-operation offsets, in the decode-enforced 12.7 edit order
+ * — with the import-addition latitude slots handled per
+ * {@link ExpectedPreviewFile}. Returns the captured import-addition offsets
+ * by file. Delta content is T6.6-5's business (non-null is the success
+ * encoding, asserted here).
+ */
+function assertPreviewPlanContent(
+  report: PreviewReport,
+  expected: ExpectedPreviewPlan,
+  context: string,
+): ReadonlyMap<string, number> {
+  assertSameJson(
+    report.findings,
+    [],
+    `${context}: a preview whose real operation would proceed reports ` +
+      `findings [] (SPEC 6.6, 12.7)`,
+  );
+  if (
+    report.mapping === null ||
+    report.files === null ||
+    report.delta === null
+  ) {
+    fail(
+      `${context}: a successful preview reports its plan — \`mapping\`, ` +
+        `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, 12.7); ` +
+        `got mapping ${report.mapping === null ? "null" : "present"}, files ` +
+        `${report.files === null ? "null" : "present"}, delta ` +
+        `${report.delta === null ? "null" : "present"}`,
+    );
+  }
+  assertSameJson(
+    report.mapping,
+    expected.mapping,
+    `${context}: \`mapping\` is the complete identity mapping the operation ` +
+      `would journal — the renamed/moved ID and every descendant (file-form: ` +
+      `every node of the file, the implicit root included), one {"from", ` +
+      `"to"} per mapped identity in \`from\`-byte order, nothing else ` +
+      `(SPEC 6.6, 6.4, 6.5, 12.7)`,
+  );
+  const files = report.files;
+  if (files.length !== expected.files.length) {
+    fail(
+      `${context}: \`files\` must hold one {"file", "edits"} entry per file ` +
+        `the operation would rewrite, relocate, or create — expected ` +
+        `[${expected.files.map((f) => f.file).join(", ")}], got ` +
+        `[${files.map((f) => renderPathValue(f.file)).join(", ")}] (SPEC 6.6, 12.7)`,
+    );
+  }
+  const captured = new Map<string, number>();
+  for (let i = 0; i < expected.files.length; i += 1) {
+    const want = expected.files[i]!;
+    const got = files[i]!;
+    if (got.file !== want.file) {
+      fail(
+        `${context}: files[${String(i)}] must be ${JSON.stringify(want.file)} ` +
+          `— entries under current, pre-operation paths (target-file ` +
+          `creation under the path the creation would occupy), ordered by ` +
+          `file path bytes (SPEC 6.6, 12.7); got ${renderPathValue(got.file)}`,
+      );
+    }
+    const latitude = want.importAdditionLatitude;
+    if (latitude === undefined) {
+      assertSameJson(
+        projectEdits(got.edits),
+        projectEdits(want.edits),
+        `${context}: ${want.file} — every edit the operation would make ` +
+          `there, class-plus-range only, byte-precise against the ` +
+          `precomputed pre-operation offsets, in 12.7's pinned edit order ` +
+          `(SPEC 6.6, 12.7)`,
+      );
+      continue;
+    }
+    const additions = got.edits.filter(
+      (edit) => edit.class === "import-addition",
+    );
+    const rest = got.edits.filter((edit) => edit.class !== "import-addition");
+    if (additions.length !== 1) {
+      fail(
+        `${context}: ${want.file} — the rewrite requires exactly one added ` +
+          `import here, so the entry carries exactly one import-addition ` +
+          `edit (SPEC 6.5, 6.6); got ${String(additions.length)} ` +
+          `(edits: ${JSON.stringify(projectEdits(got.edits))})`,
+      );
+    }
+    const addition = additions[0]!;
+    if (addition.range.start !== addition.range.end) {
+      fail(
+        `${context}: ${want.file} — an import addition is a zero-length ` +
+          `range at the insertion offset (SPEC 6.6, 12.7); got ` +
+          `[${String(addition.range.start)}, ${String(addition.range.end)})`,
+      );
+    }
+    if (
+      addition.range.start < 0 ||
+      addition.range.start > latitude.sourceByteLength
+    ) {
+      fail(
+        `${context}: ${want.file} — the import addition's offset is ` +
+          `implementation latitude (SPEC 6.5) but must lie within the ` +
+          `file's ${String(latitude.sourceByteLength)} pre-operation bytes; ` +
+          `got ${String(addition.range.start)}`,
+      );
+    }
+    assertSameJson(
+      projectEdits(rest),
+      projectEdits(want.edits),
+      `${context}: ${want.file} — the edits beside the ` +
+        `implementation-latitude import addition, class-plus-range only, ` +
+        `byte-precise in 12.7's pinned order (SPEC 6.6, 12.7)`,
+    );
+    captured.set(want.file, addition.range.start);
+  }
+  return captured;
+}
+
+/**
+ * A successful preview's two forms at one state (`runPreviewJson`): the
+ * decoded `--json` document, and the human run of the same argv without
+ * `--json` that followed it directly — matched against the document by
+ * `assertHumanPreviewReport` once the caller's JSON assertions on it have
+ * run (the module header's human-form bullet).
+ */
+interface PreviewRuns {
+  readonly report: PreviewReport;
+  readonly human: RunResult;
+}
+
+/**
+ * Run `<operation> --preview --json`: exit 0 (the staging's premise `build`
+ * passed, so the real operation would proceed and the preview succeeds with
+ * it, SPEC 6.6), a single JSON document as the entire stdout (12.0), decoded
+ * as the form-exact 12.7 preview document (H-3) — the decode also enforcing
+ * the full 12.7 edit comparator, range start, then range end, then
+ * class-name bytes, over whatever edits are emitted (T6.6-4's comparator
+ * assertion; arm (e) pins the tie-break's observations). Then, directly —
+ * at the same state, nothing mutating in between, inside whatever
+ * modifies-nothing compare the caller holds — the human preview, the same
+ * argv without `--json`: exit 0 as well (SPEC 12.0: the output form never
+ * changes an exit code). Returns both; the caller matches the human report
+ * against the document after its own JSON assertions
+ * (`assertHumanPreviewReport`).
+ */
+async function runPreviewJson(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  operationArgv: readonly string[],
+  context: string,
+): Promise<PreviewRuns> {
+  const argv = [...operationArgv, "--preview", "--json"];
+  const result = await expectExit(
+    product,
+    workspace,
+    argv,
+    0,
+    `${context}: \`${argv.join(" ")}\` — the preview succeeds exactly when ` +
+      `the real operation would proceed, and this staging's premise build ` +
+      `passed (SPEC 6.6, 12.0)`,
+  );
+  const report = decodePreviewReport(
+    parseJsonStdout(
+      result,
+      `${context}: \`${argv.join(" ")}\` — a single JSON document as the ` +
+        `entire stdout (SPEC 12.0)`,
+    ),
+    context,
+  );
+  const humanArgv = [...operationArgv, "--preview"];
+  const human = await expectExit(
+    product,
+    workspace,
+    humanArgv,
+    0,
+    `${context}: \`${humanArgv.join(" ")}\` (human report) — the same exit ` +
+      `code as the \`--json\` preview at this state: 0, the preview ` +
+      `succeeding (SPEC 6.6, 12.0)`,
+  );
+  return { report, human };
+}
+
+/** A finding message's non-blank lines, trimmed (blanked, never compared). */
+function messageLines(message: string): readonly string[] {
+  return message
+    .split(/\r\n|\r|\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+/**
+ * The human preview at the state of a decoded `--preview --json` document,
+ * after that document's own assertions — T12.0-1's information parity (SPEC
+ * 12.0: the JSON form carries the same information as the human report;
+ * 6.6: a preview reports the complete identity mapping, every file the
+ * operation would rewrite, relocate, or create with every edit classed and
+ * located, and the derived-file delta, both directions one datum; the
+ * module header): `human` — the same argv without `--json`, run directly
+ * after the `--json` one at the same state, its exit code asserted there —
+ * mentions every mapping pair's `from` and `to` identity, every file
+ * entry's path, and every delta path in either direction (identity-or-path
+ * boundaries, so `specs/Mv.md` never counts inside `specs/Mv.mdx`, nor a
+ * root's path inside its sections' identities); then, in a separate call
+ * with every identity and path the document carries blanked out — those,
+ * and the findings' concerned paths, location files, and identities — every
+ * edit's class (a preview edit class, 6.6, 12.7) and `unavailable` where the
+ * delta is explicitly unavailable (14.23; SPEC-named tokens), so a token's
+ * spelling inside an identity never stands in for the token; then, in a
+ * third, the start and end of every edit's range (whole numbers, SPEC 1.7,
+ * matched with the document's digit-holding data blanked out — those
+ * identities and paths and the findings' message lines — save a datum that
+ * is itself a whole number, `digitHoldingData`). A message is free text,
+ * never compared (H-3); it is blanked for the numbers alone, so its
+ * citation digits never stand in for an edit's offset. Robust matching
+ * (H-3): presence, never wording, and no mention associated with another.
+ * Fails diagnosed on a null plan (the callers assert the plan first) and on
+ * a file entry's or delta path in the marked byte form (every path these
+ * previews concern is ASCII, and a valid-UTF-8 path is never presented in
+ * that form, SPEC 12.0).
+ */
+function assertHumanPreviewReport(
+  human: RunResult,
+  report: PreviewReport,
+  context: string,
+): void {
+  const label = `${context} (human preview report)`;
+  const plan = requirePreviewPlan(report, label);
+  const plainPath = (value: PathValue, what: string): string => {
+    if (typeof value !== "string") {
+      fail(
+        `${label}: ${what} ${renderPathValue(value)} is no plain path — ` +
+          `every path these previews concern is ASCII, and a valid-UTF-8 ` +
+          `path is never presented in the marked byte form (SPEC 12.0, 12.7)`,
+      );
+    }
+    return value;
+  };
+  const identities = new Set<string>();
+  for (const pair of plan.mapping) {
+    identities.add(pair.from);
+    identities.add(pair.to);
+  }
+  const tokens = new Set<SpecNamedToken>();
+  const offsets = new Set<number>();
+  for (const entry of plan.files) {
+    identities.add(plainPath(entry.file, "a file entry's path"));
+    for (const edit of entry.edits) {
+      tokens.add(edit.class);
+      offsets.add(edit.range.start);
+      offsets.add(edit.range.end);
+    }
+  }
+  if ("unavailable" in plan.delta) {
+    tokens.add("unavailable");
+  } else {
+    for (const path of [...plan.delta.generated, ...plan.delta.removed]) {
+      identities.add(plainPath(path, "a delta path"));
+    }
+  }
+  const findingData: string[] = [];
+  const findingMessageLines: string[] = [];
+  for (const finding of report.findings) {
+    for (const location of finding.locations) {
+      if (typeof location.file === "string") findingData.push(location.file);
+    }
+    if (typeof finding.path === "string") findingData.push(finding.path);
+    findingData.push(...finding.identities);
+    findingMessageLines.push(...messageLines(finding.message));
+  }
+  if (identities.size > 0) {
+    assertReportMentions(
+      human,
+      [...identities].map(identityMention),
+      `${label}: every mapping pair's \`from\` and \`to\` identity, every ` +
+        `file entry's path, and every delta path in either direction — the ` +
+        `plan the JSON document carries (SPEC 6.6, 12.0, 12.7)`,
+    );
+  }
+  const literalData = [...new Set([...identities, ...findingData])];
+  if (tokens.size > 0) {
+    assertReportMentions(
+      human,
+      [...tokens].map(specTokenMention),
+      `${label}: every edit's class, and \`unavailable\` where the delta is ` +
+        `explicitly unavailable, matched with the document's identities ` +
+        `and paths blanked out (SPEC 6.6, 12.0, 12.7, 14.23)`,
+      { blank: literalData },
+    );
+  }
+  if (offsets.size > 0) {
+    assertReportMentions(
+      human,
+      [...offsets].map(numberMention),
+      `${label}: the start and end of every edit's range, whole numbers, ` +
+        `matched with the document's digit-holding data — identities, ` +
+        `paths, and the findings' message lines — blanked out, save a ` +
+        `datum that is itself a whole number (SPEC 1.7, 6.6, 12.0, 12.7)`,
+      {
+        blank: digitHoldingData([
+          ...new Set([...literalData, ...findingMessageLines]),
+        ]),
+      },
+    );
+  }
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Arm (b)'s real-run pin on the import addition (TEST-SPEC T6.6-4: "the
+ * exact offset the real operation then uses … byte-asserted by running the
+ * operation on a copy"): after the real operation runs on the
+ * preview-pinned pre-operation state, the rewritten file's bytes must equal
+ * the pre-operation bytes with (1) the known reference rewrite applied over
+ * its precomputed span — the fresh binding is the product's choice (SPEC
+ * 6.5), read out of the one added import declaration as TypeScript 5.9.3
+ * at ESNext reads an identifier (SPEC 1.4, 14.20: captured as a permissive
+ * identifier run between the declaration's ASCII blanks,
+ * helpers/ts-identifiers.ts, then judged, a run reading as none failing
+ * diagnosed) — and (2) one
+ * added-import segment spliced in at exactly the previewed offset: the
+ * declaration's characters followed by U+000A, preceded by one exactly when
+ * the offset is not at the start of a line (SPEC 6.5). Any other insertion
+ * point, extent, or byte change fails the reconstruction.
+ */
+async function assertRealRunInsertsImportAtPreviewedOffset(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  options: {
+    readonly operationArgv: readonly string[];
+    readonly file: string;
+    readonly preSource: string;
+    /** The one reference-rewrite span in `file` (pre-operation bytes). */
+    readonly referenceSpan: SourceRange;
+    /** Rewritten chain minus its root binding, e.g. `.tp.nw.kid` (6.4). */
+    readonly rewrittenChainSuffix: string;
+    /** The added import's specifier, e.g. `./Target.xspec` (2.1, 6.5). */
+    readonly importSpecifier: string;
+    /** The previewed import-addition offset (pre-operation bytes). */
+    readonly additionOffset: number;
+  },
+  context: string,
+): Promise<void> {
+  const {
+    operationArgv,
+    file,
+    preSource,
+    referenceSpan,
+    rewrittenChainSuffix,
+    importSpecifier,
+    additionOffset,
+  } = options;
+  const declarationPattern = new RegExp(
+    `import[ \\t]+(${IDENTIFIER_RUN_SOURCE})[ \\t]+from[ \\t]+(["'])${escapeRegExp(importSpecifier)}\\2`,
+    "g",
+  );
+  if (preSource.match(declarationPattern) !== null) {
+    throw new Error(
+      `T6.6-4 staging self-check: ${file} must import ${importSpecifier} ` +
+        `nowhere before the operation, so the one post-operation match is ` +
+        `the added declaration`,
+    );
+  }
+
+  await expectExit(
+    product,
+    workspace,
+    operationArgv,
+    0,
+    `${context}: \`${operationArgv.join(" ")}\` — the real operation on the ` +
+      `preview-pinned state proceeds (SPEC 6.5; the premise build passed ` +
+      `and the preview above modified nothing)`,
+  );
+
+  const postBytes = await workspace.readBytes(file);
+  let postText: string;
+  try {
+    postText = new TextDecoder("utf-8", { fatal: true }).decode(postBytes);
+  } catch {
+    return fail(
+      `${context}: the rewritten ${file} must remain valid UTF-8 ` +
+        `(SPEC 1.6, 6.5)`,
+    );
+  }
+  const matches = [...postText.matchAll(declarationPattern)];
+  if (matches.length !== 1) {
+    return fail(
+      `${context}: the rewrite leaves ${file} needing exactly one module ` +
+        `binding for ${importSpecifier}, added as one import declaration ` +
+        `(SPEC 6.5, 2.1); found ${String(matches.length)} in the rewritten file`,
+    );
+  }
+  const binding = expectFreshIdentifier(
+    matches[0]![1]!,
+    `${context}: ${file}'s added declaration of ${importSpecifier} must ` +
+      `bind a fresh identifier`,
+  );
+  const rewrittenReference = `${binding}${rewrittenChainSuffix}`;
+
+  const preBytes = Buffer.from(preSource, "utf8");
+  const expectedWithReference = Buffer.concat([
+    preBytes.subarray(0, referenceSpan.start),
+    Buffer.from(rewrittenReference, "utf8"),
+    preBytes.subarray(referenceSpan.end),
+  ]);
+  if (
+    additionOffset > referenceSpan.start &&
+    additionOffset < referenceSpan.end
+  ) {
+    return fail(
+      `${context}: the previewed import-addition offset ` +
+        `${String(additionOffset)} lies inside the rewritten reference ` +
+        `[${String(referenceSpan.start)}, ${String(referenceSpan.end)}) — no ` +
+        `file grammar permits an import declaration inside a reference ` +
+        `(SPEC 6.5, 2.1)`,
+    );
+  }
+  const adjustedOffset =
+    additionOffset <= referenceSpan.start
+      ? additionOffset
+      : additionOffset +
+        (utf8Length(rewrittenReference) -
+          (referenceSpan.end - referenceSpan.start));
+
+  const head = expectedWithReference.subarray(0, adjustedOffset);
+  const tail = expectedWithReference.subarray(adjustedOffset);
+  const insertedLength = postBytes.length - expectedWithReference.length;
+  const describePost = (): string =>
+    `rewritten ${file}: ${JSON.stringify(postText)}`;
+  if (insertedLength <= 0) {
+    return fail(
+      `${context}: the real operation must add one import line to ${file} ` +
+        `beyond the reference rewrite (SPEC 6.5); the rewritten file is not ` +
+        `longer than the reference-rewritten pre-operation bytes — ${describePost()}`,
+    );
+  }
+  if (
+    Buffer.compare(postBytes.subarray(0, head.length), head) !== 0 ||
+    Buffer.compare(postBytes.subarray(postBytes.length - tail.length), tail) !==
+      0
+  ) {
+    return fail(
+      `${context}: the real operation must insert the added import at ` +
+        `exactly the previewed offset ${String(additionOffset)} ` +
+        `(pre-operation coordinates; SPEC 6.5: in a file existing before ` +
+        `the operation the offset is exactly the one the preview reports, ` +
+        `6.6) and change no other byte of ${file} beyond the reference ` +
+        `rewrite — ${describePost()}`,
+    );
+  }
+  const inserted = postBytes.subarray(
+    head.length,
+    head.length + insertedLength,
+  );
+  const atLineStart =
+    additionOffset === 0 || preBytes[additionOffset - 1] === 0x0a;
+  const insertedPattern = new RegExp(
+    `^${atLineStart ? "" : "\\n"}import[ \\t]+${escapeRegExp(binding)}[ \\t]+from[ \\t]+(["'])${escapeRegExp(importSpecifier)}\\1;?\\n$`,
+  );
+  const insertedText = Buffer.from(inserted).toString("utf8");
+  if (!insertedPattern.test(insertedText)) {
+    fail(
+      `${context}: the added import is inserted as a line of its own — the ` +
+        `declaration's characters followed by U+000A, preceded by one ` +
+        `exactly when the insertion point is not at the start of a line ` +
+        `(here it ${atLineStart ? "is" : "is not"}; SPEC 6.5); the bytes at ` +
+        `the previewed offset are ${JSON.stringify(insertedText)}`,
+    );
+  }
+}
+
+// One spec group, no Markdown emission, no code group — arms (b)–(e) rewrite
+// MDX alone, and the derived-file delta's content is T6.6-5's business. A
+// staged-source record: T6.6-4's arms (b)–(d) and T6.6-5's later workspaces
+// stage it after a product invocation (S-9's timing clause).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.6-4/T6.6-5/T6.6-7 xspec.config.ts — exactly one spec group, no code group",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+);
+
+// Arm (a) adds a code group: the rename's reference rewrites span MDX and TS
+// (TEST-SPEC T6.6-4(a)). A staged-source record, as are arm (a)'s sources
+// below: T6.6-7 stages the workspace after a product invocation (S-9's
+// timing clause).
+const SPECS_AND_CODE_CONFIG = stagedTs(
+  "T6.6-4/T6.6-7 xspec.config.ts — one spec group and one code group (arm (a)'s)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`,
+);
+
+// --- Arm (a): rename preview — id-rewrites and the four 5.7 occurrence
+// kinds across MDX and TS. `core.mid` (with descendants `core.mid.z` and
+// `core.mid.c`, in that document order) is renamed to `core.hub`; affected
+// references, each to `core.mid` or `core.mid.z`: in the origin file
+// (string form), `core.sib`'s two `d` entries, one per target, and its MDX
+// embedding, and `core.twice`'s `d={["core.mid", "core.mid"]}` — one
+// reference spelled twice in one `d` array, a single edge (SPEC 2.2) but
+// two occurrences (5.7), so two `reference-rewrite` edits, one at each
+// entry: one per occurrence, never one per edge (TEST-SPEC T6.6-4(a)); a
+// `d` chain and an embedding in a second MDX file (external form); and a
+// marker plus a `text(...)` call in a TS file. Controls that must produce
+// NO edit: `d={"core.plain"}` (its target keeps its identity), every
+// unaffected `id` attribute, and the unrelocated `./Core.xspec` import
+// specifiers. Multi-byte text ("hölder", "ünicode", "Δ") precedes every
+// located construct.
+//
+// The mapping-order fixture (TEST-SPEC T6.6-4): the descendants stand in
+// document order (`z` before `c`) opposite to the byte order of their
+// `from` identities (`…#core.mid.c` < `…#core.mid.z`), so a product listing
+// the mapping in document order — the order its subtree traversal yields —
+// fails both decodePreviewReport's `from`-byte order check (SPEC 12.7, H-3)
+// and the exact-list comparison against the expected mapping. `c` bears no
+// reference (its only edit is its `id-rewrite`), keeping the discriminator
+// in the mapping alone; mappingInFromByteOrder composes the expectation and
+// guards that the two orders really differ.
+const A4_CORE = "specs/Core.mdx";
+const A4_OTHER = "specs/Other.mdx";
+const A4_USE = "src/use.ts";
+const A4_CORE_SOURCE = [
+  '<S id="core">',
+  "Core hölder text.",
+  "",
+  '<S id="core.mid" d={"core.plain"}>',
+  "Mid text.",
+  "",
+  '<S id="core.mid.z">',
+  "Z text.",
+  "</S>",
+  "",
+  '<S id="core.mid.c">',
+  "C text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="core.sib" d={["core.mid", "core.mid.z"]}>',
+  'Sib embeds: {text("core.mid.z")}',
+  "</S>",
+  "",
+  '<S id="core.twice" d={["core.mid", "core.mid"]}>',
+  "Twice text.",
+  "</S>",
+  "",
+  '<S id="core.plain">',
+  "Plain text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+const A4_OTHER_SOURCE = [
+  'import CORE from "./Core.xspec"',
+  "",
+  '<S id="oth">',
+  "Other ünicode text.",
+  "",
+  '<S id="oth.dep" d={CORE.core.mid}>',
+  "Dep text.",
+  "",
+  "{text(CORE.core.mid.z)}",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+const A4_USE_SOURCE = [
+  "// Δ byte offsets in this file diverge from code-point counts.",
+  'import SPEC, { text } from "../specs/Core.xspec"',
+  "",
+  "export function useMid(): string {",
+  "  SPEC.core.mid.z;",
+  "  return text(SPEC.core.mid);",
+  "}",
+  "",
+].join("\n");
+const A4_RENAME_ARGV = ["rename", A4_CORE, "core.mid", "core.hub"] as const;
+// Arm (a)'s sources as records (the configuration's note above), made from
+// the string constants the plan's locators read.
+const A4_CORE_STAGED = stagedMdx(
+  "T6.6-4/T6.6-7 arm (a) specs/Core.mdx",
+  A4_CORE_SOURCE,
+);
+const A4_OTHER_STAGED = stagedMdx(
+  "T6.6-4/T6.6-7 arm (a) specs/Other.mdx",
+  A4_OTHER_SOURCE,
+);
+const A4_USE_STAGED = stagedTs(
+  "T6.6-4/T6.6-7 arm (a) src/use.ts",
+  A4_USE_SOURCE,
+);
+
+/**
+ * The expected mapping in `from`-byte order (SPEC 12.7), composed from the
+ * mapped pairs of one spec file — order of listing immaterial — with a
+ * staging guard: the pairs' DOCUMENT order, read off the staged bytes as
+ * the order of the mapped IDs' `id` attributes, must differ from the byte
+ * order, or the fixture could not fail a product emitting document order
+ * (TEST-SPEC T6.6-4) — a re-staging whose descendants happen to sort alike
+ * is a staging defect (harness error), never a weaker test.
+ */
+function mappingInFromByteOrder(
+  source: string,
+  pairs: readonly AppliedMappingPair[],
+  where: string,
+): readonly AppliedMappingPair[] {
+  const documentIndex = (pair: AppliedMappingPair): number =>
+    uniqueCharIndex(
+      source,
+      `id="${pair.from.slice(pair.from.indexOf("#") + 1)}"`,
+      `${where}: ${pair.from}`,
+    );
+  const documentOrder = [...pairs].sort(
+    (a, b) => documentIndex(a) - documentIndex(b),
+  );
+  const byteOrder = [...pairs].sort((a, b) =>
+    Buffer.compare(Buffer.from(a.from, "utf8"), Buffer.from(b.from, "utf8")),
+  );
+  if (byteOrder.every((pair, index) => pair === documentOrder[index])) {
+    throw new Error(
+      `T6.6-4 staging (${where}): the mapping's document order coincides ` +
+        `with its \`from\`-byte order, so the fixture cannot discriminate a ` +
+        `product emitting document order (TEST-SPEC T6.6-4)`,
+    );
+  }
+  return byteOrder;
+}
+
+function armAPlan(): ExpectedPreviewPlan {
+  const core = A4_CORE_SOURCE;
+  const dArray = 'd={["core.mid", "core.mid.z"]}';
+  const twiceArray = 'd={["core.mid", "core.mid"]}';
+  return {
+    // The complete mapping — the renamed ID and every descendant — in
+    // `from`-byte order: `…#core.mid.c` before `…#core.mid.z`, the reverse
+    // of the document order the pairs are listed in (SPEC 12.7, 6.4).
+    mapping: mappingInFromByteOrder(
+      core,
+      [
+        { from: "specs/Core.mdx#core.mid", to: "specs/Core.mdx#core.hub" },
+        { from: "specs/Core.mdx#core.mid.z", to: "specs/Core.mdx#core.hub.z" },
+        { from: "specs/Core.mdx#core.mid.c", to: "specs/Core.mdx#core.hub.c" },
+      ],
+      "a: mapping",
+    ),
+    files: [
+      {
+        file: A4_CORE,
+        edits: editsInPinnedOrder([
+          // The renamed bearer's and its descendant's `id` attributes — the
+          // attribute's own characters (SPEC 6.6, 6.4).
+          {
+            class: "id-rewrite",
+            range: uniqueSpan(core, 'id="core.mid"', "a: core.mid id"),
+          },
+          {
+            class: "id-rewrite",
+            range: uniqueSpan(core, 'id="core.mid.z"', "a: z id"),
+          },
+          {
+            class: "id-rewrite",
+            range: uniqueSpan(core, 'id="core.mid.c"', "a: c id"),
+          },
+          // Each `d` array entry is its own occurrence spanning that one
+          // reference's own expression (SPEC 5.7) — located through the
+          // array (the string spelling recurs inside `id="…"` attributes).
+          {
+            class: "reference-rewrite",
+            range: spanWithin(core, dArray, '"core.mid"', "a: d core.mid"),
+          },
+          {
+            class: "reference-rewrite",
+            range: spanWithin(core, dArray, '"core.mid.z"', "a: d core.mid.z"),
+          },
+          // An MDX embedding spans the entire `{text(...)}` container,
+          // opening brace through closing brace (SPEC 5.7).
+          {
+            class: "reference-rewrite",
+            range: uniqueSpan(core, '{text("core.mid.z")}', "a: embedding"),
+          },
+          // One reference spelled twice in one `d` array (`core.twice`): a
+          // single edge (SPEC 2.2) but two occurrences (5.7), so two
+          // `reference-rewrite` edits, one at each entry, each spanning its
+          // own entry's expression — one per occurrence, never one per edge
+          // (TEST-SPEC T6.6-4(a)).
+          ...spansWithin(core, twiceArray, '"core.mid"', 2, "a: d twice").map(
+            (range): ExpectedEdit => ({ class: "reference-rewrite", range }),
+          ),
+        ]),
+      },
+      {
+        file: A4_OTHER,
+        edits: editsInPinnedOrder([
+          {
+            class: "reference-rewrite",
+            range: spanWithin(
+              A4_OTHER_SOURCE,
+              "d={CORE.core.mid}",
+              "CORE.core.mid",
+              "a: external d chain",
+            ),
+          },
+          {
+            class: "reference-rewrite",
+            range: uniqueSpan(
+              A4_OTHER_SOURCE,
+              "{text(CORE.core.mid.z)}",
+              "a: external embedding",
+            ),
+          },
+        ]),
+      },
+      {
+        file: A4_USE,
+        edits: editsInPinnedOrder([
+          // A TS marker occurrence spans the bare reference chain alone,
+          // exclusive of the statement terminator (SPEC 5.7).
+          {
+            class: "reference-rewrite",
+            range: uniqueSpan(A4_USE_SOURCE, "SPEC.core.mid.z", "a: marker"),
+          },
+          // A TS `text(...)` occurrence spans the entire call expression,
+          // callee through closing parenthesis (SPEC 5.7).
+          {
+            class: "reference-rewrite",
+            range: uniqueSpan(
+              A4_USE_SOURCE,
+              "text(SPEC.core.mid)",
+              "a: text call",
+            ),
+          },
+        ]),
+      },
+    ],
+  };
+}
+
+// --- Arm (b): section move into an existing target file. The moved
+// construct is indented two spaces and closes on an indented line, so the
+// origin edit's line-drop rule leaves exactly one merged whitespace-only
+// line — the deletion range extends over that leftover whitespace and its
+// terminator, contiguous with the construct (SPEC 6.5, 3). The origin's
+// `TGT` import is referenced only inside the moved subtree (import-removal:
+// the declaration plus its dropped line terminator); the target parent `tp`
+// is self-closing (target-parent-rewrite spanning the tag, the insertion
+// point at the tag's end); Third.mdx keeps a reference to a moved node and
+// lacks a Target binding (import-addition — offset latitude, pinned by the
+// real run) beside a control reference (`ORG.org.stay`) that keeps its ORG
+// import referenced (no removal there).
+const B4_ORIGIN = "specs/Origin.mdx";
+const B4_TARGET = "specs/Target.mdx";
+const B4_THIRD = "specs/Third.mdx";
+const B4_IMPORT_DECL = 'import TGT from "./Target.xspec"';
+const B4_MOVED_CONSTRUCT = [
+  '<S id="org.mv" d={[TGT.base, "org.mv.kid"]}>',
+  "Moved head text.",
+  "",
+  '<S id="org.mv.kid">',
+  "Moved kid text.",
+  "</S>",
+  "  </S>",
+].join("\n");
+const B4_ORIGIN_SOURCE = [
+  B4_IMPORT_DECL,
+  "",
+  '<S id="org">',
+  "Origin hölder text.",
+  "",
+  "  " + B4_MOVED_CONSTRUCT,
+  "",
+  '<S id="org.stay">',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+const B4_TARGET_PARENT_TAG = '<S id="tp" />';
+const B4_TARGET_SOURCE = [
+  '<S id="base">',
+  "Base ünicode text.",
+  "</S>",
+  "",
+  B4_TARGET_PARENT_TAG,
+  "",
+].join("\n");
+const B4_THIRD_SOURCE = [
+  'import ORG from "./Origin.xspec"',
+  "",
+  '<S id="t">',
+  "Third ünicode text.",
+  "",
+  '<S id="t.use" d={[ORG.org.mv.kid, ORG.org.stay]}>',
+  "Use text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+// Arm (b)'s initial files as staged-source records (S-9): the strings stay
+// for the offsets `armBPlan` and the real-run byte assertion pin.
+const B4_ORIGIN_STAGED = stagedMdx(
+  "T6.6-4/T6.6-7 arm (b) specs/Origin.mdx",
+  B4_ORIGIN_SOURCE,
+);
+const B4_TARGET_STAGED = stagedMdx(
+  "T6.6-4/T6.6-7 arm (b) specs/Target.mdx",
+  B4_TARGET_SOURCE,
+);
+const B4_THIRD_STAGED = stagedMdx(
+  "T6.6-4/T6.6-7 arm (b) specs/Third.mdx",
+  B4_THIRD_SOURCE,
+);
+const B4_MOVE_ARGV = [
+  "move",
+  `${B4_ORIGIN}#org.mv`,
+  `${B4_TARGET}#tp.nw`,
+] as const;
+
+function armBPlan(): ExpectedPreviewPlan & {
+  readonly thirdReferenceSpan: SourceRange;
+} {
+  const origin = B4_ORIGIN_SOURCE;
+  // Staging self-checks on the adjunct geometry the ranges extend over
+  // (violations are fixture-arithmetic defects, never product failures).
+  if (!origin.startsWith(B4_IMPORT_DECL + "\n")) {
+    throw new Error(
+      "T6.6-4 staging self-check (b): the removed import must open the " +
+        "origin on a line of its own",
+    );
+  }
+  const constructChar = uniqueCharIndex(
+    origin,
+    B4_MOVED_CONSTRUCT,
+    "b: moved construct",
+  );
+  if (
+    origin.slice(constructChar - 3, constructChar) !== "\n  " ||
+    origin.charAt(constructChar + B4_MOVED_CONSTRUCT.length) !== "\n"
+  ) {
+    throw new Error(
+      "T6.6-4 staging self-check (b): the moved construct must sit behind " +
+        "exactly two spaces of indentation and close before a line " +
+        "terminator, so the deletion leaves one whitespace-only merged line",
+    );
+  }
+  const construct = uniqueSpan(origin, B4_MOVED_CONSTRUCT, "b: construct");
+  // One range spanning every byte the origin edit removes: the construct's
+  // own characters extended over the leftover indentation before it and the
+  // merged line's terminator after it — contiguous bytes, the adjunct drop
+  // inside this class's range (SPEC 6.5, 3, 6.6).
+  const originDeletion: SourceRange = {
+    start: construct.start - 2,
+    end: construct.end + 1,
+  };
+  const dArray = 'd={[TGT.base, "org.mv.kid"]}';
+  const nestedEdits: readonly ExpectedEdit[] = [
+    {
+      class: "id-rewrite",
+      range: uniqueSpan(origin, 'id="org.mv"', "b: org.mv id"),
+    },
+    {
+      class: "id-rewrite",
+      range: uniqueSpan(origin, 'id="org.mv.kid"', "b: kid id"),
+    },
+    {
+      class: "reference-rewrite",
+      range: spanWithin(origin, dArray, "TGT.base", "b: TGT.base"),
+    },
+    {
+      class: "reference-rewrite",
+      range: spanWithin(origin, dArray, '"org.mv.kid"', "b: local ref"),
+    },
+  ];
+  assertComposedWithin(originDeletion, nestedEdits, "b: origin");
+  const parentTag = uniqueSpan(
+    B4_TARGET_SOURCE,
+    B4_TARGET_PARENT_TAG,
+    "b: target parent",
+  );
+  const thirdReferenceSpan = spanWithin(
+    B4_THIRD_SOURCE,
+    "d={[ORG.org.mv.kid, ORG.org.stay]}",
+    "ORG.org.mv.kid",
+    "b: third ref",
+  );
+  return {
+    thirdReferenceSpan,
+    mapping: [
+      { from: "specs/Origin.mdx#org.mv", to: "specs/Target.mdx#tp.nw" },
+      {
+        from: "specs/Origin.mdx#org.mv.kid",
+        to: "specs/Target.mdx#tp.nw.kid",
+      },
+    ],
+    files: [
+      {
+        file: B4_ORIGIN,
+        edits: editsInPinnedOrder([
+          // The unreferenced-after-rewrite import: the declaration plus its
+          // adjunct drop — the emptied line's terminator (SPEC 6.5).
+          {
+            class: "import-removal",
+            range: { start: 0, end: utf8Length(B4_IMPORT_DECL) + 1 },
+          },
+          { class: "origin-deletion", range: originDeletion },
+          // The re-identification's id-rewrites and the moved text's own
+          // reference rewrites nest inside the deletion range, each under
+          // its own class (SPEC 6.6: containment is geometry).
+          ...nestedEdits,
+        ]),
+      },
+      {
+        file: B4_TARGET,
+        edits: editsInPinnedOrder([
+          // The self-closing target parent's rewrite spans the tag; the
+          // insertion point is the tag's end in pre-operation coordinates
+          // (module header, H-4).
+          { class: "target-parent-rewrite", range: parentTag },
+          { class: "target-insertion", range: insertionPoint(parentTag.end) },
+        ]),
+      },
+      {
+        file: B4_THIRD,
+        edits: [{ class: "reference-rewrite", range: thirdReferenceSpan }],
+        importAdditionLatitude: {
+          sourceByteLength: utf8Length(B4_THIRD_SOURCE),
+        },
+      },
+    ],
+  };
+}
+
+// --- Arm (c): file-form move. `specs/Mv.mdx` relocates into a subdirectory,
+// so its own `./Pal.xspec` specifier and the importer's `./Mv.xspec`
+// specifier both rewrite (import-specifier-rewrite spanning the specifier
+// literal's characters, quotes included) while the reference chains
+// (`PAL.pal`, `MV.mv`) are untouched controls — IDs are unchanged, only the
+// file part of each identity moves (SPEC 6.5).
+const C4_MV = "specs/Mv.mdx";
+const C4_PAL = "specs/Pal.mdx";
+const C4_USER = "specs/User.mdx";
+const C4_MV_SOURCE = [
+  'import PAL from "./Pal.xspec"',
+  "",
+  '<S id="mv" d={PAL.pal}>',
+  "Mv ünicode text.",
+  "</S>",
+  "",
+].join("\n");
+const C4_USER_SOURCE = [
+  'import MV from "./Mv.xspec"',
+  "",
+  '<S id="user" d={MV.mv}>',
+  "User text.",
+  "</S>",
+  "",
+].join("\n");
+// The file-form move's initial files as staged-source records (S-9), staged
+// by T6.6-4's arm (c) and both of T6.6-5's file-form arms: `Mv` and `User`
+// keep their strings for the spans `armCPlan` pins.
+const C4_MV_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5/T6.6-7 specs/Mv.mdx",
+  C4_MV_SOURCE,
+);
+const C4_PAL_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5/T6.6-7 specs/Pal.mdx",
+  ['<S id="pal">', "Pal text.", "</S>", ""].join("\n"),
+);
+const C4_USER_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5/T6.6-7 specs/User.mdx",
+  C4_USER_SOURCE,
+);
+const C4_MOVE_ARGV = ["move", C4_MV, "specs/sub/Mv2.mdx"] as const;
+
+function armCPlan(): ExpectedPreviewPlan {
+  return {
+    mapping: [
+      // Every node of the moved file, the implicit root included (its
+      // identity is the path alone, SPEC 1.2, 1.5; T6.5-1's precedent).
+      { from: "specs/Mv.mdx", to: "specs/sub/Mv2.mdx" },
+      { from: "specs/Mv.mdx#mv", to: "specs/sub/Mv2.mdx#mv" },
+    ],
+    files: [
+      {
+        file: C4_MV,
+        edits: editsInPinnedOrder([
+          // The relocation spans the entire moved file, its entry under the
+          // current, pre-operation path (SPEC 6.6, 12.7).
+          {
+            class: "file-relocation",
+            range: { start: 0, end: utf8Length(C4_MV_SOURCE) },
+          },
+          {
+            class: "import-specifier-rewrite",
+            range: uniqueSpan(
+              C4_MV_SOURCE,
+              '"./Pal.xspec"',
+              "c: own specifier",
+            ),
+          },
+        ]),
+      },
+      {
+        file: C4_USER,
+        edits: [
+          {
+            class: "import-specifier-rewrite",
+            range: uniqueSpan(
+              C4_USER_SOURCE,
+              '"./Mv.xspec"',
+              "c: importer specifier",
+            ),
+          },
+        ],
+      },
+    ],
+  };
+}
+
+// --- Arm (d): section move whose target file does not exist. The moved
+// section references a staying node (`"hold.keep"`), so the created file
+// needs an added Origin import — subsumed, with the insertion, by the one
+// file-creation edit (a product reporting a target-insertion or
+// import-addition under the created path fails the exactly-one-edit
+// equality); the moved text's own rewrites are reported inside the origin
+// deletion's range.
+const D4_SOLO = "specs/Solo.mdx";
+const D4_MADE = "specs/Made.mdx";
+const D4_MOVED_CONSTRUCT = [
+  '<S id="hold.out" d={"hold.keep"}>',
+  "Out text.",
+  "</S>",
+].join("\n");
+const D4_SOLO_SOURCE = [
+  '<S id="hold">',
+  "Hold ünicode text.",
+  "",
+  D4_MOVED_CONSTRUCT,
+  "",
+  '<S id="hold.keep">',
+  "Keep text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+// The created-target move's origin as a staged-source record (S-9), staged
+// by T6.6-4's arm (d) and T6.6-5's created-target arm: the string stays for
+// the offsets `armDPlan` pins.
+const D4_SOLO_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5/T6.6-7 specs/Solo.mdx",
+  D4_SOLO_SOURCE,
+);
+const D4_MOVE_ARGV = [
+  "move",
+  `${D4_SOLO}#hold.out`,
+  `${D4_MADE}#made`,
+] as const;
+
+function armDPlan(): ExpectedPreviewPlan {
+  const solo = D4_SOLO_SOURCE;
+  const constructChar = uniqueCharIndex(
+    solo,
+    D4_MOVED_CONSTRUCT,
+    "d: moved construct",
+  );
+  if (
+    solo.charAt(constructChar - 1) !== "\n" ||
+    solo.charAt(constructChar + D4_MOVED_CONSTRUCT.length) !== "\n"
+  ) {
+    throw new Error(
+      "T6.6-4 staging self-check (d): the moved construct must occupy whole " +
+        "lines, so the deletion's adjunct drop is exactly the merged line's " +
+        "terminator",
+    );
+  }
+  const construct = uniqueSpan(solo, D4_MOVED_CONSTRUCT, "d: construct");
+  const originDeletion: SourceRange = {
+    start: construct.start,
+    end: construct.end + 1,
+  };
+  const nestedEdits: readonly ExpectedEdit[] = [
+    {
+      class: "id-rewrite",
+      range: uniqueSpan(solo, 'id="hold.out"', "d: id"),
+    },
+    {
+      class: "reference-rewrite",
+      range: spanWithin(solo, 'd={"hold.keep"}', '"hold.keep"', "d: ref"),
+    },
+  ];
+  assertComposedWithin(originDeletion, nestedEdits, "d: origin");
+  return {
+    mapping: [{ from: "specs/Solo.mdx#hold.out", to: "specs/Made.mdx#made" }],
+    files: [
+      {
+        // The created file's entry, under the path the creation would
+        // occupy: exactly one file-creation edit at the start of the new
+        // file — the only reported location without pre-operation
+        // coordinates (SPEC 6.6, 12.7).
+        file: D4_MADE,
+        edits: [{ class: "file-creation", range: insertionPoint(0) }],
+      },
+      {
+        file: D4_SOLO,
+        edits: editsInPinnedOrder([
+          { class: "origin-deletion", range: originDeletion },
+          ...nestedEdits,
+        ]),
+      },
+    ],
+  };
+}
+
+// --- Arm (e): the tie-break stagings. The comparator's final tie-break —
+// class-name bytes after range start and range end — is observable only
+// between zero-length insertion points, and 6.5's line-start preference
+// fixes where an import addition's offset coincides with the target
+// insertion's: TEST-SPEC T6.6-4 names T6.5-13's (b), (d) both variants, and
+// (g), restaged here from section-6.5-iii's exported table byte for byte.
+// The receiving file's edit list is the pinned observation; the origin
+// entry is composed here from the same staged bytes — the deletion spanning
+// the construct's own characters extended over its emptied line's
+// terminator, the re-identification's `id-rewrite` and each embedding's
+// `reference-rewrite` nested inside it, the latter present exactly when the
+// fresh identifier the real operation binds changes the spelling's
+// characters (SPEC 6.5: a spelling already resolving in the form it is
+// rooted at is neither rewritten nor reported).
+
+/**
+ * The identifier-independent observation arm (e) exists for: the receiving
+ * file's edits exactly as pinned, in 12.7's order (SPEC 6.6, 12.7).
+ */
+function assertTieBreakEntry(
+  report: PreviewReport,
+  arm: A13TieBreakArm,
+  context: string,
+): void {
+  const pinned = projectEdits(arm.receivingEdits);
+  if (
+    JSON.stringify(projectEdits(editsInPinnedOrder(arm.receivingEdits))) !==
+    JSON.stringify(pinned)
+  ) {
+    throw new Error(
+      `T6.6-4 staging self-check (e ${arm.key}): the pinned receiving edits ` +
+        "must stand in 12.7's order",
+    );
+  }
+  if (report.files === null) {
+    fail(
+      `${context}: a preview whose real operation would proceed reports its ` +
+        `plan — \`files\` is null exactly on refusal (SPEC 6.6, 12.7); ` +
+        `findings: ${JSON.stringify(report.findings)}`,
+    );
+  }
+  const entry = report.files.find(
+    (candidate) => candidate.file === arm.receiving,
+  );
+  if (entry === undefined) {
+    fail(
+      `${context}: \`files\` holds an entry for ${arm.receiving}, the file ` +
+        `the operation inserts the moved text and its added ` +
+        `declaration${arm.added.length > 1 ? "s" : ""} into (SPEC 6.6, ` +
+        `12.7); got [${report.files.map((candidate) => renderPathValue(candidate.file)).join(", ")}]`,
+    );
+  }
+  const additions = arm.receivingEdits.filter(
+    (edit) => edit.class === "import-addition",
+  ).length;
+  assertSameJson(
+    projectEdits(entry.edits),
+    pinned,
+    `${context}: ${arm.receiving} — ${arm.summary}; the entry's edits are ` +
+      `exactly the pinned list, in 12.7's order — range start, then range ` +
+      `end, then class-name bytes, which puts ` +
+      (additions > 1
+        ? `the ${String(additions)} \`import-addition\` entries, one per ` +
+          `added declaration and adjacent at their one offset, `
+        : "the `import-addition` ") +
+      `before the \`target-insertion\` there: the tie-break observed ` +
+      `(SPEC 6.5, 6.6, 12.7; TEST-SPEC T6.5-13 ${arm.key})`,
+  );
+}
+
+/**
+ * The whole plan of a tie-break staging, composed from the staged bytes
+ * given the fresh identifiers the real operation bound (read off the added
+ * declarations): the mapping's one entry (the moved section holds no
+ * descendant), the origin entry, and the receiving file's pinned entry, the
+ * files in path-byte order (SPEC 6.6, 12.7).
+ */
+function tieBreakPlan(
+  arm: A13TieBreakArm,
+  idents: readonly string[],
+): ExpectedPreviewPlan {
+  const where = `e ${arm.key}`;
+  const staged = arm.files[arm.origin];
+  const origin = staged instanceof StagedMdx ? staged.source : staged;
+  if (typeof origin !== "string") {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): the origin ${arm.origin} is not staged as text`,
+    );
+  }
+  if (arm.movedConstruct.indexOf("<S", 1) !== -1) {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): the moved section must hold no ` +
+        "descendant, so the mapping is its one entry",
+    );
+  }
+  const constructChar = uniqueCharIndex(
+    origin,
+    arm.movedConstruct,
+    `${where}: moved construct`,
+  );
+  if (
+    (constructChar !== 0 && origin.charAt(constructChar - 1) !== "\n") ||
+    origin.charAt(constructChar + arm.movedConstruct.length) !== "\n"
+  ) {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): the moved construct must occupy ` +
+        "whole lines, so the deletion's adjunct drop is exactly the emptied " +
+        "line's terminator",
+    );
+  }
+  const construct = uniqueSpan(
+    origin,
+    arm.movedConstruct,
+    `${where}: construct`,
+  );
+  const originDeletion: SourceRange = {
+    start: construct.start,
+    end: construct.end + 1,
+  };
+  const nestedEdits: ExpectedEdit[] = [
+    {
+      class: "id-rewrite",
+      range: spanWithin(
+        origin,
+        arm.movedConstruct,
+        arm.movedIdAttribute,
+        `${where}: id`,
+      ),
+    },
+  ];
+  arm.embeddings.forEach((embedding, index) => {
+    const ident = idents[index];
+    if (ident === undefined) {
+      throw new Error(
+        `T6.6-4 staging self-check (${where}): one fresh identifier per embedding`,
+      );
+    }
+    // Rooted at the chosen binding, the spelling keeps its characters when
+    // that binding is the origin's own: neither rewritten nor reported.
+    if (ident === embedding.binding) return;
+    nestedEdits.push({
+      class: "reference-rewrite",
+      range: spanWithin(
+        origin,
+        arm.movedConstruct,
+        embedding.container,
+        `${where}: embedding ${String(index)}`,
+      ),
+    });
+  });
+  assertComposedWithin(originDeletion, nestedEdits, `${where}: origin`);
+  const from = arm.argv[1];
+  const to = arm.argv[2];
+  if (from === undefined || to === undefined) {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): a section-form move names two operands`,
+    );
+  }
+  const files: ExpectedPreviewFile[] = [
+    {
+      file: arm.origin,
+      edits: editsInPinnedOrder([
+        { class: "origin-deletion", range: originDeletion },
+        ...nestedEdits,
+      ]),
+    },
+    { file: arm.receiving, edits: arm.receivingEdits },
+  ];
+  files.sort((a, b) =>
+    Buffer.compare(Buffer.from(a.file, "utf8"), Buffer.from(b.file, "utf8")),
+  );
+  return { mapping: [{ from, to }], files };
+}
+
+/** The rewritten `rel` as text — diagnosed when it is not valid UTF-8 (SPEC 1.6, 6.5). */
+async function readRewrittenText(
+  workspace: TestWorkspace,
+  rel: string,
+  context: string,
+): Promise<string> {
+  const bytes = await workspace.readBytes(rel);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return fail(
+      `${context}: the rewritten ${rel} must remain valid UTF-8 (SPEC 1.6, 6.5)`,
+    );
+  }
+}
+
+const T6_6_4 = defineProductTest({
+  id: "T6.6-4",
+  title:
+    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS — one per occurrence, never one per edge: an affected reference spelled twice in one `d` array (`core.twice`'s, naming `core.mid` at both entries) reports two, one at each entry; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over every emitted edit list — its final tie-break, class-name bytes between zero-length insertion points, pinned as an observation by (e), T6.5-13's stagings restaged byte for byte: the self-closing target parent's tag end (b) and the end of a paragraph-ended file, terminated or not (d), where `import-addition` orders before `target-insertion` at one offset, and (g), two `import-addition` entries adjacent at one offset, their count asserted — the real operation on the preview-pinned state then byte-asserted against the composed forms; and at every preview's state the human preview — the same argv without `--json` — exits 0 alike and carries the plan its JSON document reports: every mapping pair's `from` and `to` identity, every file entry's path, every edit's class and its range's start and end, and every delta path (robust matching, H-3) (SPEC 6.6, 12.0, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 2.2, 3; H-3, H-4)",
+  run: async (product) => {
+    // --- Arm (a): rename preview across MDX and TS ---
+    await withWorkspace(
+      SPECS_AND_CODE_CONFIG,
+      {
+        [A4_CORE]: A4_CORE_STAGED,
+        [A4_OTHER]: A4_OTHER_STAGED,
+        [A4_USE]: A4_USE_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-4(a) rename preview";
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` — the workspace is valid, ` +
+            `so the rename would proceed and its preview succeeds (SPEC 6.4, 6.6)`,
+        );
+        const { report, human } = await runPreviewJson(
+          product,
+          workspace,
+          A4_RENAME_ARGV,
+          context,
+        );
+        assertPreviewPlanContent(report, armAPlan(), context);
+        assertHumanPreviewReport(human, report, context);
+      },
+    );
+
+    // --- Arm (b): section move into an existing target file, then the real
+    // run pinning the import addition's offset ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [B4_ORIGIN]: B4_ORIGIN_STAGED,
+        [B4_TARGET]: B4_TARGET_STAGED,
+        [B4_THIRD]: B4_THIRD_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-4(b) section-move preview (existing target)";
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
+        );
+        const plan = armBPlan();
+        // The preview inside a whole-root modifies-nothing compare: the
+        // real run below then executes on the byte-identical pre-operation
+        // state — TEST-SPEC's "running the operation on a copy" (H-4).
+        const additionOffset = await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const { report, human } = await runPreviewJson(
+              product,
+              workspace,
+              B4_MOVE_ARGV,
+              context,
+            );
+            const captured = assertPreviewPlanContent(report, plan, context);
+            assertHumanPreviewReport(human, report, context);
+            const offset = captured.get(B4_THIRD);
+            if (offset === undefined) {
+              throw new Error(
+                "T6.6-4(b): latitude capture must yield the Third.mdx " +
+                  "import-addition offset",
+              );
+            }
+            return offset;
+          },
+          `${context}: the preview modifies nothing (SPEC 6.6) — pinning ` +
+            `the pre-operation state for the real run's byte assertion`,
+        );
+        await assertRealRunInsertsImportAtPreviewedOffset(
+          product,
+          workspace,
+          {
+            operationArgv: [...B4_MOVE_ARGV],
+            file: B4_THIRD,
+            preSource: B4_THIRD_SOURCE,
+            referenceSpan: plan.thirdReferenceSpan,
+            rewrittenChainSuffix: ".tp.nw.kid",
+            importSpecifier: "./Target.xspec",
+            additionOffset,
+          },
+          "T6.6-4(b) real move after the preview",
+        );
+        // Composition soundness guard (the T6.5-7 precedent): everything
+        // resolves after the move — a defective expectation must fail loud
+        // rather than certify a broken rewrite.
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          "T6.6-4(b) `check` after the real move — the rewritten workspace " +
+            "is valid and fresh (SPEC 6.5, 12.2)",
+        );
+      },
+    );
+
+    // --- Arm (c): file-form move preview ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-4(c) file-form move preview";
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
+        );
+        const { report, human } = await runPreviewJson(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          context,
+        );
+        assertPreviewPlanContent(report, armCPlan(), context);
+        assertHumanPreviewReport(human, report, context);
+      },
+    );
+
+    // --- Arm (d): section-move preview whose target file does not exist ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D4_SOLO]: D4_SOLO_STAGED },
+      async (workspace) => {
+        const context = "T6.6-4(d) created-target move preview";
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
+        );
+        const { report, human } = await runPreviewJson(
+          product,
+          workspace,
+          D4_MOVE_ARGV,
+          context,
+        );
+        assertPreviewPlanContent(report, armDPlan(), context);
+        assertHumanPreviewReport(human, report, context);
+      },
+    );
+
+    // --- Arm (e): the tie-break stagings — T6.5-13's (b), (d) both
+    // variants, and (g), restaged byte for byte ---
+    for (const arm of A13_TIE_BREAK_ARMS) {
+      await withWorkspace(R16_CONFIG, arm.files, async (workspace) => {
+        const context = `T6.6-4(e) tie-break staging (T6.5-13 ${arm.key})`;
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
+        );
+        // The preview inside a whole-root modifies-nothing compare: the
+        // real run below then executes on the byte-identical pre-operation
+        // state (TEST-SPEC's "running the operation on a copy", H-4). Its
+        // human form runs inside it too, and is matched against the
+        // document once the whole plan is asserted below.
+        const { report, human } = await assertLeavesUnchanged(
+          workspace.root,
+          async () => runPreviewJson(product, workspace, arm.argv, context),
+          `${context}: the preview modifies nothing (SPEC 6.6) — pinning ` +
+            `the pre-operation state for the real run's byte assertion`,
+        );
+        assertTieBreakEntry(report, arm, context);
+        await expectExit(
+          product,
+          workspace,
+          [...arm.argv],
+          0,
+          `${context}: \`${arm.argv.join(" ")}\` — the real operation on ` +
+            `the preview-pinned state proceeds (SPEC 6.5; the premise build ` +
+            `passed and the preview above modified nothing)`,
+        );
+        const actual = await readRewrittenText(
+          workspace,
+          arm.receiving,
+          context,
+        );
+        const idents = a13ReadAddedIdentifiers(actual, arm, context);
+        const forms = arm.compose(idents);
+        if (!forms.includes(actual)) {
+          fail(
+            `${context}: ${arm.receiving} after the move — ${arm.summary}: ` +
+              `the moved text at the previewed insertion point and the ` +
+              `added declaration${arm.added.length > 1 ? "s" : ""} at the ` +
+              `previewed offset, composed as 6.5 and 3 fix (H-4, ` +
+              `normalizing nothing; value-blind in the fresh identifiers ` +
+              `alone)\n` +
+              `  actual:   ${JSON.stringify(actual)}\n` +
+              forms
+                .map((form) => `  expected: ${JSON.stringify(form)}`)
+                .join("\n"),
+          );
+        }
+        for (const other of arm.others) {
+          await assertFileBytes(
+            workspace.path(other.rel),
+            other.bytes,
+            `${context}: ${other.rel} after the move — ${other.reason} ` +
+              `(SPEC 6.5, 3; H-4)`,
+          );
+        }
+        assertPreviewPlanContent(report, tieBreakPlan(arm, idents), context);
+        assertHumanPreviewReport(human, report, context);
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          `${context}: \`check\` after the real move — the rewritten ` +
+            `workspace is valid and fresh (SPEC 6.5, 12.2)`,
+        );
+      });
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T6.6-5 — delta: the derived-file delta, both directions, record-based
+// ---------------------------------------------------------------------------
+
+// The file-form arm reuses arm (c)'s sources — origin `specs/Mv.mdx` with an
+// imported neighbor and an importer — under the Markdown-emitting
+// configuration, so the delta's universe spans every derived-file kind the
+// record covers (SPEC 13.3: modules, companions, emitted Markdown). The
+// rename arm renames `pal` in place: its cross-file `PAL.pal` references are
+// content rewrites, changing no derived path.
+const F5_DEST = C4_MOVE_ARGV[2];
+const F5_RENAME_ARGV = ["rename", C4_PAL, "pal", "pal2"] as const;
+
+/** The plain files a premise `build` added: file entries of `after` whose
+ * key `before` lacks (snapshot keys are workspace-relative paths). */
+function addedFiles(
+  before: DirectorySnapshot,
+  after: DirectorySnapshot,
+): readonly string[] {
+  const added: string[] = [];
+  for (const [key, entry] of after.entries) {
+    if (entry.kind === "file" && !before.entries.has(key)) added.push(key);
+  }
+  return added;
+}
+
+/** `DIR/NAME.mdx` → `DIR/NAME` (staging arithmetic; misuse throws). */
+function sourceStem(sourcePath: string): string {
+  if (!sourcePath.endsWith(".mdx")) {
+    throw new Error(
+      `T6.6-5 staging: ${sourcePath} is not a NAME.mdx spec source`,
+    );
+  }
+  return sourcePath.slice(0, -".mdx".length);
+}
+
+/** The 13.1 module-and-companion name-shape prefix: `DIR/NAME.xspec.`. */
+function moduleCompanionPrefix(sourcePath: string): string {
+  return `${sourceStem(sourcePath)}.xspec.`;
+}
+
+/** The 13.2/7.3 Markdown emit destination with `emit: true` and `outDir`
+ * unset: `DIR/NAME.md` next to the source. */
+function markdownDestination(sourcePath: string): string {
+  return `${sourceStem(sourcePath)}.md`;
+}
+
+/** Paths in byte order (SPEC 12.7: delta directions list paths in byte
+ * order, so composed expected lists must meet the decode-enforced order). */
+function byteSortedPaths(paths: readonly string[]): readonly string[] {
+  return [...paths].sort((a, b) =>
+    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
+  );
+}
+
+/**
+ * Premise check of what the premise `build` wrote (module header, H-4):
+ * the written files partition into graph data (T13.3-2's key rule) and each
+ * staged source's derived files — per source, the `DIR/NAME.xspec.<suffix>`
+ * plain files, the module `DIR/NAME.xspec.ts` asserted written (SPEC 13.1)
+ * and a suffix containing a path separator rejected (every companion is a
+ * plain file beside the module), plus, with emission enabled, the 13.2/7.3
+ * Markdown destination asserted written. A write that is neither graph data
+ * nor attributable to a staged source fails diagnosed: SPEC 13.1–13.3
+ * enumerate what `build` writes. The check arms the record-deleted arm's
+ * presence discrimination (every staying source's derived files sit on
+ * disk); no expectation is composed from these writes, and nothing requires
+ * them equal to the record (`readRecordedDerived`; T11.6-3 pins the
+ * record's content).
+ */
+function assertPremiseBuildWrites(
+  written: readonly string[],
+  sources: readonly string[],
+  emission: boolean,
+  context: string,
+): void {
+  const unattributed = new Set(written.filter((path) => !isGraphDataKey(path)));
+  for (const source of sources) {
+    const prefix = moduleCompanionPrefix(source);
+    const moduleAndCompanions = byteSortedPaths(
+      [...unattributed].filter((path) => path.startsWith(prefix)),
+    );
+    for (const path of moduleAndCompanions) {
+      if (path.slice(prefix.length).includes("/")) {
+        fail(
+          `${context}: the premise build wrote ${path} — every companion ` +
+            `file is named \`NAME.xspec.\` plus a suffix, a plain file ` +
+            `beside the module (SPEC 13.1), never a deeper path`,
+        );
+      }
+      unattributed.delete(path);
+    }
+    const modulePath = `${prefix}ts`;
+    if (!moduleAndCompanions.includes(modulePath)) {
+      fail(
+        `${context}: the premise build must generate ${source}'s module ` +
+          `${modulePath} (SPEC 13.1); under the name shape it wrote only ` +
+          `[${moduleAndCompanions.join(", ")}]`,
+      );
+    }
+    if (emission) {
+      const markdown = markdownDestination(source);
+      if (!unattributed.has(markdown)) {
+        fail(
+          `${context}: with emission enabled, ${source} emits ${markdown} — ` +
+            `\`NAME.md\` next to the source, \`outDir\` unset (SPEC 13.2, ` +
+            `7.3); the premise build did not write it`,
+        );
+      }
+      unattributed.delete(markdown);
+    }
+  }
+  if (unattributed.size > 0) {
+    fail(
+      `${context}: every file the premise build writes is a source's ` +
+        `module or companion (SPEC 13.1), its emitted Markdown (13.2), or ` +
+        `graph data under .xspec/ (13.3); it also wrote ` +
+        `[${[...unattributed].join(", ")}]`,
+    );
+  }
+}
+
+/**
+ * The staged sources a recorded path is attributable to (T6.6-5): each
+ * source whose 13.1 name shape the path has — `DIR/NAME.xspec.` plus a
+ * non-empty suffix holding no path separator (the module and every
+ * companion are plain files beside it) — or, the build having run with
+ * emission enabled, whose 13.2/7.3 Markdown destination it is (`DIR/NAME.md`,
+ * `outDir` unset; with emission disabled no path is a Markdown emit
+ * destination, 7.3).
+ */
+function recordedPathOwners(
+  path: string,
+  sources: readonly string[],
+  emission: boolean,
+): readonly string[] {
+  return sources.filter((source) => {
+    const prefix = moduleCompanionPrefix(source);
+    if (path.startsWith(prefix)) {
+      const suffix = path.slice(prefix.length);
+      return suffix.length > 0 && !suffix.includes("/");
+    }
+    return emission && path === markdownDestination(source);
+  });
+}
+
+/**
+ * Read the record T6.6-5 composes every expectation from (module header,
+ * H-4; TEST-SPEC T6.6-5: "composed from the `recorded` set the inventory
+ * reported after the build"): `inventory --json` right after the premise
+ * `build` — before graph data is deleted or the configuration changed —
+ * exit 0, its record-supplied datum decoded form-exact (SPEC 11.6, 12.7).
+ * After a successful build the datum is the plain list (13.3: a record
+ * exists and is readable — never unavailability, never null), and every
+ * recorded path is attributed to exactly one staged source
+ * (`recordedPathOwners`): a path no staged source owns — graph data records
+ * no paths of its own (13.3), and a byte-form path is no staged source's —
+ * fails diagnosed. The record names every source's module (13.1) and, the
+ * build having emitted Markdown, every source's Markdown (13.2): the paths
+ * of the derived files most recently generated (13.3). The companions are
+ * whatever the record lists — their suffixes are the product's own (H-4),
+ * never assumed. Returns each staged source's recorded paths, byte-sorted.
+ */
+async function readRecordedDerived(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  sources: readonly string[],
+  emission: boolean,
+  context: string,
+): Promise<ReadonlyMap<string, readonly string[]>> {
+  const inventoryContext = `${context}: \`inventory --json\` after the premise build`;
+  const recorded = decodeInventoryRecordedDatum(
+    await runJson(
+      product,
+      workspace,
+      ["inventory", "--json"],
+      inventoryContext,
+    ),
+    inventoryContext,
+  );
+  if (recorded.state !== "value") {
+    fail(
+      `${inventoryContext}: after a successful \`build\` the record-` +
+        `supplied datum is the plain list of recorded derived-file paths ` +
+        `— never unavailability, never null (SPEC 13.3, 11.6, 12.7); got ` +
+        `state ${JSON.stringify(recorded.state)}`,
+    );
+  }
+  const rendered = JSON.stringify(recorded.value.map(renderPathValue));
+  const attributed = new Map<string, string[]>(
+    sources.map((source) => [source, []]),
+  );
+  for (const entry of recorded.value) {
+    const owners =
+      typeof entry === "string"
+        ? recordedPathOwners(entry, sources, emission)
+        : [];
+    if (typeof entry !== "string" || owners.length === 0) {
+      fail(
+        `${inventoryContext}: the record lists ${renderPathValue(entry)}, ` +
+          `attributable to no staged source — every recorded path is a ` +
+          `source's module or companion, \`DIR/NAME.xspec.\` plus a suffix, ` +
+          `a plain file beside the module (SPEC 13.1), or ` +
+          (emission
+            ? `its emitted Markdown at its 13.2/7.3 destination`
+            : `nothing else, the build having emitted no Markdown (7.3)`) +
+          `; graph data records no paths of its own (13.3); recorded ` +
+          rendered,
+      );
+    }
+    if (owners.length > 1) {
+      throw new Error(
+        `T6.6-5 staging self-check: ${entry} is attributable to several ` +
+          `staged sources [${owners.join(", ")}]`,
+      );
+    }
+    attributed.get(owners[0]!)!.push(entry);
+  }
+  for (const source of sources) {
+    const paths = attributed.get(source)!;
+    const modulePath = `${moduleCompanionPrefix(source)}ts`;
+    if (!paths.includes(modulePath)) {
+      fail(
+        `${inventoryContext}: the record names the derived files the build ` +
+          `generated — ${source}'s module ${modulePath} among them (SPEC ` +
+          `13.1, 13.3, 11.6); recorded ${rendered}`,
+      );
+    }
+    const markdown = markdownDestination(source);
+    if (emission && !paths.includes(markdown)) {
+      fail(
+        `${inventoryContext}: the build emitted Markdown, so the record ` +
+          `names ${source}'s ${markdown} — the paths of the derived files ` +
+          `most recently generated, the emitted Markdown included (SPEC ` +
+          `13.2, 13.3, 11.6); recorded ${rendered}`,
+      );
+    }
+  }
+  return new Map(
+    [...attributed].map(([source, paths]) => [source, byteSortedPaths(paths)]),
+  );
+}
+
+/**
+ * Re-base one source's recorded derived paths to another source path
+ * (TEST-SPEC T6.6-5: "the moved file's entries re-based to its
+ * destination"): each path's `DIR/NAME` is replaced by the destination's
+ * directory and name, its suffix kept — `.xspec.<suffix>` for the module and
+ * each companion (SPEC 13.1: per-source derived paths are defined by the
+ * `NAME.mdx` name shape alone) and `.md` for the Markdown (13.2, 7.3: next
+ * to its source, `outDir` unset). Returned byte-sorted.
+ */
+function rebaseRecordedPaths(
+  paths: readonly string[],
+  fromSource: string,
+  toSource: string,
+): readonly string[] {
+  const fromStem = sourceStem(fromSource);
+  const toStem = sourceStem(toSource);
+  return byteSortedPaths(
+    paths.map((path) => {
+      if (!path.startsWith(`${fromStem}.`)) {
+        throw new Error(
+          `T6.6-5 staging self-check: ${path} must lie under ${fromStem}.`,
+        );
+      }
+      return `${toStem}${path.slice(fromStem.length)}`;
+    }),
+  );
+}
+
+/**
+ * Assert a successful preview's delta content exactly (T6.6-5): findings
+ * `[]`, the success plan encoding, `delta` a plain two-direction value — an
+ * absent record is nothing-recorded, the empty-record success path (SPEC
+ * 6.6), never the 14.23 unavailability of T6.6-6 — and each direction equal
+ * to the expected path set in byte order.
+ */
+function assertDeltaContent(
+  report: PreviewReport,
+  expected: {
+    readonly generated: readonly string[];
+    readonly removed: readonly string[];
+  },
+  context: string,
+): void {
+  assertSameJson(
+    report.findings,
+    [],
+    `${context}: a preview whose real operation would proceed reports ` +
+      `findings [] (SPEC 6.6, 12.7) — a missing record is no finding: ` +
+      `condition 23 covers recorded state that exists but cannot be read ` +
+      `(SPEC 14.23, T6.6-6)`,
+  );
+  if (
+    report.mapping === null ||
+    report.files === null ||
+    report.delta === null
+  ) {
+    fail(
+      `${context}: a successful preview reports its plan — \`mapping\`, ` +
+        `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, ` +
+        `12.7); got mapping ${report.mapping === null ? "null" : "present"}, ` +
+        `files ${report.files === null ? "null" : "present"}, delta ` +
+        `${report.delta === null ? "null" : "present"}`,
+    );
+  }
+  const delta = report.delta;
+  if ("unavailable" in delta) {
+    fail(
+      `${context}: the delta is explicitly unavailable only where recorded ` +
+        `state exists but cannot be read as a record (SPEC 14.23; T6.6-6's ` +
+        `staging) — an absent or empty record is the nothing-recorded ` +
+        `success path, reported as a plain two-direction value (SPEC 6.6)`,
+    );
+  }
+  assertSameJson(
+    delta.generated,
+    expected.generated,
+    `${context}: \`generated\` — exactly the derived paths the operation ` +
+      `would newly generate, the paths where nothing is currently recorded ` +
+      `as generated, in byte order (SPEC 6.6, 12.7)`,
+  );
+  assertSameJson(
+    delta.removed,
+    expected.removed,
+    `${context}: \`removed\` — exactly the recorded derived paths the ` +
+      `operation would leave no longer generated, in byte order (SPEC 6.6, ` +
+      `12.7)`,
+  );
+}
+
+const T6_6_5 = defineProductTest({
+  id: "T6.6-5",
+  title:
+    "delta: after a build, a file-form move preview reports the derived-file delta both directions — under `generated` the destination's module, companion, and (emission enabled) Markdown paths, nothing being recorded there, and under `removed` the recorded pre-move module, companions, and Markdown the operation would leave no longer generated; a rename preview on the same workspace reports [] in both directions (regeneration rewrites recorded paths in place); the created-target move of T6.6-4(d) reports the new file's derived paths under `generated`; record-based, not presence-based: with graph data deleted (T13.3-2's operational definition) the same move preview's `generated` is the full post-move regeneration set and its `removed` [] — nothing being recorded, presence on disk deciding neither direction — and the preview still writes nothing: no refresh, graph data still absent afterward; lagging-record counterpart: with emission enabled in the configuration after the build and no rebuild, the same preview's `generated` is exactly the destination's module, companions, and Markdown together with every other discovered spec source's Markdown emit destination — the paths the current configuration generates that the stale record lacks — and its `removed` exactly the recorded pre-move module and companions, the preview writing nothing and the record left lagging; and at every preview's state the human preview exits 0 alike and carries the plan its JSON document reports — every mapping pair's identities, every file entry's path, every edit's class and range offsets, and every delta path in either direction (robust matching, H-3) (SPEC 6.6, 12.0, 12.7, 13.1, 13.2, 13.3, 7.3, 12.1; H-3, H-4)",
+  run: async (product) => {
+    // --- File-form move, rename, and the record-deleted arm: one
+    // Markdown-emitting workspace (arm (c)'s sources) ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      {
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-5 file-form move";
+        const before = await snapshotDirectory(workspace.root);
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` — it generates every ` +
+            `derived-file kind and records their paths (SPEC 12.1, 13.3)`,
+        );
+        const after = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          after,
+          `${context}: staging premise — the record the delta consults`,
+        );
+        assertPremiseBuildWrites(
+          addedFiles(before, after),
+          [C4_MV, C4_PAL, C4_USER],
+          true,
+          `${context} staging observation`,
+        );
+        // The record the delta consults, read before graph data is deleted
+        // below; every expectation in this workspace is composed from it.
+        const recorded = await readRecordedDerived(
+          product,
+          workspace,
+          [C4_MV, C4_PAL, C4_USER],
+          true,
+          `${context} staging`,
+        );
+        // `get` cannot miss: readRecordedDerived maps exactly the sources.
+        const mv = recorded.get(C4_MV)!;
+        const pal = recorded.get(C4_PAL)!;
+        const user = recorded.get(C4_USER)!;
+
+        // The moved file's recorded paths — module, companions, Markdown —
+        // are what the operation leaves no longer generated; re-based to the
+        // destination they are what it newly generates, nothing being
+        // recorded there.
+        const destinationDerived = rebaseRecordedPaths(mv, C4_MV, F5_DEST);
+        const originDerived = mv;
+
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const armContext = `${context} (record present)`;
+            const { report, human } = await runPreviewJson(
+              product,
+              workspace,
+              C4_MOVE_ARGV,
+              armContext,
+            );
+            assertDeltaContent(
+              report,
+              { generated: destinationDerived, removed: originDerived },
+              armContext,
+            );
+            assertHumanPreviewReport(human, report, armContext);
+          },
+          `${context} (record present): the preview modifies nothing ` +
+            `(SPEC 6.6)`,
+        );
+
+        // A rename preview on the same workspace: regeneration rewrites
+        // recorded paths in place, so both directions are [] (SPEC 6.6) —
+        // the cross-file `PAL.pal` rewrites change file contents, never a
+        // derived path.
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const renameContext = `${context}, rename \`${F5_RENAME_ARGV.join(" ")}\``;
+            const { report, human } = await runPreviewJson(
+              product,
+              workspace,
+              F5_RENAME_ARGV,
+              renameContext,
+            );
+            assertDeltaContent(
+              report,
+              { generated: [], removed: [] },
+              renameContext,
+            );
+            assertHumanPreviewReport(human, report, renameContext);
+          },
+          `${context}, rename arm: the preview modifies nothing (SPEC 6.6)`,
+        );
+
+        // --- Record-based, not presence-based: graph data deleted ---
+        const deletedContext = `${context} (record deleted)`;
+        await deleteGraphData(workspace, deletedContext);
+        // With nothing recorded, every path the operation would generate is
+        // a path "where nothing is currently recorded as generated": the
+        // full post-move regeneration set — every recorded path of the
+        // build, the moved file's re-based to its destination: every
+        // post-move source's module, companions, and Markdown, the staying
+        // sources' present-on-disk files included (presence cannot tell a
+        // generated occupant from a foreign one, SPEC 6.6) — while `removed`
+        // is exactly []: the origin's still-on-disk files are recorded
+        // nowhere.
+        const fullRegenerationSet = byteSortedPaths([
+          ...destinationDerived,
+          ...pal,
+          ...user,
+        ]);
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const { report, human } = await runPreviewJson(
+              product,
+              workspace,
+              C4_MOVE_ARGV,
+              deletedContext,
+            );
+            assertDeltaContent(
+              report,
+              { generated: fullRegenerationSet, removed: [] },
+              deletedContext,
+            );
+            assertHumanPreviewReport(human, report, deletedContext);
+          },
+          `${deletedContext}: the preview still writes nothing — no ` +
+            `refresh, no record rebuild (SPEC 6.6, 13.3)`,
+        );
+        const postPreview = await snapshotDirectory(workspace.root);
+        for (const key of postPreview.entries.keys()) {
+          if (isGraphDataKey(key)) {
+            fail(
+              `${deletedContext}: graph data must still be absent after ` +
+                `the preview — a preview writes nothing and never ` +
+                `refreshes the record (SPEC 6.6, 13.3); found ` +
+                `${displaySnapshotPath(key)}`,
+            );
+          }
+        }
+      },
+    );
+
+    // --- The created-target move of T6.6-4(d), staged identically: the
+    // new file's derived paths under `generated` ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D4_SOLO]: D4_SOLO_STAGED },
+      async (workspace) => {
+        const context = "T6.6-5 created-target move (T6.6-4(d)'s staging)";
+        const before = await snapshotDirectory(workspace.root);
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
+        );
+        const after = await snapshotDirectory(workspace.root);
+        assertPremiseBuildWrites(
+          addedFiles(before, after),
+          [D4_SOLO],
+          false,
+          `${context} staging observation`,
+        );
+        const recorded = await readRecordedDerived(
+          product,
+          workspace,
+          [D4_SOLO],
+          false,
+          `${context} staging`,
+        );
+        // The created file's derived paths: the origin's recorded module and
+        // companions re-based to the new file — no Markdown component,
+        // emission being disabled (SPEC 7.3, 13.1). The origin file stays,
+        // its recorded paths regenerated in place, so `removed` is exactly
+        // [].
+        const madeDerived = rebaseRecordedPaths(
+          recorded.get(D4_SOLO)!,
+          D4_SOLO,
+          D4_MADE,
+        );
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const { report, human } = await runPreviewJson(
+              product,
+              workspace,
+              D4_MOVE_ARGV,
+              context,
+            );
+            assertDeltaContent(
+              report,
+              { generated: madeDerived, removed: [] },
+              context,
+            );
+            assertHumanPreviewReport(human, report, context);
+          },
+          `${context}: the preview modifies nothing (SPEC 6.6)`,
+        );
+      },
+    );
+
+    // --- Lagging-record counterpart: arm (c)'s sources built WITHOUT
+    // emission, then `markdown.emit` enabled in the configuration with no
+    // rebuild, and the same file-form move previewed ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-5 file-form move (record lagging)";
+        const before = await snapshotDirectory(workspace.root);
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` with emission disabled — ` +
+            `the record then holds modules and companions alone (SPEC ` +
+            `12.1, 13.3)`,
+        );
+        const after = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          after,
+          `${context}: staging premise — the record the delta consults`,
+        );
+        assertPremiseBuildWrites(
+          addedFiles(before, after),
+          [C4_MV, C4_PAL, C4_USER],
+          false,
+          `${context} staging observation`,
+        );
+        // The record as the emission-less build left it, read before the
+        // configuration changes: modules and companions alone, a recorded
+        // Markdown path being attributable to no source (7.3).
+        const recorded = await readRecordedDerived(
+          product,
+          workspace,
+          [C4_MV, C4_PAL, C4_USER],
+          false,
+          `${context} staging`,
+        );
+        const mv = recorded.get(C4_MV)!;
+
+        // Enable emission in the configuration, no rebuild: the record now
+        // lags the configuration — no Markdown path recorded — and a
+        // lagging record alone is never staleness (SPEC 13.3); the preview
+        // plans under the current configuration and consults the record as
+        // it stands (6.6).
+        await workspace.file("xspec.config.ts", SPECS_MD_CONFIG);
+
+        // `generated`: the paths the current configuration generates that
+        // the stale record lacks — the destination's module and companions
+        // (the origin's recorded ones re-based) and its Markdown (nothing
+        // recorded there) together with every OTHER discovered source's
+        // Markdown emit destination (unrecorded, the record predating
+        // emission; 13.2/7.3 place each next to its source). The staying
+        // sources' recorded modules and companions regenerate in place, in
+        // neither direction; the origin's Markdown — never recorded, not
+        // generated post-move — is in neither direction either.
+        const generated = byteSortedPaths([
+          ...rebaseRecordedPaths(mv, C4_MV, F5_DEST),
+          markdownDestination(F5_DEST),
+          markdownDestination(C4_PAL),
+          markdownDestination(C4_USER),
+        ]);
+        // `removed`: exactly the recorded pre-move module and companions —
+        // the origin's entries in the record the inventory reported, no
+        // Markdown among them (SPEC 13.3).
+        const removed = mv;
+
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const { report, human } = await runPreviewJson(
+              product,
+              workspace,
+              C4_MOVE_ARGV,
+              context,
+            );
+            assertDeltaContent(report, { generated, removed }, context);
+            assertHumanPreviewReport(human, report, context);
+          },
+          `${context}: the preview writes nothing — the record stays ` +
+            `lagging, never refreshed by a preview (SPEC 6.6, 13.3)`,
+        );
+      },
+    );
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T6.6-6 — unreadable record
+// ---------------------------------------------------------------------------
+
+// Staging (module header, H-4): a section-form move whose plan is
+// latitude-free — the moved subtree `org.mv` is self-contained (its one
+// internal `d` reference points down at its own child and moves with it,
+// SPEC 5.3-acyclic) and nothing outside the subtree references a moved node,
+// so the move adds and removes no import anywhere (SPEC 6.5) and the
+// previewed plan is fully determined by sources + operation: origin deletion
+// with the re-identification and reference rewrites nested inside it, and
+// the target insertion. `tm` is top-level (no target parent needed) and
+// collides with nothing in Target.mdx; the whole move is unambiguously
+// valid, so the preview's only imperfection under the corrupt record is the
+// record itself (SPEC 14.23).
+const R6_ORIGIN = "specs/Origin.mdx";
+const R6_TARGET = "specs/Target.mdx";
+const R6_ORIGIN_SOURCE = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv" d={"org.mv.k1"}>',
+  "Moved root text.",
+  "",
+  '<S id="org.mv.k1">',
+  "Moved kid.",
+  "</S>",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+// A staged-source record: T6.6-7 stages it after a product invocation
+// (S-9's timing clause).
+const R6_ORIGIN_STAGED = stagedMdx(
+  "T6.6-6/T6.6-7 specs/Origin.mdx",
+  R6_ORIGIN_SOURCE,
+);
+// The plain target again (T6.5-8/T6.5-9's, T6.6-2's): section-6.5.ts's record.
+const R6_TARGET_SOURCE = A8_PLAIN_TARGET;
+const R6_MOVE_ARGV = [
+  "move",
+  `${R6_ORIGIN}#org.mv`,
+  `${R6_TARGET}#tm`,
+] as const;
+// The refused preview staged on the same corrupt-record state: an
+// identity-unchanged rename collides with nothing and reports
+// `refused-identity-unchanged` alone (SPEC 6.4), concerning the unchanged
+// identity — carried as the sole element of the finding's `identities`, in
+// 1.5's form over the operation's destination file, `<file>#id` for a
+// rename (SPEC 14, 1.5).
+const R6_RENAME_SAME_ARGV = ["rename", R6_ORIGIN, "org", "org"] as const;
+const R6_RENAME_SAME_IDENTITY = `${R6_ORIGIN}#org`;
+// The complete identity mapping the move journals — the moved ID and its
+// descendant, prefix-replaced, in full 1.5 identity form, `from`-byte
+// ordered (SPEC 6.4, 6.5, 12.7).
+const R6_EXPECTED_MAPPING: readonly AppliedMappingPair[] = [
+  { from: `${R6_ORIGIN}#org.mv`, to: `${R6_TARGET}#tm` },
+  { from: `${R6_ORIGIN}#org.mv.k1`, to: `${R6_TARGET}#tm.k1` },
+];
+
+/**
+ * A successful preview's plan members, non-null — `mapping`, `files`, and
+ * `delta` are `null` exactly on refusal, all together (SPEC 6.6, 12.7; the
+ * decode already rejects mixed nullity).
+ */
+function requirePreviewPlan(
+  report: PreviewReport,
+  context: string,
+): {
+  readonly mapping: readonly AppliedMappingPair[];
+  readonly files: readonly PreviewFileEntry[];
+  readonly delta: PreviewDeltaDatum;
+} {
+  const { mapping, files, delta } = report;
+  if (mapping === null || files === null || delta === null) {
+    fail(
+      `${context}: the preview emits its full plan — \`mapping\`, ` +
+        `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, ` +
+        `12.7); got mapping ${mapping === null ? "null" : "present"}, ` +
+        `files ${files === null ? "null" : "present"}, delta ` +
+        `${delta === null ? "null" : "present"}`,
+    );
+  }
+  return { mapping, files, delta };
+}
+
+const T6_6_6 = defineProductTest({
+  id: "T6.6-6",
+  title:
+    "unreadable record: with the product-written graph data corrupted shape-blind (garbage over T13.3-2's operational path set; H-3 record-staging adapter), a move `--preview` whose plan is otherwise valid exits 1 emitting the full preview — `mapping` and `files` complete: the exact journaled mapping, the files deep-equal to the intact-record run on the identical sources — with `delta` explicitly unavailable as one datum, never read as an empty record, and the condition-23 finding (`unreadable-record`, concerned path the graph-data area `.xspec`, no path inside it named: locations []) in `findings`; the real operation on the same state is not refused — it proceeds, its applied mapping the previewed mapping, its finishing regeneration replacing the corrupt record (`check` clean afterward, T12.2-2) — and a refused preview staged on the same corrupt-record state (an identity-unchanged rename) reports the refusal finding alone — `refused-identity-unchanged`, its `identities` exactly the unchanged identity `specs/Origin.mdx#org` in 1.5's form over the rename's file — with `mapping`/`files`/`delta` null, never a condition-23 finding; and at each full preview's state its human form — the intact-record run's exiting 0, the corrupt-record run's exiting 1 alike — carries the plan its JSON document reports: every mapping pair's identities, every file entry's path, every edit's class and range offsets, and every delta path, at the corrupt record `unavailable` in their place (robust matching, H-3) (SPEC 6.6, 6.4, 6.5, 14, 14.23, 14.10, 1.5, 11.6, 12.0, 12.7, 13.3; H-3, H-4)",
+  run: async (product) => {
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [R6_ORIGIN]: R6_ORIGIN_STAGED, [R6_TARGET]: R6_TARGET_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-6";
+        // Premise: the record under corruption is one the product itself
+        // wrote (H-3) — the staged workspace builds and graph data exists.
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` — it writes the record the ` +
+            `corruption then applies to (SPEC 12.1, 13.3; H-3)`,
+        );
+        assertGraphDataPresent(
+          await snapshotDirectory(workspace.root),
+          `${context}: staging premise — the product-written record exists`,
+        );
+
+        // Intact-record reference run of the same preview: exit 0, findings
+        // [], delta a plain value — pinning the plan the corrupt-state run
+        // must still emit in full. Wrapped in its own modifies-nothing
+        // compare, so the two runs' inputs differ in the record bytes alone;
+        // its human form runs inside it too (module header).
+        const intactContext = `${context} (record intact)`;
+        const { report: intactReport, human: intactHuman } =
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () =>
+              await runPreviewJson(
+                product,
+                workspace,
+                R6_MOVE_ARGV,
+                intactContext,
+              ),
+            `${intactContext}: the preview modifies nothing (SPEC 6.6)`,
+          );
+        assertSameJson(
+          intactReport.findings,
+          [],
+          `${intactContext}: on a readable record, this valid move's ` +
+            `preview reports findings [] (SPEC 6.6, 12.7)`,
+        );
+        const intact = requirePreviewPlan(intactReport, intactContext);
+        if ("unavailable" in intact.delta) {
+          fail(
+            `${intactContext}: with the record readable, the delta is the ` +
+              `plain two-direction value — unavailability covers recorded ` +
+              `state that exists but cannot be read (SPEC 6.6, 14.23)`,
+          );
+        }
+        assertSameJson(
+          intact.mapping,
+          R6_EXPECTED_MAPPING,
+          `${intactContext}: staging premise — the previewed plan maps ` +
+            `exactly the moved subtree, prefix-replaced, in full 1.5 ` +
+            `identity form (SPEC 6.4, 6.5, 6.6, 12.7)`,
+        );
+        assertSameJson(
+          intact.files.map((entry) => entry.file),
+          [R6_ORIGIN, R6_TARGET],
+          `${intactContext}: staging premise — the plan rewrites the origin ` +
+            `and the target file (SPEC 6.5, 6.6, 12.7), so the ` +
+            `completeness equality on the corrupt-record run has content`,
+        );
+        assertHumanPreviewReport(intactHuman, intactReport, intactContext);
+
+        // Corrupt the product-written record shape-blind (TEST-SPEC
+        // T6.6-6; H-3 adapter — garbage over T13.3-2's operational path
+        // set, files present but readable as no record).
+        await corruptGraphDataShapeBlind(
+          workspace.root,
+          `${context}: corrupt-record staging`,
+        );
+
+        // Both corrupt-state previews inside ONE whole-root compare: a
+        // preview writes nothing and never refreshes the record (SPEC 6.6,
+        // 13.3), so the corrupt state persists byte for byte and the real
+        // operation below runs on the same state.
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            // (1) The move preview: full plan, delta explicitly
+            // unavailable, the condition-23 finding, exit 1 (SPEC 14.23).
+            const corruptContext = `${context} (record corrupt), move preview`;
+            const argv = [...R6_MOVE_ARGV, "--preview", "--json"];
+            const result = await expectExit(
+              product,
+              workspace,
+              argv,
+              1,
+              `${corruptContext}: \`${argv.join(" ")}\` — an answer ` +
+                `carrying a finding and explicitly-unavailable data exits ` +
+                `1, the full answer still emitted (SPEC 14.23, 12.0)`,
+            );
+            const report = decodePreviewReport(
+              parseJsonStdout(
+                result,
+                `${corruptContext}: a single JSON document as the entire ` +
+                  `stdout (SPEC 12.0)`,
+              ),
+              corruptContext,
+            );
+            // Directly, at the same state: the human preview (module
+            // header), matched against the document once its assertions
+            // below have run.
+            const humanArgv = [...R6_MOVE_ARGV, "--preview"];
+            const human = await expectExit(
+              product,
+              workspace,
+              humanArgv,
+              1,
+              `${corruptContext}: \`${humanArgv.join(" ")}\` (human report) ` +
+                `— the same exit code as the \`--json\` preview at this ` +
+                `state: 1, the full answer still emitted beside its finding ` +
+                `and explicitly-unavailable data (SPEC 14.23, 12.0)`,
+            );
+            assertConditionCounts(
+              report.findings,
+              { "14.23": 1 },
+              `${corruptContext}: exactly the one condition-23 finding ` +
+                `(stable code unreadable-record) accompanies the answer — ` +
+                `the workspace is otherwise clean (SPEC 14.23, 14)`,
+            );
+            const finding = report.findings[0]!;
+            assertFindingConcernsPath(
+              finding,
+              GRAPH_DATA_AREA_PATH,
+              `${corruptContext}: the concerned path is the graph-data ` +
+                `area — the .xspec directory spelled as its ` +
+                `workspace-relative path, no trailing separator (SPEC ` +
+                `14.23, 11.6)`,
+            );
+            assertSameJson(
+              finding.locations,
+              [],
+              `${corruptContext}: no path inside the area is named — the ` +
+                `record's layout is deliberately unenumerated (SPEC 14.23, ` +
+                `13.3), and a path-concerned condition is unlocated: ` +
+                `locations [] (SPEC 12.7; T12.7-1)`,
+            );
+            const plan = requirePreviewPlan(report, corruptContext);
+            assertSameJson(
+              plan.mapping,
+              R6_EXPECTED_MAPPING,
+              `${corruptContext}: \`mapping\` complete — the complete ` +
+                `identity mapping the operation would journal, exactly as ` +
+                `on the readable record (SPEC 6.6, 14.23)`,
+            );
+            assertSameJson(
+              plan.files,
+              intact.files,
+              `${corruptContext}: \`files\` complete — every other part of ` +
+                `the preview report is emitted in full, equal to the ` +
+                `intact-record run on these byte-identical sources (the ` +
+                `plan holds no import addition, so no 6.5 latitude can ` +
+                `differ between the runs) (SPEC 14.23, 6.6)`,
+            );
+            if (!("unavailable" in plan.delta)) {
+              fail(
+                `${corruptContext}: the record-supplied datum — the delta ` +
+                  `— is reported explicitly unavailable as one datum, ` +
+                  `never fabricated and never read as an empty record ` +
+                  `(SPEC 14.23, 6.6, 12.7); got ` +
+                  `${JSON.stringify(plan.delta)}`,
+              );
+            }
+            assertHumanPreviewReport(human, report, corruptContext);
+
+            // (2) A refused preview staged on the same corrupt-record
+            // state: the identity-unchanged rename reports its refusal
+            // finding alone — a refused preview consults no record, so no
+            // condition-23 finding ever accompanies it (SPEC 6.6, 6.4) —
+            // and that finding carries the identity it concerns, the
+            // unchanged `specs/Origin.mdx#org`, as the sole element of its
+            // `identities` (SPEC 14, 1.5).
+            const refusedContext = `${context} (record corrupt), refused rename preview`;
+            const refusedArgv = [...R6_RENAME_SAME_ARGV, "--preview", "--json"];
+            const refused = await expectExit(
+              product,
+              workspace,
+              refusedArgv,
+              1,
+              `${refusedContext}: \`${refusedArgv.join(" ")}\` — an ` +
+                `identity-unchanged rename is refused, previewed exactly ` +
+                `as real (SPEC 6.4, 6.6, 12.0)`,
+            );
+            const refusedReport = decodePreviewReport(
+              parseJsonStdout(
+                refused,
+                `${refusedContext}: a single JSON document as the entire ` +
+                  `stdout (SPEC 12.0)`,
+              ),
+              refusedContext,
+            );
+            assertConditionCounts(
+              refusedReport.findings,
+              { "refused-identity-unchanged": 1 },
+              `${refusedContext}: the refusal findings alone — ` +
+                `refused-identity-unchanged and nothing beside it, never a ` +
+                `condition-23 finding: a refused preview consults no ` +
+                `record (SPEC 6.4 "reports refused-identity-unchanged ` +
+                `alone", 6.6, 14)`,
+            );
+            const unchanged = refusedReport.findings.find(
+              (finding) => finding.code === "refused-identity-unchanged",
+            )!;
+            assertRefusalIdentities(
+              unchanged,
+              "refused-identity-unchanged",
+              [R6_RENAME_SAME_IDENTITY],
+              `${refusedContext}: the \`refused-identity-unchanged\` ` +
+                `finding carries the identity it concerns — the unchanged ` +
+                `identity — as the sole element of its \`identities\`, in ` +
+                `1.5's form over the operation's destination file, ` +
+                `\`<file>#id\` for a rename (SPEC 14, 1.5, 6.4)`,
+            );
+            if (
+              refusedReport.mapping !== null ||
+              refusedReport.files !== null ||
+              refusedReport.delta !== null
+            ) {
+              fail(
+                `${refusedContext}: a refused preview's \`mapping\`, ` +
+                  `\`files\`, and \`delta\` are null (SPEC 6.6, 12.7); got ` +
+                  `mapping ` +
+                  `${refusedReport.mapping === null ? "null" : "present"}, ` +
+                  `files ` +
+                  `${refusedReport.files === null ? "null" : "present"}, ` +
+                  `delta ` +
+                  `${refusedReport.delta === null ? "null" : "present"}`,
+              );
+            }
+          },
+          `${context} (record corrupt): the previews modify nothing — no ` +
+            `sources, no journal, no derived files, no graph data: the ` +
+            `corrupt record is not repaired, replaced, or removed, so the ` +
+            `real operation below runs on the same state (SPEC 6.6, 13.3)`,
+        );
+
+        // The real operation on the same corrupt-record state is not
+        // refused — a corrupt record fails no build validation, so the
+        // unreadable record lies on the success side of the refusal
+        // equivalence (SPEC 6.6) — and its finishing regeneration replaces
+        // the corrupt record (SPEC 6.4, 6.5).
+        const realContext = `${context} (record corrupt), real move`;
+        const realArgv = [...R6_MOVE_ARGV, "--json"];
+        const applied = decodePerformedOperationReport(
+          await runJson(
+            product,
+            workspace,
+            realArgv,
+            `${realContext}: \`${realArgv.join(" ")}\` — the real ` +
+              `operation proceeds, exit 0 (SPEC 6.6, 6.5, 12.0)`,
+          ),
+          realContext,
+        );
+        assertAppliedMapping(
+          applied.mapping,
+          R6_EXPECTED_MAPPING,
+          `${realContext}: the applied mapping is the previewed mapping — ` +
+            `the corrupt-state preview reported the complete identity ` +
+            `mapping the operation has now journaled (SPEC 6.4, 6.5, 6.6)`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          `${context}: after the real move, \`check\` is clean — the ` +
+            `finishing regeneration replaced the corrupt record and left ` +
+            `no stale output (SPEC 6.4, 12.1, 14.10, 14.23; T12.2-2)`,
+        );
+      },
+    );
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T6.6-7 — human form
+// ---------------------------------------------------------------------------
+
+/**
+ * T6.6-7's twin of one preview at the state its staging left (the module
+ * header): inside one whole-root modifies-nothing compare — a preview
+ * acquires nothing, so the lock path stays in it (SPEC 6.6, 13.4; TEST-SPEC
+ * H-6) — the `--preview --json` run, its exit the staging's premise
+ * (`expectedExit`: 0 where the operation would proceed, 1 at T6.6-6's
+ * corrupt record and at every refusal), decoded form-exact (12.7); then the
+ * same argv without `--json`, which exits as its `--json` twin, its
+ * standard error byte-identical (SPEC 12.0: the output form never changes
+ * an exit code or standard-error content; T12.0-2), and whose report,
+ * decoded by the human preview decoder (helpers/adapters/human-reports.ts),
+ * carries the information the document carries — its findings' every code,
+ * location, concerned path, and identity, and its plan: none beside a
+ * refusal's findings, else the mapping's every pair, every file with each
+ * of its edits' class and range, and the delta's paths in both directions
+ * or its unavailability (TEST-SPEC T6.6-7; `assertHumanPreviewReportCarries`).
+ */
+async function expectHumanPreviewTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  operationArgv: readonly string[],
+  expectedExit: 0 | 1,
+  context: string,
+): Promise<void> {
+  const jsonArgv = [...operationArgv, "--preview", "--json"];
+  const humanArgv = [...operationArgv, "--preview"];
+  const jsonCommand = `\`${jsonArgv.join(" ")}\``;
+  const humanCommand = `\`${humanArgv.join(" ")}\` (human report)`;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const json = await expectExit(
+        product,
+        workspace,
+        jsonArgv,
+        expectedExit,
+        expectedExit === 0
+          ? `${context}: ${jsonCommand} — the staging's premise: the ` +
+              `preview succeeds exactly when the real operation would ` +
+              `proceed (SPEC 6.6, 12.0)`
+          : `${context}: ${jsonCommand} — the staging's premise: exit 1, ` +
+              `the preview refused as the real operation would be, or ` +
+              `answering beside a finding (SPEC 6.6, 14.23, 12.0)`,
+      );
+      const report = decodePreviewReport(
+        parseJsonStdout(
+          json,
+          `${context}: ${jsonCommand} — a single JSON document as the ` +
+            `entire stdout (SPEC 12.0)`,
+        ),
+        `${context}: ${jsonCommand}`,
+      );
+      const human = await expectExit(
+        product,
+        workspace,
+        humanArgv,
+        expectedExit,
+        `${context}: ${humanCommand} — the preview run without \`--json\` ` +
+          `on the same state exits as its \`--json\` twin (SPEC 12.0: the ` +
+          `output form never changes an exit code; TEST-SPEC T6.6-7)`,
+      );
+      assertBytesEqual(
+        human.stderrBytes,
+        json.stderrBytes,
+        `${context}: ${humanCommand} — its standard error byte-identical ` +
+          `to its \`--json\` twin's (SPEC 12.0: the output form never ` +
+          `changes standard-error content; T12.0-2)`,
+      );
+      assertHumanPreviewReportCarries(
+        human,
+        report,
+        `${context}: ${humanCommand}`,
+      );
+    },
+    `${context}: the preview and its human twin modify nothing, the lock ` +
+      `path included — a preview acquires nothing (SPEC 6.6, 13.4; ` +
+      `TEST-SPEC H-6, T6.6-7)`,
+  );
+}
+
+/**
+ * T6.6-7's twin of each refused preview of T6.6-3's refusal stagings
+ * (`runT663RefusalStagings`): the refused preview and its human twin
+ * (`expectHumanPreviewTwin`, exit 1), the human report decoded onto the
+ * refusal's findings — every code, location, concerned path, and identity
+ * of the `--json` twin's — and no plan beside them (TEST-SPEC T6.6-7; SPEC
+ * 6.6). The expected refusal finding(s) stay T6.6-3's premise: the twin
+ * compares the two forms, whatever findings the refusal reports.
+ */
+const expectHumanRefusedPreviewTwin: RefusalStagingTwin = (
+  product,
+  workspace,
+  argv,
+  _expected,
+  context,
+) => expectHumanPreviewTwin(product, workspace, argv, 1, context);
+
+/**
+ * T6.6-7's twin of T6.6-3's refused preview at acquisition arm (b)
+ * (`runT663AreaArm`, staged identically): a fresh CORE_DECL workspace,
+ * freshly built, `.xspec` then replaced by a plain file
+ * (section-13.5-ii.ts `obstructArea`) — the preview of `rename specs/A.mdx
+ * a a2` the invalid-workspace refusal, exit 1, its findings T10.1-6's
+ * condition-22 finding concerning `.xspec` — and its human twin
+ * (`expectHumanPreviewTwin`), the plain file byte-unchanged across both.
+ */
+async function runT667AreaArm(product: ProductBinding): Promise<void> {
+  await withCoreWorkspace(async (workspace) => {
+    const context = "T6.6-7 (T6.6-3(b) `.xspec` a plain file)";
+    await buildLeftoverFree(product, workspace, context);
+    const staged = await obstructArea(
+      workspace,
+      { kind: "file", content: AREA_OCCUPANT_FILE_BYTES },
+      context,
+    );
+    await expectHumanPreviewTwin(
+      product,
+      workspace,
+      ACQUISITION_RENAME,
+      1,
+      context,
+    );
+    await assertStagingInPlace(
+      [staged],
+      `${context}: the plain file at ${AREA_PATH} byte-unchanged`,
+    );
+  });
+}
+
+const T6_6_7 = defineProductTest({
+  id: "T6.6-7",
+  title:
+    "human form: what 6.6 says a preview reports binds its human report as its JSON document — each preview of T6.6-2 (the rename and the section-form move), T6.6-4 (arms (a)–(d) and (e)'s tie-break stagings), T6.6-5 (the file-form move with the record present, deleted, and lagging, the rename, and the created-target move), and T6.6-6 (the intact-record and corrupt-record moves and the refused identity-unchanged rename), restaged identically, run without `--json` on the same state, exits as its `--json` twin, its standard error byte-identical, and writes nothing (the lock path included), and its report, decoded by the human preview decoder, carries the same information, order free: the mapping's every `from` and `to` identity; every file the operation would rewrite, relocate, or create, with each of its edits' class and range as its two pre-operation byte offsets — a creation's at the new file's start; and the delta's paths in both directions, or, at T6.6-6's corrupt record, the delta reported unavailable beside the condition-23 finding (`unreadable-record` concerning `.xspec`); and each refused preview of T6.6-3 — its refusal stagings and acquisition arm (b) — run without `--json` reports its findings, every code, location, concerned path, and identity of the `--json` twin's, and no plan, exit 1; a human preview printing nothing, or omitting a mapping pair, a file, an edit's class or range, a delta path or direction, the delta's unavailability, or a refusal's findings, fails (SPEC 6.6, 12.0, 12.7, 14, 14.22, 14.23; H-3, H-6)",
+  run: async (product) => {
+    // --- T6.6-2's previews: each after its premise `build` ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [P1_CORE]: P1_CORE_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-2 rename arm)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          P1_RENAME_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [P2_ORIGIN]: P2_ORIGIN_SOURCE, [P2_TARGET]: P2_TARGET_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-2 move arm)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          P2_MOVE_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+
+    // --- T6.6-4's previews: arms (a) and (b), each after its premise
+    // `build` ---
+    await withWorkspace(
+      SPECS_AND_CODE_CONFIG,
+      {
+        [A4_CORE]: A4_CORE_STAGED,
+        [A4_OTHER]: A4_OTHER_STAGED,
+        [A4_USE]: A4_USE_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-4(a) rename preview)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          A4_RENAME_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [B4_ORIGIN]: B4_ORIGIN_STAGED,
+        [B4_TARGET]: B4_TARGET_STAGED,
+        [B4_THIRD]: B4_THIRD_STAGED,
+      },
+      async (workspace) => {
+        const context =
+          "T6.6-7 (T6.6-4(b) section-move preview, existing target)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          B4_MOVE_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+
+    // --- T6.6-4(c)'s file-form move and, on the same workspace with
+    // emission then enabled and no rebuild, T6.6-5's lagging-record
+    // preview of it ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-4(c) file-form move preview)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          context,
+        );
+        await workspace.file("xspec.config.ts", SPECS_MD_CONFIG);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          "T6.6-7 (T6.6-5 file-form move, record lagging: emission enabled " +
+            "after the build, no rebuild)",
+        );
+      },
+    );
+
+    // --- T6.6-4(d)'s created-target move — T6.6-5's created-target arm,
+    // staged identically ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D4_SOLO]: D4_SOLO_STAGED },
+      async (workspace) => {
+        const context =
+          "T6.6-7 (T6.6-4(d) and T6.6-5 created-target move preview)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          D4_MOVE_ARGV,
+          0,
+          context,
+        );
+      },
+    );
+
+    // --- T6.6-4(e)'s tie-break stagings, T6.5-13's restaged byte for
+    // byte ---
+    for (const arm of A13_TIE_BREAK_ARMS) {
+      await withWorkspace(R16_CONFIG, arm.files, async (workspace) => {
+        const context = `T6.6-7 (T6.6-4(e) tie-break staging, T6.5-13 ${arm.key})`;
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(product, workspace, arm.argv, 0, context);
+      });
+    }
+
+    // --- T6.6-5's Markdown-emitting workspace: the file-form move and the
+    // rename with the record present, then the move with graph data
+    // deleted ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      {
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
+      },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-5 file-form move)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          `${context}, record present`,
+        );
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          F5_RENAME_ARGV,
+          0,
+          `${context}'s workspace, rename \`${F5_RENAME_ARGV.join(" ")}\``,
+        );
+        await deleteGraphData(workspace, `${context}, record deleted`);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          C4_MOVE_ARGV,
+          0,
+          `${context}, record deleted`,
+        );
+      },
+    );
+
+    // --- T6.6-6's previews: the move with the record intact, then on the
+    // corrupt record the move (exit 1, the delta unavailable beside the
+    // condition-23 finding) and the refused identity-unchanged rename ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [R6_ORIGIN]: R6_ORIGIN_STAGED, [R6_TARGET]: R6_TARGET_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-7 (T6.6-6)";
+        await buildOk(product, workspace, `${context}: staging \`build\``);
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          R6_MOVE_ARGV,
+          0,
+          `${context}, record intact, move preview`,
+        );
+        await corruptGraphDataShapeBlind(
+          workspace.root,
+          `${context}: corrupt-record staging`,
+        );
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          R6_MOVE_ARGV,
+          1,
+          `${context}, record corrupt, move preview`,
+        );
+        await expectHumanPreviewTwin(
+          product,
+          workspace,
+          R6_RENAME_SAME_ARGV,
+          1,
+          `${context}, record corrupt, refused rename preview`,
+        );
+      },
+    );
+
+    // --- T6.6-3's refused previews: its refusal stagings, staged
+    // identically through its own staging code, and acquisition arm (b) ---
+    await runT663RefusalStagings(
+      product,
+      expectHumanRefusedPreviewTwin,
+      "T6.6-7",
+      "the preview and its human twin",
+    );
+    await runT667AreaArm(product);
+  },
+});
+
+export const section66Tests: readonly ProductTestEntry[] = [
+  T6_6_2,
+  T6_6_3,
+  T6_6_4,
+  T6_6_5,
+  T6_6_6,
+  T6_6_7,
+];

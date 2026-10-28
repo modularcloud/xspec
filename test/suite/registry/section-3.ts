@@ -1,5 +1,5 @@
 // TEST-SPEC §3 (Markdown compilation) — SUITE-11: T3-1, T3-2, T3-3, T3-4,
-// T3-5, T3-6.
+// T3-5, T3-6, T3-7.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -13,33 +13,75 @@
 // Certification staging constraints (CERTIFICATIONS.md §CONF-MD,
 // §VIOL-MD-CLASS, §VIOL-MD-CR), binding alongside the test text:
 // - U+00A0, U+0085, and U+2028 appear on removal-affected lines only in
-//   T3-3's class-boundary arms; every other fixture in this module keeps
-//   them out entirely.
+//   T3-3's class-boundary arms (its ESM-block arm, a line left holding
+//   U+2028 alone between two removed imports, among them); every other
+//   fixture in this module keeps them out entirely.
 // - A lone U+000D appears only in T3-4's fixtures; every other fixture uses
 //   LF terminators exclusively (CRLF appears only in T3-4).
 // - T3-1 stages sections carrying the full prop set of 2.7 — `id`, `d`
-//   (external and local forms, resolving as staged), `coverage`, and `tags`.
+//   (external and local forms, resolving as staged), `coverage`, and `tags`,
+//   plus the grammar-boundary staging: its fenced code blocks and inline
+//   code span carry construct-like bytes that must stay literal content
+//   (constructs exist only where the MDX parse yields them).
+// - T3-7 (outside CONF-MD's scope — its `view` and `query node` surfaces
+//   are not served there) keeps the same discipline: LF only, no exotic
+//   byte; its JavaScript comments beside imports are the ESM-block class
+//   P-2 composes and the scope admits.
 
-import { assertFileBytes, fail } from "../../helpers/assertions.js";
+import { Buffer } from "node:buffer";
+
+import type {
+  SourceRange,
+  ViewImportEntry,
+} from "../../helpers/adapters/index.js";
+import {
+  decodeEdgesReport,
+  decodeNodeIdentityRowsReport,
+  decodeNodeReport,
+  decodeViewReport,
+} from "../../helpers/adapters/index.js";
+import {
+  assertBytesEqual,
+  assertFileBytes,
+  fail,
+} from "../../helpers/assertions.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { defineProductTest } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { buildOk } from "./support.js";
+import {
+  assertEdgeSetEqual,
+  assertSameJson,
+  buildOk,
+  expectExit,
+  runJson,
+} from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): one spec group. The spec-group
 // glob matches only `.mdx` files, so no glob matches a Markdown emit
-// destination (`specs/**/*.md`, SPEC 7.3).
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// destination (`specs/**/*.md`, SPEC 7.3). This configuration and the two
+// `markdown` variants below are T3-6's emission-matrix variants, each staged
+// in its own workspace — every one after the first created after the body's
+// first invocation — so the variant table holds staged-source records (S-9's
+// timing clause).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T3-6 xspec.config.ts — `markdown` absent (the emission matrix's first variant)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // As above with `markdown: { emit: false }` (SPEC 7.3).
-const EMIT_FALSE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_FALSE_CONFIG = stagedTs(
+  "T3-6 xspec.config.ts — `markdown: { emit: false }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -47,11 +89,14 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
+`,
+);
 
 // As above with emission enabled (default destination: next to each source
 // file, `specs/A.mdx` → `specs/A.md`; SPEC 7.3, 13.2).
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_TRUE_CONFIG = stagedTs(
+  "T3-6 xspec.config.ts — `markdown: { emit: true }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -59,7 +104,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // ---------------------------------------------------------------------------
 // T3-1
@@ -73,9 +119,34 @@ const REMOVALS_BASE_COMPILED = "Base text.\n";
 // `<Spec>` opening/closing tags carrying the full prop set of 2.7 (`id`, `d`
 // in external and local forms, `coverage`, `tags`), and MDX comments (own-line
 // and in-line) — amid content that must survive byte-for-byte: a heading, a
-// table, a code fence, trailing spaces, and blank lines. Dependencies are
+// table, code fences, trailing spaces, and blank lines. Dependencies are
 // acyclic: alpha → {BASE.base, beta}, beta → BASE.base (SPEC 5.3).
-const REMOVALS_SOURCE = [
+//
+// Grammar boundary (SPEC 2.7, 14.16, 14.20): constructs exist only where the
+// MDX parse yields them — fenced code blocks and inline code spans are
+// literal text — so the fences and an inline code span carry construct-like
+// bytes: `<div>` (else 14.16), `<S id="x">` (else a node, or 14.20 for the
+// unmatched tag), `import X from "./X.xspec"` (else 14.15: no X.mdx exists),
+// and `{text("a")}` (else an edge, or 14.6: no id "a" exists). A product
+// recognizing constructs by textual pattern rather than by parse trips at
+// least one of the arm's assertions: a finding (build/check no longer exit
+// 0), a phantom node or edge, or bytes missing from the compiled output.
+//
+// `gamma` is an in-line (text-position) section (S-9; T3-3's staging
+// constraint): its opening tag stands at a line start but is followed there
+// by content, so the flow attempt fails and the paragraph fallback applies,
+// and its closing tag stands within that paragraph — at the end of the
+// code-span line — never at the start of a later line, where a flow closing
+// tag interrupts the paragraph and leaves the in-line element unclosed (the
+// fixture's former shape, a non-derivation under the grammar 14.20 fixes,
+// kept as such in `test/self/s9-fixture-well-formedness.test.ts`). The
+// second fence follows at top level: a fence interrupts a paragraph, so no
+// in-line section can span it. Both tags are deleted in place on lines that
+// keep other content — the opening tag at its line's start, the closing tag
+// at its line's end — so both lines are kept (SPEC 3).
+const SPAN_LINE = 'Inline code span: `<S id="x">{text("a")}` stays literal.';
+/** The staged `specs/A.mdx`, exported for the S-9 self-test (its exact bytes). */
+export const REMOVALS_SOURCE = [
   'import BASE from "./BASE.xspec"', // removed; line drops (SPEC 3)
   "",
   "# Removals fixture",
@@ -90,6 +161,7 @@ const REMOVALS_SOURCE = [
   "{/* an own-line comment, removed with its line */}",
   "```text",
   "fenced   content with spaces   ",
+  "<div>", // literal inside the fence: no 14.16, preserved (grammar boundary)
   "```",
   "",
   "Middle {/* in-line comment, removed in place */}word.",
@@ -99,15 +171,23 @@ const REMOVALS_SOURCE = [
   "Beta prose.",
   "</Spec>",
   "",
-  '<S id="gamma">Gamma keeps this line.', // tag deleted in place, content kept
+  '<S id="gamma">Gamma keeps this line.', // in-line tag deleted in place, content kept
   "More gamma prose.",
-  "</S>",
+  `${SPAN_LINE}</S>`, // code-span bytes literal; the closing tag deleted in place at the line's end
+  "```md", // a second fence, at top level: construct-like bytes on every line, literal
+  '<S id="x">',
+  'import X from "./X.xspec"',
+  '{text("a")}',
+  "```",
   "",
 ].join("\n");
 
 // Hand-derived (SPEC 3): each construct is deleted exactly, in place; every
 // line left empty purely by removals drops with its terminator; every other
-// line — author whitespace included — is preserved byte-for-byte.
+// line — author whitespace and the fence/code-span bytes included — is
+// preserved byte-for-byte. `gamma`'s two tag lines both keep content beside
+// the deleted tag, so both are kept; the second fence, outside every section,
+// is preserved as it is.
 const REMOVALS_COMPILED = [
   "",
   "# Removals fixture",
@@ -120,6 +200,7 @@ const REMOVALS_COMPILED = [
   "",
   "```text",
   "fenced   content with spaces   ",
+  "<div>",
   "```",
   "",
   "Middle word.", // "Middle " + "word." after exact in-place comment deletion
@@ -128,13 +209,45 @@ const REMOVALS_COMPILED = [
   "",
   "Gamma keeps this line.", // the in-place-deleted opening tag's line, kept
   "More gamma prose.",
+  SPAN_LINE, // the in-place-deleted closing tag's line, kept with the code span
+  "```md",
+  '<S id="x">',
+  'import X from "./X.xspec"',
+  '{text("a")}',
+  "```",
   "",
 ].join("\n");
+
+// The exact requirement-node universe of the T3-1 workspace (SPEC 1.5: roots
+// as bare paths, sections as `path#id`), sorted bytewise. `<S id="x">` inside
+// a fence or code span contributes nothing — exact-set equality proves it.
+const REMOVALS_NODE_IDENTITIES = [
+  "specs/A.mdx",
+  "specs/A.mdx#alpha",
+  "specs/A.mdx#beta",
+  "specs/A.mdx#gamma",
+  "specs/BASE.mdx",
+  "specs/BASE.mdx#base",
+] as const;
+
+// The exact edge universe (SPEC 5.2): `contains` from each file root to its
+// top-level sections, `depends` from the staged `d` props. No `embeds` edge
+// exists — the only `text(...)`-like bytes sit inside a fence and a code
+// span — and the fenced import contributes no edge and no import resolution.
+const REMOVALS_EDGES = [
+  { from: "specs/A.mdx", to: "specs/A.mdx#alpha", kind: "contains" },
+  { from: "specs/A.mdx", to: "specs/A.mdx#beta", kind: "contains" },
+  { from: "specs/A.mdx", to: "specs/A.mdx#gamma", kind: "contains" },
+  { from: "specs/BASE.mdx", to: "specs/BASE.mdx#base", kind: "contains" },
+  { from: "specs/A.mdx#alpha", to: "specs/BASE.mdx#base", kind: "depends" },
+  { from: "specs/A.mdx#alpha", to: "specs/A.mdx#beta", kind: "depends" },
+  { from: "specs/A.mdx#beta", to: "specs/BASE.mdx#base", kind: "depends" },
+] as const;
 
 const T3_1 = defineProductTest({
   id: "T3-1",
   title:
-    "imports, `<S>`/`<Spec>` opening and closing tags with all their props (`id`, `d`, `coverage`, `tags`), and MDX comments are removed by exact textual deletion in place; tables, code fences, trailing spaces, and blank lines are preserved byte-for-byte (SPEC 3, 2.7)",
+    "imports, `<S>`/`<Spec>` opening and closing tags with all their props (`id`, `d`, `coverage`, `tags`), and MDX comments are removed by exact textual deletion in place; tables, code fences, trailing spaces, and blank lines are preserved byte-for-byte; grammar boundary: construct-like bytes inside fenced code blocks and an inline code span are literal text — no node, no edge, no finding, preserved byte-for-byte (SPEC 3, 2.7, 14.16, 14.20)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -147,17 +260,59 @@ const T3_1 = defineProductTest({
       await buildOk(
         product,
         workspace,
-        "T3-1 `build` with `markdown: { emit: true }`",
+        "T3-1 `build` with `markdown: { emit: true }` — the fenced and " +
+          "code-span construct-like bytes trigger no finding of any kind " +
+          "(SPEC 3, 2.7: constructs exist only where the MDX parse yields them)",
       );
       await assertFileBytes(
         workspace.path("specs/A.md"),
         REMOVALS_COMPILED,
-        "T3-1 emitted specs/A.md — constructs deleted exactly in place, everything else preserved byte-for-byte (SPEC 3)",
+        "T3-1 emitted specs/A.md — constructs deleted exactly in place, everything else (fence and code-span bytes included) preserved byte-for-byte (SPEC 3)",
       );
       await assertFileBytes(
         workspace.path("specs/BASE.md"),
         REMOVALS_BASE_COMPILED,
         "T3-1 emitted specs/BASE.md (SPEC 3)",
+      );
+
+      // Grammar boundary: `check` reports no finding of any kind either.
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        "T3-1 `check` — the fenced and code-span construct-like bytes " +
+          "trigger no finding of any kind (SPEC 2.7, 14.16, 14.20)",
+      );
+
+      // The construct-like bytes create no node: the reported requirement
+      // nodes are exactly the staged roots and sections (SPEC 1.5, 11.1) —
+      // in particular no node spells the fenced/code-span `id` "x".
+      const nodesLabel =
+        "T3-1 `query nodes` — fenced and code-span construct-like bytes create no node (SPEC 2.7, 11.1)";
+      const identities = decodeNodeIdentityRowsReport(
+        await runJson(product, workspace, ["query", "nodes"], nodesLabel),
+        nodesLabel,
+      );
+      assertSameJson(
+        [...identities].sort(),
+        [...REMOVALS_NODE_IDENTITIES],
+        `${nodesLabel}: the reported node-identity set`,
+      );
+
+      // …and no edge: the reported edges are exactly the staged `contains`
+      // and `depends` universe (SPEC 5.2) — the fenced import and the
+      // fenced/code-span `{text("a")}` bytes contribute none.
+      const edgesLabel =
+        "T3-1 `query edges` — fenced and code-span construct-like bytes create no edge (SPEC 2.7, 5.2)";
+      const edges = decodeEdgesReport(
+        await runJson(product, workspace, ["query", "edges"], edgesLabel),
+        edgesLabel,
+      );
+      assertEdgeSetEqual(
+        edges,
+        REMOVALS_EDGES,
+        `${edgesLabel}: the reported edge set`,
       );
     } finally {
       await workspace.dispose();
@@ -253,6 +408,7 @@ const T3_2 = defineProductTest({
 const NBSP = "\u{00A0}";
 const NEL = "\u{0085}";
 const LS = "\u{2028}";
+const PS = "\u{2029}";
 
 // One fixture, one arm per line, with distinct kept marker lines between arms
 // so a misplaced drop is diagnosed precisely. LF terminators throughout, a
@@ -261,8 +417,52 @@ const LS = "\u{2028}";
 // subtree text, SPEC 1.1) are defined before use; embeddings sit at root
 // level, so the root embeds its own root-level sections — forward edges only,
 // no cycle (SPEC 5.3 forbids embedding an *ancestor*).
+// Multi-line constructs (SPEC 3: a terminator among a removed construct's own
+// characters is deleted with it, joining the lines it spanned into one, judged
+// by the drop rule as a whole): the two multi-line comments, and TEST-SPEC
+// T3-3's three multi-line opening-tag arms — each a three-line tag whose two
+// interior terminators are among its own characters: the own-lines drop form
+// (`<S`, LF, `  id="mt1"`, LF, `>` alone on its lines, a flow tag; the
+// merged line is left empty purely by the removal and drops), the flow-start
+// kept form with residue after the `>` alone (`> bar</S>` its third line;
+// ` bar` kept with its terminator), and the in-line kept form with residue
+// on both sides (`foo <S`, LF, `  id="mt3"`, LF, `  coverage="required">
+// bar</S>`, merging to `foo  bar`). Every shape derives under the MDX 3
+// grammar SPEC 14.20 fixes (TEST-SPEC S-9 gates it; AGENTS.md's parser
+// recipe checks it): a tag opening after text on its line is an in-line tag
+// inside a paragraph, whose later lines — the section's included — are
+// paragraph-continuation lines, none beginning a construct that interrupts
+// a paragraph (a `>` whatever its indentation, among others), with the
+// closing tag standing within that paragraph, never at the start of a later
+// line, where it is a flow tag that interrupts the paragraph and leaves the
+// in-line element unclosed — so both kept forms close on the residue's
+// line; a tag opening at line start may end on a bare `>` line (the concrete
+// flow attempt takes it, fails on the residue, and the fallback paragraph
+// spans all three lines). For the same reason a blank line ends each ESM
+// block — MDX 3's ESM construct runs to a blank line, so an import directly
+// followed by text does not derive — and a blank line precedes the second
+// one, which interrupts no paragraph.
+// The class-boundary arms stage every code point TEST-SPEC T3-3 names:
+// U+00A0, U+0085, U+2028 (the three §VIOL-MD-CLASS widens) and U+2029 (which
+// neither violator touches — its arm is expected unmoved under both). The
+// classes hold inside an ESM block too — the ESM-block arm, which CONF-MD's
+// scope names: a second ESM block spelling two imports on one physical line
+// separated by U+2028, an ECMAScript line terminator, so the block derives
+// under 14.20 (AGENTS.md's parser recipe: one `mdxjsEsm` node holding two
+// `ImportDeclaration`s); each declaration is removed by its own characters
+// alone (SPEC 3), and the line, left holding U+2028 plus its terminator, is
+// kept — U+2028 is no whitespace and no terminator of 3 (1.4) — where a
+// product applying ECMAScript's line terminators to line dropping drops it
+// (§VIOL-MD-CLASS's expected failure; §VIOL-MD-CR leaves it unmoved). Each
+// import resolves to a base file of its own (`specs/BASE2.mdx`,
+// `specs/BASE3.mdx`), the bindings unused as `BASE` is (2.1).
+const ESM_ARM_BASE2_SOURCE = '<S id="base2">\nBase two.\n</S>\n';
+const ESM_ARM_BASE3_SOURCE = '<S id="base3">\nBase three.\n</S>\n';
+const ESM_BLOCK_LINE =
+  'import B2 from "./BASE2.xspec"' + LS + 'import B3 from "./BASE3.xspec"';
 const DROP_SOURCE = [
   'import BASE from "./BASE.xspec"', // drop: a line holding only an import
+  "", // kept: already empty in the source — and the ESM block's end (14.20)
   "K1 after-import",
   'defs: x <S id="sp"> </S> y', // kept: removal-affected line retaining content
   '<S id="empty" />', // drop: left empty purely by removals
@@ -287,21 +487,42 @@ const DROP_SOURCE = [
   "K10 after-nel",
   "{/* c */}" + LS, // kept: left holding only U+2028 — not whitespace (1.4)
   "K11 after-ls",
+  "{/* c */}" + PS, // kept: left holding only U+2029 — not whitespace (1.4)
+  "K12 after-ps",
   "{/* c */}\t", // drop: left holding only U+0009 — whitespace (1.4)
-  "K12 after-tab-drop",
+  "K13 after-tab-drop",
   "{/* c */} ", // drop: left holding only U+0020 — whitespace (1.4)
-  "K13 after-space-drop",
+  "K14 after-space-drop",
   "foo {/* first", // multi-line comment with retained residue on both sides…
   "tail */} bar", // …deleted exactly: lines merge to "foo  bar"
-  "K14 after-merge",
+  "K15 after-merge",
   "{/* own-lines", // own-lines multi-line comment (empty residues)…
   "multiline */}", // …merged line left empty purely by removals → drops
-  "K15 final",
+  "K16 after-own-lines",
+  "<S", // a multi-line opening tag on its own lines: `<S`, LF, `  id="mt1"`,…
+  '  id="mt1"', // …LF, `>` — one construct whose two interior terminators are
+  ">", // deleted with it; the three lines merge into one, left empty → drops
+  "mt1 body", // kept: a line keeping content keeps its terminator
+  "</S>", // drop: a line holding only a closing tag
+  "K17 after-multiline-tag-drop",
+  "<S", // the flow-start kept form: a tag at line start with retained…
+  '  id="mt2"', // …non-whitespace after its `>` alone; the three lines merge
+  "> bar</S>", // into one, kept with its residue ` bar` and its terminator
+  "K18 after-flow-start-kept",
+  "foo <S", // the in-line kept form: retained non-whitespace before the…
+  '  id="mt3"', // …`<S` and after the `>`; the tag's two interior terminators
+  '  coverage="required"> bar</S>', // deleted with it: merges to `foo  bar`
+  "K19 after-inline-kept",
+  "", // kept: already empty in the source — the second ESM block's lead-in
+  ESM_BLOCK_LINE, // the ESM-block arm: both imports removed by their own characters; kept holding U+2028 alone
+  "", // kept: already empty in the source — the second ESM block's end (14.20)
+  "K20 final",
   "",
 ].join("\n");
 
 // Hand-derived compiled output: exactly the kept lines above, in order.
 const DROP_COMPILED = [
+  "", // the blank line ending the ESM block: already empty, kept
   "K1 after-import",
   "defs: x   y", // both of sp's tags deleted in place; the space content stays
   "K2 after-defs",
@@ -321,24 +542,38 @@ const DROP_COMPILED = [
   "K10 after-nel",
   LS,
   "K11 after-ls",
-  "K12 after-tab-drop",
-  "K13 after-space-drop",
+  PS,
+  "K12 after-ps",
+  "K13 after-tab-drop",
+  "K14 after-space-drop",
   "foo  bar", // the comment's own line terminator deleted with it: one line
-  "K14 after-merge",
-  "K15 final",
+  "K15 after-merge",
+  "K16 after-own-lines",
+  "mt1 body", // the tag's three lines merged into one empty line, dropped
+  "K17 after-multiline-tag-drop",
+  " bar", // mt2: the tag's three lines merged into one, kept with its residue
+  "K18 after-flow-start-kept",
+  "foo  bar", // mt3: the merged line keeps the residue on both sides
+  "K19 after-inline-kept",
+  "", // the blank line before the second ESM block: already empty, kept
+  LS, // the ESM-block arm: U+2028 alone, kept with its terminator — not whitespace (1.4)
+  "", // the blank line ending the second ESM block: already empty, kept
+  "K20 final",
   "",
 ].join("\n");
 
 const T3_3 = defineProductTest({
   id: "T3-3",
   title:
-    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028 are not whitespace while U+0009/U+0020 are; multi-line comment deletion merges the surrounding residues (SPEC 3, 1.4)",
+    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028/U+2029 are not whitespace while U+0009/U+0020 are, inside an ESM block too (two imports on one physical line separated by U+2028 leave their line holding U+2028 alone, kept with its terminator); a multi-line comment and a multi-line opening tag (own-lines, flow-start, and in-line forms) are each deleted exactly, merging the lines they span into one — dropped when left empty purely by the removal, kept with its residue otherwise (SPEC 3, 1.4)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": EMIT_TRUE_CONFIG,
         "specs/A.mdx": DROP_SOURCE,
         "specs/BASE.mdx": REMOVALS_BASE_SOURCE,
+        "specs/BASE2.mdx": ESM_ARM_BASE2_SOURCE,
+        "specs/BASE3.mdx": ESM_ARM_BASE3_SOURCE,
       },
     });
     try {
@@ -350,7 +585,7 @@ const T3_3 = defineProductTest({
       await assertFileBytes(
         workspace.path("specs/A.md"),
         DROP_COMPILED,
-        "T3-3 emitted specs/A.md — every drop arm, counter-case, class boundary, and multi-line-construct merge of the line-drop rule (SPEC 3, 1.4)",
+        "T3-3 emitted specs/A.md — every drop arm, counter-case, class boundary (the ESM-block arm included), and multi-line-construct merge of the line-drop rule (SPEC 3, 1.4)",
       );
     } finally {
       await workspace.dispose();
@@ -458,9 +693,18 @@ const T3_5 = defineProductTest({
 // T3-6
 // ---------------------------------------------------------------------------
 
-const SCOPE_A_SOURCE = '<S id="a">\nAlpha.\n</S>\n';
+// T3-6 stages both sources in each variant's fresh workspace, the second
+// and third after the first variant's `build`: staged-source records, judged
+// before any product exists (S-9, test/self/s9-staged-sources.test.ts).
+const SCOPE_A_SOURCE = stagedMdx(
+  "T3-6 specs/A.mdx",
+  '<S id="a">\nAlpha.\n</S>\n',
+);
 const SCOPE_A_COMPILED = "Alpha.\n";
-const SCOPE_B_SOURCE = '<S id="b">\nBeta.\n</S>\n';
+const SCOPE_B_SOURCE = stagedMdx(
+  "T3-6 specs/sub/B.mdx",
+  '<S id="b">\nBeta.\n</S>\n',
+);
 const SCOPE_B_COMPILED = "Beta.\n";
 
 /**
@@ -482,8 +726,13 @@ async function assertNotEmitted(
   }
 }
 
-// The three `markdown` variants of the emission-scope matrix (SPEC 7.3, 13.2).
-const EMISSION_VARIANTS = [
+// The three `markdown` variants of the emission-scope matrix (SPEC 7.3, 13.2),
+// each configuration a staged-source record (above).
+const EMISSION_VARIANTS: readonly {
+  readonly key: string;
+  readonly config: StagedTs;
+  readonly emits: boolean;
+}[] = [
   { key: "`markdown` absent", config: SPECS_ONLY_CONFIG, emits: false },
   {
     key: "`markdown: { emit: false }`",
@@ -491,7 +740,7 @@ const EMISSION_VARIANTS = [
     emits: false,
   },
   { key: "`markdown: { emit: true }`", config: EMIT_TRUE_CONFIG, emits: true },
-] as const;
+];
 
 const T3_6 = defineProductTest({
   id: "T3-6",
@@ -544,6 +793,321 @@ const T3_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T3-7
+// ---------------------------------------------------------------------------
+
+// ESM-block comments and the `;`-terminated import (SPEC 3, 2.1, 2.7). An
+// import's removal is its declaration's own characters alone, so a
+// JavaScript comment beside it in its ESM block is no MDX comment (2.7: an
+// MDX comment is an empty expression container) — it stays as content, and
+// the line-drop rule of 3 then judges the line with the comment's bytes
+// among its remaining content. Four blocks in one file (`specs/main.mdx`),
+// each ended by a blank line (MDX 3's ESM construct runs to a blank line,
+// 14.20; AGENTS.md's parser recipe) and followed by a kept marker line so a
+// misplaced drop is diagnosed precisely, every declaration valid and used —
+// the section `s` depends on one node of each imported file (2.1, 2.2):
+// - the trailing-comment arm: `import A from "./A.xspec" // note` — the
+//   declaration's characters deleted, the line is left ` // note` plus its
+//   terminator: non-whitespace content, kept, not dropped as
+//   whitespace-only;
+// - the own-line arm: `import D …`, `// note`, `import E …` on consecutive
+//   lines of one block — the two import lines are left empty purely by the
+//   removals and drop with their terminators; the comment line survives
+//   byte-for-byte with its terminator;
+// - the block-comment arm: `import F …` heading the block (an ESM block
+//   begins with a declaration at its first line's start, 14.20) and
+//   `/* c */ import B from "./B.xspec"` its second line — the line keeps
+//   `/* c */ ` and its terminator;
+// - the terminator arm: `import C from "./C.xspec";` alone on its line —
+//   the `;` ends ECMAScript's ImportDeclaration (14.20), so it is among the
+//   declaration's own characters: removed with it, the line dropped as left
+//   empty purely by the removal. A product deleting through the specifier
+//   literal alone leaves a stray `;` line as content and fails the byte
+//   assertion.
+// The same bytes are the root's own text (SPEC 1.6: the root's contribution
+// with the section's excised — the section's opening-tag line drops inside
+// its construct, its closing-tag line and the comment line drop after it),
+// read through `query node` and `view --text`; `view`'s `comments` lists the
+// one MDX comment the file stages (`{/* mdx */}` on its own line, dropped
+// from the output per 3) and none of the JavaScript comments (11.4: MDX
+// comments alone); and every import is listed under `imports` with its
+// declaration's byte range, the terminator arm's ending after the `;`
+// (11.4; T11.4-4), its binding name, and its resolved target. Every staged
+// shape derives under the grammar 14.20 fixes (S-9: the workspace builder
+// judges each file at staging; the S-9 self-test judges the exported
+// source). LF terminators only and no exotic byte anywhere (the module's
+// certification constraints, though T3-7 lies outside CONF-MD's scope: its
+// `view` and `query node` surfaces are not served there).
+
+/**
+ * A line of an ESM block: plain text (a comment line), or an import
+ * declaration with the bytes beside it on its line — `before` the comment
+ * preceding it in the block-comment arm, `after` the comment following it
+ * in the trailing-comment arm, empty otherwise. `declaration` is the
+ * declaration's own characters, a spelled `;` included (SPEC 3, 14.20);
+ * `binding` its default binding's identifier, also its target file's stem
+ * (`specs/<binding>.mdx`, holding the section `<binding, lower-cased>`).
+ */
+type EsmBlockLine =
+  | string
+  | {
+      readonly before: string;
+      readonly declaration: string;
+      readonly binding: string;
+      readonly after: string;
+    };
+
+interface EsmBlockArm {
+  readonly name: string;
+  /** The block's lines, each LF-terminated; a blank line then ends it. */
+  readonly lines: readonly EsmBlockLine[];
+  /** The block's compiled lines, hand-derived per SPEC 3, each LF-terminated. */
+  readonly compiled: readonly string[];
+  /** The kept marker line following the block's blank line. */
+  readonly marker: string;
+}
+
+function importLine(
+  binding: string,
+  spelling: {
+    readonly before?: string;
+    readonly after?: string;
+    readonly semicolon?: boolean;
+  } = {},
+): EsmBlockLine {
+  return {
+    before: spelling.before ?? "",
+    declaration: `import ${binding} from "./${binding}.xspec"${spelling.semicolon === true ? ";" : ""}`,
+    binding,
+    after: spelling.after ?? "",
+  };
+}
+
+const T3_7_ARMS: readonly EsmBlockArm[] = [
+  {
+    name: "trailing line comment",
+    lines: [importLine("A", { after: " // note" })],
+    // The declaration deleted; ` // note` is non-whitespace content, so the
+    // line is kept with its terminator.
+    compiled: [" // note"],
+    marker: "K1 after-trailing-comment",
+  },
+  {
+    name: "own-line line comment between two imports",
+    lines: [importLine("D"), "// note", importLine("E")],
+    // Both import lines dropped; the comment line survives with its
+    // terminator.
+    compiled: ["// note"],
+    marker: "K2 after-own-line-comment",
+  },
+  {
+    name: "block comment before the second line's import",
+    lines: [importLine("F"), importLine("B", { before: "/* c */ " })],
+    // The first line dropped; the second keeps `/* c */ ` and its terminator.
+    compiled: ["/* c */ "],
+    marker: "K3 after-block-comment",
+  },
+  {
+    name: "semicolon-terminated import",
+    lines: [importLine("C", { semicolon: true })],
+    // The `;` removed with the declaration; the line, left empty purely by
+    // the removal, drops with its terminator.
+    compiled: [],
+    marker: "K4 after-semicolon",
+  },
+];
+
+const T3_7_FILE = "specs/main.mdx";
+const T3_7_EMITTED = "specs/main.md";
+const T3_7_SECTION_BODY = "Body.\n";
+const T3_7_MDX_COMMENT = "{/* mdx */}";
+
+interface T37Fixture {
+  /** The staged `specs/main.mdx`. */
+  readonly source: string;
+  /** Its compiled Markdown — the root's subtree text (SPEC 3, 1.6). */
+  readonly compiled: string;
+  /** The root's own text: the compiled output with the section's excised. */
+  readonly rootOwnText: string;
+  /** The expected `imports` member, in document order (SPEC 11.4). */
+  readonly imports: readonly ViewImportEntry[];
+  /** The expected `comments` member: the one MDX comment (SPEC 11.4). */
+  readonly comments: readonly SourceRange[];
+  /** The imported target files, path to source. */
+  readonly targets: Readonly<Record<string, string>>;
+}
+
+/**
+ * Compose the fixture from the arms: each block's lines, a blank line, its
+ * marker line, a blank line; then the section using every binding, and the
+ * MDX comment. The compiled expectation is assembled the same way from the
+ * arms' hand-derived compiled lines, and each declaration's byte range is
+ * recorded as it is laid down (SPEC 1.7).
+ */
+function composeT37Fixture(arms: readonly EsmBlockArm[]): T37Fixture {
+  let source = "";
+  let compiled = "";
+  const imports: ViewImportEntry[] = [];
+  const bindings: string[] = [];
+  const pos = (): number => Buffer.byteLength(source, "utf8");
+  for (const arm of arms) {
+    for (const line of arm.lines) {
+      if (typeof line === "string") {
+        source += `${line}\n`;
+        continue;
+      }
+      source += line.before;
+      const start = pos();
+      source += line.declaration;
+      imports.push({
+        range: { start, end: pos() },
+        name: line.binding,
+        target: `specs/${line.binding}.mdx`,
+      });
+      bindings.push(line.binding);
+      source += `${line.after}\n`;
+    }
+    source += `\n${arm.marker}\n\n`;
+    compiled += `${arm.compiled.map((line) => `${line}\n`).join("")}\n${arm.marker}\n\n`;
+  }
+  const rootOwnText = compiled;
+  const references = bindings
+    .map((binding) => `${binding}.${binding.toLowerCase()}`)
+    .join(", ");
+  source += `<S id="s" d={[${references}]}>\n${T3_7_SECTION_BODY}</S>\n`;
+  const commentStart = pos();
+  source += `${T3_7_MDX_COMMENT}\n`;
+  compiled += T3_7_SECTION_BODY;
+  const targets = Object.fromEntries(
+    bindings.map((binding) => [
+      `specs/${binding}.mdx`,
+      `<S id="${binding.toLowerCase()}">\n${binding} text.\n</S>\n`,
+    ]),
+  );
+  return {
+    source,
+    compiled,
+    rootOwnText,
+    imports,
+    comments: [
+      {
+        start: commentStart,
+        end: commentStart + Buffer.byteLength(T3_7_MDX_COMMENT, "utf8"),
+      },
+    ],
+    targets,
+  };
+}
+
+const T3_7_FIXTURE = composeT37Fixture(T3_7_ARMS);
+/** The staged `specs/main.mdx`, exported for the S-9 self-test (its exact bytes). */
+export const T3_7_SOURCE = T3_7_FIXTURE.source;
+
+const T3_7 = defineProductTest({
+  id: "T3-7",
+  title:
+    "JavaScript comments inside an ESM block are content, not MDX comments — an import's removal is its declaration's characters alone: a line keeps its trailing ` // note` and terminator, an own-line `// note` between two imports of one block survives while the import lines drop, and a line keeps the `/* c */ ` preceding its import; a semicolon-terminated declaration's `;` is among its own characters, its line dropped as left empty purely by the removal; the same bytes are the root's own text (`query node`, `view --text`), `view`'s `comments` lists none of them, and every import is listed under `imports` with its declaration range, the `;`-terminated one's ending after the `;` (SPEC 3, 2.1, 2.7, 1.6, 11.4)",
+  run: async (product) => {
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": EMIT_TRUE_CONFIG,
+        [T3_7_FILE]: T3_7_FIXTURE.source,
+        ...T3_7_FIXTURE.targets,
+      },
+    });
+    try {
+      await buildOk(
+        product,
+        workspace,
+        "T3-7 `build` of the ESM-block comment fixture — every block well-formed, every import valid and used, no finding, exit 0 (SPEC 3, 2.1, 14.20)",
+      );
+      await assertFileBytes(
+        workspace.path(T3_7_EMITTED),
+        T3_7_FIXTURE.compiled,
+        "T3-7 emitted specs/main.md — each import removed by its declaration's own characters alone, a spelled `;` included: the trailing ` // note` kept on its line, the own-line `// note` surviving between two dropped import lines, `/* c */ ` kept before a removed import, and the `;`-terminated import's line dropped (SPEC 3, 2.7)",
+      );
+
+      // The same bytes are the root's own text (SPEC 1.6): `query node`.
+      const nodeLabel = "T3-7 `query node specs/main.mdx` (the root)";
+      const node = decodeNodeReport(
+        await runJson(
+          product,
+          workspace,
+          ["query", "node", T3_7_FILE],
+          nodeLabel,
+        ),
+        nodeLabel,
+      );
+      if (node.identity !== T3_7_FILE) {
+        fail(
+          `${nodeLabel}: expected the report to be about ${JSON.stringify(T3_7_FILE)} (SPEC 1.5), ` +
+            `got identity ${JSON.stringify(node.identity)}`,
+        );
+      }
+      assertBytesEqual(
+        node.ownText,
+        T3_7_FIXTURE.rootOwnText,
+        `${nodeLabel}: own text — the JavaScript comments' bytes are content of the root, the section's contribution excised (SPEC 1.6, 3)`,
+      );
+      assertBytesEqual(
+        node.subtreeText,
+        T3_7_FIXTURE.compiled,
+        `${nodeLabel}: subtree text — for the root, the entire compiled output (SPEC 1.6)`,
+      );
+
+      // `view --text`: the root's own text again; `comments` the MDX comment
+      // alone; `imports` every declaration with its range (SPEC 11.4).
+      const viewContext = "T3-7 bare `view --text`";
+      const report = decodeViewReport(
+        await runJson(
+          product,
+          workspace,
+          ["view", "--text"],
+          `${viewContext}: a finding-free answer, exit 0 (SPEC 11.2, 12.0)`,
+        ),
+        { text: true },
+        viewContext,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${viewContext}: every block well-formed, every import valid — no finding (SPEC 2.1, 14.20)`,
+      );
+      const view = report.views.find(
+        (candidate) => candidate.file === T3_7_FILE,
+      );
+      if (view === undefined) {
+        fail(
+          `${viewContext}: no per-file view for ${T3_7_FILE} among ${JSON.stringify(report.views.map((candidate) => candidate.file))} (SPEC 11.4)`,
+        );
+      }
+      assertSameJson(
+        view.imports,
+        T3_7_FIXTURE.imports,
+        `${viewContext}: \`imports\` lists every declaration in document order with its byte-exact range — the \`;\`-terminated one's ending after the \`;\` — its binding name, and its resolved target (SPEC 11.4, 1.7, 2.1; T11.4-4)`,
+      );
+      assertSameJson(
+        view.comments,
+        T3_7_FIXTURE.comments,
+        `${viewContext}: \`comments\` lists the one MDX comment by its full braced container and none of the JavaScript comments — MDX comments alone (SPEC 11.4, 2.7)`,
+      );
+      if (typeof view.root.ownText !== "string") {
+        fail(
+          `${viewContext}: the root's own text under \`--text\` should be a plain string (SPEC 11.4, 11.2), got ${JSON.stringify(view.root.ownText)}`,
+        );
+      }
+      assertBytesEqual(
+        view.root.ownText,
+        T3_7_FIXTURE.rootOwnText,
+        `${viewContext}: the root's own text — the same bytes as \`query node\` reports, the JavaScript comments among them (SPEC 11.4, 1.6, 3)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §3, in canonical ID order (SUITE-11). */
 export const section3Tests: readonly ProductTestEntry[] = [
   T3_1,
@@ -552,4 +1116,5 @@ export const section3Tests: readonly ProductTestEntry[] = [
   T3_4,
   T3_5,
   T3_6,
+  T3_7,
 ];

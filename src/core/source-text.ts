@@ -9,6 +9,8 @@
 // as a byte offset into the file.
 
 import type { Finding } from "./findings.js";
+import { locatedFinding } from "./findings.js";
+import type { PathText } from "./path-text.js";
 
 /** Decoder for byte sequences already validated by `firstInvalidUtf8`. */
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
@@ -70,6 +72,21 @@ export function firstInvalidUtf8(bytes: Uint8Array): number {
   return -1;
 }
 
+/**
+ * Whether `bytes` begin with the UTF-8 byte-order mark, `EF BB BF` — the
+ * leading bytes a source file (SPEC 1.6, 14.20) and the configuration file
+ * (SPEC 7, 14.14) must not begin with. Judged on the bytes, never on
+ * decoded text: a decoder may strip the mark silently.
+ */
+export function beginsWithByteOrderMark(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  );
+}
+
 /** The decoded text, or the file's 14.20 finding (SPEC 1.6). */
 export type DecodedSource =
   | { readonly ok: true; readonly text: string }
@@ -82,42 +99,38 @@ export type DecodedSource =
  * decoded content, exactly.
  */
 export function decodeSourceBytes(
-  path: string,
+  path: PathText,
   bytes: Uint8Array,
 ): DecodedSource {
   // SPEC 1.6: a source beginning with a byte-order mark is unparseable.
-  if (
-    bytes.length >= 3 &&
-    bytes[0] === 0xef &&
-    bytes[1] === 0xbb &&
-    bytes[2] === 0xbf
-  ) {
+  if (beginsWithByteOrderMark(bytes)) {
     return {
       ok: false,
-      finding: {
-        condition: 20,
-        file: path,
-        range: { start: 0, end: 3 },
-        message:
-          "unparseable source: the file begins with a UTF-8 byte-order " +
+      finding: locatedFinding(
+        20,
+        "unparseable source: the file begins with a UTF-8 byte-order " +
           "mark (bytes 0-3) — source files are BOM-free UTF-8; remove the " +
           "byte-order mark (SPEC 1.6, 14.20)",
-      },
+        // SPEC 14: one zero-length range at the failure's offset, 0 for a
+        // byte-order mark.
+        [{ file: path, range: { start: 0, end: 0 } }],
+      ),
     };
   }
   const invalidAt = firstInvalidUtf8(bytes);
   if (invalidAt !== -1) {
     return {
       ok: false,
-      finding: {
-        condition: 20,
-        file: path,
-        range: { start: invalidAt, end: invalidAt + 1 },
-        message:
-          `unparseable source: the file is not valid UTF-8 (first invalid ` +
+      finding: locatedFinding(
+        20,
+        `unparseable source: the file is not valid UTF-8 (first invalid ` +
           `byte at offset ${String(invalidAt)}) — re-encode the file as ` +
           `UTF-8 (SPEC 1.6, 14.20)`,
-      },
+        // SPEC 14: one zero-length range at the byte length of the longest
+        // well-formed UTF-8 prefix — the first byte of the first ill-formed
+        // sequence, malformed or truncated by the file's end.
+        [{ file: path, range: { start: invalidAt, end: invalidAt } }],
+      ),
     };
   }
   return { ok: true, text: utf8Decoder.decode(bytes) };

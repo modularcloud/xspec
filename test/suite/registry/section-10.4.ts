@@ -1,5 +1,5 @@
 // TEST-SPEC §10.4 (relevant hashes and invalidation) — SUITE-35:
-// T10.4-1…T10.4-5.
+// T10.4-1…T10.4-8.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -18,18 +18,50 @@
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - Invalidation is observed through `review status --json` rows (read-time
-//   invalidation applies to every read, SPEC 10.4); T10.4-5 additionally pins
-//   all four reads — `status`, `next`, `show`, `export` — on both the
-//   invalidated reporting and session-file byte-identity.
+//   invalidation applies to every read, SPEC 10.4); T10.4-2's journal arm
+//   also reads `show` and `export`, whose payloads present the scope node's
+//   absence; T10.4-3 also reads `show`, `next --json`, and `export`, whose
+//   payloads present the current context set as `context` and `origin`,
+//   `blockedBy`, and `reason` as last assigned, byte-comparing the session
+//   file around each read after its context-set edit; T10.4-5 pins all
+//   four reads — `status`, `next`, `show`, `export` — on both the
+//   invalidated reporting and session-file byte-identity; and T10.4-6 also
+//   reads `show` and `export`, whose payloads present an item the
+//   generators no longer produce with its `context` as last assigned, and
+//   its `reason` as last assigned; T10.4-7 also reads `show` and
+//   `export`, whose payloads present its current context set as `context`
+//   and its `origin` as last assigned, by a re-derivation, each origin
+//   entry's after side under the node's current presence; and T10.4-8
+//   reads every status it asserts through `status`, `show`, and `export`
+//   alike — its premises through `status` alone — and (a)'s stored status
+//   through `list` (SPEC 10.7).
+// - `reason`'s composition is unpinned (SPEC 10.2): T10.4-3 and T10.4-6
+//   compare it byte for byte between captures from the same surface, its
+//   content never asserted.
 // - Every sensitivity arm asserts its staging premises via `query node`
 //   captures bracketing the edit: the hashes the arm targets must change and
 //   the hashes it must isolate must not (SPEC 5.5), and every control edit
 //   must demonstrably change the edited node — so no arm passes or fails for
-//   the wrong reason (H-8).
+//   the wrong reason (H-8). T10.4-6 and T10.4-7 check their hash premises
+//   at every staged state against a capture at the baseline; T10.4-8
+//   checks each edit's against a capture taken right after the resolves it
+//   follows.
 // - Re-resolves between arms use `--status no-change` (no re-derivation,
 //   SPEC 10.5), so each arm starts from a freshly recorded state matching the
-//   graph; T10.4-4's reintroduction arm is the one place `--status updated`
-//   (re-derivation) is staged, exactly as its TEST-SPEC text prescribes.
+//   graph; T10.4-2's journal arm, T10.4-4's reintroduction and
+//   decomposition arms, T10.4-6's (b), T10.4-7's (a) and (b), and
+//   T10.4-8's (a) (p's item, inside T10.5-5's exported staging) and (c)
+//   (P.b's item) are the places `--status updated` (re-derivation) is
+//   staged, exactly as their TEST-SPEC texts prescribe.
+// - T10.4-4's decomposition arm reads the recorded decomposition from
+//   `export`'s recorded decompositions, which the review adapter decodes to
+//   each one's kind and scope node (helpers/adapters/review.ts), and its
+//   split's outcome from `status` and `export` as staging premises; it
+//   resolves the decomposition's two items with distinct statuses before the
+//   rename (`no-change`, `skipped`), so that keeping their statuses is
+//   discriminating, as the rename arm's distinct statuses are, and asserts
+//   the rename's purity (6.2: every hash byte-identical) as a premise, so no
+//   status it asserts turns on a hash.
 // - "Recorded state intact" across a journaled rename/move (T10.4-4) is
 //   asserted as: statuses preserved and not invalidated, plus the reported
 //   `current` record still holding the pre-operation hash values captured via
@@ -40,16 +72,80 @@
 //   (`.xspec/reviews/<name>.json`, SPEC 10.1) around each read — the object
 //   whose byte-identity SPEC 10.4 pins ("reads never write the session
 //   file") — not the whole workspace, whose other files are governed by
-//   other tests (T6.1-1, T13.4-5, T12.0-11).
-// - Fixture edits are followed by an explicit `build` before any read, so no
-//   read relies on the 13.3 refresh path (that path is T13.3-*'s business).
+//   other tests (T6.1-1, T13.4-5, T12.0-11). Those byte-compares are its one
+//   observation that the reads persist nothing (CERTIFICATIONS.md
+//   §VIOL-CORE-PERSISTREADS's staging constraint): once a read has computed
+//   invalidation, no `review list` runs — its counts read stored statuses
+//   (SPEC 10.7) — and the staleness stands until the closing mutating
+//   `resolve`, so no answer turns on the stored status.
+// - Fixture edits — T10.4-2's manual deletion of `.xspec/journal` included —
+//   are followed by an explicit `build` before any read, so no read relies
+//   on the 13.3 refresh path (that path is T13.3-*'s business).
+// - T10.4-7's fixture is exported for the arms T10.2-2 and T10.7-12 stage
+//   over T10.4-7(a)'s shape: its paths, identities, and initial sources,
+//   d2's source template, and the session and state stagings, which
+//   assert staging premises alone — and T10.7-12's second d2 edit, a record
+//   made here from that template: section-10.7-ii.ts, which this module
+//   imports at load (T10.4-8's stagings), imports this one only when its
+//   arm runs, so no module cycle closes.
+// - T10.4-8 stages each arm through another test's exported staging —
+//   T10.5-5's newly visited p.q (`stageT1055NewlyVisitedQ`,
+//   section-10.5.ts), T10.7-9's audit session (`runT1079AuditSplits`) and
+//   deleted children (`runT1079DeletedChildrenArm`, section-10.7-ii.ts) —
+//   whose own assertions (T10.7-9's (a)–(e) and (f) among them) run on the
+//   way as staging; in (a) and (b) its premises then read the session it
+//   continues: each item to resolve present, `unresolved`, and unblocked,
+//   and each item resolved `no-change` reading so right after its resolve
+//   — its fresh recording matches the graph (10.4) — so a later
+//   `invalidated` is the edit's.
+//
+// Sources staged after a body's first product invocation — T10.4-1's
+// sensitivity edits (each scenario's former `write()` closure over mutable
+// version variables enumerated into its successive states, in staging order,
+// every state carrying the earlier edits forward), T10.4-2's presence flips,
+// T10.4-3's context-set edit, T10.4-4's post-rename deletion, T10.4-5's
+// staleness edit, T10.4-6's upstream edits and reverts, T10.4-7's upstream
+// edits and removal edit, T10.4-8's p.q and N.c.y edits, and the second d2
+// edit T10.7-12 stages over T10.4-7(a)'s fixture — are staged-source
+// records (helpers/staged-mdx.ts, S-9: judged before any product exists),
+// the same template calls moved to module level (T10.4-8's spelled by the
+// exported source templates of the stagings it continues). A staging that
+// precedes a body's first invocation stays plain (S-7's sweep reaches it
+// against the stub): T10.4-1's subtree-coherence pre-`create` edit and
+// T10.4-3's a.k1 edit, each between `gitCommitAll` and the first `build`,
+// and each body's first workspace's initial files but T10.4-7's, whose
+// initial sources are exported records its twin shares, and T10.4-8's, the
+// exported records of the staging its (a) continues. The initial `.mdx`
+// files of every later workspace — T10.4-1's five later scenarios,
+// T10.4-2's context, origin, and journal arms, T10.4-4's move,
+// reintroduction, and decomposition arms, T10.4-6's and T10.4-7's twins,
+// and T10.4-8's (b) and (c), the exported records of the stagings they
+// continue — are records too, passed as the `files` entries (S-9's
+// before-any-product clause covers a workspace created after the body's
+// first invocation).
+// T10.4-4's reintroduction and decomposition arms append a new section a to
+// bytes the rename wrote — no harness constant equals them — so each append
+// is an anchored `workspace.edit()` (the tail's uniqueness and end position
+// diagnosed first, SPEC 6.4).
+//
+// The configurations and the code source of those later workspaces are
+// TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), every one well-formed and staged wherever it is
+// used: `SPECS_ONLY_CONFIG` (T10.4-1's, T10.4-2's, T10.4-4's, T10.4-6's,
+// and T10.4-7's later workspaces, and each of T10.4-8's three, beside the
+// stagings' sources), `SPECS_CODE_CONFIG` and `CI_CODE_SOURCE`
+// (T10.4-1's code-impact scenario), and `COVERAGE_CONFIG` (T10.4-1's
+// uncovered-requirement scenario).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import type {
+  ExportReport,
   ItemStatus,
   NodeHashes,
   NodeReport,
   ReviewItem,
+  SessionListEntry,
   SessionStatusReport,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
@@ -69,23 +165,47 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import {
+  T10_5_5_PQ_FILE,
+  T10_5_5_PQ_INITIAL_FILES,
+  T10_5_5_PQ_NODES,
+  stageT1055NewlyVisitedQ,
+  t1055PqSource,
+} from "./section-10.5.js";
+import {
+  T10_7_9_AUDIT_FILE,
+  T10_7_9_AUDIT_INITIAL_FILES,
+  T10_7_9_AUDIT_NODES,
+  T10_7_9_P_INITIAL_FILES,
+  runT1079AuditSplits,
+  runT1079DeletedChildrenArm,
+  t1079AuditSource,
+} from "./section-10.7-ii.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.4-1/T10.4-2/T10.4-4/T10.4-6/T10.4-7/T10.4-8 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Spec group plus a code group (SPEC 7.2) — the `code-impact` scenario needs
 // an impacted code location (SPEC 9.2, 10.5).
-const SPECS_CODE_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_CODE_CONFIG = stagedTs(
+  "T10.4-1 code-impact xspec.config.ts — one spec group and the code group app",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -95,12 +215,15 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // Spec group plus a direct coverage profile over it (SPEC 7.4) — the
 // `uncovered-requirement` scenario: an uncovered required leaf yields an
 // `uncovered-requirement` item in a coverage session (SPEC 10.7).
-const COVERAGE_CONFIG = `import { defineConfig } from "xspec"
+const COVERAGE_CONFIG = stagedTs(
+  "T10.4-1 uncovered-requirement xspec.config.ts — one spec group and the coverage profile p",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -115,12 +238,13 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
-  files: Readonly<Record<string, string>>,
+  config: StagedTs,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -180,6 +304,25 @@ async function showItem(
       product,
       workspace,
       ["review", "show", name, itemId, "--json"],
+      label,
+    ),
+    label,
+  );
+}
+
+/** `review export <name> --json`, decoded (SPEC 10.7). */
+async function exportSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<ExportReport> {
+  const label = `${context} \`review export ${name} --json\``;
+  return decodeExportReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "export", name, "--json"],
       label,
     ),
     label,
@@ -287,14 +430,25 @@ async function expectItemStatus(
 }
 
 /** Every string leaf of a decoded JSON value (array elements and members). */
-function collectStringLeaves(value: unknown, into: string[] = []): string[] {
-  if (typeof value === "string") {
-    into.push(value);
-  } else if (Array.isArray(value)) {
-    for (const element of value) collectStringLeaves(element, into);
-  } else if (value !== null && typeof value === "object") {
-    for (const member of Object.values(value)) {
-      collectStringLeaves(member, into);
+export function collectStringLeaves(
+  value: unknown,
+  into: string[] = [],
+): string[] {
+  // H-11: an explicit stack, never native recursion per nesting level.
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current === "string") {
+      into.push(current);
+    } else if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push(current[index]);
+      }
+    } else if (current !== null && typeof current === "object") {
+      const members = Object.values(current);
+      for (let index = members.length - 1; index >= 0; index -= 1) {
+        stack.push(members[index]);
+      }
     }
   }
   return into;
@@ -425,6 +579,60 @@ async function captureHashes(
 }
 
 /**
+ * Assert the hash premises bracketing a staged edit (SPEC 5.5): every
+ * `changed` probe must differ between the two captures and every `unchanged`
+ * probe must not, so no arm passes or fails for the wrong reason (H-8). A
+ * probe whose node was not captured on both sides fails loudly as a harness
+ * staging defect.
+ */
+function assertHashPremises(
+  before: ReadonlyMap<string, NodeHashes>,
+  after: ReadonlyMap<string, NodeHashes>,
+  changed: readonly HashProbe[],
+  unchanged: readonly HashProbe[],
+  context: string,
+): void {
+  const probeValue = (
+    captures: ReadonlyMap<string, NodeHashes>,
+    probe: HashProbe,
+    side: "pre-edit" | "post-edit",
+  ): string => {
+    const hashes = captures.get(probe.node);
+    if (hashes === undefined) {
+      fail(
+        `${context}: harness staging defect — no ${side} \`query node\` ` +
+          `capture exists for ${probe.node}, so its ${probe.hash} premise ` +
+          `cannot be checked`,
+      );
+    }
+    return hashes[probe.hash];
+  };
+  for (const probe of changed) {
+    const beforeValue = probeValue(before, probe, "pre-edit");
+    const afterValue = probeValue(after, probe, "post-edit");
+    if (beforeValue === afterValue) {
+      fail(
+        `${context}: staging premise — the edit must change ${probe.node}'s ` +
+          `${probe.hash} (SPEC 5.5) for this arm to exercise it; both ` +
+          `captures report ${JSON.stringify(afterValue)}`,
+      );
+    }
+  }
+  for (const probe of unchanged) {
+    const beforeValue = probeValue(before, probe, "pre-edit");
+    const afterValue = probeValue(after, probe, "post-edit");
+    if (beforeValue !== afterValue) {
+      fail(
+        `${context}: staging premise — the edit must leave ${probe.node}'s ` +
+          `${probe.hash} unchanged (SPEC 5.5) so the arm isolates its ` +
+          `intended sensitivity; got ${JSON.stringify(beforeValue)} -> ` +
+          JSON.stringify(afterValue),
+      );
+    }
+  }
+}
+
+/**
  * Run one kind's sensitivity arms against its resolved item: per arm, assert
  * the staged edit's hash premises (SPEC 5.5), then that the item is reported
  * `invalidated` exactly when the arm touches relevant state (SPEC 10.4), and
@@ -459,29 +667,7 @@ async function runSensitivityArms(
       probedNodes,
       `${context}, post-edit capture`,
     );
-    for (const probe of arm.changed) {
-      const beforeValue = before.get(probe.node)?.[probe.hash];
-      const afterValue = after.get(probe.node)?.[probe.hash];
-      if (beforeValue === afterValue) {
-        fail(
-          `${context}: staging premise — the edit must change ${probe.node}'s ` +
-            `${probe.hash} (SPEC 5.5) for this arm to exercise it; both ` +
-            `captures report ${JSON.stringify(afterValue)}`,
-        );
-      }
-    }
-    for (const probe of arm.unchanged) {
-      const beforeValue = before.get(probe.node)?.[probe.hash];
-      const afterValue = after.get(probe.node)?.[probe.hash];
-      if (beforeValue !== afterValue) {
-        fail(
-          `${context}: staging premise — the edit must leave ${probe.node}'s ` +
-            `${probe.hash} unchanged (SPEC 5.5) so the arm isolates its ` +
-            `intended sensitivity; got ${JSON.stringify(beforeValue)} -> ` +
-            JSON.stringify(afterValue),
-        );
-      }
-    }
+    assertHashPremises(before, after, arm.changed, arm.unchanged, context);
     await expectItemStatus(
       product,
       workspace,
@@ -552,6 +738,51 @@ function scSpec(
   ].join("\n");
 }
 
+// The scenario's successive states of specs/S.mdx, in staging order — the
+// former `write()` closure over mutable version variables enumerated, every
+// state carrying the earlier edits forward. The pre-`create` edit (p's own
+// text at v1, staged between `gitCommitAll` and the body's first `build`)
+// precedes every product invocation and stays plain contents; the four arms'
+// states follow it and are staged-source records (helpers/staged-mdx.ts,
+// S-9: judged before any product exists), indexed by arm.
+const T10_4_1_SC_PRE_CREATE = scSpec(
+  "Parent own v1.",
+  "",
+  "Child text v0.",
+  "",
+  "Outside v0.",
+);
+const T10_4_1_SC_STATES = [
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 1's edit: the child text at v1",
+    scSpec("Parent own v1.", "", "Child text v1.", "", "Outside v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 2's edit: p tagged pt",
+    scSpec("Parent own v1.", ' tags="pt"', "Child text v1.", "", "Outside v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 3's edit: p.c tagged ct",
+    scSpec(
+      "Parent own v1.",
+      ' tags="pt"',
+      "Child text v1.",
+      ' tags="ct"',
+      "Outside v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 4's edit: the outside text at v1 (control)",
+    scSpec(
+      "Parent own v1.",
+      ' tags="pt"',
+      "Child text v1.",
+      ' tags="ct"',
+      "Outside v1.",
+    ),
+  ),
+] as const;
+
 // parent-consistency (--base; SPEC 10.4: ownHash and metadataHash of the
 // scope node; subtreeHash of each context node). A deep leaf edit under
 // a > a.k > a.k.d makes a's item's context node a.k, with the changed branch
@@ -587,6 +818,43 @@ function pcSpec(
     "",
   ].join("\n");
 }
+
+// The scenario's initial specs/P.mdx: its workspace is created after the
+// body's first `build` (the subtree-coherence scenario's), so the initial
+// file is a staged-source record too (S-9's before-any-product clause), the
+// same template call moved to module level.
+const T10_4_1_PC_INITIAL = stagedMdx(
+  "T10.4-1 parent-consistency specs/P.mdx at the baseline (the scenario's initial source)",
+  pcSpec("Alpha own v0.", "", "Deep leaf v0.", "Other v0."),
+);
+
+// The scenario's successive states of specs/P.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward) — every one, the pre-`create` edit included, follows the body's
+// first `build` (the subtree-coherence scenario's), so all are records:
+// index 0 the pre-`create` edit, then one per arm.
+const T10_4_1_PC_STATES = [
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after the pre-create edit: the deep leaf at v1",
+    pcSpec("Alpha own v0.", "", "Deep leaf v1.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 1's edit: the deep leaf at v2",
+    pcSpec("Alpha own v0.", "", "Deep leaf v2.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 2's edit: a tagged at",
+    pcSpec("Alpha own v0.", ' tags="at"', "Deep leaf v2.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 3's edit: a's own text at v1",
+    pcSpec("Alpha own v1.", ' tags="at"', "Deep leaf v2.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 4's edit: the sibling text at v1 (control)",
+    pcSpec("Alpha own v1.", ' tags="at"', "Deep leaf v2.", "Other v1."),
+  ),
+] as const;
 
 // dependency-consistency (--base; SPEC 10.4: ownHash and metadataHash of the
 // scope node; subtreeHash of each upstream target in context). dep depends on
@@ -624,6 +892,76 @@ function dcSpec(
   ].join("\n");
 }
 
+// The scenario's initial specs/D.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here).
+const T10_4_1_DC_INITIAL = stagedMdx(
+  "T10.4-1 dependency-consistency specs/D.mdx at the baseline (the scenario's initial source)",
+  dcSpec(
+    "Dep own v0.",
+    "",
+    "Target own v0.",
+    "Target child v0.",
+    "Unrelated v0.",
+  ),
+);
+
+// The scenario's successive states of specs/D.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward), all after the body's first `build`: index 0 the pre-`create`
+// edit, then one per arm.
+const T10_4_1_DC_STATES = [
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after the pre-create edit: the target's own text at v1",
+    dcSpec(
+      "Dep own v0.",
+      "",
+      "Target own v1.",
+      "Target child v0.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 1's edit: dep's own text at v1",
+    dcSpec(
+      "Dep own v1.",
+      "",
+      "Target own v1.",
+      "Target child v0.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 2's edit: dep tagged dt",
+    dcSpec(
+      "Dep own v1.",
+      ' tags="dt"',
+      "Target own v1.",
+      "Target child v0.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 3's edit: the target's child text at v1",
+    dcSpec(
+      "Dep own v1.",
+      ' tags="dt"',
+      "Target own v1.",
+      "Target child v1.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 4's edit: the unrelated text at v1 (control)",
+    dcSpec(
+      "Dep own v1.",
+      ' tags="dt"',
+      "Target own v1.",
+      "Target child v1.",
+      "Unrelated v1.",
+    ),
+  ),
+] as const;
+
 // metadata-consistency (--base; SPEC 10.4: metadataHash of the scope node
 // only). m's staged tag change generates the item; the control is a text
 // edit of m itself — subtreeHash moves, metadataHash does not.
@@ -633,6 +971,31 @@ const MC_M = "specs/M.mdx#m";
 function mcSpec(mTags: string, mText: string): string {
   return [`<S id="m" tags="${mTags}">`, mText, "</S>", ""].join("\n");
 }
+
+// The scenario's initial specs/M.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here).
+const T10_4_1_MC_INITIAL = stagedMdx(
+  "T10.4-1 metadata-consistency specs/M.mdx at the baseline (the scenario's initial source)",
+  mcSpec("m0", "Em text v0."),
+);
+
+// The scenario's successive states of specs/M.mdx, in staging order (the
+// former `write()` closure enumerated), all after the body's first `build`:
+// index 0 the pre-`create` edit, then one per arm.
+const T10_4_1_MC_STATES = [
+  stagedMdx(
+    "T10.4-1 metadata-consistency specs/M.mdx after the pre-create edit: m tagged m1",
+    mcSpec("m1", "Em text v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 metadata-consistency specs/M.mdx after arm 1's edit: m tagged m2",
+    mcSpec("m2", "Em text v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 metadata-consistency specs/M.mdx after arm 2's edit: m's text at v1 (control)",
+    mcSpec("m2", "Em text v1."),
+  ),
+] as const;
 
 // code-impact (--base; SPEC 10.4: subtreeHash and effectiveHash of each node
 // targeted by the scoped location's impact edges). src/ref.ts references t;
@@ -662,13 +1025,44 @@ function ciSpec(tText: string, upText: string, wText: string): string {
 }
 
 // A whole-file code location (SPEC 4.6): the bare-reference marker sits at
-// the top level, so the `references` edge runs from `src/ref.ts` itself.
-const CI_CODE_SOURCE = [
-  'import C from "../specs/C.xspec";',
-  "",
-  "C.t;",
-  "",
-].join("\n");
+// the top level, so the `references` edge runs from `src/ref.ts` itself. The
+// scenario's workspace follows the body's first `build`, so the code source
+// is a TypeScript staged-source record (module header), well-formed.
+const CI_CODE_SOURCE = stagedTs(
+  "T10.4-1 code-impact src/ref.ts (a whole-file code location referencing t)",
+  ['import C from "../specs/C.xspec";', "", "C.t;", ""].join("\n"),
+);
+
+// The scenario's initial specs/C.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here); the
+// code source beside it is a TypeScript record (`CI_CODE_SOURCE`).
+const T10_4_1_CI_INITIAL = stagedMdx(
+  "T10.4-1 code-impact specs/C.mdx at the baseline (the scenario's initial source)",
+  ciSpec("Target v0.", "Upstream v0.", "Watcher v0."),
+);
+
+// The scenario's successive states of specs/C.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward), all after the body's first `build`: index 0 the pre-`create`
+// edit, then one per arm.
+const T10_4_1_CI_STATES = [
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after the pre-create edit: the target text at v1",
+    ciSpec("Target v1.", "Upstream v0.", "Watcher v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after arm 1's edit: the target text at v2",
+    ciSpec("Target v2.", "Upstream v0.", "Watcher v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after arm 2's edit: the upstream text at v1",
+    ciSpec("Target v2.", "Upstream v1.", "Watcher v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after arm 3's edit: the watcher text at v1 (control)",
+    ciSpec("Target v2.", "Upstream v1.", "Watcher v1."),
+  ),
+] as const;
 
 // uncovered-requirement (coverage session; SPEC 10.4: subtreeHash and
 // metadataHash of the scope node). Uncovered leaves u (under test) and e
@@ -690,11 +1084,36 @@ function urSpec(uAttrs: string, uText: string, eText: string): string {
   ].join("\n");
 }
 
+// The scenario's initial specs/U.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here).
+const T10_4_1_UR_INITIAL = stagedMdx(
+  "T10.4-1 uncovered-requirement specs/U.mdx at the baseline (the scenario's initial source)",
+  urSpec("", "You leaf v0.", "Elsewhere v0."),
+);
+
+// The scenario's successive states of specs/U.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward), all after the body's first `build` — one per arm (a coverage
+// session stages no pre-`create` edit).
+const T10_4_1_UR_STATES = [
+  stagedMdx(
+    "T10.4-1 uncovered-requirement specs/U.mdx after arm 1's edit: u's text at v1",
+    urSpec("", "You leaf v1.", "Elsewhere v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 uncovered-requirement specs/U.mdx after arm 2's edit: u tagged ut",
+    urSpec(' tags="ut"', "You leaf v1.", "Elsewhere v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 uncovered-requirement specs/U.mdx after arm 3's edit: the elsewhere text at v1 (control)",
+    urSpec(' tags="ut"', "You leaf v1.", "Elsewhere v1."),
+  ),
+] as const;
+
 const T10_4_1 = defineProductTest({
   id: "T10.4-1",
   title:
     "per-kind relevant-hash sensitivity: for each built-in kind every relevant hash of SPEC 10.4 is exercised as an invalidating case with query-node hash premises bracketing the edit, plus a non-invalidating control touching none of the item's relevant state — subtree-coherence (subtree text edit; metadata-only edit on the scope root and, separately, on a descendant, which changes no subtreeHash and MUST still invalidate; control outside the subtree), parent-consistency (own-text and metadata edits of the scope node; deep text edit under a context child; sibling-subtree control), dependency-consistency (own-text and metadata edits of the scope node; text edit under the upstream target in context; unrelated-node control), metadata-consistency (metadata edit invalidates; a text edit of the scope node does not), code-impact (target text edit; upstream edit changing only the target's effectiveHash; control on a node that is no impact-edge target and upstream of none), uncovered-requirement (scope-subtree text edit; scope metadata edit; control elsewhere) (SPEC 5.5, 10.4, 10.5, 10.7)",
-  timeoutMs: 480_000,
   run: async (product) => {
     // --- subtree-coherence -------------------------------------------------
     await withWorkspace(
@@ -710,22 +1129,12 @@ const T10_4_1 = defineProductTest({
       },
       async (workspace) => {
         const prefix = "T10.4-1 subtree-coherence";
-        let pOwn = "Parent own v0.";
-        let pAttrs = "";
-        let cText = "Child text v0.";
-        let cAttrs = "";
-        let oText = "Outside v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(
-            SC_FILE,
-            scSpec(pOwn, pAttrs, cText, cAttrs, oText),
-          );
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        pOwn = "Parent own v1."; // p `changed` relative to the baseline
-        await write();
+        // p `changed` relative to the baseline — staged before the body's
+        // first product invocation, so plain contents (S-7 reaches it).
+        await workspace.file(SC_FILE, T10_4_1_SC_PRE_CREATE);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -762,8 +1171,7 @@ const T10_4_1 = defineProductTest({
               label:
                 "text edit inside the scope subtree (a scope node's subtreeHash)",
               apply: async () => {
-                cText = "Child text v1.";
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[0]);
               },
               invalidates: true,
               changed: [
@@ -778,8 +1186,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata-only edit on the scope root (its metadataHash)",
               apply: async () => {
-                pAttrs = ' tags="pt"';
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: SC_P, hash: "metadataHash" }],
@@ -795,8 +1202,7 @@ const T10_4_1 = defineProductTest({
                 "no subtreeHash and MUST still invalidate (the relevant " +
                 "metadataHash is each scope node's)",
               apply: async () => {
-                cAttrs = ' tags="ct"';
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: SC_PC, hash: "metadataHash" }],
@@ -809,8 +1215,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit outside the scope subtree",
               apply: async () => {
-                oText = "Outside v1.";
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[3]);
               },
               invalidates: false,
               changed: [{ node: SC_O, hash: "subtreeHash" }],
@@ -831,22 +1236,15 @@ const T10_4_1 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [PC_FILE]: pcSpec("Alpha own v0.", "", "Deep leaf v0.", "Other v0."),
+        [PC_FILE]: T10_4_1_PC_INITIAL,
       },
       async (workspace) => {
         const prefix = "T10.4-1 parent-consistency";
-        let aOwn = "Alpha own v0.";
-        let aAttrs = "";
-        let dText = "Deep leaf v0.";
-        let oText = "Other v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(PC_FILE, pcSpec(aOwn, aAttrs, dText, oText));
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        dText = "Deep leaf v1."; // a.k.d `changed`
-        await write();
+        // a.k.d `changed`
+        await workspace.file(PC_FILE, T10_4_1_PC_STATES[0]);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -897,8 +1295,7 @@ const T10_4_1 = defineProductTest({
               label:
                 "deep text edit under the context child (a context node's subtreeHash)",
               apply: async () => {
-                dText = "Deep leaf v2.";
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: PC_AK, hash: "subtreeHash" }],
@@ -914,8 +1311,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (its metadataHash)",
               apply: async () => {
-                aAttrs = ' tags="at"';
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: PC_A, hash: "metadataHash" }],
@@ -927,8 +1323,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "own-text edit of the scope node (its ownHash)",
               apply: async () => {
-                aOwn = "Alpha own v1.";
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[3]);
               },
               invalidates: true,
               changed: [{ node: PC_A, hash: "ownHash" }],
@@ -940,8 +1335,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit in a sibling subtree of the scope node",
               apply: async () => {
-                oText = "Other v1.";
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[4]);
               },
               invalidates: false,
               changed: [{ node: PC_O, hash: "subtreeHash" }],
@@ -961,32 +1355,15 @@ const T10_4_1 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [DC_FILE]: dcSpec(
-          "Dep own v0.",
-          "",
-          "Target own v0.",
-          "Target child v0.",
-          "Unrelated v0.",
-        ),
+        [DC_FILE]: T10_4_1_DC_INITIAL,
       },
       async (workspace) => {
         const prefix = "T10.4-1 dependency-consistency";
-        let depOwn = "Dep own v0.";
-        let depAttrs = "";
-        let tOwn = "Target own v0.";
-        let tcText = "Target child v0.";
-        let uText = "Unrelated v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(
-            DC_FILE,
-            dcSpec(depOwn, depAttrs, tOwn, tcText, uText),
-          );
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        tOwn = "Target own v1."; // t `changed`: dep's target effectiveHash moves
-        await write();
+        // t `changed`: dep's target effectiveHash moves
+        await workspace.file(DC_FILE, T10_4_1_DC_STATES[0]);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -1031,8 +1408,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "own-text edit of the scope node (its ownHash)",
               apply: async () => {
-                depOwn = "Dep own v1.";
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: DC_DEP, hash: "ownHash" }],
@@ -1044,8 +1420,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (its metadataHash)",
               apply: async () => {
-                depAttrs = ' tags="dt"';
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: DC_DEP, hash: "metadataHash" }],
@@ -1058,8 +1433,7 @@ const T10_4_1 = defineProductTest({
               label:
                 "text edit under the upstream target in context (target subtreeHash)",
               apply: async () => {
-                tcText = "Target child v1.";
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[3]);
               },
               invalidates: true,
               changed: [{ node: DC_T, hash: "subtreeHash" }],
@@ -1071,8 +1445,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit to an unrelated node",
               apply: async () => {
-                uText = "Unrelated v1.";
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[4]);
               },
               invalidates: false,
               changed: [{ node: DC_U, hash: "subtreeHash" }],
@@ -1091,19 +1464,14 @@ const T10_4_1 = defineProductTest({
     // --- metadata-consistency ----------------------------------------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [MC_FILE]: mcSpec("m0", "Em text v0.") },
+      { [MC_FILE]: T10_4_1_MC_INITIAL },
       async (workspace) => {
         const prefix = "T10.4-1 metadata-consistency";
-        let mTags = "m0";
-        let mText = "Em text v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(MC_FILE, mcSpec(mTags, mText));
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        mTags = "m1"; // m `metadata-changed`
-        await write();
+        // m `metadata-changed`
+        await workspace.file(MC_FILE, T10_4_1_MC_STATES[0]);
         await buildOk(
           product,
           workspace,
@@ -1147,8 +1515,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (metadataHash only)",
               apply: async () => {
-                mTags = "m2";
-                await write();
+                await workspace.file(MC_FILE, T10_4_1_MC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: MC_M, hash: "metadataHash" }],
@@ -1159,8 +1526,7 @@ const T10_4_1 = defineProductTest({
                 "control: a text edit of the scope node does not invalidate " +
                 "(only the metadataHash is relevant to this kind)",
               apply: async () => {
-                mText = "Em text v1.";
-                await write();
+                await workspace.file(MC_FILE, T10_4_1_MC_STATES[2]);
               },
               invalidates: false,
               changed: [{ node: MC_M, hash: "subtreeHash" }],
@@ -1176,22 +1542,16 @@ const T10_4_1 = defineProductTest({
     await withWorkspace(
       SPECS_CODE_CONFIG,
       {
-        [CI_FILE]: ciSpec("Target v0.", "Upstream v0.", "Watcher v0."),
+        [CI_FILE]: T10_4_1_CI_INITIAL,
         [CI_CODE]: CI_CODE_SOURCE,
       },
       async (workspace) => {
         const prefix = "T10.4-1 code-impact";
-        let tText = "Target v0.";
-        let upText = "Upstream v0.";
-        let wText = "Watcher v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(CI_FILE, ciSpec(tText, upText, wText));
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        tText = "Target v1."; // t `changed`: src/ref.ts directly impacted
-        await write();
+        // t `changed`: src/ref.ts directly impacted
+        await workspace.file(CI_FILE, T10_4_1_CI_STATES[0]);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -1227,8 +1587,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "text edit of an impact-edge target (target subtreeHash)",
               apply: async () => {
-                tText = "Target v2.";
-                await write();
+                await workspace.file(CI_FILE, T10_4_1_CI_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: CI_T, hash: "subtreeHash" }],
@@ -1239,8 +1598,7 @@ const T10_4_1 = defineProductTest({
                 "upstream edit changing only the target's effectiveHash " +
                 "(its subtreeHash stays put)",
               apply: async () => {
-                upText = "Upstream v1.";
-                await write();
+                await workspace.file(CI_FILE, T10_4_1_CI_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: CI_T, hash: "effectiveHash" }],
@@ -1251,8 +1609,7 @@ const T10_4_1 = defineProductTest({
                 "control: an edit to a node that is no impact-edge target " +
                 "and upstream of none",
               apply: async () => {
-                wText = "Watcher v1.";
-                await write();
+                await workspace.file(CI_FILE, T10_4_1_CI_STATES[3]);
               },
               invalidates: false,
               changed: [{ node: CI_W, hash: "subtreeHash" }],
@@ -1270,15 +1627,9 @@ const T10_4_1 = defineProductTest({
     // --- uncovered-requirement ----------------------------------------------
     await withWorkspace(
       COVERAGE_CONFIG,
-      { [UR_FILE]: urSpec("", "You leaf v0.", "Elsewhere v0.") },
+      { [UR_FILE]: T10_4_1_UR_INITIAL },
       async (workspace) => {
         const prefix = "T10.4-1 uncovered-requirement";
-        let uAttrs = "";
-        let uText = "You leaf v0.";
-        let eText = "Elsewhere v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(UR_FILE, urSpec(uAttrs, uText, eText));
-        };
 
         await buildOk(product, workspace, `${prefix} \`build\``);
         await expectExit(
@@ -1323,8 +1674,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "text edit in the scope node's subtree (its subtreeHash)",
               apply: async () => {
-                uText = "You leaf v1.";
-                await write();
+                await workspace.file(UR_FILE, T10_4_1_UR_STATES[0]);
               },
               invalidates: true,
               changed: [{ node: UR_U, hash: "subtreeHash" }],
@@ -1333,8 +1683,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (its metadataHash)",
               apply: async () => {
-                uAttrs = ' tags="ut"';
-                await write();
+                await workspace.file(UR_FILE, T10_4_1_UR_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: UR_U, hash: "metadataHash" }],
@@ -1343,8 +1692,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit elsewhere",
               apply: async () => {
-                eText = "Elsewhere v1.";
-                await write();
+                await workspace.file(UR_FILE, T10_4_1_UR_STATES[2]);
               },
               invalidates: false,
               changed: [{ node: UR_E, hash: "subtreeHash" }],
@@ -1375,11 +1723,331 @@ function t2Spec(withX: boolean, yText: string): string {
   return [...lines, '<S id="y">', yText, "</S>", ""].join("\n");
 }
 
+// Non-scope presence recordings (SPEC 10.4: presence is recorded for every
+// scope, context, and origin node). Each arm is pure — no recorded relevant
+// hash of the item changes (query-node brackets assert it) and the generated
+// context set stays put — so only the named node's presence divergence can
+// invalidate, and a product recording presence for scope nodes alone reports
+// the item still resolved.
+
+// Context arm (`metadata-consistency`): baseline D bears a `d` reference to
+// sibling T; one edit removes the reference and deletes T's section, so
+// `review create --base` derives D's item with the removed target T as its
+// one context node (SPEC 10.5), currently absent.
+const T2C_FILE = "specs/C.mdx";
+const T2C_ROOT = "specs/C.mdx";
+const T2C_D = "specs/C.mdx#dd";
+const T2C_T = "specs/C.mdx#tt";
+
+function t2cSpec(dAttrs: string, withT: boolean): string {
+  const t = withT ? ["", '<S id="tt">', "Tee text.", "</S>"] : [];
+  return [`<S id="dd"${dAttrs}>`, "Dee own text.", "</S>", ...t, ""].join("\n");
+}
+
+// Origin arm (`dependency-consistency`): X depends on T, T depends on D — a
+// section in its own file, beside sibling `e`, the target D's staged d-list
+// edit gains. That edit leaves D `metadata-changed` and nothing `changed`
+// (SPEC 5.6), so X's item derives as scope X, context {T} (the
+// dependency-edge target whose effectiveHash changed), origin {D} (the
+// originating node of T's change) (SPEC 10.5).
+const T2O_X_FILE = "specs/X.mdx";
+const T2O_T_FILE = "specs/T.mdx";
+const T2O_D_FILE = "specs/O.mdx";
+const T2O_X = "specs/X.mdx#x";
+const T2O_T = "specs/T.mdx#t";
+const T2O_D = "specs/O.mdx#d";
+
+// The origin arm's initial X: a workspace created after the body's first
+// `build`, so a record too, wrapped in place.
+const T2O_X_SOURCE = stagedMdx(
+  "T10.4-2 specs/X.mdx with x depending on T.t (the origin arm's initial source)",
+  [
+    'import T from "./T.xspec"',
+    "",
+    '<S id="x" d={T.t}>',
+    "Ex own text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// The import stays when the `d` reference goes: an import whose binding is
+// never used is valid and records no edges (SPEC 2.1), so the reference
+// removal is a pure d-prop edit.
+function t2oTSpec(withD: boolean): string {
+  return [
+    'import O from "./O.xspec"',
+    "",
+    withD ? '<S id="t" d={O.d}>' : '<S id="t">',
+    "Tee own text.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// `dAttrs === null` deletes D's section; sibling `e` remains, so the file
+// keeps its root and the deletion touches no other source.
+function t2oDSpec(dAttrs: string | null): string {
+  const d =
+    dAttrs === null ? [] : [`<S id="d"${dAttrs}>`, "Dee own text.", "</S>", ""];
+  return [...d, '<S id="e">', "Ee text.", "</S>", ""].join("\n");
+}
+
+// Journal arm (SPEC 10.4: a node is also absent when its identity ceases to
+// resolve through the journal): an audit session over top-level leaves `a`
+// and `s`. `rename` a→b journals the mapping (6.1, 6.4), and a's item —
+// presented under b thereafter (10.4) — is resolved `no-change`, recording
+// its scope node as the canonical identity (a, the journal's start) (5.4).
+// Deleting `.xspec/journal` by hand then leaves a valid workspace with an
+// empty journal (6.1), under which b's canonical identity is (b, the
+// journal's start) and the recorded one resolves to no node: reads present
+// the item `invalidated`, its scope node absent under `a` — the recorded
+// identity mapped forward through the now-empty journal (10.4) — and the
+// `updated` resolve of s's item re-derives the session (10.5, 10.6), adding
+// a distinct item scoped at b beside the original, which keeps its id and
+// its stored `no-change` (`list` counts stored statuses, 10.7). A product
+// recording the node by its spelled identity at the resolve (b) reads the
+// item still resolved and adds no item for b. The deletion is a fixture
+// edit like the others, an explicit `build` following it.
+const T2J_FILE = "specs/J.mdx";
+const T2J_ROOT = "specs/J.mdx";
+const T2J_A = "specs/J.mdx#a";
+const T2J_B = "specs/J.mdx#b";
+const T2J_S = "specs/J.mdx#s";
+const T2J_JOURNAL = ".xspec/journal";
+
+// T10.4-2's presence flips — every one staged after the body's first
+// `build` — are staged-source records (helpers/staged-mdx.ts, S-9: judged
+// before any product exists), the same template calls moved to module level;
+// the context, origin, and journal arms' initial files (below) are records
+// too, the first arm's X — the body's first workspace — a plain `files`
+// entry.
+const T10_4_2_X_DELETED = stagedMdx(
+  "T10.4-2 specs/X.mdx with the scope node x deleted (y at v0)",
+  t2Spec(false, "Wye text v0."),
+);
+const T10_4_2_X_ABSENT_Y_EDITED = stagedMdx(
+  "T10.4-2 specs/X.mdx with x still absent across the unrelated y edit (y at v1)",
+  t2Spec(false, "Wye text v1."),
+);
+const T10_4_2_X_RESTORED = stagedMdx(
+  "T10.4-2 specs/X.mdx with x restored (y at v1)",
+  t2Spec(true, "Wye text v1."),
+);
+const T10_4_2_C_REFERENCE_REMOVED = stagedMdx(
+  "T10.4-2 specs/C.mdx with dd's d reference removed and tt deleted (context arm)",
+  t2cSpec("", false),
+);
+const T10_4_2_C_T_REAUTHORED = stagedMdx(
+  "T10.4-2 specs/C.mdx with tt re-authored, dd still bearing no d reference (context arm)",
+  t2cSpec("", true),
+);
+const T10_4_2_O_D_LIST_EDITED = stagedMdx(
+  "T10.4-2 specs/O.mdx with the d-list edit on d (origin arm)",
+  t2oDSpec(' d={"e"}'),
+);
+const T10_4_2_T_REFERENCE_REMOVED = stagedMdx(
+  "T10.4-2 specs/T.mdx with t's reference to D removed (origin arm)",
+  t2oTSpec(false),
+);
+const T10_4_2_O_D_DELETED = stagedMdx(
+  "T10.4-2 specs/O.mdx with d's section deleted (origin arm)",
+  t2oDSpec(null),
+);
+const T10_4_2_C_INITIAL = stagedMdx(
+  "T10.4-2 specs/C.mdx with dd referencing tt (the context arm's initial source)",
+  t2cSpec(' d={"tt"}', true),
+);
+const T10_4_2_T_INITIAL = stagedMdx(
+  "T10.4-2 specs/T.mdx with t referencing O.d (the origin arm's initial source)",
+  t2oTSpec(true),
+);
+const T10_4_2_O_INITIAL = stagedMdx(
+  "T10.4-2 specs/O.mdx with d beside e (the origin arm's initial source)",
+  t2oDSpec(""),
+);
+const T10_4_2_J_INITIAL = stagedMdx(
+  "T10.4-2 specs/J.mdx with top-level leaves a and s (the journal arm's initial source)",
+  [
+    '<S id="a">',
+    "Aye text.",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/** Assert an item's context is exactly one node with the given presence. */
+function assertSoleContext(
+  item: ReviewItem,
+  node: string,
+  present: boolean,
+  context: string,
+): void {
+  const summary = item.context.map((state) => ({
+    node: state.node,
+    present: state.present,
+  }));
+  if (
+    summary.length === 1 &&
+    summary[0].node === node &&
+    summary[0].present === present
+  ) {
+    return;
+  }
+  fail(
+    `${context}: the item's context must be exactly ` +
+      `[{node: ${JSON.stringify(node)}, present: ${String(present)}}] — the ` +
+      `strategy-derived context node presented under its current identity ` +
+      `and presence (SPEC 10.4, 10.5, 10.7); got ${JSON.stringify(summary)}`,
+  );
+}
+
+/**
+ * Assert an item's origin is exactly one node whose after side carries the
+ * given presence (the after side reads the current graph, SPEC 10.7).
+ */
+function assertSoleOrigin(
+  item: ReviewItem,
+  node: string,
+  afterPresent: boolean,
+  context: string,
+): void {
+  const summary = item.origin.map((entry) => ({
+    node: entry.node,
+    afterPresent: entry.after.present,
+  }));
+  if (
+    summary.length === 1 &&
+    summary[0].node === node &&
+    summary[0].afterPresent === afterPresent
+  ) {
+    return;
+  }
+  fail(
+    `${context}: the item's origin must be exactly one entry for ` +
+      `${JSON.stringify(node)} with its after side ` +
+      `${afterPresent ? "present" : "absent"} — the originating node of the ` +
+      `reviewed change (SPEC 5.6, 10.5), its after side read from the ` +
+      `current graph (SPEC 10.7); got ${JSON.stringify(summary)}`,
+  );
+}
+
+/**
+ * The journal arm's `show` and `export` observation: the item reported
+ * `invalidated`, its scope node presented absent under `node` — the
+ * recorded canonical identity, which no longer resolves, mapped forward
+ * through the now-empty journal (SPEC 5.4, 6.1, 10.4, 10.7).
+ */
+function assertInvalidatedAbsentScope(
+  item: ReviewItem,
+  node: string,
+  context: string,
+): void {
+  if (
+    item.status === "invalidated" &&
+    item.scope.node === node &&
+    item.scope.present === false
+  ) {
+    return;
+  }
+  fail(
+    `${context}: expected the item reported invalidated with its scope ` +
+      `node presented absent under ${JSON.stringify(node)} — the identity ` +
+      `its resolve recorded, (a, the journal's start), resolves to no node ` +
+      `once the journal is empty, and reads present it mapped forward ` +
+      `through that journal (SPEC 5.4, 6.1, 10.4, 10.7); got status ` +
+      `${item.status} with scope ${JSON.stringify({
+        node: item.scope.node,
+        present: item.scope.present,
+      })} — a product recording the node by its spelled identity at the ` +
+      `resolve (b) reads the item still resolved`,
+  );
+}
+
+/**
+ * Assert a `status` row's presented scope identity and reported status
+ * (SPEC 10.4, 10.7), `why` naming the rule the expectation follows.
+ */
+function assertRowPresented(
+  report: SessionStatusReport,
+  id: string,
+  scope: string,
+  status: ItemStatus,
+  why: string,
+  context: string,
+): void {
+  const row = requireRowById(report, id, context);
+  if (row.scope === scope && row.status === status) return;
+  fail(
+    `${context}: expected item ${id} reported ${status} with its scope ` +
+      `node presented as ${scope} (${why}); got ${row.status} with scope ` +
+      row.scope,
+  );
+}
+
+/** `review list --json`'s entry for one healthy session (SPEC 10.7). */
+async function listedSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  context: string,
+): Promise<Extract<SessionListEntry, { corrupt: false }>> {
+  const label = `${context} \`review list --json\``;
+  const report = decodeSessionListReport(
+    await runJson(product, workspace, ["review", "list", "--json"], label),
+    label,
+  );
+  const entries = report.sessions.filter((entry) => entry.name === name);
+  if (entries.length !== 1) {
+    fail(
+      `${label}: expected exactly one listed session named ` +
+        `${JSON.stringify(name)} (SPEC 10.7: \`list\` reports every ` +
+        `session); found ${String(entries.length)} among ` +
+        JSON.stringify(report.sessions.map((entry) => entry.name)),
+    );
+  }
+  const entry = entries[0];
+  if (entry.corrupt) {
+    fail(
+      `${label}: session ${JSON.stringify(name)} is listed corrupt; the ` +
+        `product wrote it and nothing else touched it, so it must be listed ` +
+        `with its strategy and counts (SPEC 10.1, 10.7)`,
+    );
+  }
+  return entry;
+}
+
+/**
+ * A healthy `list` entry's counts, compared as `counts[status] ?? 0` per
+ * defined status — stored statuses, no read-time invalidation (SPEC 10.4,
+ * 10.7).
+ */
+function assertStoredCounts(
+  entry: Extract<SessionListEntry, { corrupt: false }>,
+  expected: Readonly<Record<ItemStatus, number>>,
+  context: string,
+): void {
+  for (const status of ITEM_STATUSES) {
+    const actual = entry.counts[status] ?? 0;
+    if (actual !== expected[status]) {
+      fail(
+        `${context}: \`review list\` counts session ${entry.name}'s items ` +
+          `by stored status — no read-time invalidation applied (SPEC 10.4, ` +
+          `10.7) — expected ${String(expected[status])} item(s) stored ` +
+          `${status}, got ${String(actual)}`,
+      );
+    }
+  }
+}
+
 const T10_4_2 = defineProductTest({
   id: "T10.4-2",
   title:
-    "presence changes: deleting a scope node after resolve invalidates the resolution (presence recorded present, node now absent); the item stays resolvable against absence, and a node already absent at resolve time does not invalidate by remaining absent across an unrelated edit — deletion review stays resolvable; restoring the node invalidates the resolution recorded against absence (presence changed in the other direction) (SPEC 10.2, 10.3, 10.4)",
-  timeoutMs: 240_000,
+    "presence changes: deleting a scope node after resolve invalidates the resolution (presence recorded present, node now absent); the item stays resolvable against absence, and a node already absent at resolve time does not invalidate by remaining absent across an unrelated edit — deletion review stays resolvable; restoring the node invalidates the resolution recorded against absence (presence changed in the other direction); non-scope presence recordings (presence is recorded for every scope, context, and origin node), each arm pure — no recorded relevant hash of the item and no generated context set changes, so only the named node's presence divergence can invalidate and a product recording presence for scope nodes alone reports the item still resolved: context arm (metadata-consistency) — baseline D bears a `d` reference to sibling T, one edit removes the reference and deletes T's section, `review create --base` derives D's item with the removed target T as context, recorded absent at resolve; re-authoring T reads the item `invalidated` through the context node's absent-to-present flip alone (D's metadataHash and the context set unchanged); origin arm (dependency-consistency) — baseline X depends on T, T depends on D (a section in its own file); a d-list edit on D derives X's item (scope X, context {T}, origin {D}); after resolve, one edit removes T's reference to D and deletes D's section — X's ownHash and metadataHash and T's subtreeHash unchanged (d-prop edits touch no own content, SPEC 1.6/5.5) and the context set stays {T} (T's effectiveHash still changed against the baseline), so the item reads `invalidated` through the origin node's present-to-absent flip alone; journal arm (a node is also absent when its identity ceases to resolve through the journal) — in an audit session over top-level leaves a and s, `xspec rename` a→b, a's item (presented under b thereafter) resolved `no-change`, then `.xspec/journal` deleted by hand, leaving a valid workspace with an empty journal under which b's canonical identity is (b, the journal's start) and the recorded one, (a, the journal's start), resolves to no node: `status`, `show`, and `export` present the item `invalidated`, its scope node absent under a — the recorded identity mapped forward through the now-empty journal; once s's item is resolved `updated`, a distinct item scoped at b enters, `unresolved`, the original keeping its id and stored status (`list` counting it `no-change`) — a product recording the node by its spelled identity at the resolve (b) reads the item still resolved and adds no item for b (SPEC 1.6, 5.4, 5.5, 5.6, 6.1, 6.4, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1424,7 +2092,7 @@ const T10_4_2 = defineProductTest({
         );
 
         // Deleting the scope node after resolve invalidates.
-        await workspace.file(T2_FILE, t2Spec(false, "Wye text v0."));
+        await workspace.file(T2_FILE, T10_4_2_X_DELETED);
         await buildOk(product, workspace, "T10.4-2 `build` after deleting x");
         await expectItemStatus(
           product,
@@ -1475,7 +2143,7 @@ const T10_4_2 = defineProductTest({
 
         // Remaining absent does not invalidate — even across an unrelated
         // edit that moves the graph.
-        await workspace.file(T2_FILE, t2Spec(false, "Wye text v1."));
+        await workspace.file(T2_FILE, T10_4_2_X_ABSENT_Y_EDITED);
         await buildOk(product, workspace, "T10.4-2 `build` after the y edit");
         await expectItemStatus(
           product,
@@ -1490,7 +2158,7 @@ const T10_4_2 = defineProductTest({
 
         // Restoring the node invalidates the resolution recorded against
         // absence.
-        await workspace.file(T2_FILE, t2Spec(true, "Wye text v1."));
+        await workspace.file(T2_FILE, T10_4_2_X_RESTORED);
         await buildOk(product, workspace, "T10.4-2 `build` after restoring x");
         await expectItemStatus(
           product,
@@ -1521,6 +2189,600 @@ const T10_4_2 = defineProductTest({
         }
       },
     );
+
+    // --- context arm: a context node's absent-to-present flip --------------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T2C_FILE]: T10_4_2_C_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.4-2 context arm (metadata-consistency)";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await buildOk(product, workspace, `${prefix} \`build\` at baseline`);
+        const atBase = await captureHashes(
+          product,
+          workspace,
+          [T2C_D],
+          `${prefix}, baseline capture`,
+        );
+
+        // One edit removes D's `d` reference and deletes T's section.
+        await workspace.file(T2C_FILE, T10_4_2_C_REFERENCE_REMOVED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the reference-removing edit`,
+        );
+        const atCreate = await captureHashes(
+          product,
+          workspace,
+          [T2C_D],
+          `${prefix}, creation-moment capture`,
+        );
+        assertHashPremises(
+          atBase,
+          atCreate,
+          // D `metadata-changed` (SPEC 5.6) — the item generates.
+          [{ node: T2C_D, hash: "metadataHash" }],
+          // d-prop edits touch no own content (SPEC 1.6, 5.5).
+          [
+            { node: T2C_D, hash: "ownHash" },
+            { node: T2C_D, hash: "subtreeHash" },
+          ],
+          `${prefix}, staging the metadata-changed premise`,
+        );
+
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--base", base, "--name", "s"],
+          0,
+          `${prefix} \`review create --base <baseline> --name s\``,
+        );
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(status),
+          [
+            `metadata-consistency ${T2C_D}`,
+            `subtree-coherence ${T2C_ROOT}`,
+          ].sort(),
+          `${prefix}: the one edit yields D's metadata-consistency item ` +
+            `plus the changed root's subtree-coherence item — the deleted T ` +
+            `is skipped for its changed ancestor (SPEC 10.5)`,
+        );
+        const dId = requireRow(
+          status,
+          "metadata-consistency",
+          T2C_D,
+          prefix,
+        ).id;
+        assertSoleContext(
+          await showItem(product, workspace, "s", dId, `${prefix} at create`),
+          T2C_T,
+          false,
+          `${prefix} at create — the item's context is the removed ` +
+            `\`d\` target, currently absent`,
+        );
+
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          dId,
+          "no-change",
+          `${prefix} \`review resolve s <D item> --status no-change\` ` +
+            `(context node T absent — its presence recorded so, SPEC 10.4)`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          dId,
+          "no-change",
+          `${prefix} sanity — the fresh resolution matches the graph`,
+        );
+
+        // Re-author T. The item's only relevant hash (D's metadataHash) and
+        // its generated context set are untouched; only the context node's
+        // presence diverges from the recorded state.
+        await workspace.file(T2C_FILE, T10_4_2_C_T_REAUTHORED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after re-authoring T`,
+        );
+        const afterRestore = await captureHashes(
+          product,
+          workspace,
+          [T2C_D],
+          `${prefix}, post-restore capture`,
+        );
+        assertHashPremises(
+          atCreate,
+          afterRestore,
+          [],
+          // The item's one relevant hash is unchanged across the edit (the
+          // pre-edit capture equals the state the resolve recorded: no edit
+          // intervened).
+          [{ node: T2C_D, hash: "metadataHash" }],
+          `${prefix}, purity of the re-authoring edit`,
+        );
+        assertHashPremises(
+          atBase,
+          afterRestore,
+          // D still `metadata-changed` against the baseline, and metadataHash
+          // equality tracks the `d` target set exactly (SPEC 5.5), so the
+          // generators still derive the item with context {T} (SPEC 10.5).
+          [{ node: T2C_D, hash: "metadataHash" }],
+          [],
+          `${prefix}, the generated context set stays the removed target`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          dId,
+          "invalidated",
+          `${prefix} after re-authoring T — presence is recorded for the ` +
+            `context node, and its absent-to-present flip alone invalidates ` +
+            `(SPEC 10.4); a product recording presence for scope nodes ` +
+            `alone reports the item still resolved`,
+        );
+        const restored = await showItem(
+          product,
+          workspace,
+          "s",
+          dId,
+          `${prefix} post-restore read`,
+        );
+        assertSoleContext(
+          restored,
+          T2C_T,
+          true,
+          `${prefix} post-restore — the recorded-absent context node is ` +
+            `presented under its current presence`,
+        );
+      },
+    );
+
+    // --- origin arm: an origin node's present-to-absent flip ---------------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [T2O_X_FILE]: T2O_X_SOURCE,
+        [T2O_T_FILE]: T10_4_2_T_INITIAL,
+        [T2O_D_FILE]: T10_4_2_O_INITIAL,
+      },
+      async (workspace) => {
+        const prefix = "T10.4-2 origin arm (dependency-consistency)";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await buildOk(product, workspace, `${prefix} \`build\` at baseline`);
+        const atBase = await captureHashes(
+          product,
+          workspace,
+          [T2O_X, T2O_T, T2O_D],
+          `${prefix}, baseline capture`,
+        );
+
+        // The d-list edit on D: D `metadata-changed`, nothing `changed`; T
+        // and X are upstream-changed, attributed to D (SPEC 5.6).
+        await workspace.file(T2O_D_FILE, T10_4_2_O_D_LIST_EDITED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the d-list edit on D`,
+        );
+        const atCreate = await captureHashes(
+          product,
+          workspace,
+          [T2O_X, T2O_T, T2O_D],
+          `${prefix}, creation-moment capture`,
+        );
+        assertHashPremises(
+          atBase,
+          atCreate,
+          [
+            // The edit lands on D's metadata...
+            { node: T2O_D, hash: "metadataHash" },
+            // ...and cascades into T's effectiveHash, deriving X's item with
+            // context {T} (SPEC 10.5).
+            { node: T2O_T, hash: "effectiveHash" },
+          ],
+          [
+            // T itself is untouched — its change is upstream only, so the
+            // item's origin is D, not T (SPEC 5.6).
+            { node: T2O_T, hash: "ownHash" },
+            { node: T2O_T, hash: "subtreeHash" },
+            { node: T2O_T, hash: "metadataHash" },
+            { node: T2O_X, hash: "ownHash" },
+            { node: T2O_X, hash: "metadataHash" },
+          ],
+          `${prefix}, staging the upstream-change premise`,
+        );
+
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--base", base, "--name", "s"],
+          0,
+          `${prefix} \`review create --base <baseline> --name s\``,
+        );
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(status),
+          [
+            `dependency-consistency ${T2O_T}`,
+            `dependency-consistency ${T2O_X}`,
+            `metadata-consistency ${T2O_D}`,
+          ].sort(),
+          `${prefix}: the d-list edit yields D's metadata-consistency item ` +
+            `plus one dependency-consistency item per dependent of a ` +
+            `changed-effectiveHash target — no node is \`changed\`, so no ` +
+            `subtree-coherence item exists (SPEC 5.6, 10.5)`,
+        );
+        const xId = requireRow(
+          status,
+          "dependency-consistency",
+          T2O_X,
+          prefix,
+        ).id;
+        const created = await showItem(
+          product,
+          workspace,
+          "s",
+          xId,
+          `${prefix} at create`,
+        );
+        assertSoleContext(
+          created,
+          T2O_T,
+          true,
+          `${prefix} at create — the item's context is the dependency-edge ` +
+            `target whose effectiveHash changed`,
+        );
+        assertSoleOrigin(
+          created,
+          T2O_D,
+          true,
+          `${prefix} at create — the item's origin is the originating node ` +
+            `of T's change`,
+        );
+
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${prefix} \`review resolve s <X item> --status no-change\` ` +
+            `(D present — every origin node's presence recorded, SPEC 10.4)`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${prefix} sanity — the fresh resolution matches the graph`,
+        );
+
+        // One edit removes T's reference to D and deletes D's section. The
+        // item's relevant hashes (X's ownHash and metadataHash, T's
+        // subtreeHash) and its generated context set are untouched; only the
+        // origin node's presence diverges from the recorded state.
+        await workspace.file(T2O_T_FILE, T10_4_2_T_REFERENCE_REMOVED);
+        await workspace.file(T2O_D_FILE, T10_4_2_O_D_DELETED);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting D's section`,
+        );
+        const afterLoss = await captureHashes(
+          product,
+          workspace,
+          [T2O_X, T2O_T],
+          `${prefix}, post-deletion capture (D's identity no longer resolves)`,
+        );
+        assertHashPremises(
+          atCreate,
+          afterLoss,
+          // The reference removal lands on T's metadata (the pre-edit
+          // capture equals the state the resolve recorded).
+          [{ node: T2O_T, hash: "metadataHash" }],
+          // The item's relevant hashes stay put: d-prop edits touch no own
+          // content (SPEC 1.6, 5.5), and X is untouched.
+          [
+            { node: T2O_X, hash: "ownHash" },
+            { node: T2O_X, hash: "metadataHash" },
+            { node: T2O_T, hash: "subtreeHash" },
+          ],
+          `${prefix}, purity of the deletion edit`,
+        );
+        assertHashPremises(
+          atBase,
+          afterLoss,
+          // T's effectiveHash still changed against the baseline, so the
+          // generators still derive X's item with context {T} (SPEC 10.5).
+          [{ node: T2O_T, hash: "effectiveHash" }],
+          [],
+          `${prefix}, the generated context set stays {T}`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "invalidated",
+          `${prefix} after deleting D's section — presence is recorded for ` +
+            `every origin node, and its present-to-absent flip alone ` +
+            `invalidates (SPEC 10.4); a product recording presence for ` +
+            `scope (or scope and context) nodes alone reports the item ` +
+            `still resolved`,
+        );
+        const afterShow = await showItem(
+          product,
+          workspace,
+          "s",
+          xId,
+          `${prefix} post-deletion read`,
+        );
+        if (
+          afterShow.scope.node !== T2O_X ||
+          afterShow.scope.present !== true
+        ) {
+          fail(
+            `${prefix} post-deletion \`review show\`: the scope node must ` +
+              `still be the present X — the flip under test is the origin ` +
+              `node's alone (SPEC 10.4, 10.7); expected {node: ` +
+              `${JSON.stringify(T2O_X)}, present: true}, got ` +
+              JSON.stringify(afterShow.scope),
+          );
+        }
+        assertSoleContext(
+          afterShow,
+          T2O_T,
+          true,
+          `${prefix} post-deletion — the context node T stays present and ` +
+            `recorded-matching`,
+        );
+        assertSoleOrigin(
+          afterShow,
+          T2O_D,
+          false,
+          `${prefix} post-deletion — the origin node is presented under ` +
+            `its current (absent) presence`,
+        );
+      },
+    );
+
+    // --- journal arm: a recorded identity that ceases to resolve -----------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T2J_FILE]: T10_4_2_J_INITIAL },
+      async (workspace) => {
+        const prefix = "T10.4-2 journal arm";
+        await buildOk(product, workspace, `${prefix} \`build\``);
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          0,
+          `${prefix} \`review create --strategy audit --name s\``,
+        );
+        const created = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(created),
+          [
+            `subtree-coherence ${T2J_ROOT}`,
+            `subtree-coherence ${T2J_A}`,
+            `subtree-coherence ${T2J_S}`,
+          ].sort(),
+          `${prefix}: audit creates one subtree-coherence item per node, ` +
+            `root included (SPEC 10.6)`,
+        );
+        const rootId = requireRow(
+          created,
+          "subtree-coherence",
+          T2J_ROOT,
+          prefix,
+        ).id;
+        const aId = requireRow(created, "subtree-coherence", T2J_A, prefix).id;
+        const sId = requireRow(created, "subtree-coherence", T2J_S, prefix).id;
+
+        // The journaled rename a→b: a's item is presented under b thereafter.
+        await expectExit(
+          product,
+          workspace,
+          ["rename", T2J_FILE, "a", "b"],
+          0,
+          `${prefix} \`rename specs/J.mdx a b\``,
+        );
+        const journalKind = await workspace.kind(T2J_JOURNAL);
+        if (journalKind !== "file") {
+          fail(
+            `${prefix}: staging premise — after the rename \`.xspec/journal\` ` +
+              `must be a plain file holding its entry (SPEC 6.1: the file ` +
+              `comes into existence with the first journaled operation; ` +
+              `SPEC 6.4: rename appends the mapping to the journal), so ` +
+              `deleting it empties the journal; found ${journalKind}`,
+          );
+        }
+        const afterRename = `${prefix} after the rename`;
+        assertRowPresented(
+          await sessionStatus(product, workspace, "s", afterRename),
+          aId,
+          T2J_B,
+          "unresolved",
+          "reads present a recorded node under its current identity, and a " +
+            "journaled rename by itself changes no status (SPEC 10.4)",
+          afterRename,
+        );
+
+        // Resolve a's item: its scope node recorded as the canonical
+        // identity (a, the journal's start) (SPEC 5.4, 10.4).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          aId,
+          "no-change",
+          `${prefix} \`review resolve s <a's item, presented under b> ` +
+            `--status no-change\``,
+        );
+        const afterResolve = `${prefix} sanity after the resolve`;
+        assertRowPresented(
+          await sessionStatus(product, workspace, "s", afterResolve),
+          aId,
+          T2J_B,
+          "no-change",
+          "the fresh resolution matches the graph, its scope node still " +
+            "presented under b (SPEC 10.4)",
+          afterResolve,
+        );
+
+        // Delete the journal by hand: a workspace without the journal file
+        // has an empty journal and stays valid (SPEC 6.1).
+        await fsp.rm(workspace.path(T2J_JOURNAL));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting \`.xspec/journal\` — an ` +
+            `empty journal, the workspace valid (SPEC 6.1)`,
+        );
+
+        const afterDeletion = `${prefix} after deleting the journal`;
+        const deleted = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          afterDeletion,
+        );
+        assertRowPresented(
+          deleted,
+          aId,
+          T2J_A,
+          "invalidated",
+          "the identity its resolve recorded, (a, the journal's start), " +
+            "resolves to no node once the journal is empty — a recorded " +
+            "presence that changed — and reads present it mapped forward " +
+            "through that journal (SPEC 5.4, 6.1, 10.4); a product recording " +
+            "the node by its spelled identity at the resolve (b) reads the " +
+            "item still resolved",
+          `${afterDeletion} \`review status\``,
+        );
+        assertSameJson(
+          deleted.items.map((row) => [row.id, row.scope, row.status]).sort(),
+          (
+            [
+              [rootId, T2J_ROOT, "unresolved"],
+              [aId, T2J_A, "invalidated"],
+              [sId, T2J_S, "unresolved"],
+            ] as const
+          )
+            .map((row) => [...row])
+            .sort(),
+          `${afterDeletion}: still the three items — new items enter only ` +
+            `through re-derivation (SPEC 10.5), so b has no item of its own ` +
+            `yet`,
+        );
+        assertInvalidatedAbsentScope(
+          await showItem(product, workspace, "s", aId, afterDeletion),
+          T2J_A,
+          `${afterDeletion} \`review show\``,
+        );
+        const exportLabel = `${afterDeletion} \`review export s --json\``;
+        const exported = decodeExportReport(
+          await runJson(
+            product,
+            workspace,
+            ["review", "export", "s", "--json"],
+            exportLabel,
+          ),
+          exportLabel,
+        );
+        assertInvalidatedAbsentScope(
+          requireItem(exported.items, aId, exportLabel),
+          T2J_A,
+          exportLabel,
+        );
+
+        // The re-derivation: resolve s's item `updated` (SPEC 10.5, 10.6).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          sId,
+          "updated",
+          `${prefix} \`review resolve s <s item> --status updated\` — ` +
+            `re-derivation`,
+        );
+        const afterRederive = `${prefix} after the updated-resolve`;
+        const rederived = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          afterRederive,
+        );
+        // b's generated item matches no existing item — the original's
+        // recorded identity no longer resolves — so a distinct item enters.
+        // A product matching by the spelled identity it recorded (b) finds
+        // the original here and adds no item for b.
+        const bRow = requireRow(
+          rederived,
+          "subtree-coherence",
+          T2J_B,
+          afterRederive,
+        );
+        if ([rootId, aId, sId].includes(bRow.id)) {
+          fail(
+            `${afterRederive}: the item scoped at b must be a distinct item ` +
+              `that entered at the re-derivation — the original's recorded ` +
+              `identity, (a, the journal's start), matches no generated item ` +
+              `once the journal is empty (SPEC 5.4, 10.4, 10.5) — but the ` +
+              `item scoped at b carries the existing id ${bRow.id}; a ` +
+              `product recording the node by its spelled identity at the ` +
+              `resolve (b) adds no item for b`,
+          );
+        }
+        if (bRow.status !== "unresolved") {
+          fail(
+            `${afterRederive}: the item scoped at b enters unresolved (SPEC ` +
+              `10.2, 10.5); got ${bRow.status}`,
+          );
+        }
+        assertSameJson(
+          rederived.items.map((row) => [row.id, row.scope, row.status]).sort(),
+          (
+            [
+              [rootId, T2J_ROOT, "unresolved"],
+              [aId, T2J_A, "invalidated"],
+              [sId, T2J_S, "updated"],
+              [bRow.id, T2J_B, "unresolved"],
+            ] as const
+          )
+            .map((row) => [...row])
+            .sort(),
+          `${afterRederive}: exactly four items — the original keeps its id, ` +
+            `still presented invalidated under a, beside the new item for b ` +
+            `(items that no longer generate remain in the session, SPEC 10.4, ` +
+            `10.5)`,
+        );
+        assertStoredCounts(
+          await listedSession(product, workspace, "s", afterRederive),
+          {
+            unresolved: 2,
+            updated: 1,
+            "no-change": 1,
+            skipped: 0,
+            invalidated: 0,
+          },
+          `${afterRederive}: the original keeps its stored status — \`list\` ` +
+            `counts it no-change beside the root's and b's unresolved items ` +
+            `and s's updated one`,
+        );
+      },
+    );
   },
 });
 
@@ -1528,42 +2790,185 @@ const T10_4_2 = defineProductTest({
 // T10.4-3 — context-set change
 // ---------------------------------------------------------------------------
 
+// Path-blocks fixture — TEST-SPEC's A, K1, and K2 as the top-level section
+// `a` and its children `a.k1` and `a.k2`. a.k1's text is edited before
+// `create --base`, so the session holds a.k1's subtree-coherence item and
+// a's parent-consistency item — context and origin {a.k1}, blockedBy a.k1's
+// item (SPEC 10.5) — and both are resolved `no-change` (no re-derivation,
+// 10.5). a.k2's text is then edited: a new changed branch under a, with no
+// re-derivation, so the generators' context set for a's item becomes
+// {a.k1, a.k2} while no hash the item records changes (10.4). Reads present
+// that current context set as the item's `context` and its other assigned
+// fields — `origin`, `blockedBy`, `reason` — as last assigned at `create`
+// (10.4), though the generators would now give the origin {a.k1, a.k2}.
+// `reason`'s composition is unpinned (10.2): it is compared byte for byte
+// between captures, its content never asserted.
 const T3_FILE = "specs/A.mdx";
 const T3_A = "specs/A.mdx#a";
-const T3_AK = "specs/A.mdx#a.k";
-const T3_AS = "specs/A.mdx#a.s";
+const T3_AK1 = "specs/A.mdx#a.k1";
+const T3_AK2 = "specs/A.mdx#a.k2";
+const T3_SESSION_FILE = ".xspec/reviews/s.json";
 
-function t3Spec(kText: string, sText: string): string {
+function t3Spec(k1Text: string, k2Text: string): string {
   return [
     '<S id="a">',
     "Alpha own text.",
     "",
-    '<S id="a.k">',
-    kText,
+    '<S id="a.k1">',
+    k1Text,
     "</S>",
     "",
-    '<S id="a.s">',
-    sText,
+    '<S id="a.k2">',
+    k2Text,
     "</S>",
     "</S>",
     "",
   ].join("\n");
 }
 
+// T10.4-3's context-set change — the a.k2 edit, staged after the body's
+// first `build` — is a staged-source record (helpers/staged-mdx.ts, S-9:
+// judged before any product exists); the a.k1 edit precedes that `build`
+// (staged between `gitCommitAll` and it) and stays plain.
+const T10_4_3_K2_EDITED = stagedMdx(
+  "T10.4-3 specs/A.mdx with the second branch a.k2 at v1 (the context-set change)",
+  t3Spec("Kay one text v1.", "Kay two text v1."),
+);
+
+/**
+ * Run one `review` read after the a.k2 edit and return its document, the
+ * session file byte-identical around it (SPEC 10.4: reads never write the
+ * session file — the current context set and read-time invalidation are
+ * computed and reported, never persisted; TEST-SPEC T10.4-3, T10.4-5).
+ */
+async function t3ReadKeepingSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  label: string,
+): Promise<unknown> {
+  const before = await workspace.readBytes(T3_SESSION_FILE);
+  const doc = await runJson(product, workspace, argv, label);
+  assertBytesEqual(
+    await workspace.readBytes(T3_SESSION_FILE),
+    before,
+    `${label} — the read must leave the session file byte-identical: the ` +
+      `current context set and read-time invalidation are computed and ` +
+      `reported, never persisted (SPEC 10.4)`,
+  );
+  return doc;
+}
+
+/** An item's `reason` as `review export s --json` presents it (SPEC 10.7). */
+async function t3ExportedReason(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  itemId: string,
+  context: string,
+): Promise<string> {
+  const label = `${context} \`review export s --json\``;
+  const exported = decodeExportReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "export", "s", "--json"],
+      label,
+    ),
+    label,
+  );
+  return requireItem(exported.items, itemId, label).reason;
+}
+
+/**
+ * a's item as `show`, `next --json`, or `export` presents it after the a.k2
+ * edit (SPEC 10.4): reported `invalidated`, its `context` the current
+ * context set — exactly {a.k1, a.k2}, the new branch head included — while
+ * its `origin` and `blockedBy` stay as last assigned at `create`: {a.k1}
+ * and a.k1's item alone.
+ */
+function assertT3Presentation(
+  item: ReviewItem,
+  k1Id: string,
+  context: string,
+): void {
+  if (item.status !== "invalidated") {
+    fail(
+      `${context}: a's item must be reported invalidated — its current ` +
+        `context set {a.k1, a.k2} differs from its recorded context set ` +
+        `{a.k1}, though no recorded hash changed (SPEC 10.4); got ` +
+        item.status,
+    );
+  }
+  assertSameJson(
+    identitySet(item.context),
+    [T3_AK1, T3_AK2].sort(),
+    `${context}: a's item's context must be exactly {a.k1, a.k2} — reads ` +
+      `present the item's current context set, the context the generators ` +
+      `assign it against the current workspace, the new branch head a.k2 ` +
+      `included (SPEC 10.4, 10.5); a product presenting the recorded ` +
+      `context set shows {a.k1}`,
+  );
+  assertSameJson(
+    identitySet(item.origin),
+    [T3_AK1],
+    `${context}: a's item's origin must stay {a.k1} — reads present ` +
+      `origin as last assigned, at \`create\` (no re-derivation has run), ` +
+      `though the generators would now give {a.k1, a.k2} (SPEC 10.4); a ` +
+      `product presenting every field as the generators now give them ` +
+      `shows {a.k1, a.k2}`,
+  );
+  assertSameJson(
+    item.blockedBy,
+    [k1Id],
+    `${context}: a's item's blockedBy must stay a.k1's item alone — reads ` +
+      `present blockedBy as last assigned, at \`create\` (SPEC 10.4)`,
+  );
+}
+
+/**
+ * A surface's `reason` for a's item must be byte-identical to that
+ * surface's capture, taken once both resolves were done (SPEC 10.4: reads
+ * present `reason` as last assigned, and a resolve assigns `context`
+ * alone; 10.2: its composition unpinned, so it is compared, never read).
+ */
+function assertT3ReasonAsCaptured(
+  presented: string,
+  captured: string,
+  context: string,
+): void {
+  if (presented === captured) return;
+  fail(
+    `${context}: a's item's reason must be presented byte-identical to ` +
+      `this surface's capture, taken once both resolves were done — reads ` +
+      `present reason as last assigned (at \`create\`; no re-derivation or ` +
+      `split since), and a resolve assigns context alone (SPEC 10.4; its ` +
+      `composition unpinned, 10.2); a product recomputing reason from the ` +
+      `current graph when the item is read fails wherever its text ` +
+      `reflects a.k2's edit. Captured: ${JSON.stringify(captured)}; ` +
+      `presented: ${JSON.stringify(presented)}`,
+  );
+}
+
 const T10_4_3 = defineProductTest({
   id: "T10.4-3",
   title:
-    "context-set change invalidates without any recorded hash changing: after resolving a parent-consistency item whose context is one changed branch, a text edit in a sibling branch under its scope makes the generators derive a two-branch context set — the item is reported invalidated although the scope node's ownHash and metadataHash and the recorded context node's subtreeHash are all byte-unchanged (asserted as premises via query node), while the sibling branch's own resolved item stays resolved (SPEC 5.5, 10.4, 10.5)",
-  timeoutMs: 240_000,
+    "context-set change: a change that alters an item's generator-derived context set invalidates it without any recorded hash changing, and reads present the current context set as the item's `context` while presenting its other assigned fields as last assigned — path-blocks fixture: top-level A with children K1 and K2, K1's text edited before `create --base`; K1's subtree-coherence item and then A's parent-consistency item (context and origin {K1}, blockedBy K1's item) resolved `no-change`; then K2's text edited — a new changed branch under A — with no re-derivation: A's item reads `invalidated` though A's ownHash and metadataHash and K1's subtreeHash are byte-unchanged (premises via `query node`), K1's item staying resolved; `show`, `next --json`, and `export` present A's context as exactly {K1, K2}, the new branch head included, while its origin stays {K1} and its blockedBy K1's item alone — as last assigned, though the generators would now give the origin {K1, K2} — each read leaving the session file byte-identical; A's item's `reason`, captured from `show` and from `export` once both resolves are done, is presented byte-identical by each surface after K2's edit and again once A's item is resolved `no-change` (a resolve assigns `context` alone), its composition unasserted (SPEC 5.5, 5.6, 10.2, 10.4, 10.5, 10.7)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [T3_FILE]: t3Spec("Kay text v0.", "Ess text v0.") },
+      { [T3_FILE]: t3Spec("Kay one text v0.", "Kay two text v0.") },
       async (workspace) => {
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(T3_FILE, t3Spec("Kay text v1.", "Ess text v0."));
-        await buildOk(product, workspace, "T10.4-3 `build` after the a.k edit");
+        await workspace.file(
+          T3_FILE,
+          t3Spec("Kay one text v1.", "Kay two text v0."),
+        );
+        await buildOk(
+          product,
+          workspace,
+          "T10.4-3 `build` after the a.k1 edit",
+        );
         await expectExit(
           product,
           workspace,
@@ -1574,15 +2979,15 @@ const T10_4_3 = defineProductTest({
         const status = await sessionStatus(product, workspace, "s", "T10.4-3");
         assertSameJson(
           kindScopeSet(status),
-          [`parent-consistency ${T3_A}`, `subtree-coherence ${T3_AK}`].sort(),
-          "T10.4-3: the single changed branch yields a.k's " +
+          [`parent-consistency ${T3_A}`, `subtree-coherence ${T3_AK1}`].sort(),
+          "T10.4-3: the single changed branch yields a.k1's " +
             "subtree-coherence item and a's parent-consistency item " +
             "(SPEC 10.5)",
         );
-        const kId = requireRow(
+        const k1Id = requireRow(
           status,
           "subtree-coherence",
-          T3_AK,
+          T3_AK1,
           "T10.4-3",
         ).id;
         const aId = requireRow(
@@ -1595,9 +3000,9 @@ const T10_4_3 = defineProductTest({
           product,
           workspace,
           "s",
-          kId,
+          k1Id,
           "no-change",
-          "T10.4-3 resolve of the a.k subtree-coherence item (the blocker)",
+          "T10.4-3 resolve of the a.k1 subtree-coherence item (the blocker)",
         );
         await resolveOk(
           product,
@@ -1608,7 +3013,11 @@ const T10_4_3 = defineProductTest({
           "T10.4-3 resolve of the a parent-consistency item",
         );
 
-        // Premise: the recorded context set is the single changed branch.
+        // Premise: a's item as `create` assigned it — context and origin
+        // {a.k1}, blockedBy a.k1's item (SPEC 10.5) — its context the
+        // recorded context set its resolve wrote (10.4). The `reason`
+        // captures, once both resolves are done: `show`'s here, `export`'s
+        // next.
         const resolved = await showItem(
           product,
           workspace,
@@ -1617,10 +3026,23 @@ const T10_4_3 = defineProductTest({
           "T10.4-3 post-resolve read",
         );
         assertSameJson(
-          identitySet(resolved.context),
-          [T3_AK],
+          {
+            context: identitySet(resolved.context),
+            origin: identitySet(resolved.origin),
+            blockedBy: resolved.blockedBy,
+          },
+          { context: [T3_AK1], origin: [T3_AK1], blockedBy: [k1Id] },
           "T10.4-3 staging premise: the resolved parent-consistency item's " +
-            "context is the one changed branch — a's child on it (SPEC 10.5)",
+            "context is the one changed branch — a's child on it — its " +
+            "origin the changed node in a's subtree, and its blockedBy " +
+            "a.k1's subtree-coherence item (SPEC 10.5)",
+        );
+        const shownReason = resolved.reason;
+        const exportedReason = await t3ExportedReason(
+          product,
+          workspace,
+          aId,
+          "T10.4-3 post-resolve read",
         );
 
         // Captures of every recorded relevant hash (SPEC 10.4:
@@ -1629,65 +3051,164 @@ const T10_4_3 = defineProductTest({
         const before = await captureHashes(
           product,
           workspace,
-          [T3_A, T3_AK, T3_AS],
+          [T3_A, T3_AK1, T3_AK2],
           "T10.4-3 pre-edit capture",
         );
 
-        // The context-set change: a new changed branch under a.
-        await workspace.file(T3_FILE, t3Spec("Kay text v1.", "Ess text v1."));
-        await buildOk(product, workspace, "T10.4-3 `build` after the a.s edit");
+        // The context-set change: a new changed branch under a, with no
+        // re-derivation.
+        await workspace.file(T3_FILE, T10_4_3_K2_EDITED);
+        await buildOk(
+          product,
+          workspace,
+          "T10.4-3 `build` after the a.k2 edit",
+        );
         const after = await captureHashes(
           product,
           workspace,
-          [T3_A, T3_AK, T3_AS],
+          [T3_A, T3_AK1, T3_AK2],
           "T10.4-3 post-edit capture",
         );
         for (const [node, hash] of [
           [T3_A, "ownHash"],
           [T3_A, "metadataHash"],
-          [T3_AK, "subtreeHash"],
+          [T3_AK1, "subtreeHash"],
         ] as const) {
           const beforeValue = before.get(node)?.[hash];
           const afterValue = after.get(node)?.[hash];
           if (beforeValue !== afterValue) {
             fail(
-              `T10.4-3 staging premise: the sibling-branch edit must leave ` +
+              `T10.4-3 staging premise: the a.k2 edit must leave ` +
                 `${node}'s ${hash} unchanged (SPEC 5.5) so the invalidation ` +
                 `can only come from the context-set change; got ` +
                 `${JSON.stringify(beforeValue)} -> ${JSON.stringify(afterValue)}`,
             );
           }
         }
-        if (before.get(T3_AS)?.subtreeHash === after.get(T3_AS)?.subtreeHash) {
+        if (
+          before.get(T3_AK2)?.subtreeHash === after.get(T3_AK2)?.subtreeHash
+        ) {
           fail(
-            "T10.4-3 staging premise: the a.s edit must change a.s's " +
+            "T10.4-3 staging premise: the a.k2 edit must change a.k2's " +
               "subtreeHash (SPEC 5.5) — otherwise no new changed branch " +
               "exists and the arm is vacuous",
           );
         }
 
-        // The item is invalidated purely by the generator-derived context
-        // set gaining the new branch (SPEC 10.4); the sibling branch's own
-        // resolved item is untouched.
-        await expectItemStatus(
+        // `status`: a's item is invalidated purely by the generator-derived
+        // context set gaining the new branch (SPEC 10.4); a.k1's item — its
+        // recorded state and context (its ancestor chain) untouched by the
+        // edit — stays resolved, so a's item stays unblocked.
+        const statusLabel =
+          "T10.4-3 after the a.k2 edit `review status s --json`";
+        const edited = decodeSessionStatusReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "status", "s", "--json"],
+            statusLabel,
+          ),
+          statusLabel,
+        );
+        const aRow = requireRowById(edited, aId, statusLabel);
+        if (aRow.status !== "invalidated") {
+          fail(
+            `${statusLabel}: a change that alters the item's ` +
+              `generator-derived context set invalidates it without any ` +
+              `recorded hash changing (SPEC 10.4) — a's item must be ` +
+              `reported invalidated; got ${aRow.status}`,
+          );
+        }
+        const k1Row = requireRowById(edited, k1Id, statusLabel);
+        if (k1Row.status !== "no-change") {
+          fail(
+            `${statusLabel}: a.k1's item's recorded state and context (its ` +
+              `ancestor chain) are untouched by the a.k2 edit, so it stays ` +
+              `resolved (SPEC 10.4, 10.5); got ${k1Row.status}`,
+          );
+        }
+
+        // `show`, `next --json`, and `export`: the current context set as
+        // `context`; `origin`, `blockedBy`, and `reason` as last assigned.
+        const showLabel =
+          "T10.4-3 after the a.k2 edit `review show s <a item> --json`";
+        const shown = decodeItemReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "show", "s", aId, "--json"],
+            showLabel,
+          ),
+          showLabel,
+        );
+        assertT3Presentation(shown, k1Id, showLabel);
+        assertT3ReasonAsCaptured(shown.reason, shownReason, showLabel);
+
+        const nextLabel = "T10.4-3 after the a.k2 edit `review next s --json`";
+        const next = decodeNextReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "next", "s", "--json"],
+            nextLabel,
+          ),
+          nextLabel,
+        );
+        if (next.item?.id !== aId) {
+          fail(
+            `${nextLabel}: next must present a's item — the first item in ` +
+              `item order that needs review and is unblocked: it reads ` +
+              `invalidated, and its one blocker, a.k1's item, stays resolved ` +
+              `(SPEC 10.3, 10.4, 10.5, 10.7); got ` +
+              (next.item === undefined
+                ? "the fully-resolved report"
+                : `item ${next.item.id}`),
+          );
+        }
+        assertT3Presentation(next.item, k1Id, nextLabel);
+
+        const exportLabel =
+          "T10.4-3 after the a.k2 edit `review export s --json`";
+        const exported = decodeExportReport(
+          await t3ReadKeepingSession(
+            product,
+            workspace,
+            ["review", "export", "s", "--json"],
+            exportLabel,
+          ),
+          exportLabel,
+        );
+        const exportedItem = requireItem(exported.items, aId, exportLabel);
+        assertT3Presentation(exportedItem, k1Id, exportLabel);
+        assertT3ReasonAsCaptured(
+          exportedItem.reason,
+          exportedReason,
+          exportLabel,
+        );
+
+        // A resolve assigns `context` alone (SPEC 10.4): a's item — unblocked,
+        // a.k1's item resolved — resolved `no-change` runs no re-derivation
+        // (10.5), and no `split` intervenes, so each surface still presents
+        // the captured `reason`.
+        await resolveOk(
           product,
           workspace,
           "s",
           aId,
-          "invalidated",
-          "T10.4-3 after the sibling-branch edit — a change that alters the " +
-            "item's generator-derived context set invalidates without any " +
-            "recorded hash changing (SPEC 10.4)",
-        );
-        await expectItemStatus(
-          product,
-          workspace,
-          "s",
-          kId,
           "no-change",
-          "T10.4-3 the a.k item's recorded state and context (its ancestor " +
-            "chain) are untouched by the a.s edit — it stays resolved " +
-            "(SPEC 10.4, 10.5)",
+          "T10.4-3 resolve of the invalidated a item --status no-change " +
+            "(a resolve assigns context alone)",
+        );
+        const reresolved = "T10.4-3 after a's re-resolve";
+        assertT3ReasonAsCaptured(
+          (await showItem(product, workspace, "s", aId, reresolved)).reason,
+          shownReason,
+          `${reresolved} \`review show s <a item> --json\``,
+        );
+        assertT3ReasonAsCaptured(
+          await t3ExportedReason(product, workspace, aId, reresolved),
+          exportedReason,
+          `${reresolved} \`review export s --json\``,
         );
       },
     );
@@ -1700,6 +3221,8 @@ const T10_4_3 = defineProductTest({
 
 // Part 1 (rename): p with descendant p.c, plus q — rename p -> pp maps the
 // scoped node of p's item and both a scope and a context node of p.c's item.
+// Parts 2–4 below: the file-move order flip, the reintroduction arm, and
+// the decomposition arm.
 const T4R_FILE = "specs/R.mdx";
 const T4R_ROOT = "specs/R.mdx";
 const T4R_P = "specs/R.mdx#p";
@@ -1723,17 +3246,22 @@ const T4R_SOURCE = [
   "",
 ].join("\n");
 
-// The manual deletion of pp.c after the rename (SPEC 6.6: a plain edit).
-const T4R_WITHOUT_CHILD = [
-  '<S id="pp">',
-  "Parent own text.",
-  "</S>",
-  "",
-  '<S id="q">',
-  "Cue text.",
-  "</S>",
-  "",
-].join("\n");
+// The manual deletion of pp.c after the rename (SPEC 6.6: a plain edit) — a
+// staged-source record (helpers/staged-mdx.ts, S-9: judged before any
+// product exists), staged after the arm's `build` and `rename`.
+const T4R_WITHOUT_CHILD = stagedMdx(
+  "T10.4-4 specs/R.mdx with pp.c deleted after the rename (rename arm)",
+  [
+    '<S id="pp">',
+    "Parent own text.",
+    "</S>",
+    "",
+    '<S id="q">',
+    "Cue text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Part 2 (file-move order flip): specs/b.mdx before specs/d.mdx in byte
 // order; moving d.mdx to a.mdx flips which file sorts first.
@@ -1747,27 +3275,37 @@ const T4M_W = "specs/d.mdx#w";
 const T4M_AN = "specs/a.mdx#n";
 const T4M_AW = "specs/a.mdx#w";
 
-const T4M_B_SOURCE = [
-  '<S id="m">',
-  "Emm text.",
-  "</S>",
-  "",
-  '<S id="r">',
-  "Arr text.",
-  "</S>",
-  "",
-].join("\n");
+// The move and reintroduction arms follow the rename arm's invocations, so
+// their initial sources are staged-source records (S-9's before-any-product
+// clause), wrapped in place; the rename arm's `T4R_SOURCE`, the body's first
+// workspace, stays plain.
+const T4M_B_SOURCE = stagedMdx(
+  "T10.4-4 move arm specs/b.mdx",
+  [
+    '<S id="m">',
+    "Emm text.",
+    "</S>",
+    "",
+    '<S id="r">',
+    "Arr text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const T4M_D_SOURCE = [
-  '<S id="n">',
-  "Enn text.",
-  "</S>",
-  "",
-  '<S id="w">',
-  "Dub text.",
-  "</S>",
-  "",
-].join("\n");
+const T4M_D_SOURCE = stagedMdx(
+  "T10.4-4 move arm specs/d.mdx",
+  [
+    '<S id="n">',
+    "Enn text.",
+    "</S>",
+    "",
+    '<S id="w">',
+    "Dub text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Part 3 (reintroduction): top-level leaves a and s; rename a -> b, then a
 // new section reintroduces the identity `a` (a fresh canonical chain, 5.4).
@@ -1777,16 +3315,19 @@ const T4I_A = "specs/E.mdx#a";
 const T4I_B = "specs/E.mdx#b";
 const T4I_S = "specs/E.mdx#s";
 
-const T4I_SOURCE = [
-  '<S id="a">',
-  "Aye original text.",
-  "</S>",
-  "",
-  '<S id="s">',
-  "Ess text.",
-  "</S>",
-  "",
-].join("\n");
+const T4I_SOURCE = stagedMdx(
+  "T10.4-4 reintroduction arm specs/E.mdx",
+  [
+    '<S id="a">',
+    "Aye original text.",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T4I_NEW_SECTION = [
   "",
@@ -1796,11 +3337,174 @@ const T4I_NEW_SECTION = [
   "",
 ].join("\n");
 
+// The rename-rewritten file's tail — s's closing run, which the rename's
+// minimal in-place edits leave as the file's end (SPEC 6.4) — the anchor the
+// reintroduction's append extends through `workspace.edit()`: the appended
+// bytes follow the product's, which no harness constant equals, so the
+// staging is judged at staging time, not a staged-source record.
+const T4I_TAIL = ['<S id="s">', "Ess text.", "</S>", ""].join("\n");
+
+// Part 4 (decomposition): top-level a holding a.x, and a top-level leaf s;
+// a's item split (the decomposition recorded against a), a renamed to b,
+// then a new top-level section reintroducing the identity `a` — a fresh
+// canonical chain the recorded decomposition never applies to (5.4, 10.4).
+const T4D_FILE = "specs/F.mdx";
+const T4D_ROOT = "specs/F.mdx";
+const T4D_A = "specs/F.mdx#a";
+const T4D_AX = "specs/F.mdx#a.x";
+const T4D_B = "specs/F.mdx#b";
+const T4D_BX = "specs/F.mdx#b.x";
+const T4D_S = "specs/F.mdx#s";
+
+const T4D_SOURCE = stagedMdx(
+  "T10.4-4 decomposition arm specs/F.mdx with top-level a holding a.x and a top-level leaf s",
+  [
+    '<S id="a">',
+    "Aye own text.",
+    "",
+    '<S id="a.x">',
+    "Ex text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+// The new top-level leaf section a and the anchor its append extends: the
+// rename-rewritten file's tail, s's closing run (SPEC 6.4: minimal in-place
+// edits leave it the file's end) — an anchored `workspace.edit()` of the
+// product's bytes, as the reintroduction arm's.
+const T4D_NEW_SECTION = [
+  "",
+  '<S id="a">',
+  "Fresh reintroduced text.",
+  "</S>",
+  "",
+].join("\n");
+const T4D_TAIL = ['<S id="s">', "Ess text.", "</S>", ""].join("\n");
+
+/**
+ * Diagnose that `search` occurs exactly once in the product-rewritten
+ * `content` before `edit()` stages the append at it: SPEC 6.4 fixes the
+ * rewritten form (minimal in-place edits), so a missing or ambiguous anchor
+ * is a diagnosed assertion failure about the product's rewriting, never
+ * `edit()`'s plain refusal (H-8).
+ */
+function anchorOnce(content: string, search: string, context: string): void {
+  const first = content.indexOf(search);
+  if (first === -1) {
+    fail(
+      `${context}: expected the rewritten source to contain ` +
+        `${JSON.stringify(search)} exactly once (SPEC 6.4 fixes the rewritten ` +
+        `form), but it does not appear; source: ${JSON.stringify(content)}`,
+    );
+  }
+  if (content.includes(search, first + search.length)) {
+    fail(
+      `${context}: the anchor ${JSON.stringify(search)} appears more than once, ` +
+        `so the manual edit cannot be staged unambiguously; source: ` +
+        JSON.stringify(content),
+    );
+  }
+}
+
+/** A `status` report's rows as `[id, kind, scope, status]`, sorted. */
+function statusRowTuples(report: SessionStatusReport): string[][] {
+  return report.items
+    .map((row) => [row.id, row.kind, row.scope, row.status])
+    .sort();
+}
+
+/**
+ * The decomposition arm's recorded decomposition as `export` presents it:
+ * exactly one, a's `subtree-coherence` item's, its scope node under the
+ * current identity `scope` (SPEC 10.4: reads present every recorded node
+ * under its current identity, mapped forward through the journal; 10.7: the
+ * decomposition is the original's kind and scope node, recorded durably) —
+ * read through the review adapter's decode of each recorded decomposition's
+ * kind and scope node.
+ */
+function assertT4dSoleDecomposition(
+  report: ExportReport,
+  scope: string,
+  context: string,
+): void {
+  assertSameJson(
+    report.decompositions,
+    [{ kind: "subtree-coherence", scope }],
+    `${context}: \`export\` presents the session's one recorded ` +
+      `decomposition — a's subtree-coherence item's, recorded by \`split\` — ` +
+      `its scope node under the current identity ${scope} (SPEC 10.4: every ` +
+      `recorded node under its current identity; 10.7)`,
+  );
+}
+
+/**
+ * No `subtree-coherence` item scoped at b: the decomposition recorded
+ * against old-a applies to b, the same canonical identity renamed (SPEC 5.4;
+ * 10.4: decomposition matching compares canonical identities; 10.5: a
+ * generated item whose kind and scope node are recorded as decomposed is
+ * never added back).
+ */
+function assertT4dNoItemAtB(
+  report: SessionStatusReport,
+  context: string,
+): void {
+  const readded = report.items.filter(
+    (row) => row.kind === "subtree-coherence" && row.scope === T4D_B,
+  );
+  if (readded.length === 0) return;
+  fail(
+    `${context}: no subtree-coherence item scoped at b enters — the ` +
+      `decomposition \`split\` recorded against old-a applies to b, the same ` +
+      `canonical identity renamed (SPEC 5.4; 10.4: decomposition matching ` +
+      `compares canonical identities, never spellings; 10.5: a generated ` +
+      `item whose kind and scope node are recorded as decomposed is never ` +
+      `added back) — a product matching decompositions by spelling re-adds ` +
+      `one; found ${JSON.stringify(readded)}`,
+  );
+}
+
+/**
+ * The decomposition's two items as `export` presents them once a is renamed
+ * b: b.x's `subtree-coherence` item (a.x's, reused by the split) scoped at
+ * b.x with context the ancestor chain {root, b}, and b's
+ * `parent-consistency` item scoped at b with context b's children {b.x} —
+ * every recorded node under its current identity, present (SPEC 10.4, 10.6,
+ * 10.7).
+ */
+function assertT4dDecompositionItems(
+  report: ExportReport,
+  axId: string,
+  pcId: string,
+  context: string,
+): void {
+  const bx = requireItem(report.items, axId, context);
+  assertSameJson(
+    [bx.scope.node, bx.scope.present, identitySet(bx.context)],
+    [T4D_BX, true, [T4D_ROOT, T4D_B].sort()],
+    `${context}: b.x's item (a.x's, reused by the split) is presented under ` +
+      `the current identities — scope b.x, present, its context the ` +
+      `ancestor chain {root, b} (SPEC 10.4, 10.6, 10.7)`,
+  );
+  const pc = requireItem(report.items, pcId, context);
+  assertSameJson(
+    [pc.scope.node, pc.scope.present, identitySet(pc.context)],
+    [T4D_B, true, [T4D_BX]],
+    `${context}: b's parent-consistency item (a's, created by the split) is ` +
+      `presented under the current identities — scope b, present, its ` +
+      `context b's children {b.x} (SPEC 10.4, 10.7)`,
+  );
+}
+
 const T10_4_4 = defineProductTest({
   id: "T10.4-4",
   title:
-    "rename immunity: `xspec rename` on scoped and context nodes duplicates no item, loses no status, and invalidates nothing by the identity mapping alone — reads present recorded nodes under current identities, mapped forward through the journal, for present and absent nodes alike (a post-rename manual deletion presents the recorded node absent under its mapped identity); a journaled file `move` that flips which of two same-kind items' scope file paths sorts first flips their order in `status`, `next`, and `export` with statuses and recorded state intact; reintroduction arm: after resolving a's item, renaming a to b, authoring a new top-level section a, and resolving s's item `updated` (re-derivation), the item recorded against old-a keeps its id and resolved status under scope b, new-a's item enters as a distinct unresolved item, and the root item's blockedBy gains it — canonical identities with the journal-position pairing, never walked-back identity strings (SPEC 5.4, 6.2, 6.4, 6.5, 10.2, 10.4, 10.5, 10.6)",
-  timeoutMs: 360_000,
+    "rename immunity: `xspec rename` on scoped and context nodes duplicates no item, loses no status, and invalidates nothing by the identity mapping alone — reads present recorded nodes under current identities, mapped forward through the journal, for present and absent nodes alike (a post-rename manual deletion presents the recorded node absent under its mapped identity); a journaled file `move` that flips which of two same-kind items' scope file paths sorts first flips their order in `status`, `next`, and `export` with statuses and recorded state intact; reintroduction arm: after resolving a's item, renaming a to b, authoring a new top-level section a, and resolving s's item `updated` (re-derivation), the item recorded against old-a keeps its id and resolved status under scope b, new-a's item enters as a distinct unresolved item, and the root item's blockedBy gains it — canonical identities with the journal-position pairing, never walked-back identity strings; decomposition arm: after splitting a's item (a holding a.x), renaming a to b, and resolving s's item `updated`, no subtree-coherence item scoped at b enters — the decomposition recorded against old-a applies to b, its items (b.x's and b's parent-consistency item) keeping their ids and statuses under the current identities, and `export` presents the recorded decomposition's scope node as b — and once a new top-level section a is authored and s's item resolved `updated` again, new-a's subtree-coherence item enters unresolved and the root item's blockedBy gains it — decompositions matched as canonical identities, never by spelling (SPEC 5.4, 6.2, 6.4, 6.5, 10.2, 10.4, 10.5, 10.6, 10.7)",
   run: async (product) => {
     // --- rename on scoped and context nodes, present and absent -------------
     await withWorkspace(
@@ -2254,17 +3958,27 @@ const T10_4_4 = defineProductTest({
           `${prefix} \`rename specs/E.mdx a b\``,
         );
 
-        // Author a new top-level leaf section `a` — appended to whatever the
+        // Author a new top-level leaf section `a` — appended to what the
         // rename left on disk, so the reintroduced identity starts a new
         // canonical chain after the journal entry that vacated it (SPEC 5.4).
-        const renamed = await workspace.readBytes(T4I_FILE);
-        await workspace.file(
-          T4I_FILE,
-          Buffer.concat([
-            Buffer.from(renamed),
-            Buffer.from(T4I_NEW_SECTION, "utf8"),
-          ]),
-        );
+        // The bytes are the product's, so the append is an `edit()` extending
+        // the file's tail — s's closing run, which the rename's minimal
+        // in-place edits leave as the file's end (SPEC 6.4) — its uniqueness
+        // and end position diagnosed first (H-8).
+        const renamed = Buffer.from(
+          await workspace.readBytes(T4I_FILE),
+        ).toString("utf8");
+        const appendContext = `${prefix} appending the new section a after the rename-rewritten s`;
+        anchorOnce(renamed, T4I_TAIL, appendContext);
+        if (!renamed.endsWith(T4I_TAIL)) {
+          fail(
+            `${appendContext}: expected the rewritten source to end with ` +
+              `${JSON.stringify(T4I_TAIL)} (SPEC 6.4: minimal in-place edits ` +
+              `leave the file's tail in place); source: ` +
+              JSON.stringify(renamed),
+          );
+        }
+        await workspace.edit(T4I_FILE, T4I_TAIL, T4I_TAIL + T4I_NEW_SECTION);
         await buildOk(
           product,
           workspace,
@@ -2396,6 +4110,309 @@ const T10_4_4 = defineProductTest({
         );
       },
     );
+
+    // --- decomposition arm ------------------------------------------------------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T4D_FILE]: T4D_SOURCE },
+      async (workspace) => {
+        const prefix = "T10.4-4 decomposition arm";
+        await buildOk(product, workspace, `${prefix} \`build\``);
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          0,
+          `${prefix} \`review create --strategy audit --name s\``,
+        );
+        const created = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(created),
+          [
+            `subtree-coherence ${T4D_ROOT}`,
+            `subtree-coherence ${T4D_A}`,
+            `subtree-coherence ${T4D_AX}`,
+            `subtree-coherence ${T4D_S}`,
+          ].sort(),
+          `${prefix}: audit creates one item per node (SPEC 10.6)`,
+        );
+        const rootId = requireRow(
+          created,
+          "subtree-coherence",
+          T4D_ROOT,
+          prefix,
+        ).id;
+        const aId = requireRow(created, "subtree-coherence", T4D_A, prefix).id;
+        const axId = requireRow(
+          created,
+          "subtree-coherence",
+          T4D_AX,
+          prefix,
+        ).id;
+        const sId = requireRow(created, "subtree-coherence", T4D_S, prefix).id;
+
+        // Split a's item (SPEC 10.7): a.x's item reused, a's
+        // parent-consistency item created, the decomposition recorded —
+        // staging premises, read from `status` and `export`.
+        await expectExit(
+          product,
+          workspace,
+          ["review", "split", "s", aId],
+          0,
+          `${prefix} \`review split s <a's item>\``,
+        );
+        const splitContext = `${prefix} after the split`;
+        const afterSplit = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          splitContext,
+        );
+        const pcId = requireRow(
+          afterSplit,
+          "parent-consistency",
+          T4D_A,
+          splitContext,
+        ).id;
+        if ([rootId, aId, axId, sId].includes(pcId)) {
+          fail(
+            `${splitContext}: staging premise — a's parent-consistency item ` +
+              `enters as a new item (SPEC 10.7: the split original's id is ` +
+              `never reused); got the existing id ${pcId}`,
+          );
+        }
+        assertSameJson(
+          statusRowTuples(afterSplit),
+          [
+            [rootId, "subtree-coherence", T4D_ROOT, "unresolved"],
+            [pcId, "parent-consistency", T4D_A, "unresolved"],
+            [axId, "subtree-coherence", T4D_AX, "unresolved"],
+            [sId, "subtree-coherence", T4D_S, "unresolved"],
+          ].sort(),
+          `${splitContext}: staging premise — the split replaced a's ` +
+            `subtree-coherence item by a.x's item, reused, and a's new ` +
+            `parent-consistency item (SPEC 10.7)`,
+        );
+        assertT4dSoleDecomposition(
+          await exportSession(product, workspace, "s", splitContext),
+          T4D_A,
+          `${splitContext} (staging premise)`,
+        );
+
+        // Distinct resolved statuses on the decomposition's two items, so
+        // that keeping them is discriminating: a.x's item (a leaf,
+        // unblocked), then a's parent-consistency item, unblocked once its
+        // one blocker resolved (SPEC 10.3, 10.7).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          axId,
+          "no-change",
+          `${prefix} resolve of a.x's item`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          pcId,
+          "skipped",
+          `${prefix} resolve of a's parent-consistency item (unblocked once ` +
+            `a.x's resolved)`,
+        );
+
+        // The rename, with its purity premise (SPEC 6.2: every hash
+        // byte-identical under the new identities), so no status asserted
+        // below turns on a hash.
+        const aHashes = (
+          await queryNode(product, workspace, T4D_A, `${prefix} pre-rename`)
+        ).hashes;
+        const axHashes = (
+          await queryNode(product, workspace, T4D_AX, `${prefix} pre-rename`)
+        ).hashes;
+        await expectExit(
+          product,
+          workspace,
+          ["rename", T4D_FILE, "a", "b"],
+          0,
+          `${prefix} \`rename specs/F.mdx a b\` (SPEC 6.4)`,
+        );
+        const bHashes = (
+          await queryNode(product, workspace, T4D_B, `${prefix} post-rename`)
+        ).hashes;
+        const bxHashes = (
+          await queryNode(product, workspace, T4D_BX, `${prefix} post-rename`)
+        ).hashes;
+        assertSameJson(
+          [bHashes, bxHashes],
+          [aHashes, axHashes],
+          `${prefix}: cross-check with SPEC 6.2 — \`rename\` is pure and ` +
+            `leaves every hash byte-identical: b's and b.x's hashes are a's ` +
+            `and a.x's`,
+        );
+
+        // The first re-derivation: resolve s's item `updated` (SPEC 10.5).
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          sId,
+          "updated",
+          `${prefix} \`review resolve s <s item> --status updated\` — ` +
+            `re-derivation`,
+        );
+        const firstContext = `${prefix} after the first updated-resolve`;
+        const afterFirst = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          firstContext,
+        );
+        assertT4dNoItemAtB(afterFirst, firstContext);
+        const keptRows = [
+          [rootId, "subtree-coherence", T4D_ROOT, "unresolved"],
+          [pcId, "parent-consistency", T4D_B, "skipped"],
+          [axId, "subtree-coherence", T4D_BX, "no-change"],
+          [sId, "subtree-coherence", T4D_S, "updated"],
+        ];
+        assertSameJson(
+          statusRowTuples(afterFirst),
+          [...keptRows].sort(),
+          `${firstContext}: exactly the four items — the decomposition's ` +
+            `items, b.x's and b's parent-consistency item, keep their ids ` +
+            `and statuses, presented under the current identities, nothing ` +
+            `invalidated by the identity mapping (SPEC 10.4, 10.5, 10.7)`,
+        );
+        const firstExport = await exportSession(
+          product,
+          workspace,
+          "s",
+          firstContext,
+        );
+        assertT4dSoleDecomposition(firstExport, T4D_B, firstContext);
+        assertT4dDecompositionItems(firstExport, axId, pcId, firstContext);
+        const rootBlockers = [axId, pcId, sId].sort();
+        assertSameJson(
+          [
+            ...requireItem(firstExport.items, rootId, firstContext).blockedBy,
+          ].sort(),
+          rootBlockers,
+          `${firstContext}: the root item's recomputed blockedBy is its ` +
+            `child sections' items, b's replaced by all items of its ` +
+            `decomposition (SPEC 10.5, 10.6)`,
+        );
+
+        // Author a new top-level leaf section `a`, appended to what the
+        // rename left on disk — a new canonical chain after the journal
+        // entry that vacated the identity (SPEC 5.4) — through an anchored
+        // `edit()` of the product's bytes, the tail's uniqueness and end
+        // position diagnosed first (SPEC 6.4; H-8).
+        const renamed = Buffer.from(
+          await workspace.readBytes(T4D_FILE),
+        ).toString("utf8");
+        const appendContext = `${prefix} appending the new section a after the rename-rewritten s`;
+        anchorOnce(renamed, T4D_TAIL, appendContext);
+        if (!renamed.endsWith(T4D_TAIL)) {
+          fail(
+            `${appendContext}: expected the rewritten source to end with ` +
+              `${JSON.stringify(T4D_TAIL)} (SPEC 6.4: minimal in-place edits ` +
+              `leave the file's tail in place); source: ` +
+              JSON.stringify(renamed),
+          );
+        }
+        await workspace.edit(T4D_FILE, T4D_TAIL, T4D_TAIL + T4D_NEW_SECTION);
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after authoring the new section a`,
+        );
+        const premiseContext = `${prefix} before the second updated-resolve`;
+        assertSameJson(
+          statusRowTuples(
+            await sessionStatus(product, workspace, "s", premiseContext),
+          ),
+          [...keptRows].sort(),
+          `${premiseContext}: staging premise — still the four items, ` +
+            `statuses unchanged: new items enter only through re-derivation ` +
+            `(SPEC 10.5), and authoring a changes no recorded state of the ` +
+            `four (SPEC 10.4)`,
+        );
+
+        // The second re-derivation: resolve s's item `updated` again.
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          sId,
+          "updated",
+          `${prefix} second \`review resolve s <s item> --status updated\` — ` +
+            `re-derivation`,
+        );
+        const secondContext = `${prefix} after the second updated-resolve`;
+        const afterSecond = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          secondContext,
+        );
+        const newARows = afterSecond.items.filter(
+          (row) => row.kind === "subtree-coherence" && row.scope === T4D_A,
+        );
+        if (newARows.length !== 1) {
+          fail(
+            `${secondContext}: new-a's subtree-coherence item enters at the ` +
+              `re-derivation, exactly one item scoped at a — the ` +
+              `decomposition recorded against old-a never applies to new-a, ` +
+              `a distinct canonical identity (SPEC 5.4, 10.4, 10.5); a ` +
+              `product matching decompositions by spelling withholds it; ` +
+              `found ${String(newARows.length)} among ` +
+              JSON.stringify(
+                afterSecond.items.map((row) => `${row.kind} ${row.scope}`),
+              ),
+          );
+        }
+        const newARow = newARows[0];
+        if ([rootId, aId, axId, pcId, sId].includes(newARow.id)) {
+          fail(
+            `${secondContext}: new-a's item enters as a distinct item (SPEC ` +
+              `5.4: the reintroduced identity starts a new canonical chain; ` +
+              `10.7: the split original's id is never reused); got the ` +
+              `existing id ${newARow.id}`,
+          );
+        }
+        if (newARow.status !== "unresolved") {
+          fail(
+            `${secondContext}: new-a's item is created unresolved (SPEC ` +
+              `10.2); got ${newARow.status}`,
+          );
+        }
+        assertT4dNoItemAtB(afterSecond, secondContext);
+        assertSameJson(
+          statusRowTuples(afterSecond),
+          [
+            ...keptRows,
+            [newARow.id, "subtree-coherence", T4D_A, "unresolved"],
+          ].sort(),
+          `${secondContext}: exactly five items — the four as they were, ` +
+            `plus new-a's (SPEC 10.4, 10.5)`,
+        );
+        const secondExport = await exportSession(
+          product,
+          workspace,
+          "s",
+          secondContext,
+        );
+        assertT4dSoleDecomposition(secondExport, T4D_B, secondContext);
+        assertSameJson(
+          [
+            ...requireItem(secondExport.items, rootId, secondContext).blockedBy,
+          ].sort(),
+          [...rootBlockers, newARow.id].sort(),
+          `${secondContext}: the root item's recomputed blockedBy gains ` +
+            `new-a's item (SPEC 10.5, 10.6)`,
+        );
+      },
+    );
   },
 });
 
@@ -2422,11 +4439,18 @@ function t5Spec(xText: string): string {
   ].join("\n");
 }
 
+// T10.4-5's staleness edit — staged after the body's first `build` — is a
+// staged-source record (helpers/staged-mdx.ts, S-9: judged before any
+// product exists).
+const T10_4_5_X_EDITED = stagedMdx(
+  "T10.4-5 specs/W.mdx with the resolved scope node x at v1 (the staleness edit)",
+  t5Spec("Ex text v1."),
+);
+
 const T10_4_5 = defineProductTest({
   id: "T10.4-5",
   title:
-    "reads never write: with a stale resolution in an audit session (the resolved scope node edited and rebuilt), `status`, `next`, `show`, and `export` each report the item `invalidated` while leaving the session file byte-identical; `review list` still counts the stored `no-change` status — read-time invalidation is computed and reported, never persisted — and the stored status and record are rewritten only by a mutating subcommand, whose `resolve` changes the session file's bytes and cures the staleness (SPEC 10.1, 10.4, 10.7)",
-  timeoutMs: 240_000,
+    "reads never write: with a stale resolution in an audit session (the resolved scope node edited and rebuilt), `status`, `next`, `show`, and `export` each report the item `invalidated` while leaving the session file byte-identical — read-time invalidation is computed and reported, never persisted, as those byte-compares alone observe — and the stored status and record are rewritten only by a mutating subcommand, whose `resolve` changes the session file's bytes and cures the staleness (SPEC 10.1, 10.4, 10.7)",
   run: async (product) => {
     // Staged within CONF-CORE's scope (CERTIFICATIONS.md): one importless
     // spec group, no tags/d/embeddings, no git, an audit-strategy session.
@@ -2464,7 +4488,7 @@ const T10_4_5 = defineProductTest({
 
         // The staleness: edit the resolved scope node and rebuild, so every
         // subsequent read computes and reports invalidation (SPEC 10.4).
-        await workspace.file(T5_FILE, t5Spec("Ex text v1."));
+        await workspace.file(T5_FILE, T10_4_5_X_EDITED);
         await buildOk(product, workspace, "T10.4-5 `build` after the x edit");
 
         /** Run one read; assert the session file's bytes did not move. */
@@ -2571,43 +4595,14 @@ const T10_4_5 = defineProductTest({
           );
         }
 
-        // `list` counts stored statuses without read-time invalidation
-        // (SPEC 10.7): after all four reads, the stored status is still the
-        // resolved one — the reads rewrote nothing.
-        const listLabel = "T10.4-5 `review list --json`";
-        const list = decodeSessionListReport(
-          await readLeavesSessionUntouched(
-            ["review", "list", "--json"],
-            listLabel,
-          ),
-          listLabel,
-        );
-        const entries = list.sessions.filter((session) => session.name === "s");
-        const entry = entries.length === 1 ? entries[0] : undefined;
-        if (entry === undefined || entry.corrupt) {
-          fail(
-            `${listLabel}: expected exactly one non-corrupt session "s" ` +
-              `(SPEC 10.1, 10.7); got ${JSON.stringify(list.sessions)}`,
-          );
-        }
-        const counts = entry.counts;
-        for (const [storedStatus, expected] of [
-          ["no-change", 1],
-          ["unresolved", 2],
-          ["invalidated", 0],
-          ["updated", 0],
-          ["skipped", 0],
-        ] as const) {
-          if ((counts[storedStatus] ?? 0) !== expected) {
-            fail(
-              `${listLabel}: \`list\` counts stored statuses without ` +
-                `read-time invalidation (SPEC 10.7) — the reads must not ` +
-                `have rewritten the stored no-change status (SPEC 10.4); ` +
-                `expected ${String(expected)} ${storedStatus} item(s), got ` +
-                `${String(counts[storedStatus] ?? 0)} in ${JSON.stringify(counts)}`,
-            );
-          }
-        }
+        // The four byte-compares above are the one observation that the reads
+        // rewrote nothing (CERTIFICATIONS.md §VIOL-CORE-PERSISTREADS, a
+        // staging constraint): once a read has computed invalidation, nothing
+        // here reads the stored statuses while that resolution stands — no
+        // `review list` runs, its counts reading stored statuses (SPEC 10.7),
+        // and the staleness is never undone, so no later answer or blocked
+        // state turns on the stored status. A product persisting read-time
+        // invalidation thus fails this test at a read's byte-compare alone.
 
         // The stored status is rewritten only by mutating subcommands: a
         // `resolve` re-records the current relevant state — the session
@@ -2645,6 +4640,1705 @@ const T10_4_5 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.4-6 — context as last assigned
+// ---------------------------------------------------------------------------
+
+// Path-blocks fixture — TEST-SPEC's X, T1, T2, U1, and U2 as the top-level
+// sections x, t1, t2, u1, and u2 of one file: x's `d` names t1 and t2, t1
+// depends on u1 and t2 on u2 (local references, SPEC 2.2). u1's text is
+// edited before `create --base`: u1 is `changed`, t1 and x
+// `upstream-changed` (5.6), so the session holds u1's subtree-coherence item
+// and the dependency-consistency items of t1 and of x — x's context {t1},
+// the one dependency-edge target of x whose effectiveHash changed (10.5).
+// u2's text is edited after it, with no re-derivation: t2's effectiveHash
+// changes too, so the generators' context set for x's item becomes
+// {t1, t2}, while no hash x's item records changes — x's ownHash and
+// metadataHash and each target's subtreeHash (10.4). Reverting both edits
+// restores the baseline bytes: no target's effectiveHash differs from the
+// baseline, and the generators no longer produce x's item, whose current
+// context set is then its `context` as last assigned (10.4). The hash
+// premises are checked via `query node` at every state, against a capture
+// at the baseline. (a) assigns the context at a resolve, after u2's edit;
+// (b), on a twin, resolves x's item before u2's edit and assigns the context
+// through the re-derivation of u1's `updated` resolve (10.5), which also
+// assigns `reason` — compared byte for byte between captures from the same
+// surface, its composition unpinned (10.2).
+const T6_FILE = "specs/G.mdx";
+const T6_X = "specs/G.mdx#x";
+const T6_T1 = "specs/G.mdx#t1";
+const T6_T2 = "specs/G.mdx#t2";
+const T6_U1 = "specs/G.mdx#u1";
+
+function t6Spec(u1Text: string, u2Text: string): string {
+  return [
+    '<S id="x" d={["t1", "t2"]}>',
+    "Ex own text.",
+    "</S>",
+    "",
+    '<S id="t1" d={"u1"}>',
+    "Tee one text.",
+    "</S>",
+    "",
+    '<S id="t2" d={"u2"}>',
+    "Tee two text.",
+    "</S>",
+    "",
+    '<S id="u1">',
+    u1Text,
+    "</S>",
+    "",
+    '<S id="u2">',
+    u2Text,
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// T10.4-6's states staged after the body's first `build` — u1's edit, u2's
+// edit, (b)'s first revert (u1's), and the baseline bytes both reverts
+// restore, which are also the twin's initial source — are staged-source
+// records (helpers/staged-mdx.ts, S-9: judged before any product exists);
+// (a)'s workspace's initial source precedes every invocation and stays
+// plain.
+const T10_4_6_BASELINE = stagedMdx(
+  "T10.4-6 specs/G.mdx with u1 and u2 at v0 (the baseline bytes both reverts restore; the twin's initial source)",
+  t6Spec("You one text v0.", "You two text v0."),
+);
+const T10_4_6_U1_EDITED = stagedMdx(
+  "T10.4-6 specs/G.mdx with u1 at v1 (the edit before `create --base`)",
+  t6Spec("You one text v1.", "You two text v0."),
+);
+const T10_4_6_U2_EDITED = stagedMdx(
+  "T10.4-6 specs/G.mdx with u1 and u2 at v1 (u2's edit after `create --base`)",
+  t6Spec("You one text v1.", "You two text v1."),
+);
+const T10_4_6_U1_REVERTED = stagedMdx(
+  "T10.4-6 specs/G.mdx with u1 reverted to v0 and u2 still at v1 ((b)'s first revert)",
+  t6Spec("You one text v0.", "You two text v1."),
+);
+
+/** Which of T10.4-6's two upstream edits stand at a staged state. */
+interface T6Edits {
+  readonly u1: boolean;
+  readonly u2: boolean;
+}
+
+/** x's, t1's, and t2's hashes, captured via `query node` (SPEC 5.5). */
+async function t6Capture(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<ReadonlyMap<string, NodeHashes>> {
+  return await captureHashes(product, workspace, [T6_X, T6_T1, T6_T2], context);
+}
+
+/**
+ * T10.4-6's hash premises at one state, against the capture at the baseline
+ * (SPEC 5.5): x's ownHash and metadataHash and t1's and t2's subtreeHash —
+ * every hash x's item records, whichever targets its context holds (10.4) —
+ * keep their baseline values, and t1's and t2's effectiveHash differ from
+ * theirs exactly while u1's and u2's edits stand. The generators thus give
+ * x's item exactly the targets whose upstream edit stands as its context,
+ * and produce no item for x once neither stands (10.5), so no assertion
+ * turns on a hash (H-8).
+ */
+function assertT6HashPremises(
+  baseline: ReadonlyMap<string, NodeHashes>,
+  current: ReadonlyMap<string, NodeHashes>,
+  edits: T6Edits,
+  context: string,
+): void {
+  const value = (
+    captures: ReadonlyMap<string, NodeHashes>,
+    node: string,
+    hash: keyof NodeHashes,
+    side: string,
+  ): string => {
+    const hashes = captures.get(node);
+    if (hashes === undefined) {
+      fail(
+        `${context}: harness staging defect — no ${side} \`query node\` ` +
+          `capture exists for ${node}, so its ${hash} premise cannot be ` +
+          `checked`,
+      );
+    }
+    return hashes[hash];
+  };
+  for (const [node, hash] of [
+    [T6_X, "ownHash"],
+    [T6_X, "metadataHash"],
+    [T6_T1, "subtreeHash"],
+    [T6_T2, "subtreeHash"],
+  ] as const) {
+    const before = value(baseline, node, hash, "baseline");
+    const now = value(current, node, hash, "current");
+    if (before !== now) {
+      fail(
+        `${context}: staging premise — ${node}'s ${hash} must keep its ` +
+          `baseline value (SPEC 5.5): x's item records it (10.4), and only ` +
+          `its context set may change; got ${JSON.stringify(before)} -> ` +
+          JSON.stringify(now),
+      );
+    }
+  }
+  for (const [node, upstream, stands] of [
+    [T6_T1, "u1", edits.u1],
+    [T6_T2, "u2", edits.u2],
+  ] as const) {
+    const before = value(baseline, node, "effectiveHash", "baseline");
+    const now = value(current, node, "effectiveHash", "current");
+    if ((before !== now) !== stands) {
+      fail(
+        `${context}: staging premise — ${node}'s effectiveHash must ` +
+          (stands
+            ? `differ from its baseline value while ${upstream}'s edit ` +
+              `stands (SPEC 5.5), making ${node} a dependency-edge target ` +
+              `of x whose effectiveHash changed (10.5)`
+            : `equal its baseline value while ${upstream}'s edit does not ` +
+              `stand (SPEC 5.5), so ${node} is no dependency-edge target ` +
+              `of x whose effectiveHash changed (10.5)`) +
+          `; baseline ${JSON.stringify(before)}, now ${JSON.stringify(now)}`,
+      );
+    }
+  }
+}
+
+/** Write one T10.4-6 state, `build` it, and check its hash premises. */
+async function t6Stage(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  baseline: ReadonlyMap<string, NodeHashes>,
+  source: StagedMdx,
+  edits: T6Edits,
+  label: string,
+): Promise<void> {
+  await workspace.file(T6_FILE, source);
+  await buildOk(product, workspace, `${label} \`build\``);
+  assertT6HashPremises(
+    baseline,
+    await t6Capture(product, workspace, `${label} capture`),
+    edits,
+    label,
+  );
+}
+
+/** The session T10.4-6's two arms share, and the ids they act on. */
+interface T6Session {
+  readonly baseline: ReadonlyMap<string, NodeHashes>;
+  readonly xId: string;
+  readonly u1Id: string;
+}
+
+/**
+ * Stage T10.4-6's session in a fresh workspace holding the baseline source
+ * (SPEC 10.5): the baseline committed, built, and captured; u1's text
+ * edited and built; then `review create --base <baseline> --name s`, whose
+ * session holds exactly u1's subtree-coherence item and the
+ * dependency-consistency items of t1 and of x — x's context exactly {t1}
+ * (staging premises from `status` and `show`).
+ */
+async function t6CreateSession(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<T6Session> {
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${label} \`build\` at the baseline`);
+  const baseline = await t6Capture(
+    product,
+    workspace,
+    `${label} baseline capture`,
+  );
+  await t6Stage(
+    product,
+    workspace,
+    baseline,
+    T10_4_6_U1_EDITED,
+    { u1: true, u2: false },
+    `${label} after u1's edit`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--base", base, "--name", "s"],
+    0,
+    `${label} \`review create --base <baseline> --name s\``,
+  );
+  const status = await sessionStatus(product, workspace, "s", label);
+  assertSameJson(
+    kindScopeSet(status),
+    [
+      `dependency-consistency ${T6_T1}`,
+      `dependency-consistency ${T6_X}`,
+      `subtree-coherence ${T6_U1}`,
+    ].sort(),
+    `${label} staging premise: u1's edit yields u1's subtree-coherence ` +
+      `item and the dependency-consistency items of t1 (its target u1 ` +
+      `changed) and of x (its target t1's effectiveHash changed), and ` +
+      `nothing else (SPEC 5.6, 10.5)`,
+  );
+  const xId = requireRow(status, "dependency-consistency", T6_X, label).id;
+  const u1Id = requireRow(status, "subtree-coherence", T6_U1, label).id;
+  const created = await showItem(
+    product,
+    workspace,
+    "s",
+    xId,
+    `${label} after \`create\``,
+  );
+  assertSameJson(
+    identitySet(created.context),
+    [T6_T1],
+    `${label} staging premise: x's dependency-consistency item's context ` +
+      `is exactly {t1}, the one dependency-edge target of x whose ` +
+      `effectiveHash changed (SPEC 10.5)`,
+  );
+  return { baseline, xId, u1Id };
+}
+
+/**
+ * x's item as `show` or `export` presents it (SPEC 10.4, 10.7): reported
+ * `status`, its context exactly `contextNodes`, `why` naming the rule.
+ */
+function assertT6Presented(
+  item: ReviewItem,
+  status: ItemStatus,
+  contextNodes: readonly string[],
+  why: string,
+  context: string,
+): void {
+  if (item.status !== status) {
+    fail(
+      `${context}: x's item must be reported ${status} — ${why}; got ` +
+        item.status,
+    );
+  }
+  assertSameJson(
+    identitySet(item.context),
+    [...contextNodes].sort(),
+    `${context}: x's item's context must be exactly ` +
+      `${JSON.stringify(contextNodes)} — ${why}`,
+  );
+}
+
+/**
+ * Read x's item through `status`, `show`, and `export` (SPEC 10.4, 10.7):
+ * each must report it `status`, and `show` and `export` present its context
+ * as exactly `contextNodes`. Returns the item as `show` and as `export`
+ * present it, for the caller's `reason` captures and compares.
+ */
+async function t6ReadX(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  xId: string,
+  status: ItemStatus,
+  contextNodes: readonly string[],
+  why: string,
+  label: string,
+): Promise<{ readonly shown: ReviewItem; readonly exported: ReviewItem }> {
+  const report = await sessionStatus(product, workspace, "s", label);
+  const statusLabel = `${label} \`review status s --json\``;
+  const row = requireRowById(report, xId, statusLabel);
+  if (row.status !== status) {
+    fail(
+      `${statusLabel}: x's item must be reported ${status} — ${why}; got ` +
+        row.status,
+    );
+  }
+  const shown = await showItem(product, workspace, "s", xId, label);
+  assertT6Presented(
+    shown,
+    status,
+    contextNodes,
+    why,
+    `${label} \`review show s <x item> --json\``,
+  );
+  const exportLabel = `${label} \`review export s --json\``;
+  const exported = requireItem(
+    (await exportSession(product, workspace, "s", label)).items,
+    xId,
+    exportLabel,
+  );
+  assertT6Presented(exported, status, contextNodes, why, exportLabel);
+  return { shown, exported };
+}
+
+/**
+ * A surface's `reason` for x's item must be byte-identical to that
+ * surface's capture, taken right after u1's `updated` resolve (SPEC 10.4:
+ * reads present `reason` as last assigned — here by that re-derivation,
+ * 10.5 — whether or not the generators still produce the item; 10.2: its
+ * composition unpinned, so it is compared, never read).
+ */
+function assertT6ReasonAsCaptured(
+  presented: string,
+  captured: string,
+  context: string,
+): void {
+  if (presented === captured) return;
+  fail(
+    `${context}: x's item's reason must be presented byte-identical to ` +
+      `this surface's capture, taken right after u1's \`updated\` resolve ` +
+      `— reads present reason as last assigned, by that re-derivation, ` +
+      `whether or not the generators still produce the item (SPEC 10.4, ` +
+      `10.5; its composition unpinned, 10.2); a product recomputing reason ` +
+      `when the item is read fails wherever its text reflects the reverted ` +
+      `graph. Captured: ${JSON.stringify(captured)}; presented: ` +
+      JSON.stringify(presented),
+  );
+}
+
+const T10_4_6 = defineProductTest({
+  id: "T10.4-6",
+  title:
+    "context as last assigned: for an item the generators no longer produce, reads present its `context` as last assigned — by `create`, a re-derivation, a `split`, or a resolve — and a resolve assigns the item its current context set as `context` — path-blocks fixture: X's `d` names T1 and T2, T1 depends on U1 and T2 on U2, U1's text edited before `create --base` (X's dependency-consistency item: context {T1}) and U2's after it, with no re-derivation, X's ownHash and metadataHash and T1's and T2's subtreeHash never changing and T1's and T2's effectiveHash differing from the baseline exactly while U1's and U2's edits stand (premises via `query node` at every state); (a) X's item resolved `no-change` reads `no-change` in `status`, `show`, and `export`, `show` and `export` presenting its context as exactly {T1, T2}, and still does once both upstream edits are reverted and the generators no longer produce it; (b) on a twin, X's item resolved `no-change` before U2's edit (context {T1}), then U1's subtree-coherence item resolved `updated` after it — the re-derivation assigning X's item context {T1, T2} — X's item reads `invalidated`, context {T1, T2}, and once both upstream edits are reverted, one at a time, it still reads `invalidated` with context exactly {T1, T2}, never its recorded context set {T1}; its `reason`, captured from `show` and from `export` right after the `updated` resolve, is presented byte-identical by each surface after each revert, its composition unasserted (SPEC 5.5, 5.6, 10.2, 10.4, 10.5)",
+  run: async (product) => {
+    // (a) Resolve assignment.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T6_FILE]: t6Spec("You one text v0.", "You two text v0.") },
+      async (workspace) => {
+        const label = "T10.4-6 (a)";
+        const { baseline, xId } = await t6CreateSession(
+          product,
+          workspace,
+          label,
+        );
+        await t6Stage(
+          product,
+          workspace,
+          baseline,
+          T10_4_6_U2_EDITED,
+          { u1: true, u2: true },
+          `${label} after u2's edit`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} resolve of x's item --status no-change after u2's edit ` +
+            `(no re-derivation, SPEC 10.5)`,
+        );
+        await t6ReadX(
+          product,
+          workspace,
+          xId,
+          "no-change",
+          [T6_T1, T6_T2],
+          "the resolve assigned the item its current context set, {t1, t2} " +
+            "— the generators' since u2's edit — as its `context`, and " +
+            "recorded the same set as its recorded context set (SPEC 10.4); " +
+            "a product that never assigns context at a resolve presents " +
+            "{t1} or reads invalidated",
+          `${label} after x's resolve`,
+        );
+        // Both upstream edits reverted at once: the generators no longer
+        // produce x's item.
+        await t6Stage(
+          product,
+          workspace,
+          baseline,
+          T10_4_6_BASELINE,
+          { u1: false, u2: false },
+          `${label} after both reverts`,
+        );
+        await t6ReadX(
+          product,
+          workspace,
+          xId,
+          "no-change",
+          [T6_T1, T6_T2],
+          "the generators no longer produce x's item, so its current " +
+            "context set is its `context` as last assigned — by the " +
+            "resolve, {t1, t2}, which is its recorded context set — and no " +
+            "recorded hash or presence changed (SPEC 10.4); a product that " +
+            "never assigns context at a resolve presents {t1} or reads " +
+            "invalidated",
+          `${label} after both reverts`,
+        );
+      },
+    );
+
+    // (b) Re-derivation assignment, on a twin.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T6_FILE]: T10_4_6_BASELINE },
+      async (workspace) => {
+        const label = "T10.4-6 (b)";
+        const { baseline, xId, u1Id } = await t6CreateSession(
+          product,
+          workspace,
+          label,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} resolve of x's item --status no-change before u2's edit`,
+        );
+        const resolved = await showItem(
+          product,
+          workspace,
+          "s",
+          xId,
+          `${label} after x's resolve`,
+        );
+        assertT6Presented(
+          resolved,
+          "no-change",
+          [T6_T1],
+          "staging premise: the resolve assigned and recorded x's current " +
+            "context set, {t1} (SPEC 10.4)",
+          `${label} after x's resolve \`review show s <x item> --json\``,
+        );
+        await t6Stage(
+          product,
+          workspace,
+          baseline,
+          T10_4_6_U2_EDITED,
+          { u1: true, u2: true },
+          `${label} after u2's edit`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          u1Id,
+          "updated",
+          `${label} resolve of u1's subtree-coherence item --status updated ` +
+            `(the re-derivation, SPEC 10.5)`,
+        );
+        const { shown, exported } = await t6ReadX(
+          product,
+          workspace,
+          xId,
+          "invalidated",
+          [T6_T1, T6_T2],
+          "u1's `updated` resolve re-derived the session, the matched x " +
+            "item taking the generated context {t1, t2} and keeping its " +
+            "recorded state (SPEC 10.5), so its current context set {t1, t2} " +
+            "differs from its recorded context set {t1} (SPEC 10.4)",
+          `${label} after u1's \`updated\` resolve`,
+        );
+        const shownReason = shown.reason;
+        const exportedReason = exported.reason;
+
+        // The reverts, one at a time: u1's (x's item still generated, its
+        // context set {t2}), then u2's (x's item no longer generated).
+        const u1Label = `${label} after u1's revert`;
+        await t6Stage(
+          product,
+          workspace,
+          baseline,
+          T10_4_6_U1_REVERTED,
+          { u1: false, u2: true },
+          u1Label,
+        );
+        assertT6ReasonAsCaptured(
+          (await showItem(product, workspace, "s", xId, u1Label)).reason,
+          shownReason,
+          `${u1Label} \`review show s <x item> --json\``,
+        );
+        assertT6ReasonAsCaptured(
+          requireItem(
+            (await exportSession(product, workspace, "s", u1Label)).items,
+            xId,
+            `${u1Label} \`review export s --json\``,
+          ).reason,
+          exportedReason,
+          `${u1Label} \`review export s --json\``,
+        );
+
+        const bothLabel = `${label} after both reverts`;
+        await t6Stage(
+          product,
+          workspace,
+          baseline,
+          T10_4_6_BASELINE,
+          { u1: false, u2: false },
+          bothLabel,
+        );
+        const reverted = await t6ReadX(
+          product,
+          workspace,
+          xId,
+          "invalidated",
+          [T6_T1, T6_T2],
+          "the generators no longer produce x's item, so its current " +
+            "context set is its `context` as last assigned — by the " +
+            "re-derivation, {t1, t2} — which differs from its recorded " +
+            "context set {t1} (SPEC 10.4); a product presenting the " +
+            "recorded context set shows {t1}, reading no-change",
+          bothLabel,
+        );
+        assertT6ReasonAsCaptured(
+          reverted.shown.reason,
+          shownReason,
+          `${bothLabel} \`review show s <x item> --json\``,
+        );
+        assertT6ReasonAsCaptured(
+          reverted.exported.reason,
+          exportedReason,
+          `${bothLabel} \`review export s --json\``,
+        );
+      },
+    );
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T10.4-7 — recording after re-derivation; joined nodes
+// ---------------------------------------------------------------------------
+
+// Path-blocks fixture (TEST-SPEC T10.4-7, T10.4-2's origin-arm shape) —
+// TEST-SPEC's X, T, D1, and D2 as the top-level sections x, t, d1, and d2,
+// each alone in its own file: x depends on T.t, and t on D1.d1 and D2.d2.
+// d1's text is edited before `create --base`: d1 is `changed`, and t and x
+// are `upstream-changed` attributed to it (5.6), so the session holds d1's
+// subtree-coherence item and the dependency-consistency items of t and of
+// x — x's context {t}, the one dependency-edge target of x whose
+// effectiveHash changed, and its origin {d1}, the originating node of t's
+// category (10.5). d2's text is edited after it, with no re-derivation:
+// t's category is then attributed to d2 as well, so a re-derivation gives
+// x's item origin {d1, d2} — d2 joins it (10.5) — while x's context set
+// stays {t} and no hash x's item records changes: x's ownHash and
+// metadataHash and t's subtreeHash (10.4). One edit later removes t's
+// reference to D2.d2 and deletes d2's section, leaving specs/D2.mdx with no
+// section — its implicit root alone (1.2) — and t's import of it in place:
+// an import whose binding is never used is valid and records no edges
+// (2.1), so the reference removal is a pure d-prop edit, touching no own
+// content (1.6, 5.5). x's relevant hashes stay unchanged and t's
+// effectiveHash still differs from the baseline, so x's context set stays
+// {t}: d2's presence alone moves. The hash premises are checked via `query
+// node` at every staged state, against a capture at the baseline. (a)
+// resolves x's item `updated` after d2's edit: the resolve assigns and
+// records once the re-derivation it triggers is done, against the item as
+// re-derived (10.4), so d2's presence is recorded, and d2's deletion then
+// invalidates the item. (b), on a twin, resolves x's item `no-change`
+// before d2's edit, and d1's `updated` resolve re-derives the session
+// after it: d2 joins x's origin after x's `current` was last written, so
+// it has no recorded presence (10.4) — a changed origin by itself
+// invalidates nothing (10.5), and neither does d2's deletion.
+//
+// The fixture is exported for T10.2-2's and T10.7-12's arms over T10.4-7(a)'s
+// shape (`T10_4_7_FILES`, `T10_4_7_NODES`, `T10_4_7_INITIAL_FILES`,
+// `t1047D2Source`, `stageT1047Session`, `stageT1047State`, and T10.7-12's
+// second d2 edit `T10_7_12_D2_V2`, a record made here because
+// section-10.7-ii.ts loads this module only at run time): the stagings
+// assert staging premises alone, every outcome T10.4-7 asserts staying in
+// its body.
+
+/** T10.4-7's source paths — x, t, d1, and d2 each alone in its own file. */
+export const T10_4_7_FILES = {
+  x: "specs/X.mdx",
+  t: "specs/T.mdx",
+  d1: "specs/D1.mdx",
+  d2: "specs/D2.mdx",
+} as const;
+
+/** T10.4-7's node identities (TEST-SPEC's X, T, D1, D2; SPEC 1.5). */
+export const T10_4_7_NODES = {
+  x: "specs/X.mdx#x",
+  t: "specs/T.mdx#t",
+  d1: "specs/D1.mdx#d1",
+  d2: "specs/D2.mdx#d2",
+} as const;
+
+const T7_X = T10_4_7_NODES.x;
+const T7_T = T10_4_7_NODES.t;
+const T7_D1 = T10_4_7_NODES.d1;
+const T7_D2 = T10_4_7_NODES.d2;
+
+// t's `d` list names both D's, or D1.d1 alone once the removal edit drops
+// D2.d2 — both imports staying either way (SPEC 2.1: an import whose
+// binding is never used is valid and records no edges).
+function t7TSource(withD2: boolean): string {
+  return [
+    'import D1 from "./D1.xspec"',
+    'import D2 from "./D2.xspec"',
+    "",
+    withD2 ? '<S id="t" d={[D1.d1, D2.d2]}>' : '<S id="t" d={D1.d1}>',
+    "Tee own text.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+function t7D1Source(text: string): string {
+  return ['<S id="d1">', text, "</S>", ""].join("\n");
+}
+
+/**
+ * specs/D2.mdx's bytes: d2 alone, holding `text` — or, for `null`, d2's
+ * section deleted, the file left holding no section (its implicit root
+ * alone, SPEC 1.2). Exported so a later arm over T10.4-7(a)'s fixture can
+ * stage a further d2 edit as a staged-source record of its own (S-9);
+ * T10.7-12's, `T10_7_12_D2_V2`, is made below, in this module.
+ */
+export function t1047D2Source(text: string | null): string {
+  return text === null ? "" : ['<S id="d2">', text, "</S>", ""].join("\n");
+}
+
+// T10.4-7's sources are staged-source records (helpers/staged-mdx.ts, S-9:
+// judged before any product exists): the four initial sources — the twin's
+// workspace is created after the body's first invocation, and an exported
+// staging may stage them in any workspace — and the states staged after a
+// `build`: d1's edit, d2's edit, and the removal edit's two files.
+const T10_4_7_X_SOURCE = stagedMdx(
+  "T10.4-7 specs/X.mdx with x depending on T.t (the fixture's initial source)",
+  [
+    'import T from "./T.xspec"',
+    "",
+    '<S id="x" d={T.t}>',
+    "Ex own text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const T10_4_7_T_SOURCE = stagedMdx(
+  "T10.4-7 specs/T.mdx with t depending on D1.d1 and D2.d2 (the fixture's initial source)",
+  t7TSource(true),
+);
+const T10_4_7_D1_SOURCE = stagedMdx(
+  "T10.4-7 specs/D1.mdx with d1 at v0 (the fixture's initial source)",
+  t7D1Source("Dee one text v0."),
+);
+const T10_4_7_D2_SOURCE = stagedMdx(
+  "T10.4-7 specs/D2.mdx with d2 at v0 (the fixture's initial source)",
+  t1047D2Source("Dee two text v0."),
+);
+const T10_4_7_D1_EDITED = stagedMdx(
+  "T10.4-7 specs/D1.mdx with d1 at v1 (the edit before `create --base`)",
+  t7D1Source("Dee one text v1."),
+);
+const T10_4_7_D2_EDITED = stagedMdx(
+  "T10.4-7 specs/D2.mdx with d2 at v1 (the edit after `create --base`)",
+  t1047D2Source("Dee two text v1."),
+);
+const T10_4_7_T_WITHOUT_D2 = stagedMdx(
+  "T10.4-7 specs/T.mdx with t's reference to D2.d2 removed, both imports kept (the removal edit)",
+  t7TSource(false),
+);
+const T10_4_7_D2_DELETED = stagedMdx(
+  "T10.4-7 specs/D2.mdx with d2's section deleted, no section left (the removal edit)",
+  t1047D2Source(null),
+);
+
+/**
+ * specs/D2.mdx with d2 at v2 — d2's text edited a second time once x's item
+ * is resolved `updated`: T10.7-12's joined-origin arm over T10.4-7(a)'s
+ * fixture (section-10.7-ii.ts). That module loads this one only when the
+ * arm runs — this module imports it at load (T10.4-8's stagings), so a
+ * static import back would close a module cycle — and a record must exist
+ * at module load (S-9's ledger), so the arm's record is made here, from
+ * d2's own template.
+ */
+export const T10_7_12_D2_V2 = stagedMdx(
+  "T10.7-12 specs/D2.mdx with d2 at v2 (T10.4-7(a)'s fixture: d2's text edited a second time once x's item is resolved)",
+  t1047D2Source("Dee two text v2."),
+);
+
+/**
+ * T10.4-7's initial sources at the baseline, as a workspace declaration's
+ * `files` entries beside a configuration whose one spec group discovers
+ * every `.mdx` file under `specs/` (SPEC 7.1) — records, so a body's first
+ * workspace and any later one stage them alike (S-9).
+ */
+export const T10_4_7_INITIAL_FILES: Readonly<Record<string, StagedMdx>> = {
+  [T10_4_7_FILES.x]: T10_4_7_X_SOURCE,
+  [T10_4_7_FILES.t]: T10_4_7_T_SOURCE,
+  [T10_4_7_FILES.d1]: T10_4_7_D1_SOURCE,
+  [T10_4_7_FILES.d2]: T10_4_7_D2_SOURCE,
+};
+
+/**
+ * T10.4-7's states after the baseline, staged in this order: d1's edit
+ * (before `create --base`), d2's edit (after it), and the removal edit —
+ * t's reference to D2.d2 removed and d2's section deleted, one edit.
+ */
+export type T1047State = "d1-edited" | "d2-edited" | "removed";
+
+/** x's, t's, and d1's hashes, and d2's while it exists, via `query node`. */
+async function t7Capture(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  d2Exists: boolean,
+  context: string,
+): Promise<ReadonlyMap<string, NodeHashes>> {
+  return await captureHashes(
+    product,
+    workspace,
+    d2Exists ? [T7_X, T7_T, T7_D1, T7_D2] : [T7_X, T7_T, T7_D1],
+    context,
+  );
+}
+
+/**
+ * T10.4-7's hash premises at one staged state, against the capture at the
+ * baseline (SPEC 5.5): x's ownHash and metadataHash and t's subtreeHash —
+ * every hash x's item records (10.4) — and t's ownHash keep their baseline
+ * values at every state; t's effectiveHash and d1's ownHash differ from
+ * theirs at every state, so the generators give x's item context {t}
+ * (10.5), d1 `changed` (5.6); t's metadataHash keeps its baseline value
+ * until the removal edit lands on t's `d` list and differs after it, so
+ * until then t is no originating node (5.6) and x's origin is the D's
+ * alone; d2's ownHash keeps its baseline value until d2's edit and
+ * differs after it (d2 `changed`, an originating node of t's category,
+ * 5.6), and once d2's section is deleted d2 is not captured. No assertion
+ * thus turns on a hash (H-8).
+ */
+function assertT7HashPremises(
+  baseline: ReadonlyMap<string, NodeHashes>,
+  current: ReadonlyMap<string, NodeHashes>,
+  state: T1047State,
+  context: string,
+): void {
+  const value = (
+    captures: ReadonlyMap<string, NodeHashes>,
+    node: string,
+    hash: keyof NodeHashes,
+    side: string,
+  ): string => {
+    const hashes = captures.get(node);
+    if (hashes === undefined) {
+      fail(
+        `${context}: harness staging defect — no ${side} \`query node\` ` +
+          `capture exists for ${node}, so its ${hash} premise cannot be ` +
+          `checked`,
+      );
+    }
+    return hashes[hash];
+  };
+  const premises: {
+    readonly node: string;
+    readonly hash: keyof NodeHashes;
+    readonly differs: boolean;
+    readonly why: string;
+  }[] = [
+    {
+      node: T7_X,
+      hash: "ownHash",
+      differs: false,
+      why: "x's item records it (10.4)",
+    },
+    {
+      node: T7_X,
+      hash: "metadataHash",
+      differs: false,
+      why: "x's item records it (10.4)",
+    },
+    {
+      node: T7_T,
+      hash: "subtreeHash",
+      differs: false,
+      why: "x's item records it (10.4); d-prop edits touch no own content (1.6)",
+    },
+    {
+      node: T7_T,
+      hash: "ownHash",
+      differs: false,
+      why: "t is never `changed` (5.6), so its own content originates nothing",
+    },
+    {
+      node: T7_T,
+      hash: "effectiveHash",
+      differs: true,
+      why:
+        "t is the dependency-edge target of x whose effectiveHash changed, " +
+        "so the generators give x's item context {t} (10.5)",
+    },
+    {
+      node: T7_D1,
+      hash: "ownHash",
+      differs: true,
+      why: "d1 is `changed`, an originating node of t's category (5.6)",
+    },
+    {
+      node: T7_T,
+      hash: "metadataHash",
+      differs: state === "removed",
+      why:
+        state === "removed"
+          ? "the removal edit lands on t's `d` list"
+          : "t is no originating node (not `metadata-changed`, 5.6) " +
+            "until the removal edit, so x's origin is the D's alone (10.5)",
+    },
+  ];
+  if (state !== "removed") {
+    premises.push({
+      node: T7_D2,
+      hash: "ownHash",
+      differs: state === "d2-edited",
+      why:
+        state === "d2-edited"
+          ? "d2 is `changed`, an originating node of t's category (5.6), " +
+            "joining x's origin at a re-derivation (10.5)"
+          : "d2 is not `changed` before its edit, so x's origin at " +
+            "`create` is {d1} (5.6, 10.5)",
+    });
+  }
+  for (const premise of premises) {
+    const before = value(baseline, premise.node, premise.hash, "baseline");
+    const now = value(current, premise.node, premise.hash, "current");
+    if ((before !== now) !== premise.differs) {
+      fail(
+        `${context}: staging premise — ${premise.node}'s ${premise.hash} ` +
+          `must ${premise.differs ? "differ from" : "keep"} its baseline ` +
+          `value (SPEC 5.5): ${premise.why}; baseline ` +
+          `${JSON.stringify(before)}, now ${JSON.stringify(now)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Stage one T10.4-7 state — `state`'s fixture edit, then `build` — and
+ * check its hash premises against the baseline capture (staging premises
+ * alone). Exported for T10.2-2's and T10.7-12's arms over T10.4-7(a)'s
+ * fixture.
+ */
+export async function stageT1047State(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  baseline: ReadonlyMap<string, NodeHashes>,
+  state: T1047State,
+  label: string,
+): Promise<void> {
+  if (state === "d1-edited") {
+    await workspace.file(T10_4_7_FILES.d1, T10_4_7_D1_EDITED);
+  } else if (state === "d2-edited") {
+    await workspace.file(T10_4_7_FILES.d2, T10_4_7_D2_EDITED);
+  } else {
+    // One edit: t's reference to D2.d2 removed and d2's section deleted.
+    await workspace.file(T10_4_7_FILES.t, T10_4_7_T_WITHOUT_D2);
+    await workspace.file(T10_4_7_FILES.d2, T10_4_7_D2_DELETED);
+  }
+  await buildOk(product, workspace, `${label} \`build\``);
+  assertT7HashPremises(
+    baseline,
+    await t7Capture(
+      product,
+      workspace,
+      state !== "removed",
+      `${label} capture`,
+    ),
+    state,
+    label,
+  );
+}
+
+/** One origin entry as T10.4-7 asserts it: the node and its after side. */
+interface T7OriginNode {
+  readonly node: string;
+  readonly afterPresent: boolean;
+}
+
+/** An item's origin entries as T10.4-7 compares them, sorted by node. */
+function t7Origin(item: ReviewItem): T7OriginNode[] {
+  return item.origin
+    .map((entry) => ({ node: entry.node, afterPresent: entry.after.present }))
+    .sort((left, right) =>
+      left.node < right.node ? -1 : left.node > right.node ? 1 : 0,
+    );
+}
+
+/** The session T10.4-7's stagings create, and the ids its arms act on. */
+export interface T1047Session {
+  /** The baseline commit `create --base` names. */
+  readonly base: string;
+  /** x's, t's, d1's, and d2's hashes at the baseline (`query node`). */
+  readonly baseline: ReadonlyMap<string, NodeHashes>;
+  /** x's dependency-consistency item. */
+  readonly xId: string;
+  /** t's dependency-consistency item. */
+  readonly tId: string;
+  /** d1's subtree-coherence item. */
+  readonly d1Id: string;
+}
+
+/**
+ * Stage T10.4-7's session `s` in a fresh workspace holding
+ * `T10_4_7_INITIAL_FILES` (SPEC 10.5): the baseline committed, built, and
+ * captured; d1's text edited and built; then `review create --base
+ * <baseline> --name s`, whose session holds exactly d1's subtree-coherence
+ * item and the dependency-consistency items of t and of x — x's context
+ * exactly {t} and its origin exactly {d1} (staging premises from `status`
+ * and `show`). Exported for T10.2-2's and T10.7-12's arms over T10.4-7(a)'s
+ * fixture.
+ */
+export async function stageT1047Session(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<T1047Session> {
+  await workspace.gitInit();
+  const base = await workspace.gitCommitAll("baseline");
+  await buildOk(product, workspace, `${label} \`build\` at the baseline`);
+  const baseline = await t7Capture(
+    product,
+    workspace,
+    true,
+    `${label} baseline capture`,
+  );
+  await stageT1047State(
+    product,
+    workspace,
+    baseline,
+    "d1-edited",
+    `${label} after d1's edit`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["review", "create", "--base", base, "--name", "s"],
+    0,
+    `${label} \`review create --base <baseline> --name s\``,
+  );
+  const status = await sessionStatus(product, workspace, "s", label);
+  assertSameJson(
+    kindScopeSet(status),
+    [
+      `dependency-consistency ${T7_T}`,
+      `dependency-consistency ${T7_X}`,
+      `subtree-coherence ${T7_D1}`,
+    ].sort(),
+    `${label} staging premise: d1's edit yields d1's subtree-coherence ` +
+      `item and the dependency-consistency items of t (its target d1 ` +
+      `changed) and of x (its target t's effectiveHash changed), and ` +
+      `nothing else (SPEC 5.6, 10.5)`,
+  );
+  const xId = requireRow(status, "dependency-consistency", T7_X, label).id;
+  const tId = requireRow(status, "dependency-consistency", T7_T, label).id;
+  const d1Id = requireRow(status, "subtree-coherence", T7_D1, label).id;
+  const created = await showItem(
+    product,
+    workspace,
+    "s",
+    xId,
+    `${label} after \`create\``,
+  );
+  assertSameJson(
+    identitySet(created.context),
+    [T7_T],
+    `${label} staging premise: x's dependency-consistency item's context ` +
+      `is exactly {t}, the one dependency-edge target of x whose ` +
+      `effectiveHash changed (SPEC 10.5)`,
+  );
+  assertSameJson(
+    t7Origin(created),
+    [{ node: T7_D1, afterPresent: true }],
+    `${label} staging premise: x's dependency-consistency item's origin ` +
+      `is exactly {d1}, the originating node of t's category, present ` +
+      `(SPEC 5.6, 10.5, 10.7)`,
+  );
+  return { base, baseline, xId, tId, d1Id };
+}
+
+/**
+ * x's item as `show` or `export` presents it (SPEC 10.4, 10.7): reported
+ * `status`, its context exactly {t}, present — the current context set —
+ * and its origin exactly `origin`, as last assigned, each entry's after
+ * side under the node's current presence; `why` names the rule.
+ */
+function assertT7Presented(
+  item: ReviewItem,
+  status: ItemStatus,
+  origin: readonly T7OriginNode[],
+  why: string,
+  context: string,
+): void {
+  if (item.status !== status) {
+    fail(
+      `${context}: x's item must be reported ${status} — ${why}; got ` +
+        item.status,
+    );
+  }
+  assertSameJson(
+    item.context.map((state) => ({ node: state.node, present: state.present })),
+    [{ node: T7_T, present: true }],
+    `${context}: x's item's context must be exactly {t}, present — its ` +
+      `current context set: t is the one dependency-edge target of x ` +
+      `whose effectiveHash changed (SPEC 10.4, 10.5, 10.7)`,
+  );
+  assertSameJson(
+    t7Origin(item),
+    origin,
+    `${context}: x's item's origin must be presented as last assigned, ` +
+      `each entry's after side under the node's current presence (SPEC ` +
+      `10.4, 10.7) — ${why}`,
+  );
+}
+
+/**
+ * Read x's item through `status`, `show`, and `export` (SPEC 10.4, 10.7):
+ * each must report it `status`, and `show` and `export` present it per
+ * `assertT7Presented`.
+ */
+async function t7ReadX(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  xId: string,
+  status: ItemStatus,
+  origin: readonly T7OriginNode[],
+  why: string,
+  label: string,
+): Promise<void> {
+  const report = await sessionStatus(product, workspace, "s", label);
+  const statusLabel = `${label} \`review status s --json\``;
+  const row = requireRowById(report, xId, statusLabel);
+  if (row.status !== status) {
+    fail(
+      `${statusLabel}: x's item must be reported ${status} — ${why}; got ` +
+        row.status,
+    );
+  }
+  assertT7Presented(
+    await showItem(product, workspace, "s", xId, label),
+    status,
+    origin,
+    why,
+    `${label} \`review show s <x item> --json\``,
+  );
+  const exportLabel = `${label} \`review export s --json\``;
+  assertT7Presented(
+    requireItem(
+      (await exportSession(product, workspace, "s", label)).items,
+      xId,
+      exportLabel,
+    ),
+    status,
+    origin,
+    why,
+    exportLabel,
+  );
+}
+
+const T10_4_7 = defineProductTest({
+  id: "T10.4-7",
+  title:
+    "recording after re-derivation; joined nodes: an `updated` resolve assigns and records once the re-derivation it triggers is done, against the item as re-derived; a node that joined the item after `current` was last written has no recorded presence until a resolve records it; and a changed origin by itself invalidates nothing — path-blocks fixture (T10.4-2's origin-arm shape): X depends on T, and T on D1 and D2, each a top-level section in its own file, D1's text edited before `create --base` (X's dependency-consistency item: context {T}, origin {D1}) and D2's after it, X's ownHash and metadataHash and T's ownHash and subtreeHash never changing, T's effectiveHash and D1's ownHash differing from the baseline at every state, T's metadataHash until the removal edit and D2's ownHash until D2's edit keeping their baseline values (premises via `query node` at every state); (a) X's item resolved `updated` after D2's edit: the re-derivation it triggers makes D2 join X's origin, and `status`, `show`, and `export` read the item `updated`, `show` and `export` presenting its context as exactly {T} and its origin as exactly {D1, D2}; one edit then removes T's reference to D2 (the import kept) and deletes D2's section, the context set staying {T}: the three reads report X's item `invalidated` through D2's recorded presence alone, its origin {D1, D2} presenting D2 absent — a product recording before the re-derivation never recorded D2 and reads `updated`; (b) on a twin, X's item resolved `no-change` before D2's edit (premises: it reads `no-change` then and after D2's edit), then D1's subtree-coherence item resolved `updated` after it: its re-derivation makes D2 join X's origin, presented {D1, D2}, and the three reads report X's item still `no-change` — D2 has no recorded presence — and still after the same removal edit, D2 presented absent — a product invalidating on a changed origin, or recording a joined node's presence at the re-derivation, reads `invalidated` (SPEC 1.6, 2.1, 5.5, 5.6, 10.2, 10.4, 10.5, 10.7)",
+  run: async (product) => {
+    const joined: readonly T7OriginNode[] = [
+      { node: T7_D1, afterPresent: true },
+      { node: T7_D2, afterPresent: true },
+    ];
+    const d2Absent: readonly T7OriginNode[] = [
+      { node: T7_D1, afterPresent: true },
+      { node: T7_D2, afterPresent: false },
+    ];
+
+    // (a) Recording after the re-derivation.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_4_7_INITIAL_FILES,
+      async (workspace) => {
+        const label = "T10.4-7 (a)";
+        const { baseline, xId } = await stageT1047Session(
+          product,
+          workspace,
+          label,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "d2-edited",
+          `${label} after d2's edit`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "updated",
+          `${label} resolve of x's item --status updated after d2's edit ` +
+            `(the re-derivation, SPEC 10.5)`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "updated",
+          joined,
+          "the re-derivation x's `updated` resolve triggers gives the " +
+            "matched item the generated origin {d1, d2} — d2 joins it — and " +
+            "the resolve assigns and records once that re-derivation is " +
+            "done, against the item as re-derived (SPEC 10.4, 10.5), so its " +
+            "recorded state, d2's presence included, matches the graph and " +
+            "its context set stays {t}",
+          `${label} after x's \`updated\` resolve`,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "removed",
+          `${label} after the removal edit`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "invalidated",
+          d2Absent,
+          "the resolve recorded d2's presence against the item as " +
+            "re-derived, and d2 is now absent: a recorded presence changed " +
+            "(SPEC 10.4), while no hash x's item records changed and its " +
+            "context set stays {t}; a product recording before the " +
+            "re-derivation never recorded d2 and reads updated",
+          `${label} after the removal edit`,
+        );
+      },
+    );
+
+    // (b) A joined node, on a twin.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_4_7_INITIAL_FILES,
+      async (workspace) => {
+        const label = "T10.4-7 (b)";
+        const { baseline, xId, d1Id } = await stageT1047Session(
+          product,
+          workspace,
+          label,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} resolve of x's item --status no-change before d2's ` +
+            `edit (no re-derivation, SPEC 10.5)`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} staging premise after x's resolve — the fresh ` +
+            `resolution matches the graph`,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "d2-edited",
+          `${label} after d2's edit`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${label} staging premise after d2's edit — no re-derivation has ` +
+            `run, no hash x's item records changed, and its context set ` +
+            `stays {t}`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          d1Id,
+          "updated",
+          `${label} resolve of d1's subtree-coherence item --status ` +
+            `updated after d2's edit (the re-derivation, SPEC 10.5)`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "no-change",
+          joined,
+          "d1's `updated` resolve re-derived the session, the matched x " +
+            "item taking the generated origin {d1, d2} and keeping its " +
+            "recorded state (SPEC 10.5): d2 joined after x's `current` was " +
+            "last written, so it has no recorded presence, and a changed " +
+            "origin by itself invalidates nothing (SPEC 10.4, 10.5); a " +
+            "product invalidating on a changed origin reads invalidated",
+          `${label} after d1's \`updated\` resolve`,
+        );
+        await stageT1047State(
+          product,
+          workspace,
+          baseline,
+          "removed",
+          `${label} after the removal edit`,
+        );
+        await t7ReadX(
+          product,
+          workspace,
+          xId,
+          "no-change",
+          d2Absent,
+          "d2 has no recorded presence — it joined x's item at the " +
+            "re-derivation, after x's `current` was last written, and no " +
+            "resolve has recorded it since — so its deletion changes no " +
+            "recorded presence, while no hash x's item records changed and " +
+            "its context set stays {t} (SPEC 10.4); a product recording a " +
+            "joined node's presence at the re-derivation reads invalidated",
+          `${label} after the removal edit`,
+        );
+      },
+    );
+  },
+});
+
+// ---------------------------------------------------------------------------
+// T10.4-8 — items added during a session
+// ---------------------------------------------------------------------------
+
+// Items added during a session follow 10.4's rule (TEST-SPEC T10.4-8): an
+// item that entered at a re-derivation (10.5) or through a `split` (10.7),
+// once resolved, becomes `invalidated` when its recorded state diverges from
+// the current graph, and a node already absent at its resolve does not
+// invalidate it by remaining absent. Each arm runs on a workspace of its
+// own, over another test's exported staging, whose own assertions run on
+// the way:
+// (a) re-derivation — T10.5-5's newly visited p.q (`stageT1055NewlyVisitedQ`,
+//     section-10.5.ts): p.q's item, entered at p's `updated` resolve, is
+//     resolved `no-change`; p.q's text is then edited, changing p.q's
+//     subtreeHash, which the item records (10.4), so the item reads
+//     `invalidated`, while `list`, counting stored statuses (10.7), counts
+//     it `no-change`;
+// (b) a split and the re-derivation ending it — T10.7-9's audit session
+//     (`runT1079AuditSplits`, section-10.7-ii.ts), its (a)–(e) asserted:
+//     N.c.y's item, added at the re-derivation ending N's split, is resolved
+//     `no-change`, then N.c's, created by that split's decomposition and
+//     unblocked by that resolve (T10.7-9(a): blocked by exactly N.c.y's
+//     item; 10.3); N.c.y's text is then edited, changing N.c.y's subtreeHash
+//     and with it N.c's, so both read `invalidated`;
+// (c) absent at resolve — T10.7-9(f)'s deleted children
+//     (`runT1079DeletedChildrenArm`, section-10.7-ii.ts), (f) asserted: the
+//     per-child item scoped at the absent P.a, resolved `no-change`, records
+//     P.a absent (10.4) and reads `no-change`; P.b's item resolved `updated`
+//     re-derives the session (10.5), and P.a's item, P.a still absent, still
+//     reads `no-change`, never `invalidated`.
+const T8_P = T10_5_5_PQ_NODES.p;
+const T8_Q = T10_5_5_PQ_NODES.q;
+const T8_NC = T10_7_9_AUDIT_NODES.nc;
+const T8_NCY = T10_7_9_AUDIT_NODES.ncy;
+
+// T10.4-8's two edits follow product invocations, so each is a staged-source
+// record (helpers/staged-mdx.ts, S-9: judged before any product exists),
+// spelled by the exported source template of the staging it continues.
+const T10_4_8_Q_EDITED = stagedMdx(
+  "T10.4-8 specs/P.mdx with p.q's text at v3 once its item, entered at p's `updated` resolve, is resolved `no-change` (p's own text still reverted)",
+  t1055PqSource("Pee own v0.", "Cue text v3."),
+);
+const T10_4_8_NCY_EDITED = stagedMdx(
+  "T10.4-8 specs/N.mdx with N.c.y's text edited once N.c.y's and N.c's items are resolved `no-change` (T10.7-9's audit fixture after N's split)",
+  t1079AuditSource("En cee why text, edited."),
+);
+
+/** An item T10.4-8 reads back, as its diagnostics name it. */
+interface T8Item {
+  readonly id: string;
+  readonly what: string;
+}
+
+/**
+ * A staging premise read from `status` (SPEC 10.3, 10.7): the item's row
+ * reads `expected.status` and, where given, its blocked state — before
+ * T10.4-8 acts on the item or reads it back.
+ */
+function assertT8RowPremise(
+  report: SessionStatusReport,
+  item: T8Item,
+  expected: { readonly status: ItemStatus; readonly blocked?: boolean },
+  why: string,
+  context: string,
+): void {
+  const row = requireRowById(report, item.id, context);
+  if (
+    row.status === expected.status &&
+    (expected.blocked === undefined || row.blocked === expected.blocked)
+  ) {
+    return;
+  }
+  const blockedState = (blocked: boolean): string =>
+    blocked ? "blocked" : "unblocked";
+  fail(
+    `${context}: staging premise — ${item.what} reads ${expected.status}` +
+      (expected.blocked === undefined
+        ? ""
+        : `, ${blockedState(expected.blocked)}`) +
+      ` — ${why}; got ${row.status}, ${blockedState(row.blocked)}`,
+  );
+}
+
+/**
+ * Read items back through `status`, `show`, and `export` (SPEC 10.4, 10.7):
+ * each surface must report every one of them `status` — every read computes
+ * invalidation against the current graph (10.4).
+ */
+async function t8ExpectReported(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  items: readonly T8Item[],
+  status: ItemStatus,
+  why: string,
+  label: string,
+): Promise<void> {
+  const statusLabel = `${label} \`review status s --json\``;
+  const report = await sessionStatus(product, workspace, "s", label);
+  for (const { id, what } of items) {
+    const row = requireRowById(report, id, statusLabel);
+    if (row.status !== status) {
+      fail(
+        `${statusLabel}: ${what} must be reported ${status} — ${why}; got ` +
+          row.status,
+      );
+    }
+  }
+  for (const { id, what } of items) {
+    const shown = await showItem(product, workspace, "s", id, label);
+    if (shown.status !== status) {
+      fail(
+        `${label} \`review show s ${id} --json\`: ${what} must be reported ` +
+          `${status} — ${why}; got ${shown.status}`,
+      );
+    }
+  }
+  const exportLabel = `${label} \`review export s --json\``;
+  const exported = await exportSession(product, workspace, "s", label);
+  for (const { id, what } of items) {
+    const item = requireItem(exported.items, id, exportLabel);
+    if (item.status !== status) {
+      fail(
+        `${exportLabel}: ${what} must be reported ${status} — ${why}; got ` +
+          item.status,
+      );
+    }
+  }
+}
+
+/**
+ * T10.4-8(a), re-derivation: T10.5-5's newly visited p.q
+ * (`stageT1055NewlyVisitedQ`, in a fresh workspace holding
+ * `T10_5_5_PQ_INITIAL_FILES`). Once p's `updated` resolve has added p.q's
+ * item (premise: T10.5-5's three items), p.q's item — `unresolved` and
+ * unblocked — is resolved `no-change` and reads so; p.q's text is then
+ * edited, its subtreeHash changing (premise via `query node`): `status`,
+ * `show`, and `export` read the item `invalidated`, and `list` counts it
+ * `no-change`, its stored status kept (SPEC 10.4, 10.7).
+ */
+async function runT8ReDerivationArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const label = "T10.4-8 (a)";
+  await stageT1055NewlyVisitedQ(
+    product,
+    workspace,
+    `${label}, T10.5-5's newly-visited staging`,
+  );
+  const derivedLabel = `${label} after p's \`updated\` resolve`;
+  const derived = await sessionStatus(product, workspace, "s", derivedLabel);
+  assertSameJson(
+    kindScopeSet(derived),
+    [
+      `parent-consistency ${T8_P}`,
+      `subtree-coherence ${T8_P}`,
+      `subtree-coherence ${T8_Q}`,
+    ].sort(),
+    `${derivedLabel} staging premise: the re-derivation p's \`updated\` ` +
+      `resolve triggers adds p.q's subtree-coherence item and p's ` +
+      `parent-consistency item beside p's item — p.q newly visited, its ` +
+      `\`changed\` ancestor reverted (SPEC 10.5; T10.5-5 asserts it)`,
+  );
+  const q: T8Item = {
+    id: requireRow(derived, "subtree-coherence", T8_Q, derivedLabel).id,
+    what: "p.q's item",
+  };
+  assertT8RowPremise(
+    derived,
+    q,
+    { status: "unresolved", blocked: false },
+    "it enters at the re-derivation `unresolved` (SPEC 10.2), and " +
+      "path-blocks gives a subtree-coherence item no blockers (10.5)",
+    derivedLabel,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    q.id,
+    "no-change",
+    `${label} \`review resolve s <p.q's item> --status no-change\` (no ` +
+      `re-derivation, SPEC 10.5)`,
+  );
+  const atResolve = await captureHashes(
+    product,
+    workspace,
+    [T8_Q],
+    `${label} capture at p.q's resolve`,
+  );
+  const resolvedLabel = `${label} after p.q's resolve`;
+  assertT8RowPremise(
+    await sessionStatus(product, workspace, "s", resolvedLabel),
+    q,
+    { status: "no-change" },
+    "the resolve recorded p.q's subtreeHash, metadataHash, and presence, " +
+      "which the graph still matches (SPEC 10.4)",
+    resolvedLabel,
+  );
+  await workspace.file(T10_5_5_PQ_FILE, T10_4_8_Q_EDITED);
+  await buildOk(product, workspace, `${label} \`build\` after p.q's edit`);
+  const editedLabel = `${label} after p.q's edit`;
+  assertHashPremises(
+    atResolve,
+    await captureHashes(product, workspace, [T8_Q], `${editedLabel} capture`),
+    [{ node: T8_Q, hash: "subtreeHash" }],
+    [],
+    editedLabel,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [q],
+    "invalidated",
+    "it entered at p's `updated` resolve and, resolved `no-change`, " +
+      "recorded p.q's subtreeHash, which p.q's edit changed: items added " +
+      "during a session follow 10.4's rule (SPEC 10.4); a product " +
+      "recording state, or computing read-time invalidation, for " +
+      "`create`'s items alone reads it no-change",
+    editedLabel,
+  );
+  assertStoredCounts(
+    await listedSession(product, workspace, "s", editedLabel),
+    { unresolved: 1, updated: 1, "no-change": 1, skipped: 0, invalidated: 0 },
+    `${editedLabel}: p.q's item's stored status is kept — read-time ` +
+      `invalidation is computed and reported, never persisted (SPEC 10.4) ` +
+      `— so \`list\` counts it no-change, beside p's item stored updated and ` +
+      `p's parent-consistency item stored unresolved`,
+  );
+}
+
+/**
+ * T10.4-8(b), a split and the re-derivation ending it: T10.7-9's audit
+ * session (`runT1079AuditSplits`, in a fresh workspace holding
+ * `T10_7_9_AUDIT_INITIAL_FILES`), its (a)–(e) asserted. N.c.y's item, added
+ * at the re-derivation ending N's split — `unresolved` and, a leaf's,
+ * unblocked — is resolved `no-change` and reads so; N.c's item, created by
+ * that split's decomposition and unblocked by that resolve (T10.7-9(a):
+ * blocked by exactly N.c.y's item; SPEC 10.3), is resolved `no-change`
+ * likewise; N.c.y's text is then edited, N.c.y's subtreeHash and with it
+ * N.c's changing (premises via `query node`): `status`, `show`, and
+ * `export` read both items `invalidated` (SPEC 10.4).
+ */
+async function runT8SplitArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const label = "T10.4-8 (b)";
+  const session = await runT1079AuditSplits(
+    product,
+    workspace,
+    `${label}, T10.7-9's audit fixture`,
+  );
+  const ncy: T8Item = { id: session.ncyId, what: "N.c.y's item" };
+  const nc: T8Item = { id: session.ncId, what: "N.c's item" };
+  const splitLabel = `${label} after N's split`;
+  assertT8RowPremise(
+    await sessionStatus(product, workspace, "s", splitLabel),
+    ncy,
+    { status: "unresolved", blocked: false },
+    "it enters at the re-derivation ending N's split `unresolved` (SPEC " +
+      "10.2; T10.7-9(c)), and the audit strategy blocks an item by its " +
+      "child sections' items alone, a leaf's by none (10.6)",
+    splitLabel,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    ncy.id,
+    "no-change",
+    `${label} \`review resolve s <N.c.y's item> --status no-change\` (no ` +
+      `re-derivation, SPEC 10.5)`,
+  );
+  const ncyLabel = `${label} after N.c.y's resolve`;
+  const afterNcy = await sessionStatus(product, workspace, "s", ncyLabel);
+  assertT8RowPremise(
+    afterNcy,
+    ncy,
+    { status: "no-change" },
+    "the resolve recorded N.c.y's subtreeHash, metadataHash, and " +
+      "presence, which the graph still matches (SPEC 10.4)",
+    ncyLabel,
+  );
+  assertT8RowPremise(
+    afterNcy,
+    nc,
+    { status: "unresolved", blocked: false },
+    "created `unresolved` by N's split (SPEC 10.2, 10.7), it is blocked by " +
+      "exactly N.c.y's item (T10.7-9(a)), now resolved, so unblocked (10.3)",
+    ncyLabel,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    nc.id,
+    "no-change",
+    `${label} \`review resolve s <N.c's item> --status no-change\` (no ` +
+      `re-derivation, SPEC 10.5)`,
+  );
+  const atResolve = await captureHashes(
+    product,
+    workspace,
+    [T8_NCY, T8_NC],
+    `${label} capture at N.c's resolve`,
+  );
+  const ncLabel = `${label} after N.c's resolve`;
+  const afterNc = await sessionStatus(product, workspace, "s", ncLabel);
+  for (const item of [ncy, nc]) {
+    assertT8RowPremise(
+      afterNc,
+      item,
+      { status: "no-change" },
+      "each resolve recorded its scope nodes' subtreeHash and " +
+        "metadataHash and every scope and context node's presence, which " +
+        "the graph still matches (SPEC 10.4)",
+      ncLabel,
+    );
+  }
+  await workspace.file(T10_7_9_AUDIT_FILE, T10_4_8_NCY_EDITED);
+  await buildOk(product, workspace, `${label} \`build\` after N.c.y's edit`);
+  const editedLabel = `${label} after N.c.y's edit`;
+  assertHashPremises(
+    atResolve,
+    await captureHashes(
+      product,
+      workspace,
+      [T8_NCY, T8_NC],
+      `${editedLabel} capture`,
+    ),
+    [
+      { node: T8_NCY, hash: "subtreeHash" },
+      { node: T8_NC, hash: "subtreeHash" },
+    ],
+    [],
+    editedLabel,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [ncy, nc],
+    "invalidated",
+    "it entered during the session — N.c.y's at the re-derivation ending " +
+      "N's split, N.c's through that split's decomposition — and, resolved " +
+      "`no-change`, recorded its scope nodes' subtreeHash, N.c.y's edit " +
+      "changing N.c.y's and with it N.c's: items added during a session " +
+      "follow 10.4's rule (SPEC 10.4); a product recording state, or " +
+      "computing read-time invalidation, for `create`'s items alone reads " +
+      "it no-change",
+    editedLabel,
+  );
+}
+
+/**
+ * T10.4-8(c), absent at resolve: T10.7-9(f)'s deleted children
+ * (`runT1079DeletedChildrenArm`, in a fresh workspace holding
+ * `T10_7_9_P_INITIAL_FILES`), (f) asserted. The per-child item scoped at the
+ * absent P.a (its blockedBy empty, T10.7-9(f)) is resolved `no-change`:
+ * `status`, `show`, and `export` read it `no-change`; P.b's item is then
+ * resolved `updated`, re-deriving the session (SPEC 10.5), and the three
+ * reads still report P.a's item `no-change`, never `invalidated` — P.a,
+ * already absent at the resolve, does not invalidate it by remaining absent
+ * (10.4).
+ */
+async function runT8AbsentArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+): Promise<void> {
+  const label = "T10.4-8 (c)";
+  const { paId, pbId } = await runT1079DeletedChildrenArm(
+    product,
+    workspace,
+    `${label}, T10.7-9's deleted-children arm (f)`,
+  );
+  const pa: T8Item = { id: paId, what: "P.a's per-child item" };
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    pa.id,
+    "no-change",
+    `${label} \`review resolve s <P.a's item> --status no-change\` — its ` +
+      `blockedBy empty (T10.7-9(f)); no re-derivation (SPEC 10.5)`,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [pa],
+    "no-change",
+    "its resolve recorded P.a absent — an absent node's hashes recorded as " +
+      "the explicit absent marker — and the graph still presents P.a " +
+      "absent, so the fresh recording matches it (SPEC 10.4)",
+    `${label} after P.a's item's resolve`,
+  );
+  await resolveOk(
+    product,
+    workspace,
+    "s",
+    pbId,
+    "updated",
+    `${label} \`review resolve s <P.b's item> --status updated\` — ` +
+      `re-derives the session (SPEC 10.5)`,
+  );
+  await t8ExpectReported(
+    product,
+    workspace,
+    [pa],
+    "no-change",
+    "P.a, already absent when the item was resolved, does not invalidate " +
+      "it by remaining absent, and the re-derivation P.b's resolve " +
+      "triggers changes no hash, presence, or context set the item " +
+      "recorded — items added during a session follow 10.4's rule (SPEC " +
+      "10.4, 10.5); a product taking a recorded absence for a divergence " +
+      "on an item added later reads it invalidated",
+    `${label} after P.b's \`updated\` resolve`,
+  );
+}
+
+const T10_4_8 = defineProductTest({
+  id: "T10.4-8",
+  title:
+    "items added during a session: an item that entered at a re-derivation or through a `split`, once resolved, becomes `invalidated` when its recorded state diverges from the current graph, and a node already absent at its resolve does not invalidate it by remaining absent — every item resolved `no-change` reading so right after its resolve; (a) re-derivation: T10.5-5's newly visited Q — its item, entered at P's `updated` resolve, resolved `no-change`, then Q's text edited (Q's subtreeHash changed, premise via `query node`): `status`, `show`, and `export` read it `invalidated`, its stored status kept (`list` counts it `no-change`); (b) a split and the re-derivation ending it: in T10.7-9's audit session, once T10.7-9(a)–(e) are asserted, N.c.y's item — added at the re-derivation ending N's split — resolved `no-change`, then N.c's — created by that split's decomposition and unblocked by that resolve — likewise; N.c.y's text then edited (N.c.y's and N.c's subtreeHash changed): both read `invalidated`; (c) absent at resolve: T10.7-9(f)'s per-child item scoped at the absent P.a, resolved `no-change` once T10.7-9(f) is asserted, reads `no-change` then, and still does after P.b's item is resolved `updated` and the session re-derived — never `invalidated` (SPEC 10.2, 10.3, 10.4, 10.5, 10.6, 10.7)",
+  run: async (product) => {
+    // (a) Re-derivation: T10.5-5's newly visited p.q.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_5_5_PQ_INITIAL_FILES,
+      (workspace) => runT8ReDerivationArm(product, workspace),
+    );
+
+    // (b) A split and the re-derivation ending it: T10.7-9's audit session.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_7_9_AUDIT_INITIAL_FILES,
+      (workspace) => runT8SplitArm(product, workspace),
+    );
+
+    // (c) Absent at resolve: T10.7-9(f)'s deleted children.
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      T10_7_9_P_INITIAL_FILES,
+      (workspace) => runT8AbsentArm(product, workspace),
+    );
+  },
+});
+
 /** TEST-SPEC §10.4, in canonical ID order (SUITE-35). */
 export const section104Tests: readonly ProductTestEntry[] = [
   T10_4_1,
@@ -2652,4 +6346,7 @@ export const section104Tests: readonly ProductTestEntry[] = [
   T10_4_3,
   T10_4_4,
   T10_4_5,
+  T10_4_6,
+  T10_4_7,
+  T10_4_8,
 ];
