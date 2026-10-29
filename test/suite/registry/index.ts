@@ -107,6 +107,7 @@ import { section16P13Tests } from "./section-16-p13.js";
 import { section16P14Tests } from "./section-16-p14.js";
 import { section16P15Tests } from "./section-16-p15.js";
 import { section16P16Tests } from "./section-16-p16.js";
+import { section16P19Tests } from "./section-16-p19.js";
 
 export const productTestSuite = new ProductTestSuite([
   // Section registration modules are spread here as they are implemented.
@@ -202,6 +203,7 @@ export const productTestSuite = new ProductTestSuite([
   ...section16P14Tests,
   ...section16P15Tests,
   ...section16P16Tests,
+  ...section16P19Tests,
 ]);
 
 // The staged-source ledger (helpers/staged-mdx.ts, and its TypeScript

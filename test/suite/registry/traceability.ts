@@ -1328,4 +1328,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // node compared as a canonical identity and presented under its current
   // identity and presence (10.4).
   "P-16": ["5.6", "6.3", "9.2", "10.4", "10.5"],
+  // P-19 asserts 7's reading of the configuration's import: its specifier
+  // any static string literal (2.4), read as spelled and never interpreted,
+  // resolved, or loaded, so that every answer and every generated file is
+  // its twin's. Its commands' clean outcomes (12.1, 12.2, 12.3, 11.6) are
+  // the twin's staging premises, home coverage at T12.1-*, T12.2-*, T12.3-*,
+  // and T11.6-*.
+  "P-19": ["2.4", "7"],
 };
