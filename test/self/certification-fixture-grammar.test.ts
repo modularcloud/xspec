@@ -107,6 +107,16 @@ import { TestWorkspace } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
 import { T13_5_8_BOM } from "../suite/registry/section-13.5.js";
 import { CERTIFICATION_FIXTURES } from "./certification-fixtures.js";
+import {
+  AVAIL_STAGING,
+  CORE_STAGING,
+  DISC_STAGING,
+  MD_SOURCE,
+  MD_STAGING,
+  ORPHAN_STAGING,
+  SPEC_GROUP_CONFIG,
+  VALID_STAGING,
+} from "./certification-fixture-stagings.js";
 
 /** A decoder of a surface's document (H-3): fails diagnosed, never defaults. */
 type DocumentCheck = (doc: unknown, context: string) => void;
@@ -661,36 +671,11 @@ const FILE_OUTSIDE_ROOT =
   'of the syntax class; 12.3: `ids --file <glob>` follows "the rules of ' +
   '7, as in 11"';
 
-// --- stagings shared by the tables --------------------------------------------
-
-/** One spec group of `.mdx` sources (SPEC 7.1), no other configuration. */
-const SPEC_GROUP_CONFIG = `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/*.mdx"]
-  }
-})
-`;
-
 // --- CONF-DISC (CERTIFICATIONS.md §CONF-DISC: `build`, `check`, `ids`,
 // `inventory`, and `query edges`) ----------------------------------------------
-
-/**
- * One trivial single-section `.mdx` source in one spec group, as
- * §CONF-DISC's scope admits: no code group (so the conformer never loads
- * TypeScript), Markdown emission absent — a valid workspace `build`
- * regenerates and `ids` lists.
- */
-const DISC_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
-`,
-  },
-};
+//
+// The table's declaration is DISC_STAGING (certification-fixture-stagings.ts,
+// shared with the configuration-import guard), as each table's below is.
 
 const DISC_FILE = "specs/A.mdx";
 /** The workspace's one `contains` edge: the root to its section (5.2). */
@@ -1073,25 +1058,6 @@ const DISC_TABLE: GrammarTable = {
 
 // --- CONF-AVAIL (CERTIFICATIONS.md §CONF-AVAIL: `view` and `occurrences`) -----
 
-/**
- * One finding-free spec source as §CONF-AVAIL's scope admits: a section `a`,
- * and a section `b` whose `d` prop and embedding each reference `a` locally
- * — two resolving occurrences (5.7), so the answers compared hold records.
- */
-const AVAIL_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
-
-<S id="b" d={"a"}>
-Beta: {text("a")}
-</S>
-`,
-  },
-};
-
 const AVAIL_FILE = "specs/A.mdx";
 const AVAIL_TARGET = "specs/A.mdx#a";
 /** `b`'s `d` entry, then its embedding: occurrence order (5.7). */
@@ -1308,21 +1274,6 @@ const AVAIL_TABLE: GrammarTable = {
 };
 
 // --- CONF-ORPHAN (CERTIFICATIONS.md §CONF-ORPHAN: `build` and `check`) --------
-
-/**
- * One spec group of one trivial single-section source, as §CONF-ORPHAN's
- * scope admits (its staging constraint: the spec glob matches `.mdx` names
- * alone), Markdown emission absent: a valid workspace `build` regenerates.
- */
-const ORPHAN_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
-`,
-  },
-};
 
 /**
  * The preamble's universality, for the JSON-only surfaces (12.0) — none of
@@ -1633,29 +1584,10 @@ const ORPHAN_TABLE: GrammarTable = {
 // `query nodes`) --------------------------------------------------------------
 
 /**
- * One finding-free spec source as §CONF-VALID's scope admits — sections
- * carrying `id` and `tags` props, `a` tagged `x` and `y` and `b` untagged —
- * so a `--tag` filter selects a proper subset (11.1).
- */
-const VALID_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a" tags="x y">
-Alpha text.
-</S>
-
-<S id="b">
-Beta text.
-</S>
-`,
-  },
-};
-
-/**
- * The same shape failing `build`'s validations with one condition 4 (14.4),
- * as T1.4-1's whitespace arms stage one: the second section's `id` spells a
- * segment containing U+0020 (1.4). `a` keeps its defined identity, and `b c`
- * is a spelled identity (11.2), malformed.
+ * VALID_STAGING's shape failing `build`'s validations with one condition 4
+ * (14.4), as T1.4-1's whitespace arms stage one: the second section's `id`
+ * spells a segment containing U+0020 (1.4). `a` keeps its defined identity,
+ * and `b c` is a spelled identity (11.2), malformed.
  */
 const VALID_FAILING_STAGING: WorkspaceDecl = {
   files: {
@@ -2184,44 +2116,8 @@ const VALID_TABLE: GrammarTable = {
 // --- CONF-MD (CERTIFICATIONS.md §CONF-MD: `build`, `check`, and `query
 // node`, `query nodes`, and `query edges` as its scope serves them) ---------
 
-/** SPEC 1.3's own nested shape: `a` containing `a.b`, finding-free. */
-const MD_SOURCE = `<S id="a">
-Alpha text.
-
-<S id="a.b">
-Beta text.
-</S>
-</S>
-`;
-
 /**
- * One spec group with Markdown emission next to each source (7.3, 13.2) —
- * so a `build` that runs writes `specs/A.md`, and an exit-2 row's unchanged
- * workspace shows that none ran — and MD_SOURCE, a valid workspace as
- * §CONF-MD's scope admits ("every file well-formed MDX (14.20) and
- * valid"). No row runs `check` to exit 0: on a workspace never built, a
- * conforming `check` reports the missing derived files and graph data
- * (12.2, 14.10), which §CONF-MD's scope leaves out ("for T3-1's
- * grammar-boundary arm, `check` exiting 0", after its `build`), so `check`
- * appears in exit-2 rows alone.
- */
-const MD_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/*.mdx"]
-  },
-  markdown: { emit: true }
-})
-`,
-    "specs/A.mdx": MD_SOURCE,
-  },
-};
-
-/**
- * The same source under a configuration lacking the required `specs` key
+ * MD_STAGING's source under a configuration lacking the required `specs` key
  * (SPEC 7: "`specs` is required"), a configuration error (14.14).
  */
 const MD_NO_SPECS_STAGING: WorkspaceDecl = {
@@ -2797,22 +2693,6 @@ const MD_TABLE: GrammarTable = {
 // `ids`, `show`, `query`, `coverage`, the `review` reads, and `impact
 // --base`; `rename`, file-form `move`, and the mutating `review`
 // subcommands, `--test-hold` included) ------------------------------------------
-
-/**
- * One spec group of one single-section source, as §CONF-CORE's scope admits
- * (no imports, embeddings, `d` props, or tags; no `code`, `markdown`,
- * `coverage`, or `policy` keys; no git): a valid workspace every served read
- * answers and every served mutating command performs on.
- */
-const CORE_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
-`,
-  },
-};
 
 const CORE_FILE = "specs/A.mdx";
 const CORE_TARGET = `${CORE_FILE}#a`;

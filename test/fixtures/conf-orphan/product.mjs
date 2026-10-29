@@ -559,11 +559,12 @@ function tokenizeConfig(text, configError) {
 
 /**
  * Parse the declarative configuration (SPEC 7): exactly an import of
- * `defineConfig` from "xspec" (optionally aliased; no `type` or `defer`
- * modifier, no import attributes) and a default export of one call to that
- * binding whose sole argument is statically literal — object literals with
- * non-computed identifier or string-literal keys (a key repeated within one
- * object a configuration error), array literals, static string literals, and
+ * `defineConfig` (optionally aliased; no `type` or `defer` modifier, no
+ * import attributes) whose module specifier is any static string literal
+ * (2.4), and a default export of one call to that binding whose sole
+ * argument is statically literal — object literals with non-computed
+ * identifier or string-literal keys (a key repeated within one object a
+ * configuration error), array literals, static string literals, and
  * `true`/`false`. Objects are returned as Maps, in spelling order.
  */
 function parseConfigText(text, configError) {
@@ -590,7 +591,12 @@ function parseConfigText(text, configError) {
   if (peekIs("punct", ",")) i += 1;
   take("punct", "}", '"}" in the import of defineConfig');
   take("word", "from", '"from"');
-  take("string", "xspec", 'the module specifier "xspec"');
+  // The module specifier: any static string literal token, its value the
+  // characters between its delimiters as spelled (tokenizeConfig), never
+  // decoded, interpreted, resolved, or loaded (SPEC 7; CERTIFICATIONS.md
+  // preamble). An escape TypeScript's scanner rejects is accepted too: a
+  // conformer judges 14.20 on its accepting side alone (TEST-SPEC S-9).
+  take("string", undefined, "the module specifier, a static string literal");
   if (peekIs("punct", ";")) i += 1;
   take("word", "export", "the default export");
   take("word", "default", '"default"');

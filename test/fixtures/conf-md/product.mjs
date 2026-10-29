@@ -288,18 +288,27 @@ async function findConfigPath(cwd, configFlag) {
 
 /**
  * Parse the declarative configuration (SPEC 7): exactly an import of
- * `defineConfig` from "xspec" (optionally aliased) and a default export of
- * one call whose sole argument is statically literal. Returns the argument
- * as data. Any other form is a configuration error (SPEC 14.14, exit 2).
+ * `defineConfig` (optionally aliased) whose module specifier is any static
+ * string literal (2.4), and a default export of one call whose sole argument
+ * is statically literal. Returns the argument as data. Any other form is a
+ * configuration error (SPEC 14.14, exit 2).
  */
 function parseConfigSource(text) {
+  // The module specifier is matched as spelled and never decoded,
+  // interpreted, resolved, or loaded (SPEC 7; CERTIFICATIONS.md preamble):
+  // a static string literal in either quote style, each of its characters
+  // any but its own quote, a backslash, U+000A, and U+000D, or a backslash
+  // with the character after it (CRLF taken whole): escape sequences and
+  // line continuations alike. An escape TypeScript's scanner rejects is
+  // accepted too: a conformer judges 14.20 on its accepting side alone
+  // (TEST-SPEC S-9).
   const importMatch =
-    /import\s*\{\s*defineConfig(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*\}\s*from\s*(["'])xspec\2\s*;?/.exec(
+    /import\s*\{\s*defineConfig(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*\}\s*from\s*(?:"(?:[^"\\\n\r]|\\(?:\r\n|[\s\S]))*"|'(?:[^'\\\n\r]|\\(?:\r\n|[\s\S]))*')\s*;?/.exec(
       text,
     );
   if (!importMatch) {
     throw new UsageError(
-      'configuration error: xspec.config.ts must import { defineConfig } from "xspec" (SPEC 7, 14.14)',
+      "configuration error: xspec.config.ts must import { defineConfig } from a static string literal (SPEC 7, 14.14)",
     );
   }
   const binding = importMatch[1] ?? "defineConfig";
