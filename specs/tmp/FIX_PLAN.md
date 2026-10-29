@@ -10,9 +10,9 @@ Written in Phase 9 on 2026-10-29 at head `e57210b` (branch `claude/relaxed-albat
 - B-G6 (T7-9) → Tasks 31 ((a), (b)), 32 ((c)), 33 ((d)). B-G7 (T7-10) → Tasks 34 ((a), (b)), 35 ((c)), 36 ((d)), 37 ((e)). B-G8 (T7-11) → Task 38.
 - B-G9 (7.6's four rules) → Tasks 9, 10, 12, 13, 20, 21, 22 (with C-1, C-3, C-4, C-6, C-7).
 - B-G10 → Tasks 18, 19. B-G11 → 16. B-G12 → 17. B-G13 → 27. B-G14 → 28. B-G15 → 25. B-G16 → 26 (its observations: 21, 22).
-- C-1 → Task 10. C-2 → Tasks 8 (consumer half) and 12 (module half). C-3 → 12. C-4 → 13. C-5 → 11 (stub package, sweeps), 12 (absent directory), 13, 21, 22 (pairing). C-6 → 20. C-7 → 9. C-8 → 23, 24. C-9 → 14, 15, 18. C-10 → 3. C-11 → 2 (the count), 16 (7.6 mapped). C-12 → 5 (P-19), 29 (P-17), 30 (P-18). Reviewer C's CI-time note → 47.
+- C-1 → Task 10. C-2 → Tasks 8 (consumer half) and 12 (module half). C-3 → 12. C-4 → 13. C-5 → 11 (stub package, sweeps), 12 (absent directory), 13, 21, 22 (pairing). C-6 → 20. C-7 → 9. C-8 → 23, 24. C-9 → 14, 15, 18. C-10 → 3. C-11 → 2 (the count; done at 88e07d0, harness-self green but for the known open failures), 16 (7.6 mapped). C-12 → 5 (P-19), 29 (P-17), 30 (P-18). Reviewer C's CI-time note → 47.
 - D-1 → Task 6. D-2, D-3, D-4 → 7. D-5 → 5. D-6 → 4 (CONF-IMPORT's row: 7). D-7 → 31 ((a)'s staging path), 35 ((b)'s compare-around machinery).
-- VERIFY's failures: 1 → Task 2; 2 → 16; 3 and 4 → 7; 5 → 5. VERIFY's observation (no harness reader of the module channel's inputs) → 9, 10.
+- VERIFY's failures: 1 → Task 2 (done at 88e07d0); 2 → 16; 3 and 4 → 7; 5 → 5. VERIFY's observation (no harness reader of the module channel's inputs) → 9, 10.
 - The Phase 8 scaffold's note to Phase 9 (read both inputs, read the release list, add the package directory to the binding, unset `NODE_OPTIONS` and `NODE_PATH` for 7.6's runs) → Tasks 9, 10, 20.
 - Checked and not gaps (no task): T12.0-6 (its body never staged the withdrawn `"XSPEC"` cross-reference); every other T1–T6 and T7+ body (unchanged text); CONF-DISC's and CONF-CORE's new staging constraints (they hold); the escape spellings of TEST-SPEC §§1–7 and CERTIFICATIONS.md (intact in their raw bytes, and every existing harness escape arm builds its backslash from code point 0x5C).
 
@@ -97,18 +97,6 @@ Standing constraints from Developer, verbatim (they apply to any command you run
 - Against the built product, with `XSPEC_PACKAGE_DIR` set from a fresh pack: expect diagnosed failures until Phase 10 (Known state); record them.
 
 **Finishing a task.** When the change is verified locally — its self files, and the whole self project with no failure but the known open failures whose owning tasks are not yet done; certification unchanged unless the task changes it; `npm run typecheck` and `npm run format:check` exiting 0; its suite tests run against the built product with their verdicts recorded — commit and push, keeping the task in this file with a one-line status naming the pushed commit and the verdicts. Then wait in the foreground for harness-self on that head. Its gate: every failing test there is one of the known open failures whose owning task is not yet done — a task never adds one, and once Tasks 2, 5, 7, and 16 are all done, harness-self is wholly green. When the gate holds, a follow-up commit removes the task from this file (recording the job's verdict in its message) and is pushed; the commit that removes the last task deletes this file with `git rm` (`specs/tmp/.gitkeep` stays), and if that deletion is refused, stop and report the refusal verbatim. If anything is red, fix it within the task, or replace the task with precise remainder tasks. The full-suite and Windows jobs need not be awaited but in Task 47; when you see one finish, read its failures: a self test failing there, or a product test failing other than diagnosed, is this plan's to fix.
-
-## Task 2 — S-1: pin SPEC.md's 82 H-7 keys (TEST-SPEC H-7, S-1; finding C-11, VERIFY failure 1)
-
-**Requirement.** H-7's keys are SPEC.md's preamble, every numbered subsection, and the ten body-text keys of sections 3, 4, 5, 7, 8, 9, 10, 11, 14, and 15. SPEC.md now has 71 subsections (7.6 is new), so 82 keys.
-
-**Gap.** `test/self/s1-traceability.test.ts` pins `EXPECTED_KEY_COUNT = 81` (about line 44) under a comment counting 70 subsections (about line 39); "SPEC.md parses into the pinned H-7 key universe (H-7, S-1)" fails (expected 82 to be 81).
-
-**Change.** Set the pin to 82 and the comment to 71 subsections, after confirming from SPEC.md's headings (`grep -c '^### ' specs/SPEC.md`) that 7.6 is the only new key and that `EXPECTED_SECTION_COUNT` (15) still holds. Do not map "7.6" here: the map's domain is the registry, and the first test covering 7.6 lands in Task 16.
-
-**Verification.** `test/self/s1-traceability.test.ts`: the key-universe test passes; the unmapped-key test still fails on `7.6` alone (Task 16); the other two pass. Then the self project: no new failure.
-
-**Status (2026-10-29).** Implemented and pushed in the commit whose subject is `sdg(phase-9): pin SPEC.md's H-7 key universe at 82 keys (FIX_PLAN Task 2)`, the one adding this paragraph: `EXPECTED_KEY_COUNT` 81 → 82 and its comment's subsection count 70 → 71, after confirming SPEC.md's headings (15 sections, `grep -c '^### '` 71, the only heading added since main being 7.6's) and `SPEC_BODY_TEXT_KEY_SECTIONS` (H-7's ten); "7.6" left unmapped (Task 16); no AGENTS.md text or other harness comment states the count. Verdicts: `test/self/s1-traceability.test.ts` 1 failed / 3 passed, the failure key `7.6` unmapped alone (Task 16); the self project 4 failed / 5177 passed (5181 tests) in 489.4 s, admin files left out, the four failures exactly the remaining known open ones (Tasks 16, 7, 7, 5); certification unchanged (171 PASS / 48 FAIL / 0 error / 0 hang over 39 lines); `npm run typecheck` and `npm run format:check` exit 0. No suite test is involved. Awaiting harness-self on the pushed head.
 
 ## Task 3 — S-9: vectors for T7-2's newly named forms and T7-9(b)'s escapes (TEST-SPEC S-9, T7-2, T7-9(b); finding C-10)
 
