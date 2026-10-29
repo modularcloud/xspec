@@ -110,25 +110,28 @@
 //   declarative form's (14.14), never a parse failure's; a product reading
 //   the binding loosely loads each and builds (exit 0), failing the
 //   exit-code assertion.
-// - T7-2's further form arms (SPEC 7: the specifier `"xspec"`, a literal
-//   set of strings and the two booleans, non-computed identifier or
-//   string-literal keys, one call whose sole argument is statically
-//   literal): the import from `"XSPEC"`, a single-casing arm — no case
-//   folding anywhere (12.0); `markdown: { emit: true, outDir: null }` and a
-//   profile's `targetTags: null`, one arm each — `null` lies outside 7's
-//   literal set, though `inventory` reports unset members as `null` (12.7)
-//   — each fixture valid with the member omitted (the profile's target and
-//   boundary the unambiguous group `main`), so a product reading `null` as
-//   an omitted member loads it and builds (exit 0); `defineConfig()` and
-//   `defineConfig({…}, {})`, the second's first argument the canonical
-//   configuration, so a product reading the first argument alone loads it;
-//   and the numeric-literal key `specs: { 1: ["specs/*.mdx"] }`, spelled as
-//   TEST-SPEC spells it (its glob, like the canonical one, matches the
-//   staged `specs/A.mdx`), which TypeScript admits and a product reading
-//   keys loosely takes for a group named `1`. Every one is a text
-//   TypeScript 5.9.3 accepts both as module code and as script code, so
-//   each record is declared well-formed (S-9) and the refusal is the
-//   declarative form's (14.14), never a parse failure's.
+// - T7-2's import arms never vary the import's module specifier: SPEC 7
+//   accepts any static string literal there, so an import from a specifier
+//   other than `"xspec"` is valid — T7-9's subject (its single-casing
+//   `"XSPEC"` among T7-9(a)'s spellings), never a T7-2 refusal.
+// - T7-2's further form arms (SPEC 7: a literal set of strings and the two
+//   booleans, non-computed identifier or string-literal keys, one call
+//   whose sole argument is statically literal): `markdown: { emit: true,
+//   outDir: null }` and a profile's `targetTags: null`, one arm each —
+//   `null` lies outside 7's literal set, though `inventory` reports unset
+//   members as `null` (12.7) — each fixture valid with the member omitted
+//   (the profile's target and boundary the unambiguous group `main`), so a
+//   product reading `null` as an omitted member loads it and builds (exit
+//   0); `defineConfig()` and `defineConfig({…}, {})`, the second's first
+//   argument the canonical configuration, so a product reading the first
+//   argument alone loads it; and the numeric-literal key
+//   `specs: { 1: ["specs/*.mdx"] }`, spelled as TEST-SPEC spells it (its
+//   glob, like the canonical one, matches the staged `specs/A.mdx`), which
+//   TypeScript admits and a product reading keys loosely takes for a group
+//   named `1`. Every one is a text TypeScript 5.9.3 accepts both as module
+//   code and as script code, so each record is declared well-formed (S-9)
+//   and the refusal is the declarative form's (14.14), never a parse
+//   failure's.
 // - T7-2 string-literal keys arm: "both groups discover their globs' files"
 //   is observed as the spec group's exact `ids` listing plus whole-graph
 //   edge-set equality carrying the code file's marker edge (T7-3's
@@ -1070,15 +1073,17 @@ const T7_1 = defineProductTest({
 
 // Each fixture is SPECS_ONLY_CONFIG with exactly one deviation (module
 // header). SPEC 7: the file MUST consist of exactly an import of
-// `defineConfig` from `"xspec"` (optionally aliased) and a default export of
-// one call to that binding whose sole argument is statically literal —
-// object literals with non-computed identifier or string-literal keys, array
-// literals, static string literals, and the boolean literals; no other
-// statement or expression form, no spread, no computed value. The rows
-// follow TEST-SPEC's order: the import (its specifier `"XSPEC"` among the
-// misdirected ones), extra statements, each non-literal argument form, the
-// `null` literal, a non-call default export, a call without a sole
-// argument, a numeric-literal key, and the import's modifiers.
+// `defineConfig` (optionally aliased) whose module specifier is any static
+// string literal, and a default export of one call to that binding whose
+// sole argument is statically literal — object literals with non-computed
+// identifier or string-literal keys, array literals, static string
+// literals, and the boolean literals; no other statement or expression
+// form, no spread, no computed value. The rows follow TEST-SPEC's order: a
+// syntax error, the missing import, extra statements, each non-literal
+// argument form, the `null` literal, a non-call default export, a call
+// without a sole argument, a numeric-literal key, and the import's
+// modifiers. No row varies the specifier: any static string literal is
+// valid there (SPEC 7), T7-9's subject.
 const FORM_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
@@ -1093,30 +1098,6 @@ export default defineConfig({
   {
     label: "missing defineConfig import",
     config: `export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  }
-})
-`,
-  },
-  {
-    label: 'import from a specifier other than "xspec"',
-    config: `import { defineConfig } from "not-xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  }
-})
-`,
-  },
-  {
-    label:
-      'import from the specifier "XSPEC": a single-casing arm, no case ' +
-      "folding anywhere (SPEC 12.0)",
-    config: `import { defineConfig } from "XSPEC"
-
-export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
@@ -1694,10 +1675,9 @@ export default defineConfig({
 const T7_2 = defineProductTest({
   id: "T7-2",
   title:
-    "declarative form: a syntax error, a missing or misdirected " +
-    'defineConfig import (the specifier "XSPEC" among them: no case ' +
-    "folding, 12.0), a type or defer modifier or import attributes on " +
-    "that import, extra statements, each non-literal argument form, a " +
+    "declarative form: a syntax error, a missing defineConfig import, a " +
+    "type or defer modifier or import attributes on that import, extra " +
+    "statements, each non-literal argument form, a " +
     "null literal (markdown's outDir, a profile's targetTags), a non-call " +
     "default export, a call without a sole argument (defineConfig(), " +
     "defineConfig({…}, {})), and a numeric-literal key are configuration " +
