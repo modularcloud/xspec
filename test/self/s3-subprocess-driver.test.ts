@@ -104,6 +104,7 @@ import {
   VoidedTrialsExhaustedError,
 } from "../helpers/kill-discipline.js";
 import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
+import { NodeReleaseError } from "../helpers/node-releases.js";
 import {
   HarnessStagingError,
   stageDirectoryMode,
@@ -982,7 +983,7 @@ test("waitForFile surfaces a capture-limit kill as the driver's ProductRunOutput
   expect(settled).toBe(error);
 });
 
-test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, an exhausted voidable trial, and a harness step's tripped guard — unchanged, and returns for every other rejection a helper converts (H-11; TEST-SPEC S-3)", () => {
+test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, an exhausted voidable trial, a harness step's tripped guard, and a Node.js release E-1 lists left unprovisioned — unchanged, and returns for every other rejection a helper converts (H-11; TEST-SPEC S-3, E-1)", () => {
   for (const harnessError of [
     new ProductRunOutputOverflowError("capture limit"),
     new ProcessGroupLingerError("stand-in", 4242, "listed", 30_000, [], [4243]),
@@ -997,6 +998,15 @@ test("rethrowHarnessError rethrows exactly the harness errors — the capture-li
       "stand-in move",
       "prepare",
       new RangeError("parser limit"),
+    ),
+    new NodeReleaseError(
+      "release",
+      "the Node.js release 22.12.0 is not provisioned under a stand-in",
+      ["22.12.0"],
+    ),
+    new NodeReleaseError(
+      "directory",
+      "XSPEC_NODE_RELEASES_DIR is unset in a stand-in",
     ),
   ]) {
     let rethrown: unknown = null;

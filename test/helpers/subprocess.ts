@@ -199,6 +199,7 @@ import {
   ProcessGroupLingerError,
   VoidedTrialsExhaustedError,
 } from "./kill-discipline.js";
+import { NodeReleaseError } from "./node-releases.js";
 import { noteProductInvocation } from "./product-invocations.js";
 import {
   guardStep,
@@ -364,9 +365,11 @@ export class HarnessEvaluationError extends Error {
  * evaluation of the answer failed ({@link HarnessEvaluationError}), a group
  * kill could not confirm its group gone (`ProcessGroupLingerError`), every
  * attempt of a voidable trial was voided (`VoidedTrialsExhaustedError`;
- * both helpers/kill-discipline.ts), or a harness step outlasted its own
- * guard (`HarnessStepTimeoutError`, helpers/step-guards.ts; TEST-SPEC S-3)
- * — and return otherwise. A helper that turns a rejected run — the
+ * both helpers/kill-discipline.ts), a harness step outlasted its own guard
+ * (`HarnessStepTimeoutError`, helpers/step-guards.ts; TEST-SPEC S-3), or a
+ * Node.js release E-1 lists is not provisioned for the run needing it, or
+ * its list is unreadable (`NodeReleaseError`, helpers/node-releases.ts;
+ * TEST-SPEC E-1) — and return otherwise. A helper that turns a rejected run — the
  * hang-guard kill, a premature exit, a spawn failure, a T6.5-22(a) breach,
  * a T12.7-1 near-marker — into a diagnosed failure (H-8) calls it first, so
  * a harness-side failure always surfaces as the harness error it is, never
@@ -378,7 +381,8 @@ export function rethrowHarnessError(error: unknown): void {
     error instanceof HarnessEvaluationError ||
     error instanceof ProcessGroupLingerError ||
     error instanceof VoidedTrialsExhaustedError ||
-    error instanceof HarnessStepTimeoutError
+    error instanceof HarnessStepTimeoutError ||
+    error instanceof NodeReleaseError
   ) {
     throw error;
   }

@@ -34,9 +34,12 @@ import { defineConfig } from "vitest/config";
 //                            test/node-releases.json pins and
 //                            .github/scripts/provision-node-releases.sh
 //                            installs there, each release's executable at
-//                            v<version>/bin/node. A listed release missing
-//                            there is a harness error for every run needing it
-//                            (E-1, H-11, S-10), never a skip.
+//                            v<version>/bin/node; the harness reads both
+//                            through test/helpers/node-releases.ts, the
+//                            variable only when a run needs a release. A
+//                            listed release missing there is a harness error
+//                            for every run needing it (E-1, H-11, S-10),
+//                            never a skip.
 //
 // Shared harness machinery (H-3 output adapters, the workspace builder, the
 // subprocess and TypeScript-tooling drivers, the P-2/P-7 oracles) belongs in
