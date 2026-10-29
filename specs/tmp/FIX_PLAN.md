@@ -1,0 +1,713 @@
+# FIX_PLAN — Phase 9, IP 0002 (configuration import not tied to a package name), first plan: harness adherence to `specs/TEST-SPEC.md` and `specs/CERTIFICATIONS.md`
+
+Written in Phase 9 on 2026-10-29 at head `e57210b` (branch `claude/relaxed-albattani-5v6l55`, standing in for `patch/config-import-specifier`; governing IP `specs/patches/0002-config-import-specifier.md`, Stage: Tests Specified — no task here changes the Stage), from that head's compliance determination, the first since Phase 8's scaffold commits `7e7119b` and `e57210b`: reviewer A (TEST-SPEC.md tests T1–T6) 1 gap, reviewer B (T7 onward) 17 (G1–G17), reviewer C (TEST-SPEC.md outside the T-tests) 12 (C-1 to C-12), reviewer D (CERTIFICATIONS.md) 7 (D-1 to D-7); VERIFY red (5 harness self-tests failing, locally and in CI's harness job). This is IP 0002's first plan; its task numbers start at 1 (cite a task as "FIX_PLAN Task N of the plan written at e57210b"). The findings themselves, verbatim, are saved in this session's scratchpad under `/tmp/claude-0/-home-user-xspec/08a79bea-e066-52cf-ac19-1be1615496b4/scratchpad/orchestrator-notes/s2/p9det-e57210b/` (`reviewer-A-T1-T6.md`, `reviewer-B-T7-onward.md`, `reviewer-C-non-T.md`, `reviewer-D-CERTIFICATIONS.md`, `verify.md`); each task below restates what it needs, so reading them is optional.
+
+**Why the gaps exist.** SPEC.md was revised for IP 0002: 7's configuration import takes any static string literal as its module specifier, never interpreted, resolved, or loaded (SPEC.md line 415); the configuration file is a source only where a configured group discovers it; and a new subsection, 7.6, defines the product's `defineConfig` module — package and installation, Reach, covered setups, covered files, type contract, and runtime — which adds H-7's key "7.6" (82 keys). TEST-SPEC.md revised T7-1, T7-2, T7-3, T7.5-1, T12.0-6, T13.1-2, H-1, H-2, H-8, C-2, S-4, S-7, S-9, E-1, and §16's preamble, and added T7-9, T7-10, T7-11, §7.6's four rules with T7.6-1 to T7.6-7, P-17, P-18, P-19, and S-10. CERTIFICATIONS.md added CONF-IMPORT with VIOL-IMPORT-BRACED and VIOL-IMPORT-SINGLE (certifying P-19; now 10 conformers and 32 violators) and states in its preamble that every conformer reads the configuration's import as 7 states. Phase 8 packed the product's package directory and provisioned E-1's Node.js releases in CI (`XSPEC_PACKAGE_DIR`, `XSPEC_NODE_RELEASES_DIR`, `test/node-releases.json`); nothing under `test/` reads them yet. The harness's test code is otherwise unchanged since IP 0001's compliant harness. No reviewer found a blocking spec defect: reviewers B and C probed the new requirements under TypeScript 5.9.3 and the six releases, and all held.
+
+**Finding → task map.**
+- A-1, B-G17, and C-2's consumer half → Task 8 (one fix in the shared isolation code).
+- B-G1 → Task 1. B-G2 → Tasks 39 ((a)), 40 ((b)), 41 ((c), (d)), 42 ((e), (f)), 43 ((g)). B-G3 → 44. B-G4 → 45. B-G5 → 46.
+- B-G6 (T7-9) → Tasks 31 ((a), (b)), 32 ((c)), 33 ((d)). B-G7 (T7-10) → Tasks 34 ((a), (b)), 35 ((c)), 36 ((d)), 37 ((e)). B-G8 (T7-11) → Task 38.
+- B-G9 (7.6's four rules) → Tasks 9, 10, 12, 13, 20, 21, 22 (with C-1, C-3, C-4, C-6, C-7).
+- B-G10 → Tasks 18, 19. B-G11 → 16. B-G12 → 17. B-G13 → 27. B-G14 → 28. B-G15 → 25. B-G16 → 26 (its observations: 21, 22).
+- C-1 → Task 10. C-2 → Tasks 8 (consumer half) and 12 (module half). C-3 → 12. C-4 → 13. C-5 → 11 (stub package, sweeps), 12 (absent directory), 13, 21, 22 (pairing). C-6 → 20. C-7 → 9. C-8 → 23, 24. C-9 → 14, 15, 18. C-10 → 3. C-11 → 2 (the count), 16 (7.6 mapped). C-12 → 5 (P-19), 29 (P-17), 30 (P-18). Reviewer C's CI-time note → 47.
+- D-1 → Task 6. D-2, D-3, D-4 → 7. D-5 → 5. D-6 → 4 (CONF-IMPORT's row: 7). D-7 → 31 ((a)'s staging path), 35 ((b)'s compare-around machinery).
+- VERIFY's failures: 1 → Task 2; 2 → 16; 3 and 4 → 7; 5 → 5. VERIFY's observation (no harness reader of the module channel's inputs) → 9, 10.
+- The Phase 8 scaffold's note to Phase 9 (read both inputs, read the release list, add the package directory to the binding, unset `NODE_OPTIONS` and `NODE_PATH` for 7.6's runs) → Tasks 9, 10, 20.
+- Checked and not gaps (no task): T12.0-6 (its body never staged the withdrawn `"XSPEC"` cross-reference); every other T1–T6 and T7+ body (unchanged text); CONF-DISC's and CONF-CORE's new staging constraints (they hold); the escape spellings of TEST-SPEC §§1–7 and CERTIFICATIONS.md (intact in their raw bytes, and every existing harness escape arm builds its backslash from code point 0x5C).
+
+**Order and dependencies.** Tasks are listed in the recommended order; take the first task whose dependencies are done. Tasks 1–7 clear VERIFY's certification and traceability failures but one; Tasks 8–16 build the module channel up to its first test, which clears the last (S-1's unmapped "7.6"); from then on harness-self must stay green. Hard dependencies: 6 needs 4 and 5; 7 needs 6; 11 needs 10; 12 needs 8, 9, and 10; 13 needs 12; 14, 15, and 18 need 13; 16 needs 13 (14 and 15 recommended first); 17 needs 16; 19 needs 16 and 18; 20 needs 9 and 12; 21 needs 20; 22 needs 21; 23 needs 22; 24 needs 23; 25 needs 21 (23 recommended first); 26 needs 22, 24, and 25; 27 needs 17, 19, and 25; 28 needs 27; 29 needs 27; 30 needs 17; 31 needs 5 (and 6 for its green check); 32 needs 31; 33 needs 10, 12, and 31; 35, 36, and 37 need 34; 47 needs every other task. Tasks 1–5, 8–10, 34, 38, and 39–46 stand alone. Where a task creates a registry module another task also names, whichever comes first creates it (with its wrapper and manifest line).
+
+**Known state at `e57210b`.**
+- CI run 1799 (id 40870245221, `pull_request` event at `e57210b`; PR #9 open and mergeable): harness-self (job 123435151026) failed, 5 failed / 5188 passed (5193) in 400 s, certification's 39 verifications all passing, both admin self-test files passing. The five failures, each owned by a task (the *known open failures*):
+  1. `test/self/s1-traceability.test.ts` "SPEC.md parses into the pinned H-7 key universe (H-7, S-1)": expected 82 to be 81 → Task 2.
+  2. `test/self/s1-traceability.test.ts` "every H-7 key is mapped by at least one test (S-1: no unmapped keys)": key `7.6` → Task 16.
+  3. `test/self/certification-document.test.ts` "CERTIFICATIONS.md defines exactly 9 conformers and 30 violators (C-1 whole-document gate)": the document has 10 and 32 → Task 7.
+  4. `test/self/certification-document.test.ts` "the fixture manifest equals CERTIFICATIONS.md: every fixture wired with the document's ID sets (C-1)" → Task 7.
+  5. `test/self/certification-document.test.ts` "every CERTIFICATIONS.md in-scope test is implemented in the product-test registry (C-1)": `§CONF-IMPORT: P-19` → Task 5.
+- The full-suite job of run 1799 (job 123435151326) was still running when this plan was written. At `7e7119b` (run 1798, id 40863439587, the same code) the full suite failed on exactly these 5 self tests, every product test passing (about 50 minutes), and the Windows leg was green.
+- VERIFY's local self-project run at `e57210b`: 5 failed / 5178 passed (5183) in 816 s, the admin files left out; certification 39 of 39 in 578 s.
+- The built product (`src/` untouched by IP 0002 so far; `dist/` untracked — rebuild with `npm run build`) still requires the specifier `"xspec"` (T7-2's two withdrawn arms pass against it), and, per reviewer A's probe, discovers the configuration file where a glob matches it. Its packed package has no `dist/index.cjs` or `dist/index.d.cts` (no `src/index.cts` yet), and its `src/index.ts` still exports named types 7.6 forbids (the Phase 8 scaffold's note). Expect T7-9, T7-10's arms with other specifiers, P-19, 7.6's tests, P-17, and P-18 to fail against it — allowed in Phase 9 when diagnosed (below). Use this only to anticipate verdicts: every expected value comes from TEST-SPEC.md, never from the product's behavior or source.
+
+**Phase goal and scope guards (Phase 9).** The harness adheres to `specs/TEST-SPEC.md` and `specs/CERTIFICATIONS.md`: every harness self-test passes and every certification holds, locally and in CI, the harness job ("Harness self-tests + certification (Linux)") green on the head. Product tests may fail, but only as diagnosed assertion failures (`HarnessAssertionError`, H-8), never a harness error, crash, hang, or false pass. Never modify product code (`src/`, and the product's fields of `package.json`; `dist/` is untracked build output): `src/index.cts` and the rework of `src/index.ts` are Phase 10's. Never couple harness and product: the harness imports no product code (H-2), and reaches the product's package only as a placed copy of the packed directory (H-2's module channel). Add no dependency. Work lives in `test/`, this file, the problems files, and `AGENTS.md` (build/run knowledge only); `.github/workflows/ci.yml` only where Tasks 11 and 47 say so; leave `.github/scripts/`, `docs/`, `README.md`, and every other `specs/` document alone. A spec defect — a contradiction between documents, an impossible or untestable requirement, a test specified against behavior SPEC.md forbids — goes, dated and precisely described, into `specs/tmp/TEST-SPEC-PROBLEMS.md` (`CERTIFICATIONS-PROBLEMS.md` or `SPEC-PROBLEMS.md` for those documents); commit, push, and end with `OUTCOME: PROBLEM — <file>`. Never work around one. The Liaison's two IMPLEMENTATION.md points and the accepted residuals (Standing constraints) are not defects to report.
+
+**Standing constraints** (verbatim, as given to the spawn that wrote this plan).
+
+Branch, carried verbatim in every spawn prompt:
+"Branch: this IP's work runs on `claude/relaxed-albattani-5v6l55`, this session's designated branch. It stands in for `patch/<short-title>`, and the patch header records that, as IP 0001's did.
+- The first agent to commit creates the branch from main's current head: `git fetch origin main`, then `git checkout -B claude/relaxed-albattani-5v6l55 FETCH_HEAD`, then `git push -u origin claude/relaxed-albattani-5v6l55`. The stale local branch of that name, at 63bcb3f, is fully contained in main, so resetting it loses nothing.
+- Every later agent fetches the branch by name (`git fetch origin claude/relaxed-albattani-5v6l55`), and works and pushes only there.
+- Never push to `main`; merging happens only in Phase 11, per DEVOPS.md.
+- Never force-push or rewrite pushed history.
+- Never merge or rebase main into the branch without a Liaison ruling.
+- Leave every other branch alone, including `sdg/liaison-philosophy-oidc`, `claude/fumadocs-site-jfjh6s`, `claude/mintlify-docs-jfjh6s` and the stale local `claude/xspec-ui-apis-4df8fa`."
+
+(The branch exists and is pushed: every spawn of this plan is a "later agent".)
+
+Standing constraints from Developer, verbatim (they apply to any command you run):
+- "Administrative access. In the Claude Code cloud sandbox the permission system refused sudo and credential probes, so nothing needing admin access runs locally: no user accounts, no mounts, no PID namespaces, and no sudo beyond AGENTS.md's documented recipe.
+  - Tests that need admin access (T13.5-9, T13.5-10(e)–(g), test/self/*.admin.test.ts) are written locally but verified only in CI.
+  - Local runs use AGENTS.md's `unshare --map-user` recipe and leave those files out."
+- "Permission refusals. On any refusal, stop that line of work and run a Liaison consult; never work around it." What this means for you: if the permission system refuses anything, stop that line of work and do not work around it. Report the refusal verbatim in your final report; the consult is run for you. Ruling: GitHub's "GraphQL is not available" 403 is not a refusal. Read GitHub through REST (`gh api repos/modularcloud/xspec/...`) or the GitHub MCP tools. The Bash tool's "Blocked: sleep …" guard on foreground sleeps is not a refusal either, since its message names the sanctioned way to wait: never get past it by chaining shorter sleeps; wait on the condition itself with a foreground until-loop that has an explicit timeout.
+- "Removals: name every removal target by an absolute, literal path. Never put `rm` after a `cd` in the same command, never remove a relative path or a glob (such as `./*`), and never build a removal target from a shell variable. The built-in safety check refuses any removal whose target it cannot resolve statically. To get a clean scratch workspace, create a new directory with `mktemp -d` under the session scratchpad instead of clearing an old one. Inside /home/user/xspec, remove only files you created in this spawn, or go through git. A refused removal is a refusal under the Developer's rule: stop that line of work, do not work around it, and report it verbatim."
+  Mechanical note: the commonest breaches are clearing a probe or staging directory with `rm -rf $VAR` before reusing it, and deleting a file through a variable path partway through a probe (for example, removing a hold file to release a held run). Both have been refused, at e049255 by the built-in safety check and at 86d4836 and a16da39 by the auto-mode classifier, and each time the spawn had to drop its probe. A deletion counts however it is made: `rm`, `unlink`, `find -delete`, Node's `unlinkSync`, `rmSync` or `fs.rm`, Python's `os.remove` or `shutil.rmtree`. Never clear or reuse a directory: give every probe its own fresh `mktemp -d` directory. Keep every deletion out of scripts, `bash -c` and compound commands entirely. When a probe or staging step needs a file deleted, including the hold file that releases a held run, run that deletion as its own `rm` command, naming the file's absolute path literally. Never stage a symlink or other fixture that points outside the probe's own directory, least of all at `/etc`, `/` or any other system path, where the product under test might delete or write through it: point it at a decoy directory inside the probe's directory instead. If a probe cannot be written that way, drop the probe rather than bend the rule.
+- "Accepted residuals. Three known gaps are not to be reported as gaps or planned as fixes; defer them to Phase 11. Two are recorded as AGENTS.md bullets: the 14.20 syntax-failure location gaps, and the SPEC 6.5 gap for TypeScript import removals joined by automatic semicolon insertion. The third (Developer, 2026-10-22, accepted in place of reverting to SPEC refinement): SPEC 4.1's and 14.7's TypeScript type error for a requirement path whose last segment names a member of TypeScript's global `Object` interface (`constructor`, `toString`, `toLocaleString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable`), in bracket or dot form. TypeScript cannot report the bare bracket form. xspec's own 14.7 finding for such a path stays required and is not covered by this residual."
+  Developer, 2026-10-22, verbatim: "to be clear, dont implement the blacklist or tests for the blacklist now. just accept the error as is and we will add the sentence to the spec and implement later through the official process".
+  For IP 0002: these three stay outside this patch, its release included. They are parked in issue #8 (Developer, 2026-10-28).
+  No task here touches the residuals. If a task's work would reach one, leave that part out and say so in your report. (T7-11 and T7.6-2(e) stage `Object`-member names as group, profile, and rule names, never as requirement paths: they are not the third residual.)
+- From the Liaison, verbatim: "IMPLEMENTATION.md is known to be stale on two points (Liaison, 2026-10-29). Its own preamble rules that where a choice it names cannot satisfy SPEC.md, the spec wins, and these are two such cases; their correction is held for the release step.
+  - Its Distribution bullet names the package `xspec`. The product is distributed as `@modularcloud/xspec`, the name `package.json` carries; never change that `name`. (A test may still install the product under any name it chooses, `xspec` included, as SPEC 7.6 allows.)
+  - "ES modules throughout" does not override SPEC 7.6: the `defineConfig` module must also load through `require`, with no option, on every Node.js 22 release, 22.0–22.11 included. The means are a technical choice: choose conservatively and note the choice in your report.
+  Do not edit `specs/IMPLEMENTATION.md`, and do not report these two points again as findings or problems."
+- From the Liaison, verbatim: "Escape spellings (Liaison, 2026-10-29). A backslash followed by `u` and four hex digits, or by `u` and a braced code point, typed literally into tool input can arrive decoded. During this patch's test-plan refinement, an Edit and a committed review both silently lost such escapes, an escaped `s` arriving as a plain `s`. A probe or test whose input lost its escapes checks the wrong text and can pass for the wrong reason. So never type such a sequence literally anywhere: not in Edit or Write, not in a Bash command, heredoc or inline script, and not in a report or review. Where a file must hold one (a spec, a review, a test, a fixture or a probe), write or change those lines with a script that builds the backslash from its code point, for example Python's `chr(92)` or JavaScript's `String.fromCharCode(92)`. Then confirm the escapes in the written bytes, for example by counting them with a pattern built the same way. Treat any other backslash sequence that must reach a file unchanged the same way. In reports and reviews, name an escaped spelling by file and line, or in words (for example, "`specs` with its first letter written as the escape of U+0073"). Where a document or test you review presents a spelling as an escape, confirm the escape is in its raw bytes, and report any loss as a finding."
+
+**Run mechanics.** AGENTS.md holds the recipes. It is about 1.7 MB on some 400 lines, single bullets running past 100 KB: never read it whole. Find a bullet by its opening words (`grep -n -F -- '- <opening words>' AGENTS.md`), print that line alone, folded (`sed -n '<N>p' AGENTS.md | fold -w 400`), in bounded slices, and edit it with exact, unique `old_string`s. Run every command from `/home/user/xspec`, the Bash tool's starting directory (no `cd` needed).
+- *Git.* Confirm `git status` is clean on `claude/relaxed-albattani-5v6l55` and read `git log -3 --format='%h %s'` before starting and before each push; if the remote branch moved, fetch it by name (Standing constraints) and rebase your unpushed commits onto it. Stage files by explicit path, never `git add -A` or `git add .`. Commit subject `sdg(phase-9): <imperative summary> (FIX_PLAN Task N)`, ending with the trailer lines your spawn prompt gives. Push with `git push -u origin claude/relaxed-albattani-5v6l55`, retrying network errors with backoff (2 s, 4 s, 8 s, 16 s).
+- *The module channel's inputs.* Releases (`XSPEC_NODE_RELEASES_DIR`): VERIFY provisioned E-1's six releases at `/tmp/claude-0/-home-user-xspec/08a79bea-e066-52cf-ac19-1be1615496b4/scratchpad/node-releases.mikz23/releases` (each `v<version>/bin/node` present); use that directory read-only. If it is gone, provision a fresh one with `bash .github/scripts/provision-node-releases.sh <a new path inside a fresh mktemp -d directory>` (about 40 s and 1.4 GB; AGENTS.md's bullet beginning "E-1's Node.js releases"). Package directory (`XSPEC_PACKAGE_DIR`), for suite runs of 7.6's tests, P-17, P-18, and T7-9(d) alone: after `npm run build`, `bash .github/scripts/pack-package.sh <a fresh mktemp -d directory>` prints the package directory to export (AGENTS.md's bullet beginning "The module channel's package directory"); pack again into a fresh directory after every rebuild. Never set `XSPEC_PACKAGE_DIR` for the self project: CI's harness-self job runs with it unset (H-8).
+- *The self project* needs no product build (H-8): `XSPEC_NODE_RELEASES_DIR=<releases> unshare --map-user=1000 --map-group=1000 -- env -u NODE_OPTIONS -u NODE_PATH -u XSPEC_PACKAGE_DIR npx vitest run --config test/vitest.config.ts --project self --exclude 'test/self/**/*.admin.test.ts'` (AGENTS.md's bullets beginning "Harness self-tests and certification only" and "The self project"; this sandbox sets `NODE_OPTIONS=--use-openssl-ca` and a `NODE_PATH`, both unset here). It includes S-1 (registry = H-7 map), S-7 (every registered test fails diagnosed against the empty stub — new tests are swept automatically), and S-9 (every staged-source record judged). Run it in the background (`run_in_background`) as one command ending `> <log> 2>&1; echo "EXIT $?" >> <log>`, and wait in the foreground with `timeout 590 bash -c 'until grep -q "^EXIT" <log>; do sleep 5; done'`, repeated as needed (about 14 minutes at `e57210b`). Read the log for `×` lines and the `Tests` summary, never capped with `head`: the certification runner's indented `FAIL` lines are violators' expected outcomes. One file: `--project self test/self/<file>.test.ts`. Check the load first (`uptime`); a failure seen only while harness runs overlap is rerun alone.
+- *Suite tests* need the built product: `npm ci` if `node_modules` is missing, then `npm run build` (it writes the untracked `dist/` and changes no product code). One file: `XSPEC_NODE_RELEASES_DIR=<releases> XSPEC_PACKAGE_DIR=<package dir> unshare --map-user=1000 --map-group=1000 -- env -u NODE_OPTIONS -u NODE_PATH npx vitest run --config test/vitest.config.ts --project suite test/suite/<file>.test.ts`, adding `-t '<ID> '` (trailing space kept, so `T7-1` does not also select `T7-10`) for one test and `--reporter=verbose` for per-test lines; run long ones in the background with the `EXIT`-line wait. Never run `test/suite/section-13.5-ii.test.ts` (T13.5-10), `test/suite/section-13.5-v.test.ts` (T13.5-9), or the `*.admin.test.ts` self files locally: CI verifies them.
+- *Network.* CI's Linux jobs run network-denied (`.github/scripts/run-without-network.sh`); locally, where a verdict turns on the network (T7.6-7(d), T7-9(a)'s URL arm), use the network-denied nesting recipe in AGENTS.md's bullet beginning "The self project".
+- *Red and green checks.* A new self-test vector: AGENTS.md's bullet beginning "Red-checking a new self-test vector" (break or stash the helper alone, run the one self file, restore it, `cmp` the restored copy). A product test the built product passes: AGENTS.md's bullet beginning "Red-checking a strengthened product test against the built product (Phase 9)" — a scratchpad `.mjs` stand-in spawning the real `dist/cli/bin.js` and perturbing the one answer under test, bound through a temporary `test/self/zz-<task>-standin.test.ts` and `runProductTests(binding, productTestSuite.select([id]))` (`test/self/certification-runner.ts`). A test against a fixture not yet in the manifest: AGENTS.md's bullet beginning "To run a selection of product tests against one fixture executable that the certification manifest does not (yet) list". Delete every temporary file in the checkout before committing (its absolute path, in its own `rm` command).
+- *Checking a staged TypeScript text* before pinning it: AGENTS.md's bullet beginning "Checking whether a staged TypeScript shape" (S-9's judge, `judgeTypeScript` in `test/helpers/ts-derivability.ts`, module and script code).
+- *Reading CI, and waiting for it* (AGENTS.md's bullet beginning "Reading a CI run from this sandbox"): `gh` here is Claude Code's built-in client; read GitHub through REST. Runs: `gh api 'repos/modularcloud/xspec/actions/runs?branch=claude/relaxed-albattani-5v6l55&per_page=3' --jq '.workflow_runs[] | [.id, .run_number, .event, .head_sha[0:7], .status, .conclusion] | @tsv'`; jobs: `gh api repos/modularcloud/xspec/actions/runs/<run-id>/jobs --jq '.jobs[] | [.id, .name, .status, .conclusion] | @tsv'`; failures: `gh api repos/modularcloud/xspec/check-runs/<job-id>/annotations`. Runs come from PR #9's `pull_request` events; a push cancels the branch's run in progress, and a job cancelled with no steps is an infrastructure event, not a verdict. Judge each job on its own: Phase 9's gate is harness-self (about 7.5 minutes at `e57210b`). Wait in the foreground, never by going idle on a background monitor (a spawn that does is handed back before the result arrives): repeated foreground calls, each a bounded until-loop such as `timeout 540 bash -c 'until [ "$(gh api repos/modularcloud/xspec/actions/jobs/<job-id> --jq .status)" = completed ]; do sleep 30; done'`. If no run appears for a pushed head within about 10 minutes, read `gh api repos/modularcloud/xspec/pulls/9 --jq '[.state, .mergeable, .mergeable_state] | @tsv'`: a conflicted PR gets no `pull_request` runs — report it in your final report; never edit the workflow's triggers or touch main for it.
+- *Scratch space:* the session scratchpad `/tmp/claude-0/-home-user-xspec/08a79bea-e066-52cf-ac19-1be1615496b4/scratchpad/` is shared across spawns: give every probe its own fresh `mktemp -d` directory under it with a task-specific prefix, and never clear or reuse one. `git status --short` before each commit lists only the task's own files.
+
+**Conventions.**
+- Before committing: `npm run typecheck`; `npx prettier --write <the files you changed under test/>` (never `npm run format`, which also rewrites `src/`), then `npm run format:check`.
+- *Spellings.* Take every exact spelling — staged texts, codes, option values, ranges — from TEST-SPEC.md, SPEC.md, CERTIFICATIONS.md, or the harness code a task names, never from this plan's paraphrase where they differ; read each named test's whole bullet first (`grep -n -F '* **<ID> ' specs/TEST-SPEC.md`, then print that line folded). Line numbers in this plan are those at `e57210b`.
+- *Escapes* (the Liaison's rule above). This plan holds no backslash: it names every escaped spelling in words, and TEST-SPEC.md's lines hold the raw spellings. Never type a backslash sequence into Edit, Write, a Bash command, a heredoc, or an inline script. Every line you add or change that must hold a backslash — an escape in a staged text, a regular expression in a fixture product, a string escape in harness code — is written by a script that builds the backslash from its code point (Python `chr(92)`, JavaScript `String.fromCodePoint(0x5c)`), or, in harness code, assembled at run time from a constant such as `BACKSLASH` (`test/suite/registry/section-7-basics.ts`, about line 1462) so that the source line holds none; then confirm the written bytes by counting backslashes with a pattern built the same way, before and after.
+- *Comments, messages, and titles* that a change contradicts are corrected in the same task: each test's `title:` states what its body asserts, so every new arm extends it.
+- *AGENTS.md* gets only build/run knowledge a later spawn needs — for a new test or helper, one short bullet (its module and wrapper, its local time and verdict against the built product, any recipe it needed), rewriting the bullet a task makes stale.
+- *Guards (S-3).* Every product invocation, and every run of a Node.js release, goes through the subprocess driver (`runProduct`, its own hang guard); every harness step of real work — staging, a TypeScript check, a decode — runs under `guardStep`/`guardSyncStep` (`test/helpers/step-guards.ts`) sized to its work with generous margin; no test or helper sets a timer, race, or clock budget of its own (`test/self/s3-hang-guards.test.ts` scans the harness sources and flags one).
+- *Infrastructure caution.* Agents in these runs have died from usage-credit exhaustion, container restarts, API overloads, and single responses over the output-token ceiling. Issue a few tool calls per response, keep payloads modest, write files in bounded pieces, and land a coherent part early rather than one giant commit. If a task is too large for one spawn, land a coherent part and replace the task with precise remainder tasks numbered `<N>a`, `<N>b`, ….
+- Task numbers are stable; never renumber. A new gap goes in as a new task numbered 48 onward.
+
+**New-test conventions** (every task registering a test or adding an arm).
+- *Registration.* `defineProductTest({ id, title, run })` in the module the task names, placed in canonical ID order in that module's exported list. A new module needs its spread line in `test/suite/registry/index.ts` (in module order) and a thin wrapper `test/suite/<module>.test.ts` (copy `test/suite/section-7-basics.test.ts`'s shape and header style). The H-7 row goes into `test/suite/registry/traceability.ts` in the same commit (S-1 holds registry = map both ways): the SPEC.md passages the body asserts, in document order, with `"14"` wherever it asserts a numbered condition's finding or a stable code (the map's header gives the rules); model it on neighboring rows. Each H-7 row a task proposes is a starting point: read the body and keep exactly what it asserts.
+- *Staging.* Every deterministic staged file is a staged-source record (`stagedTs` in `test/helpers/staged-ts.ts`, `stagedMdx` in `test/helpers/staged-mdx.ts`) created at module load, never in a body (the ledgers seal once the manifest has loaded; S-9's timing clause, judged by `test/self/s9-staged-sources.test.ts`); a property draw's files are staged under the per-draw declaration and judged through `checkProperty`'s `drawSources` (`test/helpers/property.ts`). Each workspace is fresh (H-1) and holds exactly what the test names.
+- *Pins.* Expected offsets and ranges are computed from the staged bytes, never measured from product output, with a module-load self-check that each pinned construct occurs where TEST-SPEC places it.
+- *Many stagings.* A test with many independent arms may run them all and fail once at the end naming every failed arm (diagnosed failures collected; a harness error or hang propagating at once; `test/suite/registry/section-6.5-v.ts`'s header describes the pattern) — but see the module-channel conventions for a package that resolves nothing.
+- *Against the built product.* Run the test alone and record its verdict and time in the task's status line and AGENTS.md. A failure must be a diagnosed `HarnessAssertionError` naming the arm, its diagnosis showing the product's answer deviating from TEST-SPEC — hand-check the expected value against the staged bytes before ascribing it to the product. A harness error, crash, or hang is a harness defect, fixed in the task. Where the built product passes a new arm, red-check it — at least one arm per arm family — with a stand-in perturbing the answer under test; where it fails one, green-check the arm against a product that meets it (a conformer or a stand-in), so that no arm is red for every product.
+
+**Module-channel conventions** (Tasks 12–30 and 33).
+- Stage through Task 12's module, type-check through Task 13's driver, load through Tasks 20–22's driver; never place a package or run TypeScript or Node.js for 7.6 any other way.
+- No package directory given: the body fails diagnosed before any staging (Task 12). Under S-7's stub package (Task 11) a 7.6 body fails at its first failing setup or run, so that the harness-self job stays within its limit.
+- *Pairing* (§7.6): a shape-violation arm counts only where its valid twin type-checks in the same setup and placement; a runtime absence only where the same run loaded the module and saw `defineConfig` return its argument.
+- Green-check against a conforming stand-in package directory in the scratchpad — the dual-entry layout the Phase 8 scaffold probed (AGENTS.md's bullet beginning "7.6's covered setups": `import` an ES module typed by a `.d.ts`, `require` a CommonJS module typed by a `.d.cts`, the top-level `types` for `node10`), exporting exactly `defineConfig` (an identity function typed by an exact configuration type) — bound through a temporary self-test (`runProductTests({ ...builtProductBinding(), packageDir: <stand-in> }, productTestSuite.select([<ID>]))`, deleted before committing); red-check with stand-ins carrying the deviations each task names. Scratchpad stand-ins are scratch material, never product code and never committed; the stand-ins the self-tests of Tasks 12–15, 18, 23, and 24 commit under `test/fixtures/` are the exception, and they are non-xspec.
+- Against the built product, with `XSPEC_PACKAGE_DIR` set from a fresh pack: expect diagnosed failures until Phase 10 (Known state); record them.
+
+**Finishing a task.** When the change is verified locally — its self files, and the whole self project with no failure but the known open failures whose owning tasks are not yet done; certification unchanged unless the task changes it; `npm run typecheck` and `npm run format:check` exiting 0; its suite tests run against the built product with their verdicts recorded — commit and push, keeping the task in this file with a one-line status naming the pushed commit and the verdicts. Then wait in the foreground for harness-self on that head. Its gate: every failing test there is one of the known open failures whose owning task is not yet done — a task never adds one, and once Tasks 2, 5, 7, and 16 are all done, harness-self is wholly green. When the gate holds, a follow-up commit removes the task from this file (recording the job's verdict in its message) and is pushed; the commit that removes the last task deletes this file with `git rm` (`specs/tmp/.gitkeep` stays), and if that deletion is refused, stop and report the refusal verbatim. If anything is red, fix it within the task, or replace the task with precise remainder tasks. The full-suite and Windows jobs need not be awaited but in Task 47; when you see one finish, read its failures: a self test failing there, or a product test failing other than diagnosed, is this plan's to fix.
+
+## Task 1 — T7-2: withdraw the two arms that fail a conforming product (TEST-SPEC T7-2, T7-9(a); SPEC 7; finding B-G1)
+
+**Requirement.** T7-2 (TEST-SPEC.md line 330; read it whole) no longer refuses an import whose specifier is other than `"xspec"`: "An aliased `defineConfig` import is valid, and so is one whose module specifier is any static string literal (7; T7-9)". T7-9(a) requires `"XSPEC"` to load and answer as its `"xspec"` twin. SPEC 7 (SPEC.md line 415): every well-formed specifier is accepted alike.
+
+**Gap.** `FORM_VIOLATIONS` (`test/suite/registry/section-7-basics.ts`, about line 1082) still expects 14.14 and exit 2 for `import { defineConfig } from "not-xspec"` (about lines 1103–1112) and for the specifier `"XSPEC"` (about lines 1114–1124). Against a product conforming to the revised SPEC both arms fail; the built product still refuses both, so T7-2 passes today for the wrong reason.
+
+**Change.**
+- Delete both rows.
+- Rewrite what the removal contradicts: the module header's bullet on T7-2's further form arms (about lines 113–130, "the import from `"XSPEC"`, a single-casing arm …"), the comment above `FORM_VIOLATIONS` (about line 1078, "its specifier `"XSPEC"` among the misdirected ones"), and T7-2's `title` (about line 1697: "a missing or misdirected defineConfig import (the specifier "XSPEC" among them: no case folding, 12.0)" becomes "a missing defineConfig import").
+- `test/suite/registry/traceability.ts` (about lines 535–538): delete the comment tying T7-2 to 12.0 through the `"XSPEC"` arm, and drop `"12.0"` from T7-2's row unless another T7-2 arm asserts a 12.0 rule (read the body; say which in the commit message). The single-casing `"XSPEC"` arm now belongs to T7-9(a) (Task 31).
+- `grep -rn -e 'not-xspec' -e '"XSPEC"' test/ AGENTS.md`: at `e57210b` nothing else uses the two rows; correct any AGENTS.md text describing them.
+
+**Verification.** `test/self/s1-traceability.test.ts` (no failure but the known open ones), `test/self/s9-staged-sources.test.ts`, `test/self/s7-red-green-sweep.test.ts`, then the self project: no new failure. Against the built product, `test/suite/section-7-basics.test.ts -t 'T7-2 '` passes as before.
+
+## Task 2 — S-1: pin SPEC.md's 82 H-7 keys (TEST-SPEC H-7, S-1; finding C-11, VERIFY failure 1)
+
+**Requirement.** H-7's keys are SPEC.md's preamble, every numbered subsection, and the ten body-text keys of sections 3, 4, 5, 7, 8, 9, 10, 11, 14, and 15. SPEC.md now has 71 subsections (7.6 is new), so 82 keys.
+
+**Gap.** `test/self/s1-traceability.test.ts` pins `EXPECTED_KEY_COUNT = 81` (about line 44) under a comment counting 70 subsections (about line 39); "SPEC.md parses into the pinned H-7 key universe (H-7, S-1)" fails (expected 82 to be 81).
+
+**Change.** Set the pin to 82 and the comment to 71 subsections, after confirming from SPEC.md's headings (`grep -c '^### ' specs/SPEC.md`) that 7.6 is the only new key and that `EXPECTED_SECTION_COUNT` (15) still holds. Do not map "7.6" here: the map's domain is the registry, and the first test covering 7.6 lands in Task 16.
+
+**Verification.** `test/self/s1-traceability.test.ts`: the key-universe test passes; the unmapped-key test still fails on `7.6` alone (Task 16); the other two pass. Then the self project: no new failure.
+
+## Task 3 — S-9: vectors for T7-2's newly named forms and T7-9(b)'s escapes (TEST-SPEC S-9, T7-2, T7-9(b); finding C-10)
+
+**Requirement.** S-9 (TEST-SPEC line 697; read its TypeScript half whole): "T7-2's modifier-bearing configuration imports, string-literal import names, and export and import assignments" check as well-formed, "while T7-9(b)'s specifier escapes … scanning errors of that release — check as unparseable under both readings."
+
+**Gap.** `test/self/s9-typescript-well-formedness.test.ts` pins vectors for T7-2's modifier-bearing imports (about lines 290–310) but none for T7-2's string-literal import name, export assignment, or import assignment, and none for T7-9(b)'s four specifiers. The judge (`judgeTypeScript`, `test/helpers/ts-derivability.ts`) already returns the right verdicts: reviewer C saw TS1125, TS1198, TS1487, and TS1488 for the four escapes, under both readings.
+
+**Change.**
+- Well-formed vectors at `xspec.config.ts`, in the style of the neighboring `configWith(...)` rows, spelled exactly as TEST-SPEC line 330 spells them: `import { "defineConfig" as d } from "xspec"` with `export default d({…})`; `export = defineConfig({…})` beside `import { defineConfig } from "xspec"`; `import defineConfig = require("xspec")` beside `export default defineConfig({…})`.
+- Unparseable vectors (rejected under both readings): the configuration importing from each of T7-9(b)'s four double-quoted specifiers (TEST-SPEC line 337 has the raw spellings) — a hexadecimal escape with one hex digit (backslash, `x`, `4`), a braced Unicode escape of the code point 110000 hexadecimal, an octal escape (backslash, `0`, `1`), and a backslash before `8`. Build each backslash from code point 92 and confirm the four in the written file's bytes (Conventions, *Escapes*).
+- Update the file's header and the comment above the T7-2 rows to name the new vectors.
+
+**Verification.** The file passes; red-check per AGENTS.md's bullet beginning "Red-checking a new self-test vector" (flip one new vector's expected verdict, see it fail diagnosed, restore, `cmp`). Then the self project: no new failure.
+
+## Task 4 — Every conformer reads the configuration's import as 7 states (CERTIFICATIONS.md preamble, third paragraph; SPEC 7, 2.4; finding D-6)
+
+**Requirement.** CERTIFICATIONS.md's preamble (line 7): "Every conformer reads the configuration's import as 7 states too: its module specifier is any static string literal (2.4), never interpreted, resolved, or loaded, and the configuration file is a source only where a configured group discovers it." SPEC 7 (line 415).
+
+**Gap.** Every conformer's configuration reader requires the specifier `xspec`: the import's regular expression in `parseConfigSource` of `test/fixtures/conf-avail/product.mjs` (about line 314), `conf-core/product.mjs` (about 425), `conf-disc/product.mjs` (about 408), `conf-md/product.mjs` (about 297), and `conf-valid/product.mjs` (about 292), and the tokenizer step `take("string", "xspec", …)` in `conf-orphan/product.mjs` (about line 593). Reviewer D's probe: importing from `"@modularcloud/xspec"` or `'./x.js'` makes each exit 2 ("must import { defineConfig } from "xspec"") where its `"xspec"` twin exits 0. CONF-RACE, CONF-READERS, and CONF-LEFTOVER run conf-core's `product.mjs` and every violator runs its conformer's, so these six files cover all 39 fixtures. No certification verdict changes (no in-scope test stages another specifier), so certification cannot see this: it needs a pin of its own.
+
+**Change.**
+- In each of the six readers, accept as the import's module specifier any static string literal in either quote style — escape sequences and line continuations included, read as spelled, never decoded, interpreted, resolved, or loaded — and keep the rest of 7's import rule exactly as each reader has it (the binding, the optional alias, the rest of the declarative form). Well-formedness may be judged on the accepting side alone (TEST-SPEC S-9: a conformer may judge 14.20 on its accepting side alone). Confirm that no reader treats the configuration file as a source where no group discovers it. Update each reader's doc comment and error message: none may say the specifier must be `"xspec"`.
+- These lines hold backslashes (regular-expression escapes): write them with a script that builds the backslash from code point 92, and count backslashes in each file before and after (Conventions, *Escapes*).
+- The pin: a new self-test (for instance `test/self/certification-fixture-import.test.ts`), one row per conformer reader — CONF-CORE, CONF-VALID, CONF-MD, CONF-DISC, CONF-AVAIL, CONF-ORPHAN — each staging that conformer's valid workspace shape (reuse its table's `staging` in `test/self/certification-fixture-grammar.test.ts`) with the specifier varied over a fixed set of spellings (at least: a scoped name, a single-quoted relative path, the empty string, a hexadecimal-escape spelling and a line continuation each built from code point 92, and a raw U+FFFD), and running the commands its grammar table drives, each under `--json`, required to exit and answer exactly as the `"xspec"` twin (exit code and stdout equal, written files byte-equal). Take the conformers' bindings from `CERTIFICATION_FIXTURES` by name, as the grammar tables do. Task 7 adds CONF-IMPORT's row.
+- AGENTS.md's bullet beginning "Certification fixture products" (line 25): one sentence on the specifier rule and the pin.
+
+**Verification.** The new self-test passes, and fails against an unfixed reader (red-check: stash one fixed reader, run, restore, `cmp`); `test/self/certification-fixture-grammar.test.ts` and `test/self/certification.test.ts` pass with certification unchanged (39 verifications, each conformer passing its in-scope set, each violator failing exactly its certified set); then the self project: no new failure.
+
+## Task 5 — P-19, configuration import spellings, with its fixed-seed draw guard (TEST-SPEC §16 P-19, T7-9, S-9, E-5, H-10; CERTIFICATIONS.md §CONF-IMPORT, §VIOL-IMPORT-BRACED, §VIOL-IMPORT-SINGLE; findings C-12's P-19, D-5, VERIFY failure 5)
+
+**Requirement.**
+- P-19 (TEST-SPEC line 681; read it whole): seeded draws of the configuration's module specifier as a static string literal TypeScript 5.9.3's scanner accepts — either quote style; text shaped as bare, scoped, relative, absolute, and URL specifiers, and the empty string; every escape form the scanner accepts (the hexadecimal escape, the Unicode escape in its four-digit and its braced form, the single-character escapes, and the NUL escape before a non-digit) and line continuations; U+FFFD and other non-ASCII code points — over T7-9's workspace, no group discovering the configuration file: each draw loads and answers as its `"xspec"` twin does, under T7-9's assertions (T7-9's opening and (a), line 337: `build`, `check`, `ids`, and `inventory`, each under `--json`, exit code and stdout equal to the twin's, `build` and `check` exiting 0 finding-free, `inventory`'s `configuration` byte-identical, the generated modules and emitted Markdown byte-identical, graph data not compared). Each draw checked well-formed before the product is driven on it (S-9, §16's preamble), a failing draw a harness error with its seed (H-10).
+- CONF-IMPORT's staging constraints (CERTIFICATIONS.md line 245): `specs/A.mdx` and `specs/B.mdx`, each one section carrying an `id` alone around plain text (`<S id="a">A</S>`); one spec group globbing `specs/*.mdx`; `markdown` with `emit: true`, next to sources; no code group at all, and no `coverage`, `policy`, git, or `node_modules`; each draw's configuration differing from its twin's in the specifier alone; each draw and twin driving exactly those four commands, compared as T7-9(a) and (c) compare.
+- VIOL-IMPORT-BRACED's constraint (its expected failures, line 256): the braced draws include code points at or below U+FFFF (leading zeros and surrogates count), begun by a backslash that itself begins an escape sequence. C-1 needs P-19 to fail against both violators on every run (E-5's fixed seeds), so the fixed-seed draws include at least one single-quoted specifier and at least one such braced escape.
+- CONF-IMPORT's justification (line 249): draws reach the file as spelled — no value printer, no decoding, no quote-normalizing formatter.
+
+**Gap.** P-19 does not exist: no registry module, generator, wrapper, or H-7 row. `test/self/certification-document.test.ts`'s "every CERTIFICATIONS.md in-scope test is implemented in the product-test registry (C-1)" fails on `§CONF-IMPORT: P-19`.
+
+**Change.**
+- A shared configuration builder for the import's spelling (for instance `test/helpers/config-import.ts`): given the literal exactly as it is to appear in the file, quotes included, it returns T7-9's configuration text with that literal as the specifier — by concatenation, never through a printer, `JSON.stringify`, or a formatter — beside the workspace files above. T7-9(a)'s escape-spelled, single-quoted, and raw-U+FFFD arms must be staged through this same path (CERTIFICATIONS.md, Exclusions bullet "T7-9 and T7-10"; Task 31): make it the one path both use.
+- `test/suite/registry/section-16-p19.ts` (wrapper `test/suite/section-16-p19.test.ts`; manifest spread line after `section16P16Tests`): the property through `checkProperty` at the default fixed seeds (E-5); the generator building every backslash from code point 92; each draw's configuration staged under the per-draw TypeScript declaration and judged through `drawSources` (S-9) before any invocation; the twin in its own fresh workspace (H-1), identical but for the specifier `"xspec"`. Weight the generator so the fixed seeds reach every class P-19 names, and export the generator and its runs per seed for the guard (as `section-16-p15.ts` does).
+- `test/self/p19-fixed-seed-draws.test.ts`, modeled on `test/self/p15-fixed-seed-draws.test.ts`: replay the fixed-seed draws with no product (`drawFixedSeedTrials`) and pin that they include (1) a single-quoted specifier (VIOL-IMPORT-SINGLE), (2) a braced Unicode escape of a code point at or below U+FFFF begun by a backslash that begins an escape (VIOL-IMPORT-BRACED), and (3) the rest of P-19's space — each text shape, the empty string, each escape form, line continuations (each line terminator the generator draws after the backslash), U+FFFD, and other non-ASCII; and that each draw's staged configuration holds the drawn spelling's exact UTF-8 bytes (no decoding, no re-quoting). Should the fixed seeds miss a class, raise the runs per seed or the class's weight; never weaken the guard.
+- H-7 row in `test/suite/registry/traceability.ts` among the P rows: at least `"7"` and `"2.4"`.
+- AGENTS.md: a short P-19 bullet (module, wrapper, guard, local time, verdict against the built product).
+
+**Verification.** `test/self/p19-fixed-seed-draws.test.ts`; `test/self/s1-traceability.test.ts`; `test/self/certification-document.test.ts` (the in-scope-registry test now passes; the count and manifest tests still fail until Task 7); `test/self/s7-red-green-sweep.test.ts` (P-19 fails diagnosed against the stub); `test/self/s3-hang-guards.test.ts`; then the self project: no new failure. Against the built product, `test/suite/section-16-p19.test.ts` is expected to fail diagnosed (the product refuses every specifier but `"xspec"`), reported with its seed: record the verdict and time. Its green check is Task 6's: P-19 passes against the CONF-IMPORT conformer.
+
+## Task 6 — The CONF-IMPORT conformer (CERTIFICATIONS.md §CONF-IMPORT; TEST-SPEC C-1, C-2; finding D-1)
+
+**Requirement.** CERTIFICATIONS.md §CONF-IMPORT (line 243; read it whole): scope T7-9's workspace as P-19 draws over it (Task 5's constraints); command surface `build`, `check`, `ids` (12.3), and `inventory` (11.6) in its full 12.7 document form, each under `--json` and behaving per 12.0 and 13.3 over such workspaces — `build` generating each source's module (13.1) and its Markdown next to it (13.2) and writing graph data whose record lists the derived paths generated (13.3), the record `inventory` reports; content beyond path, byte-determinism (12.0), and the record out of scope, but no module's or Markdown file's content may depend on anything in the configuration file that a draw and its twin spell differently. Its configuration read per 7: any static string literal in either quote style as the specifier — escapes and line continuations included — read as spelled and never interpreted, resolved, or loaded, well-formedness judged on the accepting side alone, so nothing in scope presents a finding. The preamble's universal rules: configuration located by upward search for `xspec.config.ts` or at `--config <path>` (resolved against the working directory), arguments read under 12.0's invocation grammar, every usage error under `--json` in the 12.7 error document. In-scope tests: P-19.
+
+**Gap.** Nothing under `test/fixtures/` implements it.
+
+**Change.**
+- `test/fixtures/conf-import/product.mjs` and `bin.mjs`: a plain Node ESM program with no dependencies and no build step, like the other fixtures (AGENTS.md's bullet beginning "Certification fixture products"). Reviewer D's notes: CONF-DISC's product serves `build`, `check`, `ids`, and `inventory` but refuses `check` on a valid workspace (exit 70, "fixture scope error"), so it cannot be reused as is; CONF-MD's `check` answers on valid workspaces, but it serves `build` and `check` alone. Either may be the starting point; its reader reads the import as Task 4 makes every reader read it, and its derived files take the shapes 13.1, 13.2, and 13.3 fix for these trivial sources.
+- Write backslash-bearing lines with a script building the backslash from code point 92 (Conventions, *Escapes*).
+- Do not add it to `test/self/certification-fixtures.ts` yet: the C-1 gate compares the manifest with the whole document, so CONF-IMPORT and its two violators enter together (Task 7).
+
+**Verification.** Run P-19 against the conformer through a temporary runner (AGENTS.md's bullet beginning "To run a selection of product tests against one fixture executable that the certification manifest does not (yet) list"; delete the temporary file before committing): P-19 passes. By hand, confirm determinism and twin equality on one draw spelled with a braced escape and one single-quoted. Then `npm run typecheck`, `npm run format:check`, and the self project: no new failure. AGENTS.md: the fixture's command surface and its time.
+
+**Depends on:** Tasks 4 and 5.
+
+## Task 7 — VIOL-IMPORT-BRACED, VIOL-IMPORT-SINGLE, and the manifest (CERTIFICATIONS.md §VIOL-IMPORT-BRACED, §VIOL-IMPORT-SINGLE, preamble; TEST-SPEC C-1; findings D-2, D-3, D-4, VERIFY failures 3 and 4)
+
+**Requirement.** Each violator is CONF-IMPORT plus one deviation confined to the specifier (CERTIFICATIONS.md lines 251–263; read both whole):
+- VIOL-IMPORT-BRACED: a braced Unicode escape whose code point is at or below U+FFFF (leading zeros and surrogates included) in the import's specifier is judged not well-formed, a configuration error (14.14): `build`, `check`, `ids`, and `inventory` each exit 2 with the 12.7 error document, `code` `"configuration-error"`, `path` `"xspec.config.ts"`. A braced escape begins only at a backslash that itself begins an escape sequence and is followed by `u{`; read left to right, so an escaped backslash followed by the ordinary characters `u{…}` is read as the conformer reads it. Unchanged: braced escapes above U+FFFF, the four-digit form, every other escape, line continuations, both quote styles, every other spelling.
+- VIOL-IMPORT-SINGLE: a single-quoted specifier is a configuration error, every command exiting 2 with the same document; double-quoted specifiers, whatever their content, and every other literal of the configuration (single-quoted globs included) unchanged.
+- Each certifies P-19, its expected failure exactly P-19, a diagnosed assertion failure (never an error or a hang).
+- The manifest equals the document (C-1's whole-document gate): CONF-IMPORT between CONF-DISC and CONF-AVAIL, in-scope `["P-19"]`, its two violators in document order, each certifying `["P-19"]`; 10 conformers and 32 violators.
+
+**Gap.** Neither violator exists. `test/self/certification-fixtures.ts` lacks CONF-IMPORT, and `test/self/certification-document.test.ts` pins `EXPECTED_CONFORMERS = 9` and `EXPECTED_VIOLATORS = 30` (about lines 34–35): two of its tests fail (known open failures 3 and 4).
+
+**Change.**
+- `test/fixtures/conf-import/bin-braced.mjs` and `bin-single.mjs`, each running `product.mjs` with one deviation switch, as the other families do; backslash-bearing lines written by a script (Conventions, *Escapes*).
+- In `CERTIFICATION_FIXTURES`, the CONF-IMPORT entry with its two violators, each with the neighbors' kind of deviation summary; the counts set to 10 and 32 and the count test's title to match.
+- CONF-IMPORT's reader joins the invocation-grammar guard: a table for it in `GRAMMAR_TABLES` (`test/self/certification-fixture-grammar.test.ts`, about line 3561), its rows drawn from 12.0, 12.7, and 14 as the others' are, over CONF-IMPORT's workspace (CERTIFICATIONS.md preamble; reviewer D-1). Add CONF-IMPORT's row to Task 4's specifier pin.
+- AGENTS.md: the certification counts (42 verifications) and the CONF-IMPORT family's time (`test/self/certification.test.ts -t IMPORT`).
+
+**Verification.** `test/self/certification-document.test.ts` passes all its tests; `test/self/certification.test.ts -t IMPORT`: CONF-IMPORT passes P-19 and each violator fails exactly P-19, diagnosed (`FAIL`, never `error` or `hang`), at the fixed seeds; the grammar guard and Task 4's pin pass (red-check one new grammar row by a temporary perturbation of the conformer, restored and `cmp`-checked); then the self project: no failure but S-1's unmapped `7.6` while Task 16 is open.
+
+**Depends on:** Task 6.
+
+## Task 8 — H-1 and H-2: consumer programs verified against what TypeScript and Node.js read above a staging (TEST-SPEC H-1, H-2, T13.1-2; SPEC 13.1, 7.6; findings A-1, B-G17, C-2's consumer half)
+
+**Requirement.** H-1's new sentence (TEST-SPEC line 19, from "The verification reaches what TypeScript and Node.js read above a staging too"): an arm compiling or running a consumer program (H-2) runs only once the harness has verified, under the environment those tools run in — TypeScript taking a directory inside the staging as its current one, Node.js run with no `NODE_PATH` and a fresh `HOME` — that no ancestor of the staging root holds a `package.json` or a `node_modules` entry and that none of Node.js's global module folders holds a package; an unmet precondition is a harness error (H-11), never a pass, a product failure, or a skip. H-2 (line 20): the compiled consumer runs with "nothing resolvable there by package name — no copy of the product's package under any name least of all …, H-1 verifying the precondition". T13.1-2 (line 590): "a consumer project with nothing installed in or above it … verified as H-1 states".
+
+**Gap.** In `test/helpers/tooling.ts`:
+- (a) `verifyConsumerIsolation` (about line 1430) checks every ancestor of the project root and of the runtime output directory, along the spelled and the physical path, only for an entry named `node_modules`: nothing checks for a `package.json`.
+- (b) `verifyNoGlobalPackage` (about line 1469) checks the global folders (the run's `NODE_PATH` entries, `$HOME/.node_modules`, `$HOME/.node_libraries`, `<prefix>/lib/node`) only for an entry named `xspec` (`XSPEC_PACKAGE_NAME`, about line 1412), so a copy of the product's package under another name — 7.6 allows any — or any other package passes.
+- (c) `runConsumer` and `consumerEnvironmentOverrides` (about lines 1066–1093) drop `NODE_PATH` but keep the ambient `HOME`, which `productEnvironment` (`test/helpers/subprocess.ts`, about line 1915) passes through; (b) reads that `HOME`'s folders.
+TypeScript's current directory is already the project root (`getCurrentDirectory`, about line 568). In this sandbox `/package.json`, `/tmp/package.json`, `/tmp/node_modules`, and `/opt/node22/lib/node` are absent, so the precondition can be met; the ambient `NODE_PATH` (`/usr/local/lib/node_modules_global`) is already dropped. Reached through this driver: 23 T1–T6 tests (T1.1-2, T1.1-3, T1.2-2, T1.4-3, T1.4-5, T1.6-3, T2.4-4, T2.4-5, T4-3, T4-4, T4.1-1, T4.1-2, T4.1-3, T4.2-3, T4.2-4, T4.3-1, T4.4-1, T4.4-2, T4.5-1, T6.5-9, T6.5-11, T6.5-18, T6.5-23), T13.1-2, and the consumer arms of `section-13.1-13.2.ts` and `section-14.ts`; no test body changes.
+
+**Change.**
+- Put the ancestor and global-folder verification in one shared module (for instance `test/helpers/staging-isolation.ts`) that Task 12's module-channel stagings call too: given a staging root, the environment a run will have, and the Node.js executables that will run there, verify (1) no ancestor of the root, along its spelled and its physical path, each once, holds an entry named `package.json` or `node_modules` of any kind (by `lstat`, a dangling link counting); (2) none of Node.js's global module folders — the run's `NODE_PATH` entries if it has any, `$HOME/.node_modules` and `$HOME/.node_libraries` under the run's own `HOME`, and `<prefix>/lib/node` of each executable that runs (`<prefix>` the directory above its `bin/`) — holds any entry (an existing folder with any entry in it counts as holding a package: the conservative reading); an examination failing otherwise than by absence leaves the precondition unverified. Unmet or unverified is `HarnessStagingError` (mode `consumer-isolation`, or a new mode for the module channel), never a verdict. For T13.1-2's "in or above it", also refuse a `node_modules` entry in the consumer project's root itself.
+- Each compiled consumer's run gets a fresh `HOME`: a new empty directory outside the workspace and the output directory, created for the run and removed afterwards as the harness's other temporary directories are, given as `HOME` (and `USERPROFILE` where the run is on Windows) with `NODE_PATH` dropped, the verification made under exactly that environment (`productEnvironment` with the run's overrides). TypeScript's current directory stays inside the staging.
+- Rewrite `ISOLATION_RULE`, the module header's isolation paragraph, and the messages to state the rule as H-1 now states it.
+- Extend S-4's isolation self-tests in `test/self/s4-typescript-tooling.test.ts` (the tests whose titles begin "H-2's isolation", about lines 1174–1253): a project whose root has a `package.json` above it is refused as a staging error; a global folder holding a package under a name other than `xspec` is refused before the consumer runs; a compiled consumer runs under a fresh, empty `HOME`, never the ambient one (the consumer reports `process.env.HOME`; the harness checks it). Build each staging in a fresh temporary directory, never under this repository, whose own `package.json` lies above it.
+- AGENTS.md: rewrite the isolation sentences of the bullet beginning "Consumer fixture programs are compiled through the harness's TypeScript tooling driver" (line 10).
+
+**Verification.** `test/self/s4-typescript-tooling.test.ts` (the new vectors fail against the unfixed checks: red-check by stashing `tooling.ts`), then the self project: no new failure. Against the built product, the suite files holding the tests listed above pass as at `7e7119b`; record the times. In CI, the full-suite job's consumer tests must not turn into staging errors: if the runner's own global folders hold a package, report it (an environment fact E-1 cannot paper over), never relax the check.
+
+## Task 9 — E-1's release list, read on the harness side (TEST-SPEC E-1, S-10, H-11, H-9; finding C-7)
+
+**Requirement.** E-1 (TEST-SPEC line 702; read it whole): the Node.js releases on which the module channel loads the module are each provisioned by the environment before the run, beside the one the suite runs on, and no test downloads a runtime; a listed release the environment has not provisioned is a harness error (H-11) for every run needing it, never a skip (H-9) and never a product failure; the list follows E-1's rule, pinned by exact version — set on 2026-10-29: 22.0.0, 22.11.0, 22.12.0, 22.23.4, 24.22.2, 26.13.0. `test/node-releases.json` is the one copy CI and the harness both read; each release's executable is `$XSPEC_NODE_RELEASES_DIR/v<version>/bin/node` (AGENTS.md's bullet beginning "E-1's Node.js releases").
+
+**Gap.** No harness code reads `test/node-releases.json` or `XSPEC_NODE_RELEASES_DIR`.
+
+**Change.**
+- A harness module (for instance `test/helpers/node-releases.ts`): read `test/node-releases.json` (resolved relative to the module, never the working directory), validate its shape strictly (a `releases` array of exact `major.minor.patch` versions, no duplicates), and resolve each release's executable under `XSPEC_NODE_RELEASES_DIR`. An unset or empty variable, or a listed release whose executable is missing or not executable, is a harness error naming the variable or the release and the path looked at — raised by the run that needs it, never at import time, so that self-tests needing no release never fail for its absence.
+- A self-test (for instance `test/self/node-releases.test.ts`): the list equals E-1's six releases in order (pinned; a change goes through the normal change process, with E-1); an unset variable, and a directory missing one listed release, each raise the harness error naming it; a directory of stand-in executables (a fresh temporary directory) resolves every release in list order.
+- AGENTS.md: the bullet beginning "E-1's Node.js releases" (line 13) names the module.
+
+**Verification.** The new self-test passes with and without `XSPEC_NODE_RELEASES_DIR` set; then the self project: no new failure. Whether the release in effect is the one provisioned is S-10's (Task 23).
+
+## Task 10 — The package directory in the product binding (TEST-SPEC C-2, H-2, H-8; CERTIFICATIONS.md preamble; findings C-1, B-G9)
+
+**Requirement.** C-2 (TEST-SPEC line 688): the runner takes the product binding — the executable, and the package directory 7.6's module is distributed as, holding exactly what its distribution carries and never a development tree (H-2's module channel) — with the workspace, and nothing else, so certifying and testing use one code path. H-2 (line 20): the package directory is given to the harness beside the executable; a subpath, or a file of the package named by its path, is never a channel. H-8: with no package directory given, every test of 7.6 fails as a diagnosed failure. CERTIFICATIONS.md's preamble (line 3): each fixture is bound with its executable and no package directory.
+
+**Gap.** `ProductBinding` (`test/helpers/subprocess.ts`, about line 239) holds only the executable; `builtProductBinding` and `builtProductBindingAt` (about lines 417–440) read nothing for the module; nothing reads `XSPEC_PACKAGE_DIR`, which CI's full-suite job sets after packing.
+
+**Change.**
+- An optional `packageDir` (absolute path) on `ProductBinding`, documented: the package directory as distributed, given beside the executable (C-2); the harness copies it into stagings and reads its manifest's `name` where a test says so (T7.6-4(a), T7-9(d)), and never writes into it, never loads or reads one of its files as a module, never treats a file of it as a channel by its path.
+- `builtProductBinding()` sets it from `XSPEC_PACKAGE_DIR` (read when the binding is made; unset or empty means none). `builtProductBindingAt(<path>)` keeps the no-product shape S-7's layer 5 uses, with no package directory.
+- The binding reaches every body unchanged through `declareProductTests` (`test/suite/declare.ts`), `runProductTests`, and S-7: confirm that none of them rebuilds a binding field by field.
+- Fixture bindings (`nodeFixtureBinding` in `test/self/certification-fixtures.ts`) carry no package directory; pin that in `test/self/certification-document.test.ts` (or beside its existence test): no manifest conformer's or violator's binding has a `packageDir`.
+- Pin the environment reading (for instance in `test/self/s3-subprocess-driver.test.ts`): with `XSPEC_PACKAGE_DIR` set the built binding carries exactly that path; unset or empty, none.
+- What a 7.6 body does when the directory is absent or unusable is Task 12's.
+- AGENTS.md: the bullet beginning "The module channel's package directory" (line 12) names the binding field.
+
+**Verification.** The new pins pass; `npm run typecheck`; the self project: no new failure.
+
+## Task 11 — The empty stub package and S-7's two sweeps (TEST-SPEC S-7, H-8, H-2; finding C-5's sweeps)
+
+**Requirement.** S-7 (TEST-SPEC line 695): against an empty stub product beside an empty stub package (a directory holding only a manifest naming no entry; H-2's module channel), and again with no package directory given, every product-facing test fails with a diagnosed assertion and the suite completes without harness errors (H-8) — 7.6's tests failing through their pairing, never passing on a negative arm alone.
+
+**Gap.** `test/fixtures/empty-stub/` holds only `bin.mjs`; `test/self/s7-red-green-sweep.test.ts` sweeps the stub product (with, implicitly, no package directory) and the absent built artifact; no stub package exists.
+
+**Change.**
+- `test/fixtures/empty-stub-package/package.json`: a manifest naming no entry — no `main`, `exports`, `types`, `typings`, `module`, `imports`, or `bin` — with a `name` of 7.6's grammar, unscoped and different from `xspec` (for instance `xspec-empty-stub`), and a `version`; nothing else in the directory. Document it in S-7's header (JSON holds no comment).
+- S-7: layer 1 also asserts the stub package's contract (the directory holds exactly `package.json`, a JSON object with no entry member); the registry sweep and layer 4's bodies run twice — the stub product with the stub package as `packageDir`, and the stub product with none (today's sweep) — every body failing diagnosed and no harness error, the report naming the sweep. Layer 5 (no product) stays. Update the header's layer list.
+- Measure the self project's time with the extra sweep and record it in AGENTS.md's bullet beginning "Harness self-tests and certification only". If CI's harness-self job (`timeout-minutes: 30` in `.github/workflows/ci.yml`, a limit of the CI service, not a harness guard: S-3) would then come within a third of its limit, raise it in the same commit, its comment giving the measured time.
+
+**Verification.** `test/self/s7-red-green-sweep.test.ts` passes, both sweeps; then the self project: no new failure.
+
+**Depends on:** Task 10.
+
+## Task 12 — Module-channel stagings: Placement, Reach, and H-1's verification (TEST-SPEC §7.6 *Placement*, H-1, H-2, H-8; SPEC 7.6 *Package and installation*, *Reach*; findings C-3, C-2's module half, C-5's absent directory, B-G9)
+
+**Requirement.** §7.6's *Placement* rule (TEST-SPEC line 356; read it whole) and SPEC 7.6 (SPEC.md lines 470–481):
+- The package directory, exactly as given (Task 10), is installed by placement alone — a copy, or a symbolic link to a copy elsewhere in the staging under no `node_modules`; no package-manager run, install step, or network access.
+- Under a name `N` of 7.6's grammar (`name` or `@scope/name`, each a non-empty run of lowercase ASCII letters, digits, `-`, `.`, and `_` beginning with a letter or digit, the whole at most 214 characters) outside its exclusions: never an `@types` name, never an `@typescript/lib-…` name, and on a runtime arm never a name the release resolves to a built-in module (ask the release itself, for instance `require("node:module").isBuiltin(N)` in a run of it).
+- The canonical placement: a copy at `node_modules/N` in the importing file's own directory, `N` a fixed unscoped, dot-free name of the harness's choosing that differs from the manifest's `name` (so the canonical install is an aliased one), with nothing else installed anywhere TypeScript or Node.js looks (no other package, no `@types`).
+- A fresh staging whose ancestors H-1 has verified (Task 8's module), under the environment the tools will run in: TypeScript's current directory inside the staging; Node.js runs with no `NODE_PATH` and a fresh `HOME`; the global folders of each release that will run (`<dir>/v<version>/lib/node`, which the provisioned archives do not create).
+- Every staging meets Reach's four conditions — nothing nearer (SPEC.md line 478, with `S`, `D`, and `T` as defined there), no self-reference (line 479), physical naming (each tool given the importing file by its physical path, line 480), well-formed manifests (line 481) — and the three project kinds are stageable: an ES-module project (nearest `package.json` holding `"type": "module"`), a CommonJS project whose nearest `package.json` has no `type`, and one with no `package.json` at all. A staging that fails a condition is a harness defect, `HarnessStagingError`, raised before any tool runs ("where a condition fails, 7.6 promises nothing").
+- H-8: with no package directory given, every 7.6 body fails as a diagnosed assertion failure (`HarnessAssertionError`) before any staging; the built product's binding treats a given path that does not exist as its missing product likewise (as `missingFilesFailDiagnosed` treats its executable); any other binding's unusable directory is a harness error.
+
+**Gap.** No such machinery exists.
+
+**Change.**
+- A new module (for instance `test/helpers/module-channel.ts`) providing: the package-directory check above; fresh stagings (each a new directory under the OS temporary directory, its physical path used throughout); the three project kinds; placements (a copy, or a symbolic link to a copy, at a holding directory the caller names — the importing file's own or an ancestor); `N`'s grammar and exclusions; Reach's four conditions checked on the finished staging; and the manifest's `name` (T7.6-4(a), T7-9(d)) read by parsing the given directory's `package.json` and nothing else. As a conservative choice (note it in the module header and your report): refuse, as a harness error, a given directory holding a `node_modules` entry — a distribution carries none and a development tree does (H-2: never a development tree).
+- Never write into the given directory: copy it entry by entry (files, directories, symbolic links as links), bytes and modes preserved.
+- A self-test (for instance `test/self/module-channel-staging.test.ts`) over a small hand-written non-xspec stand-in package under `test/fixtures/` (for instance `test/fixtures/module-channel-standin/`): no package directory → diagnosed failure before any staging; a development-tree directory refused; the copy byte-equal to the source and the source untouched (snapshot before and after); a symbolic-link placement resolving to a copy inside the staging; `N`'s grammar and exclusions on vectors (`@types/x`, `@typescript/lib-es5`, a 214- and a 215-character name, an upper-case name, `fs` refused on a runtime arm and admitted on a type-checking one); an ancestor `package.json` or `node_modules` refused (Task 8's module); each Reach condition refused when broken (an `N.js` beside `node_modules/N`, an ancestor manifest naming `N`, a malformed ancestor manifest).
+- AGENTS.md: a bullet on module-channel stagings (module, the canonical `N`, where stagings live).
+
+**Verification.** The new self-test passes; then the self project: no new failure.
+
+**Depends on:** Tasks 8, 9 (each release's global folders and built-in names), and 10.
+
+## Task 13 — 7.6's TypeScript driver: covered setups and verdict (TEST-SPEC §7.6 *Covered setups*, *Verdict*, *Pairing*, S-3; SPEC 7.6 *Covered setups*; findings C-4, C-5's pairing, B-G9)
+
+**Requirement.** §7.6's *Covered setups* and *Verdict* rules (TEST-SPEC lines 358 and 360; read them whole):
+- Every type-checking arm runs in every covered setup: the configuration file, the program's one root file, named with each of `.ts`, `.mts`, `.cts`, and `.tsx` in each of the three projects (Task 12), judged by TypeScript 5.9.3 (the harness's `typescript-5.9.3`) under each option set covering it — the fourteen strict defaults (`strict` on, with `moduleResolution` `node10` and `module` at its default; `node16` and `nodenext`, each with `module` `node16`, `node18`, `node20`, and `nodenext`; `bundler` with `module` `es2015`, `es2020`, `es2022`, `esnext`, and `preserve`) for every file, and the initialized-project set (exactly the options SPEC.md line 487 lists) for each file TypeScript compiles as an ES module (`.mts` in every project, `.ts` and `.tsx` in the ES-module one): 173 programs per arm. Every option a set does not name stays at the release's default for that set (`target` included, `skipLibCheck` off under the strict defaults): these are not H-2's consumer configurations.
+- No setup sampled away, no case dropped: every suite run checks every pairing of setup and case.
+- Allowed sharing: parsed library files may serve many programs; the files a setup and placement share (the libraries and the package's) may be checked once, with the program's options and global diagnostics, each case's verdict read from its configuration file's own diagnostics beside theirs.
+- Verdict: a file type-checks when TypeScript reports no error for its program in any of its files — options, global, syntactic, semantic, and declaration diagnostics (the last wherever a set turns `declaration` on, as the initialized set does); a file fails to type-check when TypeScript reports at least one error located in the configuration file. Compiler output, where any is written, lands outside the staging.
+- SPEC 7.6's program condition (line 485): nothing enters the program but the root, TypeScript's default libraries (none replaced by an installed package), and the package's own declaration files.
+- *Pairing* (line 362): a shape-violation arm passes only where its valid twin type-checks in the same setup and placement, so a missing or stub package fails every arm, and a permissive one (`defineConfig` taking `any`) fails the shape-violation arms.
+- S-3: each check is a harness step under its own guard, sized to its work.
+
+**Gap.** `test/helpers/tooling.ts` serves H-2's two consumer configurations only, by design, refusing any other option set, and its clean verdict counts options, global, syntactic, and semantic diagnostics only. No driver exists for 7.6.
+
+**Change.**
+- A new module (for instance `test/helpers/module-channel-ts.ts`) over `typescript-5.9.3`, separate from `tooling.ts`, whose H-2 restriction stays (S-4 pins it): the matrix as data (173 entries naming project, extension, and option set) with a module-load self-check of its composition; programs whose host takes a directory inside the staging as its current directory and the configuration file by its physical path; the program condition checked on each program's file list (a violation a `HarnessStagingError`); the two verdicts; a paired verdict for shape-violation arms, failing diagnosed wherever the twin does not type-check; no emit (declaration diagnostics need none), or emit into a directory outside the staging.
+- Make it fast enough for T7.6-3's few hundred arms × 173 setups (Task 17): parse each library file once per option set, check the shared files once per setup and placement, and read each case from its own file's diagnostics. The scaffold measured about 1 s for a fresh program with `skipLibCheck` off (AGENTS.md's bullet beginning "7.6's covered setups"). If you batch several cases into one program, argue its soundness in the module header and add a self-test comparing batched and one-root verdicts on a sample.
+- A self-test pinning the driver (S-4's setting detections are Tasks 14 and 15): the matrix's composition (173; per project and extension; each option set exactly as listed and nothing else set, read back from each program's options); the verdicts on stand-ins — clean; an error in the configuration file; an error only in the package's declaration file (fails "type-checks", yet no error "located in the configuration file"); the paired verdict failing diagnosed when the twin fails (the verdict's reach into declaration diagnostics is Task 15's S-4 detection). Stand-ins are hand-written non-xspec packages under `test/fixtures/`.
+- AGENTS.md: the driver's module and its measured per-arm cost.
+
+**Verification.** The new self-test passes; then the self project: no new failure.
+
+**Depends on:** Task 12.
+
+## Task 14 — S-4: 7.6's covered setups detected in effect, I — each `moduleResolution` and `module` value (TEST-SPEC S-4; finding C-9)
+
+**Requirement.** S-4 (TEST-SPEC line 692), from "7.6's covered setups are detected in effect likewise": before any product exists, through hand-written non-xspec fixtures and stand-in packages whose verdicts the setting under test decides, through the same driver the tests use (Task 13): an `exports`-only stand-in, which `node10` alone does not resolve; an ES-module-only stand-in imported from a file TypeScript compiles as CommonJS, rejected under `module` `node16` and `node18` and admitted under `node20` and `nodenext`; import attributes on an import of a JavaScript module in a file TypeScript compiles as an ES module, rejected under `module` `node16` and admitted under `node18`; `Object.groupBy`, which the library of `nodenext`'s default target brings and that of `node20`'s does not; and under `bundler`, `import.meta` rejected by `es2015`, a string-literal import name rejected by `es2020`, import attributes rejected by `es2022`, and an import assignment admitted by `preserve` alone. A driver serving one setup's settings for another's, or dropping one, fails here.
+
+**Gap.** `test/self/s4-typescript-tooling.test.ts` covers H-2's two consumer configurations only.
+
+**Change.** Fixtures under a new `test/fixtures/s4-module-channel/`, and S-4 tests (in that file or a sibling `test/self/s4-module-channel.test.ts`) asserting each detection through Task 13's driver, in the setups that decide it, both sides (rejected where it must be, admitted where it must be). Reviewer C's probe under 5.9.3 found: TS2307 under `node10` for the exports-only stand-in; TS1479 from a `.cts` file under `module` `node16` and `node18`; TS2823 under `node16`; TS2550 under `node20`; under `bundler`, TS1343 (`es2015`), TS18057 (`es2020`), TS2823 (`es2022`), and TS1202 everywhere but `preserve`. Pin each by its effect (an error located where expected), the code a diagnostic aid.
+
+**Verification.** The new tests pass; red-check one detection per kind by serving a neighboring setup's options (a temporary change to the driver, restored and `cmp`-checked); then the self project: no new failure.
+
+**Depends on:** Task 13.
+
+## Task 15 — S-4: 7.6's covered setups detected in effect, II — the initialized set, `strict`, the module format, and declaration diagnostics (TEST-SPEC S-4; finding C-9)
+
+**Requirement.** S-4 (TEST-SPEC line 692), continuing: the initialized set's own options — `verbatimModuleSyntax`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUncheckedSideEffectImports`, `skipLibCheck` (an error inside a stand-in's declaration file), and `types` `[]` (an `@types` stand-in it keeps out of the program); the strict defaults' `strict` — a stand-in whose declaration file leaves a parameter implicitly typed, an error `strict` alone raises there, `skipLibCheck` being off (under the initialized set, a dropped `strict` already surfaces as an options error, `exactOptionalPropertyTypes` requiring `strictNullChecks`); the module format the project and the extension imply (`import.meta`, rejected in a file TypeScript compiles as CommonJS under the `node16` and `nodenext` modes); and the verdict's reach into declaration diagnostics — under the initialized set, a stand-in whose `defineConfig` returns an interface it does not export fails a valid default export through TS4082 alone, every other diagnostic kind empty. (T7.6-1's export listing is Task 18's.)
+
+**Gap.** None of these detections exists.
+
+**Change.** As Task 14, in the same fixtures directory and test file. Reviewer C's probe: TS1484, TS2375, TS2322, and TS2307 for the four options; `skipLibCheck` and `types: []` behave as specified; TS7006 inside the declaration file under the strict defaults, and TS5052 with `strict` dropped from the initialized set; TS1470 for the module format; TS4082 alone, a declaration diagnostic.
+
+**Verification.** As Task 14.
+
+**Depends on:** Task 13 (and Task 14's fixtures layout, if done).
+
+## Task 16 — T7.6-2, valid configurations (TEST-SPEC T7.6-2, §7.6's four rules, S-9; SPEC 7.6 *Covered files*, *Type contract*; findings B-G11, C-11's 7.6 mapping, VERIFY failure 2)
+
+**Requirement.** T7.6-2 (TEST-SPEC line 365; read it whole): each covered file (a)–(f) type-checks in every covered setup under the canonical placement — (a) every key and field 7 defines, every enumerated value at each position, both rule types with `kinds`, all three selector forms, the group form without `kind` and with each of `"spec"` and `"code"`, each dependency edge kind in a profile's `edgeKinds` and a rule's `kinds`; (b) (a) with an aliased binding and every key a string literal; (c) (a) with line and block comments before the import, between keys, inside lists, and after the export; (d) the minimal configuration, `specs` holding no group; (e) the seven members of TypeScript's global `Object` interface and `__proto__` as spec and code group names, identifier keys in one file and string-literal keys in another, each referenced as a profile's `target` or `boundary` and as a selector's `group` (with its kind where a name is both), plus profiles and rules so named; (f) three files — `code: {}`, `coverage: []`, `policy: []`, and `markdown: { emit: false }` beside a `specs` group; (a) with every optional field omitted (names unambiguous); (a) with one spec group's and one code group's glob list empty and an element repeated in `targetTags`, `edgeKinds`, a rule's `kinds`, and a selector's `tags`. Every file meets the covered-file conditions (SPEC.md lines 490–494): `defineConfig` imported by its identifier and bound to a name strict module code admits, never `require` or `exports`; no backslash outside comments; no comment TypeScript reads as a directive or pragma; the specifier spelling exactly `N`.
+
+**Gap.** Not implemented.
+
+**Change.**
+- A new registry module `test/suite/registry/section-7.6.ts` (wrapper `test/suite/section-7.6.test.ts`; manifest spread line after `section74to75Tests`) registering T7.6-2 over Task 12's stagings and Task 13's driver. Each file is judged by S-9 before any product exists: a staged-source record (`stagedTs`, a `"tsx"` record beside it for the `.tsx` name), or a dedicated S-9 vector set — say which in the module header.
+- H-7 row `"T7.6-2": ["7.6", …]`. This maps H-7's key "7.6", clearing S-1's last failure.
+- Under S-7's stub package the body fails at its first failing setup (Module-channel conventions).
+
+**Verification.** `test/self/s1-traceability.test.ts` wholly green; `s9-staged-sources`, `s7-red-green-sweep` (T7.6-2 fails diagnosed in both sweeps), `s3-hang-guards`, then the self project — wholly green once Tasks 2, 5, and 7 are done. Green-check against the conforming stand-in (Module-channel conventions): passes. Red-check with stand-ins whose `defineConfig` type lacks an admitted value, narrows `emit` to one boolean, demands a non-empty `coverage`, `policy`, or glob list or a repeat-free set-read list, or requires an optional field (T7.6-2's last sentence): each fails diagnosed. Against the built product: record the verdict (diagnosed failures expected where a setup resolves the absent `require` entry) and the time.
+
+**Depends on:** Task 13 (Tasks 14 and 15 recommended first).
+
+## Task 17 — T7.6-3, shape violations (TEST-SPEC T7.6-3, §7.6 *Pairing*; SPEC 7.6 *Shape violations*; finding B-G12)
+
+**Requirement.** T7.6-3 (TEST-SPEC line 366; read it whole): in every covered setup, each of these files — T7.6-2(a)'s file with one violation of 7.6's type-error class applied, that file its valid twin — fails to type-check, each paired with (a) in the same setup and placement: an unknown key at the top level, in `markdown`, in a profile, in a rule, and in a selector; each missing required key (`specs`, `markdown`'s `emit`, a profile's `name`, `target`, `boundary`, and `mode`, a rule's `name`, `type`, `from`, and `to`); at every position 7 gives a kind (the text lists them), each kind among a boolean, a string, a list, and an object that 7 does not admit there; a string outside each enumeration at each enumerated position, near misses (`"Direct"`, `"depend"`) among them, and `"contains"` as an element of `edgeKinds` and of a rule's `kinds`; each selector-form violation (each two of `group`, `files`, and `tags`; all three; none; `kind` without `group` beside `files`, beside `tags`, and alone); each forbidden empty list (`targetTags`, `edgeKinds`, a rule's `kinds`, a selector's `tags`); and one file holding several violations. No arm stages a configuration error outside the class for a verdict.
+
+**Gap.** Not implemented.
+
+**Change.** T7.6-3 in `section-7.6.ts`: its arms generated from T7.6-2(a)'s file by a table of single violations — one row per position and kind, spelled out so that the table can be audited against T7.6-3's list — each judged by S-9; Task 13's paired verdict for every arm in every setup; a module-load self-check that the table covers every position and kind T7.6-3 lists. H-7 row `"T7.6-3": ["7.6", …]`. Keep it within CI's limits through Task 13's sharing.
+
+**Verification.** As Task 16; green-check the conforming stand-in; red-check with a permissive stand-in (`defineConfig(config: any)`: every arm fails diagnosed through the pairing) and one admitting `"contains"` (those arms alone fail); record the built product's verdict and the time.
+
+**Depends on:** Task 16.
+
+## Task 18 — T7.6-1's export listing in the TypeScript driver, with S-4's listing detection (TEST-SPEC T7.6-1, S-4; findings B-G10, C-9's listing)
+
+**Requirement.** T7.6-1 (TEST-SPEC line 364): exports are read from TypeScript's own resolution of the covered file's import in that program — the compiler's listing of the module's exports together with, where the module declares an export assignment (`export =`), the members of the assigned value that a named import binds, each with its meanings (value, type, namespace), every name included — never probed by names the harness chooses. A declaration module holding neither an export list nor an export assignment exports each of its top-level declarations, an interface it never marks `export` among them; a module whose export assignment assigns a value carrying `defineConfig` alone declares that one export, though the listing of its exports proper is empty. Each setup is read through its own resolution (a package serving different declaration files to `import` and `require`, or to different resolution modes, is checked through each). TypeScript's synthetic default is no declared export; a declared default export is one. S-4 (line 692, its end): a stand-in declaring an interface without `export`, and no `export {}`, lists that interface among its exports, and one whose export assignment assigns a value carrying `defineConfig` and one other member lists both.
+
+**Gap.** No listing exists.
+
+**Change.** The listing in Task 13's driver, returning each name with its meanings — reviewer C's probe: an interface left unexported is listed implicitly, and an `export =` value's members come through the checker's `getExportsAndPropertiesOfModule`; and S-4's two listing detections beside Task 14's tests, with their stand-ins.
+
+**Verification.** The S-4 additions pass, and fail against a listing that drops the implicit export or the export assignment's members (red-check); then the self project: no new failure.
+
+**Depends on:** Task 13.
+
+## Task 19 — T7.6-1, declared exports (TEST-SPEC T7.6-1; finding B-G10)
+
+**Requirement.** T7.6-1 (TEST-SPEC line 364; read it whole): in every covered setup, the module TypeScript resolves the covered file's import to declares exactly one export, `defineConfig`, carrying a value meaning and neither a type nor a namespace meaning, and no other export, type-only or not.
+
+**Gap.** Not implemented.
+
+**Change.** T7.6-1 in `section-7.6.ts` over Task 18's listing, the canonical placement, every covered setup. H-7 row `"T7.6-1": ["7.6", …]`.
+
+**Verification.** As Task 16. Red-check stand-ins: an extra exported type; an unexported interface in a declaration module without `export {}`; a declared default export; an `export =` value with an extra member; `defineConfig` also declared as a namespace or a type. Green-check the conforming stand-in in both `.d.cts` styles (ESM-syntax declarations and `export =`), and confirm that a synthetic default fails nothing. Record the built product's verdict (`src/index.ts` still exports named types: a diagnosed failure expected).
+
+**Depends on:** Tasks 16 and 18.
+
+## Task 20 — The Node.js release driver: runs, routes, and their conditions (TEST-SPEC H-2, T7.6-6's run conditions, T7.6-7, S-3, E-1, H-1; findings C-6, B-G9; the Phase 8 note)
+
+**Requirement.** H-2 (line 20): the module loaded through `import` and `require` by the Node.js releases E-1 provisions, the harness observing, in processes it launches, the values the module yields and those processes' output streams, state, and surrounding files. T7.6-6 (line 369): on each release, run with no option, no environment variable (`NODE_OPTIONS` and `NODE_PATH` among them), no user condition, and no loader or customization hook, the module loaded along each route from a harness-written importing module in the importing file's place — a static `import` from an ES module (`.mjs`), a dynamic `import()` from an ES module and from a CommonJS module (`.cjs`), and `require` from a CommonJS module. T7.6-7 (line 370): each run given a fresh `HOME` and `TMPDIR`; the importing module reports its observations outside both streams and every compared path; harness-written code registers a `warning` listener on `process` and only then loads the importing module, by its physical path. S-3: each run is a product invocation under its own hang guard. H-1: the staging and the releases' global folders verified first (Tasks 8 and 12). This sandbox sets `NODE_OPTIONS=--use-openssl-ca` and a `NODE_PATH`; these runs carry neither.
+
+**Gap.** No such driver exists; `productEnvironment` passes `NODE_PATH` and `HOME` through.
+
+**Change.**
+- A new module (for instance `test/helpers/module-channel-node.ts`): for a staging from Task 12 and a release from Task 9, write the harness's bootstrap and the importing module for a route, then run `<release>/bin/node <bootstrap by its physical path> <arguments>` through `runProduct` (its own hang guard), with no option before the script and an explicit minimal environment — a fresh `HOME` and `TMPDIR` (each a new empty directory), no `NODE_OPTIONS`, no `NODE_PATH`, nothing else that bears on module loading (document what you keep, such as `PATH`). The bootstrap registers the `warning` listener (and reads the initial state Task 22 needs) and then loads the importing module by its physical path; the importing module performs the route's load and the calls the observations need; the observations travel outside both streams — for instance into a file in a directory outside the staging, the working directory, `HOME`, and `TMPDIR`, named by an argument — and the harness decodes them, failing loudly (H-3's rule) when one is missing or malformed.
+- The importing module's kind is fixed by its extension (`.mjs`, `.cjs`); fix and document each run's working directory (T7.6-7(b) compares it).
+- A run that loads nothing, or crashes, is reported to the caller as such: a diagnosed failure for a test, a harness error for a stand-in the harness expected to load.
+- AGENTS.md: the driver's module and its local recipe (`XSPEC_NODE_RELEASES_DIR`).
+
+**Verification.** A minimal self-test of the driver (S-10's checks are Tasks 23 and 24): one stand-in package loads along each route on each provisioned release, the observation channel round-trips, and a stray `NODE_OPTIONS` in the ambient environment does not reach the run. Then the self project: no new failure.
+
+**Depends on:** Tasks 9 and 12.
+
+## Task 21 — Release-driver observations, I: exports, identity, no examination, and the output oracle (TEST-SPEC T7.6-6, T7.6-7(a), §7.6 *Pairing*; findings B-G15, B-G16)
+
+**Requirement.** T7.6-6 (TEST-SPEC line 369): (a) an `import` namespace's own string-keyed properties are exactly `defineConfig` (a CommonJS-only entry's namespace carries `default`), and a `require` result's own enumerable properties, string- and symbol-keyed alike, are exactly `defineConfig` (an enumerable `__esModule` fails); (b) `defineConfig(v)` returns `v` itself, compared by SameValue, for an object, an array, a function, a symbol, `null`, `undefined` passed explicitly, a string, a boolean, a bigint, and the numbers `0`, `-0`, and `NaN`; a call with no argument returns `undefined`; a call with further arguments returns its first; (c) called with a first argument that is a Proxy over a function whose every trap records its invocation, and a second argument likewise, it returns the first Proxy itself with no trap invoked; called with a frozen object, it returns that object without throwing. T7.6-7(a) (line 370; read it whole): standard output empty; standard error exactly the release's printed forms of the process warnings the run emits, in order, as delivered to the bootstrap's `warning` listener — each printed as the release prints its own (`(node:<pid>)`, the bracketed code where it carries one, its type, its message, possibly over several lines, its detail where it carries one, the first warning followed by the release's hint line) — and no captured warning's stack beginning in the package's files (its first frame naming one of them). *Pairing*: an absence counts only where the same run loaded the module and saw `defineConfig` return its argument.
+
+**Gap.** Not implemented.
+
+**Change.** In Task 20's module, the importing modules' observations and their decoders: the property listings by route; the identity checks (`Object.is` inside the run, each value's verdict reported); the recording Proxies; the frozen object; the warning capture (code, type, message, detail, the stack's first frame); and the harness-side oracle rendering the release's printed forms from the captured warnings and comparing them byte for byte with the run's standard error. Learn each release's printed form from the release itself (a stand-in emitting a known warning, captured as the release prints it), never hard-coding one release's spelling for all.
+
+**Verification.** A self-test of the plumbing (S-10's catches are Task 24's): a conforming stand-in yields exactly `defineConfig` on every route and release, every identity verdict true, no trap invoked, standard error empty or exactly its runtime warnings. Then the self project: no new failure.
+
+**Depends on:** Task 20.
+
+## Task 22 — Release-driver observations, II: writes, process state, and FIFOs (TEST-SPEC T7.6-7(b)–(e); finding B-G16)
+
+**Requirement.** T7.6-7 (TEST-SPEC line 370): (b) no entry created, modified, or removed in the staging (the placement included), in the working directory, or in the run's fresh `HOME` and `TMPDIR`, compared entry by entry before and after, a plain file by its bytes as well, a FIFO by its kind alone, never opened; (c) process state unchanged across the load and the calls, observed as: the global object's own properties with their descriptors (read without invoking accessors); the own properties of the global built-in constructors and namespace objects and of those constructors' prototypes; the extensibility and the prototype of each of these objects, the global object included; `process`'s own properties with their descriptors (read likewise); `process.env`; the process title; the working directory; `process.exitCode`; the `write` each of `process.stdout` and `process.stderr` resolves to; the listeners registered on `process` (the `warning` listener among them, registered before the state is first read, both before the importing module's own loading begins); and the pending timers and handles the runtime reports — none left to keep the process alive, each run ending on its own once its importing module completes; (d) every run network-denied (E-1; Run mechanics, *Network*); (e) FIFOs named `xspec.config.ts` in the working directory, in the importing module's directory, and in `HOME`, each afterwards still a FIFO and unopened, every run ending within its guard (S-3). Its closing sentences list what admits no discriminating staging: assert nothing there.
+
+**Gap.** Not implemented.
+
+**Change.** In Task 20's module: before-and-after snapshots of the four places (reuse `snapshotDirectory` in `test/helpers/snapshot.ts` where it fits; FIFOs by kind, never opened); the state snapshot taken in the bootstrap before loading and again after the calls, compared field by field and reported outside the streams; the three FIFOs staged (reuse `stageFifo` and `assertFifosIntact` in `test/helpers/lock-staging.ts` where they fit); every absence asserted only where the run loaded the module and its identity check held (*Pairing*).
+
+**Verification.** A self-test: a conforming stand-in leaves every observation unchanged on every route and release. Then the self project: no new failure. (S-10's catch of each effect: Task 24.)
+
+**Depends on:** Task 21.
+
+## Task 23 — S-10, I: the release driver's releases, run conditions, and routes (TEST-SPEC S-10; finding C-8)
+
+**Requirement.** S-10 (TEST-SPEC line 698; read it whole), before any product exists, on each release E-1 provisions: the release in effect is the one provisioned, as the running process reports its version, a listed release left unprovisioned a harness error (E-1); each run carries no option, no `NODE_OPTIONS` or `NODE_PATH`, and no condition, loader, or hook, and has a fresh `HOME`; each route is the one exercised — the importing module's own kind confirmed, and a stand-in dual package, whose ES-module and CommonJS entries each report their own format when loaded, answering the `import` routes from its ES-module entry and the `require` route from its CommonJS one — and an ES-module-only stand-in's `require` route fails on each provisioned release before 22.12.0 and loads on each later one; two minimal stand-ins, one with an ES-module entry and one with a CommonJS entry, leave T7.6-7(c)'s observed state unchanged, and their loading output along each route passes T7.6-7(a)'s output oracle, as does that of stand-ins whose manifests draw the release's own deprecations — an invalid `main` beside an `index.js` along `require`, and an ES-module package's `main` lookup along `import`, wherever the release prints one — so that the oracle admits the runtime's own loading output.
+
+**Gap.** No S-10 self-test exists.
+
+**Change.** `test/self/s10-node-release-driver.test.ts` with hand-written stand-in packages under `test/fixtures/s10-stand-ins/`, run through Tasks 20–22's driver exactly as the tests run it. Reviewer C's probe on the six releases: the ES-module-only stand-in fails `require` on 22.0.0 and 22.11.0 and loads on 22.12.0 and later; only 22.12.0 printed the experimental warning; DEP0128 and DEP0151 printed on every release. Pin effects, not release-specific spellings. With `XSPEC_NODE_RELEASES_DIR` unset, the file fails as a harness error naming it, never a skip (H-9).
+
+**Verification.** The new file passes locally (`XSPEC_NODE_RELEASES_DIR` set) and in CI's harness-self job, which provisions the releases; then the self project: no new failure. AGENTS.md: the file's time.
+
+**Depends on:** Task 22.
+
+## Task 24 — S-10, II: every observation catches what it exists for (TEST-SPEC S-10; finding C-8)
+
+**Requirement.** S-10 (TEST-SPEC line 698), its last clause: stand-ins that print while loading — to standard output, to standard error outside the release's warning form, and to standard error in that form, a line of their own after a warning the release prints included — emit a process warning through the runtime's warning facility, write a file, add a global, add an own property to a built-in constructor (`Array`) and to a namespace object (`Math`), alter a built-in prototype, make the global object non-extensible, change the prototype of a built-in prototype, replace a property of `process` (`process.emitWarning`), set a variable in `process.env`, set the process title, change the working directory (`process.chdir`), replace a standard stream's `write`, set `process.exitCode`, register a `process` listener, start a timer, return a copy of their argument, touch a trap of an argument's Proxy, or open one of the FIFOs are each caught by the matching observation — so no absence passes through a blind observer.
+
+**Gap.** Not implemented.
+
+**Change.** One stand-in per effect under `test/fixtures/s10-stand-ins/`, each otherwise conforming (exporting exactly `defineConfig`, returning its argument), and one S-10 test per effect asserting the matching observation reports it, on each provisioned release and on the routes the effect can take. The FIFO-opening stand-in opens only the staging's own FIFOs; its run ends at its guard or the FIFO check, never hanging the harness.
+
+**Verification.** All pass on every release, and each fails when its observation is disabled (red-check one per observation family); then the self project: no new failure; record the harness-self time.
+
+**Depends on:** Task 23.
+
+## Task 25 — T7.6-6, runtime exports and identity (TEST-SPEC T7.6-6; finding B-G15)
+
+**Requirement.** T7.6-6 (TEST-SPEC line 369; read it whole): on each release E-1 provisions — a release of 22.0–22.11, on which `require` cannot load an ES module without a flag, among them — under the run conditions of Task 20, along each of the four routes: (a), (b), and (c) as Task 21 states them.
+
+**Gap.** Not implemented.
+
+**Change.** A registry module for the runtime tests (for instance `test/suite/registry/section-7.6-ii.ts`, wrapper and manifest line after `section-7.6`'s) registering T7.6-6 over Tasks 12, 20, and 21: the canonical placement, every release, every route; a missing package directory a diagnosed failure (Task 12), a missing release a harness error (Task 9). H-7 row `"T7.6-6": ["7.6", …]`.
+
+**Verification.** `s1-traceability`, `s7-red-green-sweep`, `s3-hang-guards`, then the self project: no new failure. Green-check the conforming stand-in; red-check stand-ins: a CommonJS-only entry (its namespace carries `default`), an enumerable `__esModule`, a `defineConfig` copying its argument, one returning a different value for `-0`, one touching a Proxy trap (as `Object.isFrozen(arg)` does), one throwing on a frozen object. Against the built product: record the verdict (no `dist/index.cjs` yet, so the `require` route is expected to fail, diagnosed) and the time.
+
+**Depends on:** Task 21 (Task 23 recommended first).
+
+## Task 26 — T7.6-7, runtime: no effect (TEST-SPEC T7.6-7; finding B-G16)
+
+**Requirement.** T7.6-7 (TEST-SPEC line 370; read it whole): in T7.6-6's runs, beyond the runtime's own resolution of the specifier and loading of the package's files, loading the module and making T7.6-6's calls have no effect — (a) to (e) as Tasks 21 and 22 state them. The rest of its read, write, network, state, and output clauses admits no discriminating staging (its closing sentences): assert nothing there.
+
+**Gap.** Not implemented.
+
+**Change.** T7.6-7 in the runtime module over Tasks 21 and 22's observations, in T7.6-6's runs or runs of the same shape (say which). H-7 row `"T7.6-7": ["7.6", …]`.
+
+**Verification.** As Task 25. S-10 (Task 24) red-checks each observation; here green-check the conforming stand-in and record the built product's verdict and time.
+
+**Depends on:** Tasks 22, 24, and 25.
+
+## Task 27 — T7.6-4, placements (TEST-SPEC T7.6-4; SPEC 7.6 *Package and installation*, *Reach*; finding B-G13)
+
+**Requirement.** T7.6-4 (TEST-SPEC line 367; read it whole): each placement stands in for the canonical one in a run of T7.6-1, of T7.6-2(a) with T7.6-3's unknown-top-level-key arm paired to it in every covered setup, and of T7.6-6's exports and identity assertions along every route on every release E-1 provisions, and fares as the canonical placement does: (a) a copy under the `name` the package's manifest gives (the non-aliased install), wherever that is a name of 7.6's grammar outside its exclusions; (b) `node_modules/N` a symbolic link to a copy placed elsewhere in the staging, under no `node_modules`; (c) a scoped name, a name beginning with a digit, a name holding `-` and `_`, the dotted names `a.js` and `a.b` (each beside an unrelated package at `node_modules/a`, and no `a.ts` beside `a.js`), and an unscoped and a scoped name each exactly 214 characters long; (d) the holding directory a strict ancestor of the importing file's directory, and, separately, an ancestor of the file's physical path alone (the file's directory also reachable through a symbolic link elsewhere in the staging, on whose path that ancestor does not lie), each tool given the physical path; (e) other packages installed — TypeScript 5.9.3's package at `node_modules/typescript` and an unrelated package beside the placement, and, with the holding directory a strict ancestor, an unrelated package in the importing file's own directory — none an `@types` package; (f) in the type-checking runs alone, `N` `fs`, and separately `path`.
+
+**Gap.** Not implemented.
+
+**Change.** T7.6-4 over Tasks 12, 13, 18, 20, and 21, registered once (its type-checking and runtime halves may share one body in either 7.6 module; say where). For (e), place a copy of the harness's own `typescript-5.9.3` package directory (it is TypeScript 5.9.3's package) — never a symbolic link out of the staging. H-7 row `"T7.6-4": ["7.6", …]`. Each placement repeats the shared-file checks of 173 setups: share what Task 13 allows, and measure.
+
+**Verification.** As Task 25; green-check the conforming stand-in on every placement; record the built product's verdict and time.
+
+**Depends on:** Tasks 17, 19, and 25.
+
+## Task 28 — T7.6-5, Reach's open cases (TEST-SPEC T7.6-5; finding B-G14)
+
+**Requirement.** T7.6-5 (TEST-SPEC line 368): stagings meeting every condition of Reach while leaving open what none of them bars, each run as T7.6-4's placements are: (a) an ancestor `package.json` whose `name` (`"unrelated"`) TypeScript and Node.js read as neither `N` nor a leading part of it; (b) an ES-module project beneath an ancestor `package.json` holding `"type": "commonjs"`, and a CommonJS project (its nearest `package.json` without `type`) beneath an ancestor holding `"type": "module"`; (c) a nearest `package.json` holding `"type": "commonjs"`. These ancestor manifests lie inside the staging, below the staging root whose own ancestors H-1 verifies.
+
+**Gap.** Not implemented.
+
+**Change.** T7.6-5 beside T7.6-4, reusing its runs. H-7 row `"T7.6-5": ["7.6", …]`.
+
+**Verification.** As Task 27.
+
+**Depends on:** Task 27.
+
+## Task 29 — P-17, installation names (TEST-SPEC §16 P-17, E-5, H-10; finding C-12)
+
+**Requirement.** P-17 (TEST-SPEC line 679; read it whole): seeded draws of `N` from 7.6's grammar — unscoped and scoped, each segment a run of lowercase letters, digits, `-`, `.`, and `_` beginning with a letter or digit, weighted toward a `.` in the last segment (`S` then differing from `N`), digit-first segments, and lengths up to the 214-character bound — never an `@types` name, an `@typescript/lib-` name, or a name the drawn release resolves to a built-in module, each crossed with a drawn placement form (a copy, or a symbolic link to a copy elsewhere in the staging), a drawn holding directory (the importing file's own or an ancestor), a covered setup drawn from 7.6's matrix, and a release and route drawn from T7.6-6's, every condition of Reach holding: T7.6-1's exports assertion holds, T7.6-2(a)'s file type-checks with T7.6-3's unknown-top-level-key arm paired to it, and T7.6-6's exports and identity assertions hold along the drawn route. Seeded and reproducible, the seed reported on failure (H-10), fixed seeds in CI (E-5).
+
+**Gap.** Not implemented.
+
+**Change.** `test/suite/registry/section-16-p17.ts` (wrapper; manifest line) through `checkProperty`, drawing over Tasks 12, 13, 18, 20, and 21; a fixed-seed draw guard (`test/self/p17-fixed-seed-draws.test.ts`, as P-15's) pinning that the fixed seeds reach a dotted last segment, a scoped name, a digit-first segment, a 214-character name, both placement forms, both holding-directory kinds, each project kind, and each route. H-7 row `"P-17": ["7.6", …]`. Under S-7's sweeps keep the property's failure cheap: its first trial fails there; consider declining shrinking where nothing resolves, as H-8's missing product does (`test/helpers/property.ts`).
+
+**Verification.** The guard, `s1-traceability`, `s7-red-green-sweep`, `s3-hang-guards`, then the self project: no new failure. Green-check the conforming stand-in at the fixed seeds; record the built product's verdict and time.
+
+**Depends on:** Task 27.
+
+## Task 30 — P-18, the type contract over generated configurations (TEST-SPEC §16 P-18, its preamble, S-9, E-5, H-10; finding C-12)
+
+**Requirement.** P-18 (TEST-SPEC line 680; read it whole): seeded draws of configurations valid under 7 by construction, each a covered file — key order, and the identifier or string-literal choice, drawn per key; the binding's name drawn among those strict module code admits, never `require` or `exports`; comments drawn between tokens, their bodies free of `@` and never a `///` line; optional keys and fields drawn present or absent; each group's glob list drawn empty or not, and each set-read list (`targetTags`, `edgeKinds`, a rule's `kinds`, a selector's `tags`) drawn with repeated elements or without; group, profile, and rule names drawn from identifier and non-identifier spellings free of backslashes, quotes, line terminators, and U+FFFD, weighted toward the members of TypeScript's global `Object` interface and `__proto__`; every reference resolving, every kind given where a name is ambiguous, every name distinct where 7 requires it — each type-checks in a covered setup drawn from 7.6's matrix (T7.6-2). Each draw is then given one violation drawn from 7.6's type-error class (its member, position, and offending value drawn), and the mutant fails to type-check in the same setup, paired with its draw (T7.6-3). Draws and mutants alike are checked well-formed before TypeScript judges them (S-9), a failing one a harness error reported with its seed. §16's preamble lists P-18's violating mutants among the inputs invalid by design.
+
+**Gap.** Not implemented.
+
+**Change.** `test/suite/registry/section-16-p18.ts` (wrapper; manifest line) over Tasks 12 and 13 (reusing Task 17's violation table as the mutation space where it fits), `drawSources` judging draw and mutant before any check; a fixed-seed draw guard pinning that the seeds reach string-literal and identifier keys, each `Object` member name and `__proto__`, empty glob lists, repeated set-read elements, comments, each violation class, and each project kind. H-7 row `"P-18": ["7.6", "7", …]`. S-7 cost as in Task 29.
+
+**Verification.** As Task 29; red-check with a permissive stand-in (`any`): the mutants fail through the pairing.
+
+**Depends on:** Task 17.
+
+## Task 31 — T7-9, configuration import: (a) spellings and (b) scanner-rejected escapes (TEST-SPEC T7-9, S-9, E-1, H-5; SPEC 7; CERTIFICATIONS.md Exclusions, "T7-9 and T7-10"; findings B-G6, D-7(a))
+
+**Requirement.** T7-9 (TEST-SPEC line 337; read it whole). Every arm on a valid workspace: a spec group globbing `specs/*.mdx` over `specs/A.mdx` and `specs/B.mdx`, emission enabled next to sources, no code group matching the configuration file. (a) Eleven spellings, each differing from its `"xspec"` twin in the specifier alone: the bare names `"XSPEC"` (a single-casing arm, 12.0: no case folding) and `"left-pad"`; the scoped name `"@acme/config"`; the paths `"./lib/define.js"` and `"/opt/define.mjs"`; the URL `"https://example.com/define.js"`, under the denied network every product invocation has (E-1); the empty string; the single-quoted `xspec`; `xspec` with its `x` written as a hexadecimal escape; a line continuation between `xs` and `pec` (a backslash, then U+000A); and a raw U+FFFD inside `xspec` (`x`, U+FFFD, `spec`). `build`, `check`, `ids`, and `inventory`, each under `--json`, exit and answer as on the twin — exit code and stdout equal, `build` and `check` exiting 0 finding-free — `inventory`'s `configuration` byte-identical, and the generated modules and emitted Markdown byte-identical; graph data is not compared. (b) The four scanner-rejected specifiers (Task 3 names them): each command reports 14.14, exit 2, the error document's `code` `"configuration-error"` and `path` `"xspec.config.ts"`; S-9 verifies each unparseable (declare the records so). CERTIFICATIONS.md (Exclusions, line 330): (a)'s escape-spelled, line-continuation, single-quoted, and raw-U+FFFD arms are staged through the same path that writes P-19's draws.
+
+**Gap.** T7-9 is not registered.
+
+**Change.**
+- A new registry module for the configuration's import (for instance `test/suite/registry/section-7-import.ts`, wrapper `test/suite/section-7-import.test.ts`, manifest line after `section7DiscoveryTests`), registering T7-9 with (a) and (b); Tasks 32 and 33 extend it. Stage every (a) and (b) configuration through Task 5's builder (`test/helpers/config-import.ts`), each a staged-source record built from that builder's output, every backslash built from code point 92 and confirmed in the written bytes (Conventions, *Escapes*).
+- Collect every arm's diagnosed failure and fail once naming each (New-test conventions, *Many stagings*).
+- H-7 row `"T7-9": ["7", "2.4", "12.0", "12.7", "14", …]` as the body asserts them.
+
+**Verification.** `s9-staged-sources`, `s1-traceability`, `s7-red-green-sweep`, then the self project: no new failure. Green-check (a) against Task 6's CONF-IMPORT conformer through a temporary runner: every (a) arm passes there, while (b)'s fail (the conformer judges well-formedness on its accepting side alone), as the collected diagnosis shows. Red-check (b) with a stand-in accepting the configuration (exit 0). Against the built product: record the verdict ((a)'s arms are expected to fail, diagnosed: it still refuses every specifier but `"xspec"`) and the time.
+
+**Depends on:** Task 5 (Task 6 for the green check).
+
+## Task 32 — T7-9(c), designations (TEST-SPEC T7-9(c), T14-10's discipline, S-3, E-1; CERTIFICATIONS.md Exclusions; finding B-G6)
+
+**Requirement.** T7-9(c) (TEST-SPEC line 337): compared as (a), the specifier varied over `"./nowhere.js"` (designating nothing); `"./locked.js"`, a plain file the environment refuses to read (T14-10's discipline, Linux leg — content refused, kind still examinable — verified on the harness itself); `"./sealed/define.js"`, `sealed/` holding `define.js` and staged mode `000` (T14-10(l)'s discipline, Linux leg, verified on the harness itself); `"./fifo"`, a FIFO afterwards still a FIFO and unopened, each command ending within its guard (S-3); `"./specs"` (a directory); and the configuration file itself, `"./xspec.config"` and `"./xspec.config.ts"`. The clause on reads a product survives admits no staging: record nothing for it. CERTIFICATIONS.md's Exclusions rely on the permission stagings being verified on the harness and every FIFO asserted afterwards still a FIFO in place.
+
+**Gap.** Not implemented.
+
+**Change.** (c) in T7-9, reusing the permission helpers (`stageReadRefusalOfFile`, `stageDirectoryMode`, and their `verify…` twins in `test/helpers/permissions.ts`) and the FIFO helpers (`stageFifo`, `assertFifosIntact` in `test/helpers/lock-staging.ts`) as the neighboring T14-10 arms do, the Linux-leg arms staged as those are. Extend T7-9's title.
+
+**Verification.** As Task 31; (c) passes against CONF-IMPORT through the temporary runner. Each permission staging verifies itself (a privileged runner makes it a harness error: AGENTS.md's bullet beginning "The self project").
+
+**Depends on:** Task 31.
+
+## Task 33 — T7-9(d), installs (TEST-SPEC T7-9(d), T7-8, H-5, H-6, H-8, H-9, S-3; SPEC 7, 7.6; finding B-G6)
+
+**Requirement.** T7-9(d) (TEST-SPEC line 337): a configuration importing from `"N"` beside a trap package at `node_modules/N` — its manifest naming an entry that, if loaded, writes a marker file into the workspace, prints to both streams, and exits non-zero — and, separately, beside a `node_modules/N` whose `package.json` is a FIFO, each staged under three names: `trap`; `xspec`; and the `name` the module channel's package manifest gives, read as T7.6-4(a) reads it, wherever that is a name of 7.6's grammar (the last two coinciding where that `name` is `xspec`). Each arm runs T7-8's representative commands — `build`, `check`, `ids`, `view`, `inventory`, `review list`, and `rename specs/A.mdx a b` (`specs/A.mdx` holding `<S id="a">A</S>`) — each under `--json`, against its twin (the same workspace and configuration, no `node_modules`): exit code and stdout equal, written files byte-equal (H-6's lock-path exclusion aside), and each outcome also as such a workspace gives it, so that the arm stays red against S-7's stub (`build` and `check` 0 finding-free, `ids` 0 with its listing, `view` and `inventory` 0 finding-free, `review list` 0, the `rename` 0 with its applied mapping); no marker written, neither stream carrying anything the entry prints, the FIFO unopened, every command ending within its guard.
+
+**Gap.** Not implemented.
+
+**Change.** (d) in T7-9, modeled on T7-8's representative-command body (`test/suite/registry/section-7-discovery.ts`, T7-8 at about line 2796); the third name from Task 12's manifest reader over the binding's `packageDir` (Task 10). With no package directory given, the third-name arms fail as a diagnosed assertion failure naming the missing package directory: the module channel counts as part of the product (H-8), and a skip is barred (H-9) — a conservative choice; note it in the module header and your report. The trap package and the FIFO live in the workspace (`node_modules/` beside the configuration). Extend the title.
+
+**Verification.** As Task 31, plus a run with `XSPEC_PACKAGE_DIR` set (the third name is then `@modularcloud/xspec`, from the packed product) and one with it unset (the third-name arms diagnosed). Red-check with a stand-in that runs the trap's entry before the real product, and one that opens `node_modules/N/package.json`. Record the built product's verdict and time.
+
+**Depends on:** Tasks 10, 12, and 31.
+
+## Task 34 — T7-10, the configuration file as a source: (a) undiscovered and (b) discovered (TEST-SPEC T7-10; SPEC 7, 4, 11.4, 11.6, 14.15, 14.18; finding B-G7)
+
+**Requirement.** T7-10 (TEST-SPEC line 338; read it whole). On a valid workspace — a spec group globbing `specs/*.mdx` over `specs/A.mdx` (holding `<S id="a">A</S>`), emission enabled next to sources — the configuration imports, one arm each, from `"./specs/A.xspec"`, `"./missing.xspec"`, `"./specs/A.xspec.ts"`, `"./.xspec/x"`, and `"./specs/A.md"`. (a) Undiscovered (no code group matching it): each arm valid, `build` and `check` exit 0, no 14.15. (b) Discovered, by a code group globbing `*.ts` and separately by one whose glob is `xspec.config.ts`: in each arm `build` and `check` exit 1 reporting 14.15, located at the configuration's import declaration in `xspec.config.ts` by 11.4's import range, its `path` `null` (12.7); in the two `.xspec` arms also 14.18, locating `defineConfig` at its call; no other finding, and never 14.14 or exit 2; `inventory` exits 0 with no finding, listing `xspec.config.ts` among its `sources` in that code group. Control: importing from `"xspec"`, the discovered configuration is clean (`build` and `check` exit 0), and `query edges --from xspec.config.ts` exits 0.
+
+**Gap.** T7-10 is not registered.
+
+**Change.** T7-10 registered in Task 31's module (created here if Task 31 is not done), with (a) and (b); expected ranges computed from the staged bytes (New-test conventions, *Pins*). Collect arm failures. H-7 row `"T7-10": ["7", "4", "11.1", "11.4", "11.6", "12.7", "14", …]`, extended by Tasks 35–37 as their arms assert further passages.
+
+**Verification.** `s9-staged-sources`, `s1-traceability`, `s7-red-green-sweep`, then the self project: no new failure. Against the built product: record the verdict and time; red-check the 14.18 arm with a stand-in dropping that finding.
+
+## Task 35 — T7-10(c), consequences (TEST-SPEC T7-10(c); SPEC 12.1, 13.3, 6.3, 6.4, 6.5; CERTIFICATIONS.md Exclusions, §VIOL-CORE-CHATTYREADS's note; findings B-G7, D-7(b))
+
+**Requirement.** T7-10(c) (TEST-SPEC line 338), each on the discovered configuration beside its undiscovered twin: after a successful `build` under the control's `"xspec"`, the specifier changed to `"./missing.xspec"` — `build` exits 1 and modifies nothing (every derived file and all graph data byte-identical to the state before it, 12.1), and the gated reads, `ids` and `query nodes`, exit 1 reporting exactly `build`'s findings ((b)'s 14.15 and 14.18) and modify nothing (13.3); with the configuration importing from `"./specs/B.md"` (no `specs/B.mdx` existing, the workspace valid), `move specs/A.mdx specs/B.mdx` is refused with `refused-invalid-destination`, exit 1, nothing modified, while the undiscovered twin moves, exit 0; and a commit `c1` whose discovered configuration imports from `"./missing.xspec"`, the working tree valid, fails `impact --base c1` and `review create --base c1 --name n` as T6.3-4's baseline failing validation does (exit 2, `code` and `path` `null`, no session written), the undiscovered twin's commit resolving. The converse: importing from `"./specs/A.xspec"`, undiscovered, `move specs/A.mdx specs/B.mdx --preview` exits 0 listing no edit in `xspec.config.ts`, and the `move` exits 0 leaving it byte-identical, `build` and `check` then exiting 0; its discovered twin is refused as 6.4's invalid workspace (exit 1, (b)'s findings for that arm alone, nothing modified). CERTIFICATIONS.md: the modifies-nothing compares share the compare-around machinery VIOL-CORE-CHATTYREADS certifies.
+
+**Gap.** Not implemented.
+
+**Change.** (c) and the converse in T7-10; every "modifies nothing" through `assertLeavesUnchanged` / `snapshotDirectory` (`test/helpers/snapshot.ts`), as the tests that note lists do; git staging through the workspace builder's scripted commits (H-1). Extend the title and H-7 row (for instance "6.3", "6.4", "6.5", "12.1", "13.3").
+
+**Verification.** As Task 34.
+
+**Depends on:** Task 34.
+
+## Task 36 — T7-10(d), baselines (TEST-SPEC T7-10(d), H-3; SPEC 6.3, 9.3, 10.7; finding B-G7)
+
+**Requirement.** T7-10(d) (TEST-SPEC line 338): a commit `c1` whose undiscovered configuration imports from `""`, `"./nowhere"`, or `"XSPEC"`, or from `"./fifo"` (a FIFO at that path in the working tree), or from `"trap"` (T7-9(d)'s trap package at `node_modules/trap` in the working tree), one arm each, its sources differing from the working tree's by one section's edited text: `impact --base c1` exits 0, its impact information decoded through H-3's adapter equal to that against the twin commit importing from `"xspec"` (the edited section `changed`; never compared byte for byte, E-6). In the FIFO and trap arms, `review create --base c1 --name n` and then `review status n` each exit 0, and the items `status` reports (kinds, scopes, statuses, blocked states) equal the twin's; the FIFO stays a FIFO, unopened, each command within its guard; no marker, and no trap output in either stream. A commit whose configuration spells T7-9(b)'s incomplete hexadecimal escape as its specifier: `impact --base c1` exits 2 with T6.3-4's code-less usage error naming `xspec.config.ts`.
+
+**Gap.** Not implemented.
+
+**Change.** (d) in T7-10, reusing T7-9(d)'s trap package (Task 33; build it here if that task is not done) and the impact and review decoders (H-3); the escape's backslash built from code point 92. Extend the title and H-7 row ("6.3", "9.3", "10.7" as asserted).
+
+**Verification.** As Task 34.
+
+**Depends on:** Task 34.
+
+## Task 37 — T7-10(e), discovered by a spec group (TEST-SPEC T7-10(e), S-9; SPEC 2.1, 2.7, 7.1, 11.6, 13.1, 14.15, 14.16, 14.19; finding B-G7)
+
+**Requirement.** T7-10(e) (TEST-SPEC line 338): the configuration importing from `"xspec"`, with no blank line inside its default export, so that read as MDX its import and export derive as ESM blocks (14.20). (i) Spec globs `specs/*.mdx` and `xspec.config.ts`, and separately `specs/*.mdx` and `*.ts`: `build` and `check` each exit 1 reporting 14.19 concerning `xspec.config.ts`, 14.15 locating its import declaration, and 14.16 its export statement, never 14.14 or exit 2; `inventory` exits 0 listing it among that group's sources, its `derived` entry's `module` and `markdown` `null`. (ii) A configuration named `xspec.config.mdx`, given by `--config` on every invocation, no `xspec.config.ts` existing, judged as plain TypeScript, and matched by a spec glob `*.mdx` beside `specs/*.mdx`: `build` and `check` each exit 1 reporting 14.15 at its import declaration and 14.16 at its export statement, never 14.14 or exit 2; `inventory` exits 0 listing it with its generated-module path `xspec.config.xspec.ts`. Each beside its undiscovered twin (the spec group globbing `specs/*.mdx` alone), whose `build` and `check` exit 0. S-9: each such file is read both as a configuration (TypeScript) and as a spec source (MDX); declare it well-formed under each grammar it is read by.
+
+**Gap.** Not implemented.
+
+**Change.** (e) in T7-10. Extend the title and H-7 row ("2.1", "2.7", "7.1", "13.1" as asserted).
+
+**Verification.** As Task 34.
+
+**Depends on:** Task 34.
+
+## Task 38 — T7-11, configured names (TEST-SPEC T7-11; SPEC 7, 7.4, 7.5, 8.2, 12.0; finding B-G8)
+
+**Requirement.** T7-11 (TEST-SPEC line 339; read it whole), each arm on an otherwise valid workspace: (a) a spec group named `__proto__` (spelled once as an identifier key and once as a string-literal key), one named `constructor`, and one named `hasOwnProperty`, each globbing `specs/*.mdx` over `specs/A.mdx`, and code groups so named globbing `src/*.ts` over `src/a.ts`, one arm each: the configuration loads, `build` and `check` exit 0, and `inventory` reports the group under its name with its source; (b) a profile named `toString` and a `forbidden` rule named `toString` over an offending edge: `inventory` reports both, `coverage toString` reports the profile, and `check` reports the rule's violation under that name, exit 1; (c) a profile's `target`, its `boundary`, and a rule's selector `group`, each naming `__proto__` or `constructor`, one arm each: with a group of that name configured the reference resolves (the profile's coverage reported, the rule evaluated), and with none it is an unknown group, 14.14, exit 2; (d) with no such profile configured, `coverage constructor` and `coverage __proto__` each name an unknown profile, the usage error of 12.0 (exit 2).
+
+**Gap.** Not implemented; no `Object`-member name appears in section 7's registry.
+
+**Change.** T7-11 in a registry module of its own (for instance `test/suite/registry/section-7-names.ts`, wrapper and manifest line) or in Task 31's module. H-7 row `"T7-11": ["7", "7.4", "7.5", "8.2", "11.6", "12.0", "14", …]` as asserted. These are group, profile, and rule names, not requirement paths: the third accepted residual is not reached.
+
+**Verification.** As Task 34; red-check per the New-test conventions.
+
+## Task 39 — T7-2: wrapped forms and call variants (TEST-SPEC T7-2, S-9; SPEC 7, 4.6; finding B-G2(a))
+
+**Requirement.** T7-2 (TEST-SPEC line 330), "Wrapped forms and call variants": each over an otherwise valid argument → 14.14, exit 2, one arm each: `export default defineConfig({…}) satisfies object`; `export default (defineConfig({…}))`; `export default defineConfig({…})!`; `defineConfig({…} as const)`; `defineConfig(({…}))`; `markdown: { emit: true as boolean }`; `specs: ({…})`; `export default defineConfig<object>({…})`; `export default defineConfig?.({…})`. Each is text TypeScript 5.9.3 accepts (14.20): declare each record well-formed (S-9).
+
+**Gap.** None of these arms exists in `test/suite/registry/section-7-basics.ts`.
+
+**Change.** The nine arms in `FORM_VIOLATIONS` (or a sibling table through `refusedConfigArms`), each the canonical configuration with exactly one deviation (the module's single-deviation convention); extend the module header and T7-2's title.
+
+**Verification.** `test/self/s9-staged-sources.test.ts` (each record accepted as module and as script code), then the self project: no new failure. Against the built product, `test/suite/section-7-basics.test.ts -t 'T7-2 '`: record the verdict; an arm the built product passes is red-checked with a stand-in that loads it (exit 0).
+
+## Task 40 — T7-2: binding forms (TEST-SPEC T7-2, S-9; SPEC 7, 2.4; finding B-G2(b))
+
+**Requirement.** T7-2 (TEST-SPEC line 330), "Binding forms": `import { "defineConfig" as d } from "xspec"` with `export default d({…})`, over an otherwise valid argument, loads, `inventory`'s `configuration` byte-identical to its identifier-named twin's; its escape-spelled twin — the import name `defineConfig` with its `C` written as a hexadecimal escape (line 330 holds the raw spelling) — imports no `defineConfig` → 14.14; and a default import (`import defineConfig from "xspec"` with `export default defineConfig({…})`), a namespace import (`import * as X from "xspec"` with `export default X.defineConfig({…})`), an extra default binding (`import d, { defineConfig } from "xspec"`), and an extra named binding (`import { defineConfig, other } from "xspec"`), each beside an otherwise valid default export → 14.14, exit 2.
+
+**Gap.** None exists.
+
+**Change.** The loading arm (its `inventory` compared as T7-2's comment arm compares) and the five refused arms; the escape's backslash built from code point 92 and confirmed in the written bytes. Extend the header and the title.
+
+**Verification.** As Task 39.
+
+## Task 41 — T7-2: statement forms and statement order (TEST-SPEC T7-2, S-9; SPEC 7; finding B-G2(c), (d))
+
+**Requirement.** T7-2 (TEST-SPEC line 330), "Statement forms": an export assignment, `export = defineConfig({…})` beside `import { defineConfig } from "xspec"`, and an import assignment, `import defineConfig = require("xspec")` beside `export default defineConfig({…})`, one arm each over an otherwise valid argument → 14.14, exit 2 (each text TypeScript 5.9.3 accepts as module and as script code; S-9). "Statement order": `export default defineConfig({…})` followed by `import { defineConfig } from "xspec"` loads — `build` and `check` exit 0, and `inventory`'s `configuration` is byte-identical to its import-first twin's.
+
+**Gap.** None exists.
+
+**Change.** The three arms; extend the header and the title.
+
+**Verification.** As Task 39.
+
+## Task 42 — T7-2: keys and enumerated values read as spelled (TEST-SPEC T7-2, S-9; SPEC 7, 2.4; finding B-G2(e), (f))
+
+**Requirement.** T7-2 (TEST-SPEC line 330), "Keys and enumerated values are read as spelled" and "Identifier keys are read as spelled alike" (take every raw spelling from line 330's bytes):
+- String-literal keys and values with hexadecimal escapes: a top-level key `specs` with its first letter written as the escape of U+0073 is an unknown key, `specs` then missing → 14.14; `mode` valued `direct` with its first letter written as the escape of U+0064, in an otherwise valid profile → 14.14; `specs` holding the keys `"ab"` (`["a/*.mdx"]`) and `ab` with its `b` written as the escape of U+0062 (`["b/*.mdx"]`) declares two groups, no key repeated — it loads, `inventory` reporting both, each discovering its own glob's file.
+- Identifier keys with four-digit Unicode escapes: a top-level identifier key `specs` with its first letter so escaped → 14.14; the identifiers `ab` and `ab` with its `b` so escaped declare two groups that load as above; a spec group keyed by the identifier `product` with its `u` so escaped names a group whose spelling contains a backslash, so a profile's `target: "product"` is an unknown group (14.14), while a target string spelled exactly as that key resolves.
+
+**Gap.** None exists; the verbatim arms present (`VERBATIM_GLOB`, `VERBATIM_GROUP_NAME`, about lines 1462–1525 of `section-7-basics.ts`) cover only the escape-spelled glob and the string-literal group name.
+
+**Change.** The six arms (refused ones through `refusedConfigArms`, loading ones beside the verbatim-name arms), every backslash assembled from `BACKSLASH` (about line 1462) so that the source holds none, and the escapes confirmed in the staged bytes at module load. Extend the header and the title.
+
+**Verification.** As Task 39; also count the backslash bytes in the committed module's new lines (a pattern built from code point 92): none typed literally.
+
+## Task 43 — T7-2: comments inside the import declaration (TEST-SPEC T7-2; SPEC 7; finding B-G2(g))
+
+**Requirement.** T7-2 (TEST-SPEC line 330), "Comments": line and block comments anywhere — before the import, inside the import declaration between each two of its tokens (`import /* c */ { /* c */ defineConfig /* c */ } /* c */ from // c`, then U+000A, then `"xspec" /* c */`), inside the argument between keys and inside a glob list, after the export — contribute nothing: the configuration loads and `inventory`'s `configuration` is byte-identical to its comment-free twin's.
+
+**Gap.** `COMMENTED_CONFIG` (`test/suite/registry/section-7-basics.ts`, about line 1672) has no comment inside the import declaration.
+
+**Change.** Extend `COMMENTED_CONFIG` (or add a second commented record beside it) with the import-declaration comments exactly as line 330 spells them; extend the header and the title.
+
+**Verification.** As Task 39.
+
+## Task 44 — T7-1: configuration file names (TEST-SPEC T7-1, S-9; SPEC 7, 14.20; finding B-G3)
+
+**Requirement.** T7-1 (TEST-SPEC line 329), "Configuration file names": `--config xspec.config.mts`, `--config xspec.config.cts`, and `--config xspec.config.tsx`, each naming a plain file at the root that holds a valid configuration's bytes, no `xspec.config.ts` existing: each loads — `build` and `check` exit 0, and `inventory`'s `configuration` is byte-identical to its twin's, which names the same bytes `xspec.config.ts`.
+
+**Gap.** No `.mts`, `.cts`, or `.tsx` configuration name appears in the registry.
+
+**Change.** The three arms in T7-1 (`test/suite/registry/section-7-basics.ts`, about line 898), each file a staged-source record of the grammar its name selects (`"tsx"` for the `.tsx` name, judged by S-9 under TSX), the bytes identical across the three and the twin. Extend T7-1's title.
+
+**Verification.** As Task 39, with `-t 'T7-1 '`.
+
+## Task 45 — T7-3: empty glob lists (TEST-SPEC T7-3; SPEC 7, 7.4, 7.5, 12.7; finding B-G4)
+
+**Requirement.** T7-3 (TEST-SPEC line 331): an empty glob list is valid (7 bars an empty list only for `targetTags`, `edgeKinds`, a rule's `kinds`, and a selector's `tags`): with `specs: { product: [] }` alone, and separately with a code group `app: []` beside a spec group globbing `specs/*.mdx` over `specs/A.mdx`, the configuration loads — `build` and `check` exit 0 — and `inventory` reports the group with `globs` exactly `[]` (12.7) and no source in it.
+
+**Gap.** T7-3 (`test/suite/registry/section-7-basics.ts`, about line 2488) has no such arm.
+
+**Change.** The two arms; extend T7-3's title.
+
+**Verification.** As Task 39, with `-t 'T7-3 '`.
+
+## Task 46 — T7.5-1: a selector carrying `kind` without `group` (TEST-SPEC T7.5-1; SPEC 7.5; finding B-G5)
+
+**Requirement.** T7.5-1 (TEST-SPEC line 345): a selector carrying `kind` without `group` — `{ files: "src/*.ts", kind: "code" }`, `{ tags: ["a"], kind: "spec" }`, and `{ kind: "spec" }`, one arm each → 14.14, exit 2 (7.5: `kind` belongs to the group form alone).
+
+**Gap.** T7.5-1's selector arms (`test/suite/registry/section-7.4-7.5.ts`, about lines 1577–1857) cover zero and two of `group`, `files`, and `tags` only.
+
+**Change.** The three arms through the module's `expectConfigRefused` pattern, each a record made at module load; extend T7.5-1's title.
+
+**Verification.** As Task 39, with `test/suite/section-7.4-7.5.test.ts -t 'T7.5-1 '`.
+
+## Task 47 — E-1: CI within the service's per-job limits, every pairing kept (TEST-SPEC E-1, S-3; reviewer C's CI note)
+
+**Requirement.** E-1 (TEST-SPEC line 702): the full suite — sections 1–17, certification included — runs in GitHub CI on Linux runners; where the CI service's per-job limits require it, the suite is split across parallel jobs whose union is the whole suite, every verdict reported, never trimmed to fit them — no test, arm, or pairing of 7.6's covered setups and cases dropped. S-3: CI limits are no harness guards.
+
+**Gap.** With 7.6's tests, P-17, and P-18 in (Tasks 16–30), the jobs' times are unmeasured. At `7e7119b` the full suite took about 50 minutes against its 360-minute limit (GitHub's maximum for hosted runners) and harness-self about 7 minutes against 30.
+
+**Change.** Read both Linux jobs' times on the head once every other task is done. If either comes within a third of its limit, split the full suite across parallel jobs (for instance Vitest's `--shard`, each job doing the present job's setup: provisioning, build, pack), each shard's verdict reported, the Windows leg's `needs` and the E-6 exchange upload still working; or raise the harness-self limit, its comment giving the measured time. Edit `.github/workflows/ci.yml` (with its header comment) alone, never `.github/scripts/`. Record the measured times in AGENTS.md's bullet beginning "CI: " (line 85).
+
+**Verification.** CI on the head: harness-self green; the full suite and the Windows leg complete within their limits, every registered test run (count the reported tests against the registry and the self files).
+
+**Depends on:** every other task.
