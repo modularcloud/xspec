@@ -6,7 +6,7 @@ Written in Phase 9 on 2026-10-29 at head `e57210b` (branch `claude/relaxed-albat
 
 **Finding → task map.**
 - A-1, B-G17, and C-2's consumer half → Task 8 (one fix in the shared isolation code).
-- B-G1 → Task 1. B-G2 → Tasks 39 ((a)), 40 ((b)), 41 ((c), (d)), 42 ((e), (f)), 43 ((g)). B-G3 → 44. B-G4 → 45. B-G5 → 46.
+- B-G1 → Task 1 (done at cc74272, harness-self green but for the known open failures). B-G2 → Tasks 39 ((a)), 40 ((b)), 41 ((c), (d)), 42 ((e), (f)), 43 ((g)). B-G3 → 44. B-G4 → 45. B-G5 → 46.
 - B-G6 (T7-9) → Tasks 31 ((a), (b)), 32 ((c)), 33 ((d)). B-G7 (T7-10) → Tasks 34 ((a), (b)), 35 ((c)), 36 ((d)), 37 ((e)). B-G8 (T7-11) → Task 38.
 - B-G9 (7.6's four rules) → Tasks 9, 10, 12, 13, 20, 21, 22 (with C-1, C-3, C-4, C-6, C-7).
 - B-G10 → Tasks 18, 19. B-G11 → 16. B-G12 → 17. B-G13 → 27. B-G14 → 28. B-G15 → 25. B-G16 → 26 (its observations: 21, 22).
@@ -97,22 +97,6 @@ Standing constraints from Developer, verbatim (they apply to any command you run
 - Against the built product, with `XSPEC_PACKAGE_DIR` set from a fresh pack: expect diagnosed failures until Phase 10 (Known state); record them.
 
 **Finishing a task.** When the change is verified locally — its self files, and the whole self project with no failure but the known open failures whose owning tasks are not yet done; certification unchanged unless the task changes it; `npm run typecheck` and `npm run format:check` exiting 0; its suite tests run against the built product with their verdicts recorded — commit and push, keeping the task in this file with a one-line status naming the pushed commit and the verdicts. Then wait in the foreground for harness-self on that head. Its gate: every failing test there is one of the known open failures whose owning task is not yet done — a task never adds one, and once Tasks 2, 5, 7, and 16 are all done, harness-self is wholly green. When the gate holds, a follow-up commit removes the task from this file (recording the job's verdict in its message) and is pushed; the commit that removes the last task deletes this file with `git rm` (`specs/tmp/.gitkeep` stays), and if that deletion is refused, stop and report the refusal verbatim. If anything is red, fix it within the task, or replace the task with precise remainder tasks. The full-suite and Windows jobs need not be awaited but in Task 47; when you see one finish, read its failures: a self test failing there, or a product test failing other than diagnosed, is this plan's to fix.
-
-## Task 1 — T7-2: withdraw the two arms that fail a conforming product (TEST-SPEC T7-2, T7-9(a); SPEC 7; finding B-G1)
-
-**Requirement.** T7-2 (TEST-SPEC.md line 330; read it whole) no longer refuses an import whose specifier is other than `"xspec"`: "An aliased `defineConfig` import is valid, and so is one whose module specifier is any static string literal (7; T7-9)". T7-9(a) requires `"XSPEC"` to load and answer as its `"xspec"` twin. SPEC 7 (SPEC.md line 415): every well-formed specifier is accepted alike.
-
-**Gap.** `FORM_VIOLATIONS` (`test/suite/registry/section-7-basics.ts`, about line 1082) still expects 14.14 and exit 2 for `import { defineConfig } from "not-xspec"` (about lines 1103–1112) and for the specifier `"XSPEC"` (about lines 1114–1124). Against a product conforming to the revised SPEC both arms fail; the built product still refuses both, so T7-2 passes today for the wrong reason.
-
-**Change.**
-- Delete both rows.
-- Rewrite what the removal contradicts: the module header's bullet on T7-2's further form arms (about lines 113–130, "the import from `"XSPEC"`, a single-casing arm …"), the comment above `FORM_VIOLATIONS` (about line 1078, "its specifier `"XSPEC"` among the misdirected ones"), and T7-2's `title` (about line 1697: "a missing or misdirected defineConfig import (the specifier "XSPEC" among them: no case folding, 12.0)" becomes "a missing defineConfig import").
-- `test/suite/registry/traceability.ts` (about lines 535–538): delete the comment tying T7-2 to 12.0 through the `"XSPEC"` arm, and drop `"12.0"` from T7-2's row unless another T7-2 arm asserts a 12.0 rule (read the body; say which in the commit message). The single-casing `"XSPEC"` arm now belongs to T7-9(a) (Task 31).
-- `grep -rn -e 'not-xspec' -e '"XSPEC"' test/ AGENTS.md`: at `e57210b` nothing else uses the two rows; correct any AGENTS.md text describing them.
-
-**Verification.** `test/self/s1-traceability.test.ts` (no failure but the known open ones), `test/self/s9-staged-sources.test.ts`, `test/self/s7-red-green-sweep.test.ts`, then the self project: no new failure. Against the built product, `test/suite/section-7-basics.test.ts -t 'T7-2 '` passes as before.
-
-**Status (2026-10-29).** Implemented and pushed in the commit whose subject is `sdg(phase-9): withdraw T7-2's arms refusing a specifier other than "xspec" (FIX_PLAN Task 1)`, the one adding this paragraph: both `FORM_VIOLATIONS` rows deleted, their two staged-source records with them; the module header (a new bullet: no T7-2 arm varies the specifier, T7-9's subject; the further-form-arms bullet without the `"XSPEC"` arm), the comment above `FORM_VIOLATIONS`, and T7-2's `title` ("a missing defineConfig import") rewritten; `"12.0"` and its comment dropped from T7-2's H-7 row, no other T7-2 arm asserting a 12.0 rule (its exit codes and output channels come from the shared checks T7-3 also runs, whose row carries no "12.0"; its verbatim group-name arm is 7's and 2.4's, escape reading, not case folding); AGENTS.md's one mention of the `"XSPEC"` record (the Task 55 count history in the bullet beginning "Harness self-tests and certification only") corrected. Verdicts: the self project 5 failed / 5176 passed (5181 tests, two fewer S-9 judge tests than VERIFY's 5183) in 536.4 s, admin files left out, the five failures exactly the known open ones (Tasks 2, 16, 7, 7, 5); certification unchanged (171 PASS / 48 FAIL / 0 error / 0 hang over 39 lines); `npm run typecheck` and `npm run format:check` exit 0. Against the built product: T7-2 passes (19.8 s). Awaiting harness-self on the pushed head.
 
 ## Task 2 — S-1: pin SPEC.md's 82 H-7 keys (TEST-SPEC H-7, S-1; finding C-11, VERIFY failure 1)
 
