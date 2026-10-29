@@ -18,8 +18,8 @@
 // the program's diagnostics at the consumer references under test alone —
 // and runtime behavior is exercised under the CommonJS configuration alone:
 // the consumer program compiled to CommonJS JavaScript written into a
-// fresh directory outside the workspace and run there under plain Node, no
-// package named `xspec` resolvable. H-2 supplies no `@types/node`, so a
+// fresh directory outside the workspace and run there under plain Node,
+// nothing resolvable by package name. H-2 supplies no `@types/node`, so a
 // consumer writing to standard output declares the one `process` member it
 // uses itself (module-scoped, the file holding an import).
 //
