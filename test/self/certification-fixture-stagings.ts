@@ -38,6 +38,38 @@ Alpha text.
   },
 };
 
+/** CONF-IMPORT's configuration: one spec group, Markdown next to sources. */
+const IMPORT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+/**
+ * CONF-IMPORT: T7-9's workspace outside its install stagings, as
+ * §CONF-IMPORT's scope admits — one spec group globbing `specs/*.mdx` over
+ * `specs/A.mdx` and `specs/B.mdx`, each a trivial single-section source
+ * whose one section carries an `id` alone around plain text (T7-9(d)'s
+ * `<S id="a">A</S>`), and `markdown` with `emit: true`, emitting next to
+ * sources (7.3, 13.2); no code group, `coverage`, `policy`, git, or
+ * `node_modules`, so that no configured group discovers the configuration
+ * file. A valid workspace `build` regenerates, `check` then finds current,
+ * `ids` lists, and `inventory` reports.
+ */
+export const IMPORT_STAGING: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": IMPORT_CONFIG,
+    "specs/A.mdx": `<S id="a">A</S>
+`,
+    "specs/B.mdx": `<S id="b">B</S>
+`,
+  },
+};
+
 /**
  * CONF-AVAIL: one finding-free spec source as §CONF-AVAIL's scope admits: a
  * section `a`, and a section `b` whose `d` prop and embedding each reference

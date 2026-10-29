@@ -121,8 +121,12 @@
 // Deviation seam: runXspec(argv, cwd, options) assigns `options` onto the
 // module-level `deviations` switches (all off = this conformer). The
 // configuration's specifier is read in one place, `parseConfigText`, which
-// keeps its quote character and its spelled characters
-// (`config.specifier`) and gives them no meaning.
+// returns its quote character and its spelled characters and gives them no
+// meaning; `loadConfig` hands them to `specifierRefusal`, the violators' one
+// hook, which makes a configuration error (14.14) of the class of spellings
+// a switch refuses — `refuseBracedEscapes` (VIOL-IMPORT-BRACED,
+// `bin-braced.mjs`) and `refuseSingleQuotes` (VIOL-IMPORT-SINGLE,
+// `bin-single.mjs`) — and of nothing while every switch is off.
 
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
@@ -764,9 +768,13 @@ async function loadConfig(cwd, configFlag) {
   const text = decodeUtf8(bytes);
   if (text === null) throw configError("the file is not valid UTF-8");
   const { data, specifier } = parseConfigText(text, configError);
+  // The violators' one hook (module header): the specifier as read, judged
+  // by the deviation switches alone, before validation as well-formedness
+  // (14.20) precedes it. The conformer, every switch off, refuses nothing.
+  const refusal = specifierRefusal(specifier);
+  if (refusal !== null) throw configError(refusal);
   return {
     ...validateConfig(data, configError),
-    specifier,
     root: path.dirname(configPath),
     rootAnchor: anchoringPath(cwdReal, rootReal),
     configAnchor,
@@ -957,6 +965,69 @@ function parseConfigText(text, configError) {
     data: value,
     specifier: { quote: specifierToken.quote, spelled: specifierToken.value },
   };
+}
+
+/** A braced Unicode escape's code point digits: one or more hex digits. */
+const HEX_DIGITS = /^[0-9A-Fa-f]+$/;
+
+/**
+ * Whether a specifier's spelled characters hold a braced Unicode escape (a
+ * backslash, `u`, and a code point's hex digits in braces) of a code point
+ * at or below U+FFFF, leading zeros and surrogates included
+ * (VIOL-IMPORT-BRACED). The characters are read left to right as the grammar
+ * 14.20 fixes reads them, as the tokenizer does: a backslash begins an
+ * escape sequence and takes the character after it with it (a carriage
+ * return and line feed pair whole), so a braced escape begins only at a
+ * backslash that itself begins an escape and is followed by `u{` — never at
+ * one a preceding backslash escapes, after which `u{…}` is ordinary
+ * characters — and every other escape is passed over whole or read on as
+ * ordinary characters, which begin none.
+ */
+function spellsBracedEscapeAtOrBelowFfff(spelled) {
+  let i = 0;
+  while (i < spelled.length) {
+    if (spelled[i] !== BACKSLASH) {
+      i += 1;
+      continue;
+    }
+    if (spelled[i + 1] === "u" && spelled[i + 2] === "{") {
+      const close = spelled.indexOf("}", i + 3);
+      const digits = close === -1 ? "" : spelled.slice(i + 3, close);
+      if (HEX_DIGITS.test(digits) && Number.parseInt(digits, 16) <= 0xffff) {
+        return true;
+      }
+    }
+    i += spelled[i + 1] === CR && spelled[i + 2] === LF ? 3 : 2;
+  }
+  return false;
+}
+
+/**
+ * The violators' one hook (module header): the configuration error (14.14)
+ * a deviation switch makes of the configuration's import specifier as read —
+ * its quote character and its spelled characters — or null, which the
+ * conformer, every switch off, always returns.
+ * - `refuseBracedEscapes` (VIOL-IMPORT-BRACED): a specifier spelling a
+ *   braced Unicode escape of a code point at or below U+FFFF is judged not
+ *   well-formed TypeScript (14.20); a braced escape above U+FFFF, the
+ *   four-digit form, every other escape, line continuations, both quote
+ *   styles, and every other spelling are read as the conformer reads them.
+ * - `refuseSingleQuotes` (VIOL-IMPORT-SINGLE): a single-quoted specifier is
+ *   refused, the import read only where its specifier is double-quoted; a
+ *   double-quoted specifier, whatever it holds, and every other literal of
+ *   the configuration are read as the conformer reads them.
+ */
+function specifierRefusal(specifier) {
+  if (
+    deviations.refuseBracedEscapes &&
+    spellsBracedEscapeAtOrBelowFfff(specifier.spelled)
+  ) {
+    return "the module specifier is not a well-formed string literal: a braced Unicode escape of a code point at or below U+FFFF";
+  }
+  if (deviations.refuseSingleQuotes && specifier.quote === "'") {
+    return "the module specifier must be a double-quoted string literal";
+  }
+  return null;
 }
 
 /** One group map (7.1, 7.2): named lists of globs, in configuration order. */

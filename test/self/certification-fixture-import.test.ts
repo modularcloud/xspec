@@ -82,6 +82,7 @@ import {
   AVAIL_STAGING,
   CORE_STAGING,
   DISC_STAGING,
+  IMPORT_STAGING,
   MD_STAGING,
   ORPHAN_STAGING,
   VALID_STAGING,
@@ -259,6 +260,20 @@ const ROWS: readonly ImportRow[] = [
       { argv: ["ids", "--json"], exit: 0 },
       { argv: ["inventory", "--json"], exit: 0 },
       { argv: ["query", "edges", "--from", "specs/A.mdx", "--json"], exit: 0 },
+    ],
+  },
+  {
+    conformer: "CONF-IMPORT",
+    staging: IMPORT_STAGING,
+    clause:
+      "§CONF-IMPORT's surface: `build`, `check` on the built workspace, " +
+      "`ids`, and `inventory`, each under `--json`, over T7-9's valid " +
+      "workspace (exit 0, 12.0)",
+    steps: [
+      { argv: ["build", "--json"], exit: 0 },
+      { argv: ["check", "--json"], exit: 0 },
+      { argv: ["ids", "--json"], exit: 0 },
+      { argv: ["inventory", "--json"], exit: 0 },
     ],
   },
   {
