@@ -1,0 +1,17 @@
+{
+  "name": "s4-module-channel-exports-only",
+  "version": "1.0.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./entry.d.ts",
+        "default": "./entry.js"
+      },
+      "require": {
+        "types": "./entry.d.cts",
+        "default": "./entry.cjs"
+      }
+    }
+  }
+}
