@@ -1,7 +1,7 @@
 # 0002 — Configuration import not tied to a package name
 
 - **Type:** Improvement Proposal (IP)
-- **Stage:** Accepted
+- **Stage:** Applied
 - **Branch:** `claude/relaxed-albattani-5v6l55` (harness-designated for this session; stands in for `patch/config-import-specifier`)
 
 ## Motivation
