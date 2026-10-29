@@ -297,8 +297,10 @@ export interface ProductBinding {
    * driver never reads it. Whether the path is usable — absolute, naming a
    * directory, holding a distribution rather than a development tree — is
    * for the module channel to check where a test of 7.6 reaches for the
-   * module, never when the binding is made, so that a test which never
-   * reaches the module never fails for it.
+   * module (helpers/module-channel.ts, `modulePackageDirectory`, which
+   * `ModuleStaging.create` runs before anything is staged), never when the
+   * binding is made, so that a test which never reaches the module never
+   * fails for it.
    */
   readonly packageDir?: string;
 }

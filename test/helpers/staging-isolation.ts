@@ -20,7 +20,10 @@
 // one check for every such staging — H-2's consumer programs
 // (helpers/tooling.ts: a project's root before TypeScript serves it, the
 // runtime output directory before the compiler writes into it and again
-// before each run) and the module channel's stagings alike — called before
+// before each run) and the module channel's stagings alike
+// (helpers/module-channel.ts: a staging as it is made, and again wherever a
+// driver asks before a Node.js run, with that run's exact environment,
+// working directory, and release executables) — called before
 // the tools read the staging, by a caller that keeps TypeScript's current
 // directory inside the staging and gives each Node.js run exactly the
 // environment verified:
@@ -60,8 +63,9 @@
 //   `lstat`, a folder's `stat` or listing refused — leaves the precondition
 //   unverified, an unmet precondition too.
 // - Unmet or unverified throws `HarnessStagingError` (helpers/permissions.ts)
-//   of the caller's mode — `consumer-isolation` for H-2's consumer programs
-//   — naming the offending entry or what left it unverified, `context`
+//   of the caller's mode — `consumer-isolation` for H-2's consumer programs,
+//   `module-channel` for the module channel's stagings — naming the
+//   offending entry or what left it unverified, `context`
 //   leading its detail and the caller's statement of the rule closing it:
 //   never a `HarnessAssertionError`, since nothing here is a product verdict.
 //   Each half is one harness step under its own guard (TEST-SPEC S-3,
