@@ -1,0 +1,39 @@
+# Review — specs/TEST-SPEC.md — bring TEST-SPEC.md in line with SPEC.md as IP 0002 revised it (refinement iteration 3)
+
+## Critical
+- [C1] §7.6, T7.6-7(a) and the record of unstageable clauses that closes T7.6-7. This softens SPEC 7.6 Runtime ("no output on standard output or standard error"). T7.6-7(a) admits every stderr line in the release's warning form. The closing clause records two cases as "told apart from the release's own by nothing the channel observes": a warning the module itself emits through the runtime's warning facility, and text that form reads as part of a warning. Both are observable inside H-2's module channel, through the values and process state the harness already reads in its own importing module.
+  - The importing module can register a `process` `warning` listener before the package loads, as part of the state (c) snapshots, so registering it is no change. The listener receives each warning with its stack.
+  - Checked on Node.js 22.22.0: a package that calls `process.emitWarning` at load yields a warning whose first stack frame is the package's own file (`node_modules/<pkg>/index.cjs:1:9`). The release's own DEP0128 warning for an invalid `main` begins in `node:internal/modules/cjs/loader`.
+  - Text written straight to stderr in warning form has no captured warning behind it.
+
+  As written, a module that announces itself with a runtime warning passes every arm, and that is the likeliest way such a module would print. Require that stderr equal exactly the printed forms of the captured warnings, in order. Fail any captured warning whose first frame lies in the package's files. Remove both cases from the residual.
+- [C2] §7, T7-10(d) adds a requirement SPEC 9.3 does not make, and it contradicts E-6. The arm says "`impact --base c1` exits 0, its report byte-identical to that against the twin commit importing from `"xspec"`". The twin commit's configuration differs in its bytes, so the two commits necessarily have different identities. E-6 states that a conforming product may echo "the resolved baseline commit in an impact report or its JSON", and H-3 leaves the shape of `impact`'s JSON unpinned. A product that prints the resolved commit therefore fails this arm without breaking any SPEC rule. Compare the decoded impact information instead (categories with their attributions, impacted code and witness paths, through H-3's adapter), or assert the categories the one-section edit predicts. Never compare raw bytes across distinct commits.
+
+## Important
+- [I1] §7, T7-10(b) says "each arm is 14.15 at `build` and `check` (exit 1), concerning `xspec.config.ts`". 14.15 is a located condition: its finding locates the import declaration in `xspec.config.ts` by the import range of 11.4, and its `path` is `null` (12.7). Everywhere else this document uses "concerning X" for the finding's concerned path (T7-10(e)(i) "14.19 concerning it"; T14-10(b) "condition 13 concerning `.xspec/journal`"). An Engineer who reads it that way asserts `path` `"xspec.config.ts"` and fails every conforming product. State the location and the `null` path. Also say whether a further finding may accompany 14.15: the `"./specs/A.xspec"` arm calls a spec-module binding that is neither the default nor `text`, which a product may also report as 14.18.
+- [I2] §7.6, T7.6-1. "The compiler's listing of the module's exports" is ambiguous for export assignments, so the verdict turns on a choice the document leaves open (H-2's own rule forbids that). Checked with TypeScript 5.9.3, for a package declaring `declare const m: { defineConfig(c: …): unknown }; export = m;`:
+  - the covered file's `import { defineConfig } from "N"` type-checks;
+  - the checker's listing of the module's exports is empty;
+  - its listing of exports together with export-assignment properties is `defineConfig` alone.
+
+  Export-assignment typings are idiomatic for CommonJS packages. Such a product passes or fails T7.6-1 depending on which listing the Engineer picks. Pin which names count as the module's declared exports, for example every name the covered file's import can bind from it, export-assignment members included. If SPEC 7.6's "declares exactly one export" is itself unclear for export assignments, take that to the Developer.
+
+## Optional
+- [O1] §7.6 Verdict and §17 S-4 both say a package "whose `defineConfig` returns a type it does not export fails … (TS4082)". That is broader than TypeScript 5.9.3's behavior. Checked under the initialized set:
+  - a non-exported type alias of an object type, returned by `defineConfig`, produces no diagnostic, because the declaration emitter inlines it;
+  - a non-exported interface does yield TS4082.
+
+  Describe S-4's stand-in as returning a non-exported interface. The text as written also admits a non-exported type alias, and a stand-in built that way makes the self-test fail.
+- [O2] §17, S-10's final clause. Its stand-ins (one that prints, one that writes, one that adds a global, and so on) check the same negative observations that T7.6-7's violators would certify. PROCESS allows internal self-tests only for harness behavior certification does not exercise, and S-10 justifies only its release/route driver. Either state S-4's selectivity argument for this clause (a selective violator set cannot target every observation), or leave the clause to certification.
+- [O3] §7.6, T7.6-7(c). The observed process state leaves out JS-visible state a module can change: `process`'s own properties (for example an overridden `process.emitWarning`, or `process.title`), and those of `process.stdout` and `process.stderr` (for example a patched `write`). The residual's general clause ("a change to process state that none of (c)'s observations reflects") formally covers these. But they are as observable from the importing module as everything else in (c), unlike the internal and native-addon state the residual cites. Add them to (c).
+- [O4] §7, T7-10(d). SPEC 7 extends "never interprets, resolves, or loads" to a baseline's configuration, but the baseline arms vary only the specifier's spelling, never what it designates. Add one baseline arm whose configuration designates a FIFO, or T7-9(d)'s trap package present in the working tree; that carries T7-9(c) and (d) over to baselines.
+- [O5] §18 E-1 and §17 S-10 do not say what a run does when a release E-1 lists is not provisioned (for example, a local run without it). State that it is a harness error (H-11), never a skip (H-9) and never a product failure.
+- [O6] §7, T7-2 comments arm, and P-19. The comments arm places comments before the import, inside the argument, and after the export, but never inside the import declaration. Now that the specifier is free-form, a product that finds it lexically is more likely to trip on `import /* c */ { defineConfig } /* c */ from /* c */ "…"`. One arm would cover it, or P-19 could draw comments between the declaration's tokens.
+
+## Open questions
+- [Q1] (non-blocking) Should every CI run cover 7.6's full matrix? "No setup is sampled away", so every type-checking arm runs 173 programs.
+  - Measured here with TypeScript 5.9.3 under the strict defaults (library checking on), with a minimal dual package: 173 programs took about 2 min 50 s, roughly 1 s each.
+  - T7.6-3 alone has a few hundred arms (each position times each inadmissible kind, plus the other class members). That is on the order of 45,000 programs, about 15 CPU-hours.
+  - On top of that come T7.6-2, T7.6-4 and T7.6-5, the P-17 and P-18 draws, and certification's reruns for each fixture in scope.
+
+  My tentative read: keep the full matrix, since it is 7.6's universal, but have the document say that per-setup work may be shared and the suite sharded across CI jobs. If CI time matters more, cross each shape-violation arm with a covering subset of setups, so that every setup still meets every class member.
