@@ -108,6 +108,8 @@ Standing constraints from Developer, verbatim (they apply to any command you run
 
 **Verification.** `test/self/s1-traceability.test.ts`: the key-universe test passes; the unmapped-key test still fails on `7.6` alone (Task 16); the other two pass. Then the self project: no new failure.
 
+**Status (2026-10-29).** Implemented and pushed in the commit whose subject is `sdg(phase-9): pin SPEC.md's H-7 key universe at 82 keys (FIX_PLAN Task 2)`, the one adding this paragraph: `EXPECTED_KEY_COUNT` 81 → 82 and its comment's subsection count 70 → 71, after confirming SPEC.md's headings (15 sections, `grep -c '^### '` 71, the only heading added since main being 7.6's) and `SPEC_BODY_TEXT_KEY_SECTIONS` (H-7's ten); "7.6" left unmapped (Task 16); no AGENTS.md text or other harness comment states the count. Verdicts: `test/self/s1-traceability.test.ts` 1 failed / 3 passed, the failure key `7.6` unmapped alone (Task 16); the self project 4 failed / 5177 passed (5181 tests) in 489.4 s, admin files left out, the four failures exactly the remaining known open ones (Tasks 16, 7, 7, 5); certification unchanged (171 PASS / 48 FAIL / 0 error / 0 hang over 39 lines); `npm run typecheck` and `npm run format:check` exit 0. No suite test is involved. Awaiting harness-self on the pushed head.
+
 ## Task 3 — S-9: vectors for T7-2's newly named forms and T7-9(b)'s escapes (TEST-SPEC S-9, T7-2, T7-9(b); finding C-10)
 
 **Requirement.** S-9 (TEST-SPEC line 697; read its TypeScript half whole): "T7-2's modifier-bearing configuration imports, string-literal import names, and export and import assignments" check as well-formed, "while T7-9(b)'s specifier escapes … scanning errors of that release — check as unparseable under both readings."
