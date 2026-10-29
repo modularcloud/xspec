@@ -1,9 +1,12 @@
 // Certification runner (TEST-SPEC 17 preamble, C-1, C-2). Executes the full
 // product-facing suite or a named subset — `ProductTestEntry` values resolved
 // from the registry (test/suite/registry/index.ts) — against an arbitrary
-// fixture product supplied as an executable binding and nothing else (C-2),
-// and attributes an outcome to every test ID so certification results are
-// legible per fixture, per test, in CI output (C-1; the harness-self job).
+// fixture product supplied as a product binding (the executable and, where
+// one is given, the package directory 7.6's module is distributed as) and
+// nothing else (C-2), handing each body that binding unchanged, never
+// rebuilt field by field, and attributes an outcome to every test ID so
+// certification results are legible per fixture, per test, in CI output
+// (C-1; the harness-self job).
 // One code path: the runner invokes exactly the registered bodies the Vitest
 // suite runs against the built product (test/suite/declare.ts).
 //

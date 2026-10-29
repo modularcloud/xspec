@@ -4,6 +4,10 @@
 // shape as the built product — an executable/workspace binding and nothing
 // else (C-2), so certifying and testing use one code path and fixtures are
 // invocable in CI without network or a build step (plain Node ESM programs).
+// No binding here carries a package directory: CERTIFICATIONS.md's preamble
+// binds each fixture with its executable and no package directory, since no
+// scope includes the `defineConfig` module (certification-document.test.ts
+// pins both).
 //
 // CERTIFICATION_FIXTURES lists every CERTIFICATIONS.md fixture in document
 // order: each conformer with its in-scope test IDs and each violator with the

@@ -4,11 +4,13 @@
 //
 // Every product-facing test (TEST-SPEC sections 1–16) is registered as a
 // `ProductTestEntry`: its stable TEST-SPEC ID, a human title, and a body that
-// receives a `ProductBinding` — the executable binding is the only
-// product-specific datum a body ever sees (C-2). The identical body therefore
-// runs against the built product (the thin Vitest wrappers in test/suite/,
-// see test/suite/declare.ts) and against an arbitrary CERTIFICATIONS.md
-// fixture product (the certification runner in
+// receives a `ProductBinding` — the product binding (the executable and,
+// where one is given, the package directory 7.6's module is distributed as)
+// is the only product-specific datum a body ever sees (C-2), and it reaches
+// the body unchanged, never rebuilt field by field. The identical body
+// therefore runs against the built product (the thin Vitest wrappers in
+// test/suite/, see test/suite/declare.ts) and against an arbitrary
+// CERTIFICATIONS.md fixture product (the certification runner in
 // test/self/certification-runner.ts): certifying and testing use one code
 // path, and no test hard-codes the product path.
 //

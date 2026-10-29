@@ -29,7 +29,11 @@ import { defineConfig } from "vitest/config";
 //   XSPEC_PACKAGE_DIR        the product's package directory, exactly as
 //                            distributed, beside the built executable: the
 //                            directory .github/scripts/pack-package.sh prints.
-//                            Unset, no package directory is given (H-8, S-7).
+//                            The harness reads it when the built product's
+//                            binding is made (test/helpers/subprocess.ts,
+//                            `builtProductBinding`: the binding's
+//                            `packageDir`, exactly as spelled). Unset or
+//                            empty, no package directory is given (H-8, S-7).
 //   XSPEC_NODE_RELEASES_DIR  the Node.js releases E-1 lists, which
 //                            test/node-releases.json pins and
 //                            .github/scripts/provision-node-releases.sh
