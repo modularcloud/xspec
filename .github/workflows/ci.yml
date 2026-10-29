@@ -5,14 +5,19 @@
 #   harness-self   Linux. Harness self-tests and certification only (TEST-SPEC
 #                  17, C-1: certification results are part of the harness's CI
 #                  output), run through the same wrapper as suite-linux, with
-#                  no product installed: the job builds nothing and confirms
-#                  dist/ absent before they run, so a self-test or
-#                  certification that needs the built product fails here
-#                  (H-8: they must pass before the product exists). This is
-#                  the signal that must be green before the product exists
-#                  (red-green): product-facing tests may still fail while this
-#                  job passes. suite-linux runs the self project again, within
-#                  its full suite, with the product built.
+#                  no product installed: the job builds nothing and packs no
+#                  package directory, and confirms dist/ absent and
+#                  XSPEC_PACKAGE_DIR unset before they run, so a self-test or
+#                  certification that needs the built product or its package
+#                  fails here (H-8: they must pass before the product exists,
+#                  and the module channel counts as part of the product). E-1's
+#                  Node.js releases are provisioned here too (below), for S-10,
+#                  which checks the release driver on each of them before any
+#                  product exists. This is the signal that must be green
+#                  before the product exists (red-green): product-facing tests
+#                  may still fail while this job passes. suite-linux runs the
+#                  self project again, within its full suite, with the product
+#                  built.
 #
 #   suite-linux    Linux. The full suite — sections 1–17, certification
 #                  included (E-1) — run through
@@ -30,8 +35,10 @@
 #                  outside every product invocation (E-1, H-2). Workspaces
 #                  land in /tmp on the image's ext4 root filesystem (TMPDIR
 #                  stays unset), whose name-hash listing order T13.5-10(c)'s
-#                  bracketing arm needs. Expected red until the product
-#                  conforms to SPEC.md; green is required from then on.
+#                  bracketing arm needs. The module channel's two inputs are
+#                  set up before the run (below). Expected red until the
+#                  product conforms to SPEC.md; green is required from then
+#                  on.
 #
 #   suite-windows  Windows. The E-6 platform-sensitive subset, the
 #                  representative fixture's exclusion probe (13.5's busy
@@ -40,6 +47,27 @@
 #                  representative-fixture outputs from the e6-linux-outputs
 #                  artifact, exchanged through XSPEC_E6_EXCHANGE_DIR (written
 #                  by the harness on the Linux leg, read on the Windows leg).
+#
+# The module channel (TEST-SPEC H-2, C-2, E-1; SPEC 7.6) runs on the Linux leg
+# alone. Its inputs are made at setup, while the network is still available,
+# and reach the wrapped run unchanged (run-without-network.sh restores the
+# caller's environment exactly):
+#
+#   Package directory  suite-linux alone. After the build,
+#                      .github/scripts/pack-package.sh packs the product with
+#                      npm pack, the tarball release.yml's npm publish
+#                      uploads, and extracts it under RUNNER_TEMP;
+#                      XSPEC_PACKAGE_DIR names the extracted package
+#                      directory: exactly what the distribution carries, never
+#                      the development tree (H-2).
+#   Node.js releases   Both Linux jobs. .github/scripts/provision-node-releases.sh
+#                      installs each release test/node-releases.json pins (E-1's
+#                      list) under RUNNER_TEMP, each archive checked against
+#                      its published SHA-256 sum, beside the release the suite
+#                      runs on; XSPEC_NODE_RELEASES_DIR names the directory,
+#                      each release's executable at v<version>/bin/node. No
+#                      test downloads a runtime, so those runs stay
+#                      network-denied (E-1).
 #
 # Local-only tests (E-2) form a separately invocable local suite
 # (`npm run test:local`) and are deliberately excluded here — never silently
@@ -68,7 +96,11 @@ jobs:
   harness-self:
     name: Harness self-tests + certification (Linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # A limit of the CI service, not a harness guard (TEST-SPEC S-3). The job
+    # took 6.5 minutes at 3d8e7ad, before S-10's checks on E-1's six Node.js
+    # releases and S-4's checks of 7.6's covered setups are implemented, and
+    # its setup now provisions those releases.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -76,6 +108,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Provision E-1's Node.js releases (S-10; at setup, before the network is disabled)
+        run: |
+          bash .github/scripts/provision-node-releases.sh "$RUNNER_TEMP/node-releases"
+          echo "XSPEC_NODE_RELEASES_DIR=$RUNNER_TEMP/node-releases" >> "$GITHUB_ENV"
       - name: Typecheck both programs (product and harness)
         run: npm run typecheck
       - name: Confirm no product is installed (H-8; self-tests and certification run before the product exists)
@@ -84,20 +120,28 @@ jobs:
             echo "::error::dist/ exists, but this job runs the harness self-tests and certification with no product installed (TEST-SPEC H-8)"
             exit 1
           fi
+          if [ -n "${XSPEC_PACKAGE_DIR+set}" ]; then
+            echo "::error::XSPEC_PACKAGE_DIR is set, but this job gives the harness no package directory: the module channel counts as part of the product (TEST-SPEC H-8)"
+            exit 1
+          fi
       - name: Run harness self-tests and certification (network disabled, unprivileged, administrative access kept)
         run: bash .github/scripts/run-without-network.sh npm run test:self
 
   suite-linux:
     name: Full suite (Linux, E-1)
     runs-on: ubuntu-24.04
-    # A limit of the CI service, not a harness guard (TEST-SPEC S-3). The
-    # suite's Vitest run took 1099.5 s at 3bb3df8 on one hosted-runner class
-    # and 1951.3-2015.5 s at 80b83aa and f22cc77 on another (transform and
-    # import times scaling alike; the job up to 34 minutes), before the
-    # refined TEST-SPEC's twenty new tests, P-16, and the new arms of
-    # existing tests (T13.3-5(a)'s seeded tampering trials among them) are
-    # implemented; 90 minutes leaves room for both classes.
-    timeout-minutes: 90
+    # A limit of the CI service, not a harness guard (TEST-SPEC S-3): the job
+    # is held to GitHub's own per-job limit for hosted runners, 6 hours, and
+    # to nothing shorter. It took up to 34 minutes at f22cc77 and 46.5 at
+    # 3d8e7ad, before IP 0002's tests of SPEC 7.6 are implemented. Those
+    # type-check every arm in all 173 of 7.6's covered setups, a fresh
+    # TypeScript 5.9.3 program over a covered file taking about 1 s where the
+    # scaffold measured it, and load the module on each of E-1's six Node.js
+    # releases, so a shorter limit could stop a conforming run. Where the
+    # suite outgrows the service's limit, E-1 splits it across parallel jobs
+    # whose union is the whole suite, every verdict reported, never trimming
+    # it.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -105,8 +149,16 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Provision E-1's Node.js releases (the module channel's; at setup, before the network is disabled)
+        run: |
+          bash .github/scripts/provision-node-releases.sh "$RUNNER_TEMP/node-releases"
+          echo "XSPEC_NODE_RELEASES_DIR=$RUNNER_TEMP/node-releases" >> "$GITHUB_ENV"
       - name: Build the product
         run: npm run build
+      - name: Pack the product's package directory exactly as distributed (H-2's module channel, C-2)
+        run: |
+          package=$(bash .github/scripts/pack-package.sh "$RUNNER_TEMP/xspec-package")
+          echo "XSPEC_PACKAGE_DIR=$package" >> "$GITHUB_ENV"
       - name: Run the full suite (network disabled after setup, unprivileged, administrative access kept; E-1)
         run: bash .github/scripts/run-without-network.sh npm test
         env:

@@ -22,6 +22,22 @@ import { defineConfig } from "vitest/config";
 //                           invocable suite, never run in CI and never marked
 //                           skipped; this set is currently empty
 //
+// The module channel (TEST-SPEC H-2, C-2, E-1; SPEC 7.6) takes its two inputs
+// from the environment, which CI sets at setup and AGENTS.md shows how to set
+// locally:
+//
+//   XSPEC_PACKAGE_DIR        the product's package directory, exactly as
+//                            distributed, beside the built executable: the
+//                            directory .github/scripts/pack-package.sh prints.
+//                            Unset, no package directory is given (H-8, S-7).
+//   XSPEC_NODE_RELEASES_DIR  the Node.js releases E-1 lists, which
+//                            test/node-releases.json pins and
+//                            .github/scripts/provision-node-releases.sh
+//                            installs there, each release's executable at
+//                            v<version>/bin/node. A listed release missing
+//                            there is a harness error for every run needing it
+//                            (E-1, H-11, S-10), never a skip.
+//
 // Shared harness machinery (H-3 output adapters, the workspace builder, the
 // subprocess and TypeScript-tooling drivers, the P-2/P-7 oracles) belongs in
 // test/helpers/. Certification fixture products (CERTIFICATIONS.md) and

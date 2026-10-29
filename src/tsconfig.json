@@ -1,6 +1,18 @@
 {
   // The product program (`xspec`). Compiled by `npm run build` to dist/;
   // dist/cli/bin.js is the `xspec` executable declared in package.json.
+  //
+  // The defineConfig module (SPEC 7.6) is the package's root entry, one file
+  // per route that package.json's `exports` names:
+  //   import   the ES module dist/index.js, compiled from index.ts, typed by
+  //            dist/index.d.ts (which the top-level `types` also names, for
+  //            TypeScript's `node10` resolution, which reads no `exports`);
+  //   require  the CommonJS module dist/index.cjs, compiled from index.cts,
+  //            typed by dist/index.d.cts, so that the module loads through
+  //            `require` with no option on every Node.js release 7.6 covers,
+  //            22.0 through 22.11 included, where `require` cannot load an ES
+  //            module. Hence `.cts` sources are compiled too.
+  //
   // This project must never include files from test/ — the harness is a
   // separate program (TEST-SPEC H-2; IMPLEMENTATION.md).
   "extends": "../tsconfig.base.json",
@@ -9,5 +21,5 @@
     "outDir": "../dist",
     "declaration": true
   },
-  "include": ["./**/*.ts"]
+  "include": ["./**/*.ts", "./**/*.cts"]
 }
