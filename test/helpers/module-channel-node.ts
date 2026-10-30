@@ -82,18 +82,21 @@
 //   `HarnessStagingError` when unmet.
 // - The report (`decodeModuleRunReport`): one JSON document the bootstrap
 //   writes to a path the driver names, outside both streams — once the load
-//   has completed or failed, and again as the process exits, each time
-//   whole (a sibling file renamed over it). Its members are read exactly:
-//   the protocol, the arguments as the run saw them, the release's version,
-//   executable, and options, the process identifier, the environment, the
-//   working directory, the phase reached, the importing module's note of its
+//   and T7.6-6's calls have completed, or the load has failed, and again as
+//   the process exits, each time whole (a sibling file renamed over it).
+//   Its members are read exactly: the protocol, the arguments as the run
+//   saw them, the release's version, executable, and options, the process
+//   identifier, the environment, the working directory, the phase reached
+//   (`loading`, `calling`, `completed`), the importing module's note of its
 //   kind and location, the load's outcome (the loaded value's type and own
-//   property names, or the error the load threw: its type, name, code,
-//   message, and stack), a failure of the bootstrap's own, each warning
-//   delivered (its type, name, code, message, detail, and stack), and the
-//   exit code the `exit` listener saw. Anything else — absent members, an
-//   extra one, a value of another kind, bytes that are no UTF-8 JSON — is a
-//   malformed report: H-3's rule, failing loudly, never a pass.
+//   keys — each key's kind, name, and enumerability — or the error the load
+//   threw: its type, name, code, message, and stack), T7.6-6's calls
+//   (below), a failure of the bootstrap's own, each warning delivered (its
+//   type, name, code, message, detail, and stack), and the exit code the
+//   `exit` listener saw. Anything else — absent members, an extra one, a
+//   value of another kind, members inconsistent with the phase, calls out
+//   of `CALL_CASES`' order, bytes that are no UTF-8 JSON — is a malformed
+//   report: H-3's rule, failing loudly, never a pass.
 // - The run's conditions, checked on every report that decodes (S-10 pins
 //   them on stand-ins): the arguments round-trip exactly as passed; the
 //   release in effect is the one provisioned (`process.version` and
@@ -108,7 +111,8 @@
 //   ES-module-only package along `require` on a release before 22.12.0);
 //   `incomplete`, the process exited before the load completed or failed
 //   (`process.exit` while loading, an uncaught exception, an unsettled
-//   top-level `await`), or the bootstrap's own flow failed; `no-report`,
+//   top-level `await`) or during T7.6-6's calls, or the bootstrap's own
+//   flow failed; `no-report`,
 //   the process left no report (killed by a signal, or exiting without its
 //   `exit` listeners while loading); `malformed-report`. The run's exit
 //   code, signal, and both streams are reported beside the outcome.
@@ -121,11 +125,63 @@
 //   (`ProductRunTimeoutError`) propagates unchanged — a hang ends its test
 //   (S-3) — and so does every other rejection of the run's spawn, which
 //   for a release E-1 provisioned is a harness error.
-// - Observations beyond the load (T7.6-6's calls, T7.6-7's output, writes,
-//   process state, and FIFOs) extend the bootstrap's report and this
-//   module's decoder together; each absence they assert counts only where
-//   the same run loaded the module and saw `defineConfig` return its
-//   argument (§7.6 Pairing).
+// - T7.6-6's observations, made inside the run by the bootstrap once the
+//   load has handed back a value (its header), and read here as problems
+//   in words, each led by the run's description, none thrown, so that a
+//   test may run every arm and fail once naming each:
+//   (a) `exportsProblems`: the route's listing from the loaded value's own
+//       keys — an `import` namespace's string-keyed properties exactly
+//       `defineConfig` (a CommonJS-only entry's namespace, carrying
+//       `default`, fails), a `require` result's enumerable properties,
+//       string- and symbol-keyed alike, exactly `defineConfig` (an
+//       enumerable `__esModule` fails);
+//   (b) `identityProblems`: `defineConfig`, read once from the loaded
+//       value, a function, and each identity case of `CALL_CASES` — every
+//       value T7.6-6 names, no argument, a further argument — returning
+//       what it must, compared by `Object.is` inside the run;
+//   (c) `examinationProblems`: the call with two recording Proxies over
+//       functions returning the first, no trap of either invoked through
+//       the run's end, and the call with a frozen object returning it
+//       without a throw.
+// - Pairing (§7.6; `pairingProblem`): each absence a runtime arm asserts
+//   counts only where the same run loaded the module and saw `defineConfig`
+//   return its argument — here, in every one of T7.6-6's calls, the
+//   conservative reading — so a missing or stub package fails every arm.
+// - The output oracle (T7.6-7(a); `outputProblems`, `runtimeOutputProblems`):
+//   standard output empty, and standard error, byte for byte, exactly the
+//   release's printed forms of the warnings the bootstrap's listener
+//   captured, in order (`renderWarnings`): each `(node:<pid>) `, its
+//   bracketed code and a space where it carries a non-empty one, its type
+//   and message as the release joins them (`<type>: <message>`, either
+//   alone where the other is empty), a line feed and its detail where it
+//   carries one, the first warning followed by a line feed and the hint
+//   line the release appends to it, and each ended by a line feed; and no
+//   captured warning's stack beginning in the package's files, its first
+//   frame (`warningFirstFrame`: the first line after the stack's head that
+//   is a frame) naming a path under the placement or its copy, by path or
+//   file URL (`packageFrame`). A warning the oracle cannot render — no
+//   object whose name and message are strings, which the runtime's own
+//   warnings always are — fails it. Each release's printed form is learned
+//   from the release itself (`learnWarningForm`, once per release in a
+//   process): a calibration script (helpers/module-channel-warning-
+//   calibration.cjs, harness code beside the bootstrap) run on the release
+//   as a module run is — copied into a fresh directory of its own, through
+//   the subprocess driver under the run's guard, with a fresh `HOME` and
+//   `TMPDIR`, the harness's `PATH`, and no option — emits known warnings
+//   through `process.emitWarning` in three runs, a warning of a type of
+//   its own first, a `DeprecationWarning` first, and an
+//   `ExperimentalWarning` first, which between them carry and lack a code
+//   and a detail and span lines in their messages and details. The hint
+//   lines are read off the release's standard error after the first
+//   warning's form (the release appends one hint to a first deprecation
+//   and another to any other first warning), and the whole of each run's
+//   standard error must then render exactly from its captured warnings, so
+//   a release printing a warning in any other form — the separators and
+//   the line structure above included — fails the calibration as a harness
+//   error naming the release, never a verdict.
+// - T7.6-7's other observations (writes, process state, and FIFOs) extend
+//   the bootstrap's report and this module's decoder together, each
+//   absence under the same pairing.
 // - Every examination and write here is a harness step under its own guard
 //   (helpers/step-guards.ts); the run itself is a product invocation under
 //   its own (S-3). E-1 exercises the releases on the Linux leg alone, and
@@ -136,7 +192,7 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { fail } from "./assertions.js";
+import { bytesEqual, describeByteDifference, fail } from "./assertions.js";
 import type {
   ModuleStaging,
   Placement,
@@ -162,7 +218,13 @@ const MODE: StagingMode = "module-channel";
 export const MODULE_RUN_PREFIX = "xspec-module-run-";
 
 /** The protocol the bootstrap's report names, which the decoder requires. */
-export const MODULE_RUN_PROTOCOL = "xspec-module-run/1";
+export const MODULE_RUN_PROTOCOL = "xspec-module-run/2";
+
+/** The prefix of each warning calibration's directory (module header). */
+export const WARNING_CALIBRATION_PREFIX = "xspec-warning-calibration-";
+
+/** The protocol the calibration's report names, which its decoder requires. */
+export const WARNING_CALIBRATION_PROTOCOL = "xspec-warning-calibration/1";
 
 /**
  * Each run's own hang guard (TEST-SPEC S-3): the subprocess driver's
@@ -179,7 +241,13 @@ const BOOTSTRAP_SOURCE = fileURLToPath(
   new URL("./module-channel-bootstrap.cjs", import.meta.url),
 );
 
+/** The warning calibration, harness code beside this module (module header). */
+const CALIBRATION_SOURCE = fileURLToPath(
+  new URL("./module-channel-warning-calibration.cjs", import.meta.url),
+);
+
 /** The names in a run's own directory (module header). */
+const CALIBRATION_NAME = "calibration.cjs";
 const BOOTSTRAP_NAME = "bootstrap.cjs";
 const REPORT_NAME = "report.json";
 const HOME_NAME = "home";
@@ -430,6 +498,15 @@ export interface CapturedWarning extends ThrownDescription {
   readonly detail: string | null;
 }
 
+/** One own key of a loaded value, as the bootstrap lists it. */
+export interface OwnKey {
+  readonly kind: "string" | "symbol";
+  /** The key itself, or a symbol's description (null where it has none). */
+  readonly name: string | null;
+  /** Whether its descriptor is enumerable; null where none could be read. */
+  readonly enumerable: boolean | null;
+}
+
 /** What the route's load handed back, or what it threw. */
 export type LoadObservation =
   | {
@@ -437,11 +514,113 @@ export type LoadObservation =
       readonly value: {
         /** `typeof` the loaded value, `null` reading as "null". */
         readonly type: string;
-        /** Its own string-keyed property names, where it is an object. */
-        readonly ownPropertyNames: readonly string[] | null;
+        /**
+         * Its own keys in their own order, where it is an object or a
+         * function whose keys could be listed; null otherwise.
+         */
+        readonly ownKeys: readonly OwnKey[] | null;
       };
     }
   | { readonly outcome: "failed"; readonly error: ThrownDescription };
+
+/**
+ * T7.6-6's calls, in the order the bootstrap makes them (its header): an
+ * object, an array, a function, a symbol, `null`, `undefined` passed
+ * explicitly, a string, a boolean, a bigint, `0`, `-0`, and `NaN`, each
+ * returning itself; no argument, returning `undefined`; a further
+ * argument, returning the first; two recording Proxies, returning the
+ * first; and a frozen object, returning itself.
+ */
+export const CALL_CASES = Object.freeze([
+  "object",
+  "array",
+  "function",
+  "symbol",
+  "null",
+  "undefined",
+  "string",
+  "boolean",
+  "bigint",
+  "zero",
+  "negative-zero",
+  "nan",
+  "no-argument",
+  "further-arguments",
+  "proxies",
+  "frozen",
+] as const);
+
+/** One of T7.6-6's calls. */
+export type CallCase = (typeof CALL_CASES)[number];
+
+/** T7.6-6(b)'s calls: each but (c)'s Proxies and frozen object. */
+export const IDENTITY_CASES: readonly CallCase[] = Object.freeze(
+  CALL_CASES.filter((name) => name !== "proxies" && name !== "frozen"),
+);
+
+/** Every trap a Proxy handler can carry, each recorded by the bootstrap's. */
+export const PROXY_TRAPS = Object.freeze([
+  "apply",
+  "construct",
+  "defineProperty",
+  "deleteProperty",
+  "get",
+  "getOwnPropertyDescriptor",
+  "getPrototypeOf",
+  "has",
+  "isExtensible",
+  "ownKeys",
+  "preventExtensions",
+  "set",
+  "setPrototypeOf",
+] as const);
+
+/** One trap a Proxy handler can carry. */
+export type ProxyTrap = (typeof PROXY_TRAPS)[number];
+
+/** A value a call returned in place of its own. */
+export interface ReturnedValue {
+  /** `typeof` it, `null` reading as "null". */
+  readonly type: string;
+  /** A primitive's text, or a harness value's name; null otherwise. */
+  readonly text: string | null;
+}
+
+/** The verdict of one of T7.6-6's calls, reached by `Object.is` in the run. */
+export type CallOutcome = "returned-argument" | "returned-other" | "threw";
+
+/** One of T7.6-6's calls, as the bootstrap made it. */
+export interface CallResult {
+  readonly case: CallCase;
+  readonly outcome: CallOutcome;
+  /** For `returned-other`, what it returned; null otherwise. */
+  readonly returned: ReturnedValue | null;
+  /** For `threw`, what it threw; null otherwise. */
+  readonly thrown: ThrownDescription | null;
+}
+
+/** One trap a recording Proxy's handler ran. */
+export interface TrapInvocation {
+  readonly proxy: "first" | "second";
+  readonly trap: ProxyTrap;
+}
+
+/** How reading `defineConfig` from the loaded value went: one of the two. */
+export interface DefineConfigReading {
+  /** `typeof` the value read, `null` reading as "null"; null if it threw. */
+  readonly type: string | null;
+  readonly thrown: ThrownDescription | null;
+}
+
+/** T7.6-6's calls, as the bootstrap made them (its header). */
+export interface CallsObservation {
+  /** The read of `defineConfig`; null while it was unfinished. */
+  readonly reading: DefineConfigReading | null;
+  /** Each call made, in `CALL_CASES`' order: all of them, once completed. */
+  readonly results: readonly CallResult[];
+  /** Each trap either Proxy's handler ran, in order, through the run's end. */
+  readonly traps: readonly TrapInvocation[];
+}
 
 /** The importing module's note of its own kind and location. */
 export interface ImportingModuleNote {
@@ -450,6 +629,9 @@ export interface ImportingModuleNote {
   /** `import.meta.url` in an ES module, `__filename` in a CommonJS one. */
   readonly location: string | null;
 }
+
+/** How far a run got (module header). */
+export type ModuleRunPhase = "loading" | "calling" | "completed";
 
 /** A decoded report (module header), its members read exactly. */
 export interface ModuleRunReport {
@@ -469,12 +651,17 @@ export interface ModuleRunReport {
   readonly environment: Readonly<Record<string, string>>;
   /** `process.cwd()`, read likewise. */
   readonly cwd: string;
-  /** `completed` once the load completed or failed; `loading` before. */
-  readonly phase: "loading" | "completed";
+  /**
+   * `loading` until the load handed back a value or threw; `calling` while
+   * T7.6-6's calls ran; `completed` once they, or a failed load, ended.
+   */
+  readonly phase: ModuleRunPhase;
   /** Where the module loaded: the importing module's note; null otherwise. */
   readonly importingModule: ImportingModuleNote | null;
-  /** The load's outcome once the phase is `completed`; null before. */
+  /** The load's outcome from the phase `calling` on; null before. */
   readonly load: LoadObservation | null;
+  /** Where the module loaded: T7.6-6's calls; null otherwise. */
+  readonly calls: CallsObservation | null;
   /** A failure of the bootstrap's own flow, if any. */
   readonly bootstrapError: ThrownDescription | null;
   /** Each warning delivered to the `warning` listener, in order. */
@@ -494,6 +681,7 @@ class ReportShapeError extends Error {}
 const REPORT_MEMBERS = [
   "argv",
   "bootstrapError",
+  "calls",
   "cwd",
   "environment",
   "exit",
@@ -509,6 +697,17 @@ const RELEASE_MEMBERS = ["execArgv", "execPath", "version"];
 const THROWN_MEMBERS = ["code", "message", "name", "stack", "type"];
 const WARNING_MEMBERS = [...THROWN_MEMBERS, "detail"];
 const NOTE_MEMBERS = ["location", "topLevelThis"];
+const OWN_KEY_MEMBERS = ["enumerable", "kind", "name"];
+const CALLS_MEMBERS = ["reading", "results", "traps"];
+const READING_MEMBERS = ["thrown", "type"];
+const RESULT_MEMBERS = ["case", "outcome", "returned", "thrown"];
+const RETURNED_MEMBERS = ["text", "type"];
+const TRAP_MEMBERS = ["proxy", "trap"];
+const CALL_OUTCOMES: readonly CallOutcome[] = [
+  "returned-argument",
+  "returned-other",
+  "threw",
+];
 
 /**
  * Decode a report's bytes (module header): UTF-8 JSON holding exactly the
@@ -553,9 +752,10 @@ function readReport(value: unknown): ModuleRunReport {
     );
   }
   const phase = record["phase"];
-  if (phase !== "loading" && phase !== "completed") {
+  if (phase !== "loading" && phase !== "calling" && phase !== "completed") {
     throw new ReportShapeError(
-      `its phase ${JSON.stringify(phase)} is neither "loading" nor "completed"`,
+      `its phase ${JSON.stringify(phase)} is none of "loading", "calling", ` +
+        `and "completed"`,
     );
   }
   const report: ModuleRunReport = {
@@ -574,6 +774,7 @@ function readReport(value: unknown): ModuleRunReport {
         ? null
         : readNote(record["importingModule"]),
     load: record["load"] === null ? null : readLoad(record["load"]),
+    calls: record["calls"] === null ? null : readCalls(record["calls"]),
     bootstrapError:
       record["bootstrapError"] === null
         ? null
@@ -583,18 +784,7 @@ function readReport(value: unknown): ModuleRunReport {
     ),
     exit: record["exit"] === null ? null : readExit(record["exit"]),
   };
-  if (report.phase === "completed") {
-    if (report.load === null || report.bootstrapError !== null) {
-      throw new ReportShapeError(
-        "it reached the phase completed without a load outcome, or with a " +
-          "failure of the bootstrap's own",
-      );
-    }
-  } else if (report.load !== null) {
-    throw new ReportShapeError(
-      "it holds a load outcome while still in the phase loading",
-    );
-  }
+  checkPhase(report);
   if (
     (report.importingModule !== null) !==
     (report.load?.outcome === "loaded")
@@ -605,6 +795,189 @@ function readReport(value: unknown): ModuleRunReport {
     );
   }
   return report;
+}
+
+/**
+ * The members each phase holds (module header): `loading`, neither a load
+ * outcome nor calls; `calling`, a loaded module and its calls so far;
+ * `completed`, a load outcome, no failure of the bootstrap's own, and,
+ * for a loaded module, `defineConfig` read and every call made where it
+ * is a function, none otherwise.
+ */
+function checkPhase(report: ModuleRunReport): void {
+  const loaded = report.load?.outcome === "loaded";
+  switch (report.phase) {
+    case "loading":
+      if (report.load !== null || report.calls !== null) {
+        throw new ReportShapeError(
+          "it holds a load outcome or calls while still in the phase loading",
+        );
+      }
+      return;
+    case "calling":
+      if (!loaded || report.calls === null) {
+        throw new ReportShapeError(
+          "it reached the phase calling without a loaded module and its calls",
+        );
+      }
+      return;
+    case "completed": {
+      if (report.load === null || report.bootstrapError !== null) {
+        throw new ReportShapeError(
+          "it reached the phase completed without a load outcome, or with a " +
+            "failure of the bootstrap's own",
+        );
+      }
+      const calls = report.calls;
+      if ((calls !== null) !== loaded) {
+        throw new ReportShapeError(
+          "it holds calls without a loaded module, or a loaded module " +
+            "without calls",
+        );
+      }
+      if (calls === null) return;
+      const callable = calls.reading?.type === "function";
+      if (
+        calls.reading === null ||
+        calls.results.length !== (callable ? CALL_CASES.length : 0)
+      ) {
+        throw new ReportShapeError(
+          `it reached the phase completed with defineConfig unread, or with ` +
+            `${String(calls.results.length)} calls made where ` +
+            `${callable ? "all of them" : "none"} must be`,
+        );
+      }
+      return;
+    }
+  }
+}
+
+function readCalls(value: unknown): CallsObservation {
+  const record = readRecord(value, "calls", CALLS_MEMBERS);
+  const reading =
+    record["reading"] === null ? null : readReading(record["reading"]);
+  const results = readArray(record["results"], "calls.results").map(
+    (entry, index) => readCallResult(entry, `calls.results[${String(index)}]`),
+  );
+  const traps = readArray(record["traps"], "calls.traps").map((entry, index) =>
+    readTrap(entry, `calls.traps[${String(index)}]`),
+  );
+  results.forEach((result, index) => {
+    if (result.case !== CALL_CASES[index]) {
+      throw new ReportShapeError(
+        `calls.results[${String(index)}] is the call ` +
+          `${JSON.stringify(result.case)}, where the bootstrap's order ` +
+          `(CALL_CASES) puts ${JSON.stringify(CALL_CASES[index] ?? null)}`,
+      );
+    }
+  });
+  if (results.length > 0 && reading?.type !== "function") {
+    throw new ReportShapeError(
+      "calls.results holds calls made with no function read as defineConfig",
+    );
+  }
+  return { reading, results, traps };
+}
+
+function readReading(value: unknown): DefineConfigReading {
+  const record = readRecord(value, "calls.reading", READING_MEMBERS);
+  const type = readNullableString(record["type"], "calls.reading.type");
+  const thrown =
+    record["thrown"] === null
+      ? null
+      : readThrown(record["thrown"], "calls.reading.thrown");
+  if ((type === null) === (thrown === null)) {
+    throw new ReportShapeError(
+      "calls.reading holds both a type and a thrown value, or neither",
+    );
+  }
+  return { type, thrown };
+}
+
+function readCallResult(value: unknown, where: string): CallResult {
+  const record = readRecord(value, where, RESULT_MEMBERS);
+  const callCase = record["case"];
+  if (!CALL_CASES.some((name) => name === callCase)) {
+    throw new ReportShapeError(
+      `${where}.case ${JSON.stringify(callCase)} is none of CALL_CASES`,
+    );
+  }
+  const outcome = record["outcome"];
+  if (!CALL_OUTCOMES.some((name) => name === outcome)) {
+    throw new ReportShapeError(
+      `${where}.outcome ${JSON.stringify(outcome)} is none of ` +
+        JSON.stringify(CALL_OUTCOMES),
+    );
+  }
+  const returned =
+    record["returned"] === null
+      ? null
+      : readReturned(record["returned"], `${where}.returned`);
+  const thrown =
+    record["thrown"] === null
+      ? null
+      : readThrown(record["thrown"], `${where}.thrown`);
+  if (
+    (returned !== null) !== (outcome === "returned-other") ||
+    (thrown !== null) !== (outcome === "threw")
+  ) {
+    throw new ReportShapeError(
+      `${where} holds a returned or thrown value its outcome ` +
+        `${JSON.stringify(outcome)} does not, or lacks one it does`,
+    );
+  }
+  return {
+    case: callCase as CallCase,
+    outcome: outcome as CallOutcome,
+    returned,
+    thrown,
+  };
+}
+
+function readReturned(value: unknown, where: string): ReturnedValue {
+  const record = readRecord(value, where, RETURNED_MEMBERS);
+  return {
+    type: readString(record["type"], `${where}.type`),
+    text: readNullableString(record["text"], `${where}.text`),
+  };
+}
+
+function readTrap(value: unknown, where: string): TrapInvocation {
+  const record = readRecord(value, where, TRAP_MEMBERS);
+  const proxy = record["proxy"];
+  const trap = record["trap"];
+  if (proxy !== "first" && proxy !== "second") {
+    throw new ReportShapeError(
+      `${where}.proxy ${JSON.stringify(proxy)} is neither "first" nor "second"`,
+    );
+  }
+  if (!PROXY_TRAPS.some((name) => name === trap)) {
+    throw new ReportShapeError(
+      `${where}.trap ${JSON.stringify(trap)} is none of PROXY_TRAPS`,
+    );
+  }
+  return { proxy, trap: trap as ProxyTrap };
+}
+
+function readOwnKey(value: unknown, where: string): OwnKey {
+  const record = readRecord(value, where, OWN_KEY_MEMBERS);
+  const kind = record["kind"];
+  if (kind !== "string" && kind !== "symbol") {
+    throw new ReportShapeError(
+      `${where}.kind ${JSON.stringify(kind)} is neither "string" nor "symbol"`,
+    );
+  }
+  const name =
+    kind === "string"
+      ? readString(record["name"], `${where}.name`)
+      : readNullableString(record["name"], `${where}.name`);
+  const enumerable = record["enumerable"];
+  if (enumerable !== null && typeof enumerable !== "boolean") {
+    throw new ReportShapeError(
+      `${where}.enumerable ${JSON.stringify(enumerable)} is no boolean`,
+    );
+  }
+  return { kind, name, enumerable };
 }
 
 function readRecord(
@@ -712,19 +1085,19 @@ function readLoad(value: unknown): LoadObservation {
   if (outcome === "loaded") {
     const record = readRecord(value, "load", ["outcome", "value"]);
     const loaded = readRecord(record["value"], "load.value", [
-      "ownPropertyNames",
+      "ownKeys",
       "type",
     ]);
     return {
       outcome,
       value: {
         type: readString(loaded["type"], "load.value.type"),
-        ownPropertyNames:
-          loaded["ownPropertyNames"] === null
+        ownKeys:
+          loaded["ownKeys"] === null
             ? null
-            : readStrings(
-                loaded["ownPropertyNames"],
-                "load.value.ownPropertyNames",
+            : readArray(loaded["ownKeys"], "load.value.ownKeys").map(
+                (key, index) =>
+                  readOwnKey(key, `load.value.ownKeys[${String(index)}]`),
               ),
       },
     };
@@ -823,6 +1196,9 @@ export interface LoadedModuleRun extends ModuleRun {
   readonly report: ModuleRunReport & {
     readonly load: Extract<LoadObservation, { readonly outcome: "loaded" }>;
     readonly importingModule: ImportingModuleNote;
+    readonly calls: CallsObservation & {
+      readonly reading: DefineConfigReading;
+    };
   };
 }
 
@@ -941,7 +1317,7 @@ export class PreparedModuleRun {
       importingModuleText(route, placement.name),
       request.context,
     );
-    const root = await makeRunDirectory(request.context);
+    const root = await makeScratchDirectory(MODULE_RUN_PREFIX, request.context);
     try {
       const prepared = new PreparedModuleRun(request, importingFile, root);
       await guardStep(
@@ -1174,10 +1550,28 @@ export function moduleRunProblem(run: ModuleRun): string | null {
       );
     case "incomplete": {
       const own = run.report?.bootstrapError;
-      return own !== null && own !== undefined
-        ? `failed in the harness's own bootstrap (${describeThrown(own)}): ` +
-            `the process ${ended}`
-        : `ended before the load completed or failed: the process ${ended}`;
+      if (own !== null && own !== undefined) {
+        return (
+          `failed in the harness's own bootstrap (${describeThrown(own)}): ` +
+          `the process ${ended}`
+        );
+      }
+      const calls = run.report?.calls;
+      if (
+        run.report?.phase === "calling" &&
+        calls !== null &&
+        calls !== undefined
+      ) {
+        const next = CALL_CASES[calls.results.length];
+        const during =
+          calls.reading === null
+            ? "while reading defineConfig from what the route loaded"
+            : next === undefined
+              ? "after T7.6-6's calls to defineConfig"
+              : `during T7.6-6's call ${describeCallCase(next)}`;
+        return `loaded the module, but ended ${during}: the process ${ended}`;
+      }
+      return `ended before the load completed or failed: the process ${ended}`;
     }
     case "load-failed": {
       const load = run.report?.load;
@@ -1255,6 +1649,834 @@ export function describeThrown(thrown: ThrownDescription): string {
 }
 
 // ---------------------------------------------------------------------------
+// T7.6-6's observations, and pairing
+// ---------------------------------------------------------------------------
+
+/** SPEC 7.6 Runtime's export clause, which T7.6-6(a)'s problems cite. */
+const EXPORTS_CITATION =
+  "(TEST-SPEC T7.6-6(a); SPEC 7.6 Runtime: the module's exports are " +
+  "exactly defineConfig — an import namespace holds that one export, and a " +
+  "require result has that one own enumerable property, symbol-keyed " +
+  "properties counted as well as string-keyed ones)";
+
+/** SPEC 7.6 Runtime's return clause, which T7.6-6(b)'s problems cite. */
+const IDENTITY_CITATION =
+  "(TEST-SPEC T7.6-6(b); SPEC 7.6 Runtime: defineConfig returns its first " +
+  "argument, the very value passed, whatever it is; undefined when called " +
+  "with none; any further arguments ignored)";
+
+/** SPEC 7.6 Runtime's return clause, which T7.6-6(c)'s problems cite. */
+const EXAMINATION_CITATION =
+  "(TEST-SPEC T7.6-6(c); SPEC 7.6 Runtime: defineConfig returns its first " +
+  "argument and does nothing else, that value neither examined, copied, nor " +
+  "modified)";
+
+/** SPEC 7.6 Runtime's effect clause, which T7.6-7(a)'s problems cite. */
+const OUTPUT_CITATION =
+  "(TEST-SPEC T7.6-7(a); SPEC 7.6 Runtime: beyond the runtime's own " +
+  "resolution of the specifier and loading of the package's files, neither " +
+  "loading the module nor calling defineConfig has any effect — no output " +
+  "on standard output or standard error)";
+
+const CALL_CASE_DESCRIPTIONS: Readonly<Record<CallCase, string>> = {
+  object: "defineConfig(v) with v an object",
+  array: "defineConfig(v) with v an array",
+  function: "defineConfig(v) with v a function",
+  symbol: "defineConfig(v) with v a symbol",
+  null: "defineConfig(null)",
+  undefined: "defineConfig(undefined), undefined passed explicitly",
+  string: "defineConfig(v) with v a string",
+  boolean: "defineConfig(false)",
+  bigint: "defineConfig(10n)",
+  zero: "defineConfig(0)",
+  "negative-zero": "defineConfig(-0)",
+  nan: "defineConfig(NaN)",
+  "no-argument": "defineConfig() with no argument, which returns undefined",
+  "further-arguments":
+    "defineConfig(a, b) with a further argument, which returns a",
+  proxies:
+    "defineConfig(p, q) with p and q Proxies over functions whose every " +
+    "trap records its invocation, which returns p itself",
+  frozen: "defineConfig(f) with f a frozen object",
+};
+
+/** One of T7.6-6's calls, in words. */
+export function describeCallCase(name: CallCase): string {
+  return CALL_CASE_DESCRIPTIONS[name];
+}
+
+/** One of T7.6-6's calls and what it came to, in words. */
+function describeCallResult(result: CallResult): string {
+  const call = describeCallCase(result.case);
+  switch (result.outcome) {
+    case "returned-argument":
+      return `${call}: it returned its argument`;
+    case "threw":
+      return (
+        `${call}: it threw ` +
+        (result.thrown === null ? "a value" : describeThrown(result.thrown))
+      );
+    case "returned-other":
+      return `${call}: it returned ${describeReturned(result.returned)} instead`;
+  }
+}
+
+/** A value a call returned in place of its own, in words. */
+function describeReturned(returned: ReturnedValue | null): string {
+  if (returned === null) return "another value";
+  if (returned.text === null) return `another ${returned.type}`;
+  return returned.type === "string"
+    ? `the string ${JSON.stringify(returned.text)}`
+    : `${returned.text} (${returned.type})`;
+}
+
+/** A loaded value's type, in words. */
+function describeValueType(type: string): string {
+  return type === "null" || type === "undefined"
+    ? type
+    : `a value of type ${type}`;
+}
+
+/** Own keys, in words. */
+function describeKeys(keys: readonly OwnKey[]): string {
+  const described = keys.map((key) =>
+    key.kind === "symbol"
+      ? `Symbol(${key.name ?? ""})`
+      : JSON.stringify(key.name),
+  );
+  return `[${described.join(", ")}]`;
+}
+
+/**
+ * What keeps T7.6-6's calls from having been made — `defineConfig`'s read
+ * threw, or read no function — in words, or null where nothing does.
+ */
+function readingFault(run: LoadedModuleRun): string | null {
+  const { reading } = run.report.calls;
+  if (reading.thrown !== null) {
+    return (
+      `reading defineConfig from what the route loaded threw ` +
+      `${describeThrown(reading.thrown)}, so none of T7.6-6's calls was made`
+    );
+  }
+  if (reading.type !== "function") {
+    return (
+      `defineConfig, read from what the route loaded, is ` +
+      `${describeValueType(reading.type ?? "undefined")}, no function, so ` +
+      `none of T7.6-6's calls was made`
+    );
+  }
+  return null;
+}
+
+/**
+ * T7.6-6(a) on `run` (module header): the route's listing of the loaded
+ * value's own keys exactly `defineConfig`. Each problem in words, led by
+ * the run's description; none where it holds.
+ */
+export function exportsProblems(run: LoadedModuleRun): string[] {
+  const { value } = run.report.load;
+  if (run.route === "require") {
+    if (value.ownKeys === null) {
+      return [
+        `${run.description}: the require result is ` +
+          `${describeValueType(value.type)} whose own keys could not be ` +
+          `listed, not one whose own enumerable properties are exactly ` +
+          `"defineConfig" ${EXPORTS_CITATION}`,
+      ];
+    }
+    const problems: string[] = [];
+    const unread = value.ownKeys.filter((key) => key.enumerable === null);
+    if (unread.length > 0) {
+      problems.push(
+        `${run.description}: whether the require result's own properties ` +
+          `${describeKeys(unread)} are enumerable could not be read ` +
+          EXPORTS_CITATION,
+      );
+    }
+    const enumerable = value.ownKeys.filter((key) => key.enumerable === true);
+    const [only] = enumerable;
+    if (
+      enumerable.length !== 1 ||
+      only?.kind !== "string" ||
+      only.name !== "defineConfig"
+    ) {
+      problems.push(
+        `${run.description}: the require result's own enumerable ` +
+          `properties, string- and symbol-keyed alike, are ` +
+          `${describeKeys(enumerable)}, not exactly "defineConfig" ` +
+          EXPORTS_CITATION,
+      );
+    }
+    return problems;
+  }
+  if (value.ownKeys === null) {
+    return [
+      `${run.description}: the import namespace is ` +
+        `${describeValueType(value.type)} whose own keys could not be listed ` +
+        EXPORTS_CITATION,
+    ];
+  }
+  const strings = value.ownKeys.filter((key) => key.kind === "string");
+  const [only] = strings;
+  return strings.length === 1 && only?.name === "defineConfig"
+    ? []
+    : [
+        `${run.description}: the import namespace's own string-keyed ` +
+          `properties are ${describeKeys(strings)}, not exactly ` +
+          `"defineConfig" ${EXPORTS_CITATION}`,
+      ];
+}
+
+/**
+ * T7.6-6(b) on `run` (module header): `defineConfig` a function, and each
+ * identity case returning what it must by SameValue. Each problem in words,
+ * led by the run's description; none where it holds.
+ */
+export function identityProblems(run: LoadedModuleRun): string[] {
+  const fault = readingFault(run);
+  if (fault !== null) {
+    return [`${run.description}: ${fault} ${IDENTITY_CITATION}`];
+  }
+  return run.report.calls.results
+    .filter(
+      (result) =>
+        IDENTITY_CASES.includes(result.case) &&
+        result.outcome !== "returned-argument",
+    )
+    .map(
+      (result) =>
+        `${run.description}: ${describeCallResult(result)}, compared by ` +
+        `SameValue ${IDENTITY_CITATION}`,
+    );
+}
+
+/**
+ * T7.6-6(c) on `run` (module header): the call with the two recording
+ * Proxies returning the first, no trap of either invoked through the run's
+ * end, and the call with a frozen object returning it without a throw. Each
+ * problem in words, led by the run's description; none where it holds.
+ */
+export function examinationProblems(run: LoadedModuleRun): string[] {
+  const fault = readingFault(run);
+  if (fault !== null) {
+    return [`${run.description}: ${fault} ${EXAMINATION_CITATION}`];
+  }
+  const problems = run.report.calls.results
+    .filter(
+      (result) =>
+        !IDENTITY_CASES.includes(result.case) &&
+        result.outcome !== "returned-argument",
+    )
+    .map(
+      (result) =>
+        `${run.description}: ${describeCallResult(result)} ` +
+        EXAMINATION_CITATION,
+    );
+  const { traps } = run.report.calls;
+  if (traps.length > 0) {
+    const invoked = traps.map(
+      (invocation) => `${invocation.trap} on the ${invocation.proxy} Proxy`,
+    );
+    problems.push(
+      `${run.description}: ${describeCallCase("proxies")}, yet its Proxies' ` +
+        `handlers ran ${String(traps.length)} trap(s) through the run's end ` +
+        `— ${invoked.join(", ")} — where none may run ${EXAMINATION_CITATION}`,
+    );
+  }
+  return problems;
+}
+
+/**
+ * §7.6 Pairing on `run` (module header): an absence a runtime arm asserts
+ * counts only where the run loaded the module and saw `defineConfig` return
+ * its argument, here in every one of T7.6-6's calls. The problem in words,
+ * led by the run's description, or null where the pairing holds.
+ */
+export function pairingProblem(run: LoadedModuleRun): string | null {
+  const fault = readingFault(run);
+  const unmet =
+    fault === null
+      ? run.report.calls.results
+          .filter((result) => result.outcome !== "returned-argument")
+          .map((result) => describeCallResult(result))
+      : [fault];
+  if (unmet.length === 0) return null;
+  return (
+    `${run.description}: no absence counts in this run, which never saw ` +
+    `defineConfig return its argument in every one of T7.6-6's calls — ` +
+    `${unmet.join("; ")} (TEST-SPEC §7.6 Pairing: an absence a runtime arm ` +
+    `asserts counts only where the same run loaded the module and saw ` +
+    `defineConfig return its argument)`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The output oracle (T7.6-7(a))
+// ---------------------------------------------------------------------------
+
+/** A release's printed form of warnings (module header), learned from it. */
+export interface WarningForm {
+  /** The release whose form this is. */
+  readonly version: string;
+  /**
+   * The hint line the release appends to the first warning it prints: to a
+   * `DeprecationWarning`, and to any other.
+   */
+  readonly hints: { readonly deprecation: string; readonly other: string };
+}
+
+/** A rendering of a run's warnings, or why the oracle cannot render them. */
+export type WarningRendering =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly problem: string };
+
+/** A warning's type and message as the release joins them (module header). */
+function joinedText(name: string, message: string): string {
+  if (name === "") return message;
+  if (message === "") return name;
+  return `${name}: ${message}`;
+}
+
+/**
+ * The head of `warning`'s printed form (module header) — all of it but the
+ * hint line and the closing line feed — or null where the oracle cannot
+ * render it.
+ */
+function printedHead(warning: CapturedWarning, pid: number): string | null {
+  if (
+    warning.type !== "object" ||
+    warning.name === null ||
+    warning.message === null
+  ) {
+    return null;
+  }
+  const code =
+    warning.code !== null && warning.code !== "" ? `[${warning.code}] ` : "";
+  const detail = warning.detail === null ? "" : `${LF}${warning.detail}`;
+  return (
+    `(node:${String(pid)}) ${code}` +
+    `${joinedText(warning.name, warning.message)}${detail}`
+  );
+}
+
+/** A captured warning, in words. */
+function describeCapturedWarning(warning: CapturedWarning): string {
+  const code = warning.code === null ? "" : `[${warning.code}] `;
+  const name = warning.name ?? `a value of type ${warning.type}`;
+  return warning.message === null
+    ? `${code}${name}`
+    : `${code}${name}: ${JSON.stringify(warning.message)}`;
+}
+
+/**
+ * The release's printed forms of `warnings`, in order, as a process `pid`
+ * prints them under `form` (module header).
+ */
+export function renderWarnings(
+  warnings: readonly CapturedWarning[],
+  pid: number,
+  form: WarningForm,
+): WarningRendering {
+  let text = "";
+  for (const [index, warning] of warnings.entries()) {
+    const head = printedHead(warning, pid);
+    if (head === null) {
+      return {
+        ok: false,
+        problem:
+          `the run's warning ${String(index + 1)}, ` +
+          `${describeCapturedWarning(warning)}, is no object whose name and ` +
+          `message are strings, as the runtime's own warnings are, so the ` +
+          `oracle knows no printed form of it`,
+      };
+    }
+    const hint =
+      index === 0
+        ? `${LF}${warning.name === "DeprecationWarning" ? form.hints.deprecation : form.hints.other}`
+        : "";
+    text += `${head}${hint}${LF}`;
+  }
+  return { ok: true, text };
+}
+
+/**
+ * The first frame of `warning`'s stack (module header): the first line after
+ * the stack's head — its type and message as the release joins them — that
+ * is a frame, an indented line beginning `at `; after the first line where
+ * the stack begins otherwise; null where there is none.
+ */
+export function warningFirstFrame(warning: CapturedWarning): string | null {
+  const { stack } = warning;
+  if (stack === null) return null;
+  const head =
+    warning.name !== null && warning.message !== null
+      ? joinedText(warning.name, warning.message)
+      : null;
+  let rest: string;
+  if (
+    head !== null &&
+    stack.startsWith(head) &&
+    (stack.length === head.length || stack.charAt(head.length) === LF)
+  ) {
+    rest = stack.slice(head.length);
+  } else {
+    const firstBreak = stack.indexOf(LF);
+    rest = firstBreak === -1 ? "" : stack.slice(firstBreak);
+  }
+  for (const line of rest.split(LF)) {
+    const trimmed = line.trimStart();
+    if (trimmed.length < line.length && trimmed.startsWith("at ")) {
+      return line;
+    }
+  }
+  return null;
+}
+
+/**
+ * `warning`'s first frame where it names one of the package's files — a
+ * path under the placement or the copy it reaches, by path or file URL —
+ * or null.
+ */
+export function packageFrame(
+  warning: CapturedWarning,
+  placement: Placement,
+): string | null {
+  const frame = warningFirstFrame(warning);
+  if (frame === null) return null;
+  for (const root of new Set([placement.path, placement.copy])) {
+    if (
+      frame.includes(`${root}${path.sep}`) ||
+      frame.includes(`${pathToFileURL(root).href}/`)
+    ) {
+      return frame;
+    }
+  }
+  return null;
+}
+
+/**
+ * T7.6-7(a) on `run` under its release's `form` (module header): the
+ * pairing; standard output empty; standard error exactly the release's
+ * printed forms of the warnings the run emits, in order; and no warning's
+ * stack beginning in the package's files. Each problem in words, led by
+ * the run's description; none where it holds.
+ */
+export function outputProblems(
+  run: LoadedModuleRun,
+  form: WarningForm,
+): string[] {
+  if (form.version !== run.release.version) {
+    throw new Error(
+      `module channel: the printed form learned from the Node.js release ` +
+        `${form.version} judges no run on ${run.release.version} ` +
+        `(${run.description})`,
+    );
+  }
+  const problems: string[] = [];
+  const pairing = pairingProblem(run);
+  if (pairing !== null) problems.push(pairing);
+  if (run.result.stdoutBytes.length > 0) {
+    problems.push(
+      `${run.description}: standard output is not empty: ` +
+        `${quoteStream(run.result.stdout)} ${OUTPUT_CITATION}`,
+    );
+  }
+  const { warnings, pid } = run.report;
+  const rendering = renderWarnings(warnings, pid, form);
+  if (!rendering.ok) {
+    problems.push(
+      `${run.description}: ${rendering.problem}; standard error ` +
+        `${quoteStream(run.result.stderr)} ${OUTPUT_CITATION}`,
+    );
+  } else if (!bytesEqual(run.result.stderrBytes, rendering.text)) {
+    problems.push(
+      `${run.description}: standard error is not exactly the release's ` +
+        `printed forms of the ${String(warnings.length)} warning(s) the run ` +
+        `emits, in order — ` +
+        describeByteDifference(
+          run.result.stderrBytes,
+          Buffer.from(rendering.text, "utf8"),
+          "standard error",
+          "printed forms",
+        ) +
+        ` — standard error ${quoteStream(run.result.stderr)}, the printed ` +
+        `forms ${quoteStream(rendering.text)} ${OUTPUT_CITATION}`,
+    );
+  }
+  warnings.forEach((warning, index) => {
+    const frame = packageFrame(warning, run.placement);
+    if (frame !== null) {
+      problems.push(
+        `${run.description}: the run's warning ${String(index + 1)}, ` +
+          `${describeCapturedWarning(warning)}, begins its stack in the ` +
+          `package's files, its first frame ${JSON.stringify(frame)}: a ` +
+          `warning the module emits, which the runtime's own loading never ` +
+          `does ${OUTPUT_CITATION}`,
+      );
+    }
+  });
+  return problems;
+}
+
+/**
+ * {@link outputProblems} under the form learned from `run`'s release
+ * ({@link learnWarningForm}).
+ */
+export async function runtimeOutputProblems(
+  run: LoadedModuleRun,
+): Promise<string[]> {
+  return outputProblems(run, await learnWarningForm(run.release));
+}
+
+// ---------------------------------------------------------------------------
+// Learning each release's printed form (module header)
+// ---------------------------------------------------------------------------
+
+/** One warning a calibration run emits through `process.emitWarning`. */
+export interface CalibrationWarning {
+  /** Its type, the `type` option. */
+  readonly type: string;
+  /** Its code, the `code` option; null for none. */
+  readonly code: string | null;
+  readonly message: string;
+  /** Its detail, the `detail` option; null for none. */
+  readonly detail: string | null;
+}
+
+/** Which kind of warning a calibration run emits first (module header). */
+export type CalibrationKind = "other" | "deprecation" | "experimental";
+
+/** The warnings each calibration run emits, in order (module header). */
+export const WARNING_CALIBRATIONS: Readonly<
+  Record<CalibrationKind, readonly CalibrationWarning[]>
+> = Object.freeze({
+  other: Object.freeze([
+    {
+      type: "XspecCalibrationWarning",
+      code: "XSPEC_CALIBRATION",
+      message: `xspec calibration: a message${LF}over two lines`,
+      detail: `its detail${LF}over two lines`,
+    },
+    {
+      type: "Warning",
+      code: null,
+      message: "xspec calibration: a warning with no code and no detail",
+      detail: null,
+    },
+    {
+      type: "DeprecationWarning",
+      code: "XSPEC_CALIBRATION_DEPRECATION",
+      message: "xspec calibration: a later deprecation",
+      detail: null,
+    },
+  ]),
+  deprecation: Object.freeze([
+    {
+      type: "DeprecationWarning",
+      code: "XSPEC_CALIBRATION_DEPRECATION",
+      message: "xspec calibration: a first deprecation",
+      detail: "its detail",
+    },
+    {
+      type: "ExperimentalWarning",
+      code: null,
+      message: `xspec calibration: a later experimental feature${LF}over two lines`,
+      detail: null,
+    },
+  ]),
+  experimental: Object.freeze([
+    {
+      type: "ExperimentalWarning",
+      code: null,
+      message: `xspec calibration: a first experimental feature${LF}over two lines`,
+      detail: null,
+    },
+    {
+      type: "XspecCalibrationWarning",
+      code: "XSPEC_CALIBRATION",
+      message: "xspec calibration: a later warning",
+      detail: `its detail${LF}over two lines`,
+    },
+  ]),
+});
+
+/** The forms learned in this process, by release (module header). */
+const warningForms = new Map<string, Promise<WarningForm>>();
+
+/**
+ * The printed form of warnings on `release`, learned from the release
+ * itself (module header): once per release in a process, a learning that
+ * fails being forgotten. Rejects with a harness error where the release
+ * prints a warning in a form the oracle does not know.
+ */
+export function learnWarningForm(release: NodeRelease): Promise<WarningForm> {
+  const key = `${release.version}${LF}${release.executable}`;
+  const known = warningForms.get(key);
+  if (known !== undefined) return known;
+  const learning = calibrateWarningForm(release);
+  warningForms.set(key, learning);
+  learning.catch(() => {
+    if (warningForms.get(key) === learning) warningForms.delete(key);
+  });
+  return learning;
+}
+
+/** One calibration run's observations. */
+interface CalibrationRun {
+  /** The run, in words, leading its harness errors. */
+  readonly context: string;
+  readonly pid: number;
+  /** The warnings delivered to its listener: exactly those it emitted. */
+  readonly warnings: readonly CapturedWarning[];
+  /** Its standard error, as UTF-8. */
+  readonly stderr: string;
+}
+
+async function calibrateWarningForm(
+  release: NodeRelease,
+): Promise<WarningForm> {
+  const other = await runCalibration(release, "other");
+  const deprecation = await runCalibration(release, "deprecation");
+  const experimental = await runCalibration(release, "experimental");
+  const form: WarningForm = Object.freeze({
+    version: release.version,
+    hints: Object.freeze({
+      deprecation: learnHint(deprecation),
+      other: learnHint(other),
+    }),
+  });
+  for (const calibration of [other, deprecation, experimental]) {
+    confirmCalibration(form, calibration);
+  }
+  return form;
+}
+
+/**
+ * Run the calibration script on `release` (module header), emitting
+ * `kind`'s warnings, and read what it printed and what its listener was
+ * delivered. Every departure from a clean run is a harness error.
+ */
+async function runCalibration(
+  release: NodeRelease,
+  kind: CalibrationKind,
+): Promise<CalibrationRun> {
+  const context =
+    `learning how the Node.js release ${release.version} prints warnings ` +
+    `(the calibration emitting ${kind === "other" ? "a warning of its own type" : `a ${kind} warning`} first)`;
+  const root = await makeScratchDirectory(WARNING_CALIBRATION_PREFIX, context);
+  try {
+    const script = path.join(root, CALIBRATION_NAME);
+    const reportPath = path.join(root, REPORT_NAME);
+    const home = path.join(root, HOME_NAME);
+    const tmp = path.join(root, TMPDIR_NAME);
+    const cwd = path.join(root, WORK_NAME);
+    await guardStep(
+      `making the calibration's directories and script under ${root} ` +
+        `(${context})`,
+      async () => {
+        for (const directory of [home, tmp, cwd]) {
+          await fsp.mkdir(directory);
+        }
+        await fsp.writeFile(script, await fsp.readFile(CALIBRATION_SOURCE), {
+          flag: "wx",
+        });
+      },
+    );
+    const binding = releaseBinding(release);
+    const emitted = WARNING_CALIBRATIONS[kind];
+    const result = await runProduct(binding, {
+      cwd,
+      argv: [script, reportPath, JSON.stringify(emitted)],
+      env: exactEnvironmentOverrides(binding, moduleRunEnvironment(home, tmp)),
+      timeoutMs: MODULE_RUN_TIMEOUT_MS,
+    });
+    const harnessError = (problem: string): Error =>
+      new Error(
+        `harness error (H-11): ${context}: ${problem}; the process ` +
+          `${describeEnding(result)}, ${describeStreams(result)}`,
+      );
+    if (result.exitCode !== 0 || result.signal !== null) {
+      throw harnessError("the calibration did not exit with code 0 on its own");
+    }
+    if (result.stdoutBytes.length > 0) {
+      throw harnessError("the calibration wrote to standard output");
+    }
+    const bytes = await readReportBytes(reportPath, context);
+    if (bytes === null) throw harnessError("the calibration left no report");
+    const decoding = guardSyncStep(
+      `decoding the calibration's report (${context})`,
+      () => decodeCalibrationReport(bytes),
+    );
+    if (!decoding.ok) {
+      throw harnessError(`its report is malformed (${decoding.problem})`);
+    }
+    const { pid, warnings } = decoding;
+    const delivered = warnings.map((warning) => ({
+      type: warning.name,
+      code: warning.code,
+      message: warning.message,
+      detail: warning.detail,
+    }));
+    const asEmitted =
+      warnings.length === emitted.length &&
+      warnings.every((warning, index) => {
+        const wanted = emitted[index];
+        return (
+          wanted !== undefined &&
+          warning.type === "object" &&
+          warning.name === wanted.type &&
+          warning.code === wanted.code &&
+          warning.message === wanted.message &&
+          warning.detail === wanted.detail
+        );
+      });
+    if (!asEmitted) {
+      throw harnessError(
+        `the warnings its listener was delivered, ` +
+          `${JSON.stringify(delivered)}, are not those it emitted, ` +
+          JSON.stringify(emitted),
+      );
+    }
+    const stderr = guardSyncStep(
+      `decoding the calibration's standard error (${context})`,
+      () => {
+        try {
+          return new TextDecoder("utf-8", { fatal: true }).decode(
+            result.stderrBytes,
+          );
+        } catch {
+          return null;
+        }
+      },
+    );
+    if (stderr === null) throw harnessError("its standard error is no UTF-8");
+    return { context, pid, warnings, stderr };
+  } finally {
+    await removeRunDirectory(root, context);
+  }
+}
+
+/** A calibration report's decoding: its members, or what makes it malformed. */
+type CalibrationDecoding =
+  | {
+      readonly ok: true;
+      readonly pid: number;
+      readonly warnings: readonly CapturedWarning[];
+    }
+  | { readonly ok: false; readonly problem: string };
+
+/**
+ * Decode a calibration report's bytes: UTF-8 JSON holding exactly the
+ * protocol, the process identifier, and the warnings delivered, each read
+ * as a module run's report reads one.
+ */
+function decodeCalibrationReport(bytes: Uint8Array): CalibrationDecoding {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      problem: `its bytes are no UTF-8 JSON (${describeError(error)})`,
+    };
+  }
+  try {
+    const record = readRecord(parsed, "the calibration's report", [
+      "pid",
+      "protocol",
+      "warnings",
+    ]);
+    if (record["protocol"] !== WARNING_CALIBRATION_PROTOCOL) {
+      throw new ReportShapeError(
+        `its protocol is ${JSON.stringify(record["protocol"])}, not ` +
+          JSON.stringify(WARNING_CALIBRATION_PROTOCOL),
+      );
+    }
+    const pid = record["pid"];
+    if (typeof pid !== "number" || !Number.isSafeInteger(pid) || pid <= 0) {
+      throw new ReportShapeError(
+        `its pid ${JSON.stringify(pid)} is no positive integer`,
+      );
+    }
+    const warnings = readArray(record["warnings"], "warnings").map(
+      (warning, index) => readWarning(warning, `warnings[${String(index)}]`),
+    );
+    return { ok: true, pid, warnings };
+  } catch (error) {
+    if (error instanceof ReportShapeError) {
+      return { ok: false, problem: error.message };
+    }
+    throw error;
+  }
+}
+
+/**
+ * The hint line `calibration`'s release appends to its first warning: the
+ * line after that warning's form at the head of its standard error.
+ */
+function learnHint(calibration: CalibrationRun): string {
+  const [first] = calibration.warnings;
+  const head = first === undefined ? null : printedHead(first, calibration.pid);
+  if (head === null) {
+    throw calibrationError(calibration, "its first warning cannot be rendered");
+  }
+  const lead = `${head}${LF}`;
+  const { stderr } = calibration;
+  if (!stderr.startsWith(lead)) {
+    throw calibrationError(
+      calibration,
+      `its standard error does not begin with the first warning's form ` +
+        `${JSON.stringify(lead)}, so the release prints warnings in a form ` +
+        `the oracle does not know`,
+    );
+  }
+  const end = stderr.indexOf(LF, lead.length);
+  if (end <= lead.length) {
+    throw calibrationError(
+      calibration,
+      "no hint line follows the first warning's form",
+    );
+  }
+  return stderr.slice(lead.length, end);
+}
+
+/**
+ * Require `calibration`'s whole standard error to be what `form` renders
+ * from the warnings its listener was delivered.
+ */
+function confirmCalibration(
+  form: WarningForm,
+  calibration: CalibrationRun,
+): void {
+  const rendering = renderWarnings(calibration.warnings, calibration.pid, form);
+  if (!rendering.ok) throw calibrationError(calibration, rendering.problem);
+  if (rendering.text !== calibration.stderr) {
+    throw calibrationError(
+      calibration,
+      `its standard error is not what the learned form renders from its ` +
+        `warnings, so the release prints warnings in a form the oracle does ` +
+        `not know — ` +
+        describeByteDifference(
+          Buffer.from(calibration.stderr, "utf8"),
+          Buffer.from(rendering.text, "utf8"),
+          "standard error",
+          "rendered",
+        ),
+    );
+  }
+}
+
+function calibrationError(calibration: CalibrationRun, problem: string): Error {
+  return new Error(
+    `harness error (H-11): ${calibration.context}: ${problem}; standard ` +
+      `error ${quoteStream(calibration.stderr)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Files
 // ---------------------------------------------------------------------------
 
@@ -1319,11 +2541,17 @@ async function readImportingModule(
   );
 }
 
-/** A fresh run directory under the OS temporary directory, physical. */
-async function makeRunDirectory(context: string): Promise<string> {
+/**
+ * A fresh directory named with `prefix` under the OS temporary directory,
+ * physical: a run's own, or a warning calibration's.
+ */
+async function makeScratchDirectory(
+  prefix: string,
+  context: string,
+): Promise<string> {
   const made = await guardStep(
-    `creating a run directory under ${os.tmpdir()} (${context})`,
-    () => fsp.mkdtemp(path.join(os.tmpdir(), MODULE_RUN_PREFIX)),
+    `creating a directory under ${os.tmpdir()} (${context})`,
+    () => fsp.mkdtemp(path.join(os.tmpdir(), prefix)),
   );
   try {
     return await guardStep(

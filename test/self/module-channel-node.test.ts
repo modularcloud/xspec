@@ -48,6 +48,7 @@ import { ModuleStaging, runtimeArm } from "../helpers/module-channel.js";
 import type { Placement } from "../helpers/module-channel.js";
 import {
   assertModuleLoaded,
+  CALL_CASES,
   decodeModuleRunReport,
   importingModuleKind,
   importingModuleName,
@@ -84,6 +85,20 @@ const BOOTSTRAP_SOURCE = fileURLToPath(
 
 /** The user condition a stray NODE_OPTIONS would carry into a run. */
 const STRAY_CONDITION = "xspec-stray-condition";
+
+/** A loaded value's own `defineConfig` key, as the report lists it. */
+const DEFINE_CONFIG_KEY = {
+  kind: "string",
+  name: "defineConfig",
+  enumerable: true,
+} as const;
+
+/** A module namespace's own `Symbol.toStringTag` key, likewise. */
+const TO_STRING_TAG_KEY = {
+  kind: "symbol",
+  name: "Symbol.toStringTag",
+  enumerable: false,
+} as const;
 
 /** A manifest's text. */
 function manifest(members: Record<string, unknown>): string {
@@ -322,7 +337,10 @@ test("a dual stand-in package loads along each of Node.js's four routes on each 
       const report = loaded.report;
       expect(report.load.value, context).toEqual({
         type: "object",
-        ownPropertyNames: ["defineConfig"],
+        ownKeys:
+          route === "require"
+            ? [DEFINE_CONFIG_KEY]
+            : [DEFINE_CONFIG_KEY, TO_STRING_TAG_KEY],
       });
       expect(run.result.stdout, context).toBe("");
       expect(run.result.stderr, context).toBe("");
@@ -489,9 +507,12 @@ test("a stray NODE_OPTIONS carrying a user condition the stand-in's exports map 
           request(staged, release, route, context),
         );
         const loaded = assertModuleLoaded(run, "stand-in");
-        expect(loaded.report.load.value.ownPropertyNames, context).toEqual([
-          "defineConfig",
-        ]);
+        expect(
+          loaded.report.load.value.ownKeys
+            ?.filter((key) => key.kind === "string")
+            .map((key) => key.name),
+          context,
+        ).toEqual(["defineConfig"]);
         for (const name of Object.keys(strays)) {
           expect(loaded.report.environment[name], context).toBeUndefined();
         }
@@ -654,7 +675,7 @@ test("the importing modules' place: each route's file, named for its route and n
   );
 });
 
-test("the report's decoder reads exactly the bootstrap's members, each of its kind and consistent with the phase, and says what makes any other report malformed — a missing or extra member, another protocol, a value of another kind, a phase of its own, a load outcome inconsistent with the phase or the note, bytes that are no UTF-8 or no JSON (TEST-SPEC H-3: failing loudly when required information is absent)", () => {
+test("the report's decoder reads exactly the bootstrap's members, each of its kind and consistent with the phase — T7.6-6's own-key listing and calls among them — and says what makes any other report malformed — a missing or extra member, another protocol, a value of another kind, a phase of its own, a load outcome or calls inconsistent with the phase or the note, calls out of the bootstrap's order or unfinished at completion, a call verdict inconsistent with its values, a trap or proxy of its own, bytes that are no UTF-8 or no JSON (TEST-SPEC H-3: failing loudly when required information is absent)", () => {
   const encode = (value: unknown): Uint8Array =>
     new TextEncoder().encode(JSON.stringify(value));
   const thrown = {
@@ -672,6 +693,21 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     detail: null,
     stack: "DeprecationWarning: Invalid 'main' field",
   };
+  const returned = (name: string): Record<string, unknown> => ({
+    case: name,
+    outcome: "returned-argument",
+    returned: null,
+    thrown: null,
+  });
+  const results = CALL_CASES.map(returned);
+  const calls = {
+    reading: { type: "function", thrown: null },
+    results,
+    traps: [],
+  };
+  const withResults = (
+    altered: readonly Record<string, unknown>[],
+  ): Record<string, unknown> => ({ ...calls, results: altered });
   const valid = {
     protocol: MODULE_RUN_PROTOCOL,
     argv: ["/run/bootstrap.cjs", "/staging/importing.cjs", "/run/r", "require"],
@@ -683,8 +719,9 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     importingModule: { topLevelThis: "object", location: "/staging/i.cjs" },
     load: {
       outcome: "loaded",
-      value: { type: "object", ownPropertyNames: ["defineConfig"] },
+      value: { type: "object", ownKeys: [DEFINE_CONFIG_KEY] },
     },
+    calls,
     bootstrapError: null,
     warnings: [warning],
     exit: { code: 0 },
@@ -696,29 +733,102 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     Object.fromEntries(
       Object.entries(record).filter(([name]) => name !== member),
     );
+  const failedLoad = {
+    ...valid,
+    load: { outcome: "failed", error: thrown },
+    importingModule: null,
+    calls: null,
+  };
+  const loading = {
+    ...valid,
+    phase: "loading",
+    load: null,
+    importingModule: null,
+    calls: null,
+  };
+  const listing = (ownKeys: unknown): Record<string, unknown> => ({
+    ...valid,
+    load: { outcome: "loaded", value: { type: "object", ownKeys } },
+  });
   const decodes: readonly [string, unknown][] = [
     ["a loaded report", valid],
+    ["a failed load", failedLoad],
+    ["a run ending while loading", loading],
+    ["a bootstrap failure", { ...loading, bootstrapError: thrown, exit: null }],
     [
-      "a failed load",
+      "a run ending while reading defineConfig",
       {
         ...valid,
-        load: { outcome: "failed", error: thrown },
-        importingModule: null,
+        phase: "calling",
+        calls: { ...calls, reading: null, results: [] },
       },
     ],
     [
-      "a run ending while loading",
-      { ...valid, phase: "loading", load: null, importingModule: null },
+      "a run ending during the calls",
+      { ...valid, phase: "calling", calls: withResults(results.slice(0, 3)) },
     ],
     [
-      "a bootstrap failure",
+      "a bootstrap failure during the calls",
       {
         ...valid,
-        phase: "loading",
-        load: null,
-        importingModule: null,
+        phase: "calling",
+        calls: withResults(results.slice(0, 1)),
         bootstrapError: thrown,
         exit: null,
+      },
+    ],
+    [
+      "a defineConfig that is no function",
+      {
+        ...valid,
+        calls: {
+          ...calls,
+          reading: { type: "undefined", thrown: null },
+          results: [],
+        },
+      },
+    ],
+    [
+      "a read of defineConfig that threw",
+      {
+        ...valid,
+        calls: { ...calls, reading: { type: null, thrown }, results: [] },
+      },
+    ],
+    [
+      "calls returning another value or throwing, and traps invoked",
+      {
+        ...valid,
+        calls: {
+          ...withResults([
+            {
+              ...returned("object"),
+              outcome: "returned-other",
+              returned: { type: "object", text: null },
+            },
+            { ...returned("array"), outcome: "threw", thrown },
+            ...results.slice(2),
+          ]),
+          traps: [
+            { proxy: "first", trap: "get" },
+            { proxy: "second", trap: "ownKeys" },
+          ],
+        },
+      },
+    ],
+    [
+      "a symbol key with no description, and a key whose enumerability is unknown",
+      listing([
+        DEFINE_CONFIG_KEY,
+        { kind: "symbol", name: null, enumerable: false },
+        { kind: "string", name: "other", enumerable: null },
+      ]),
+    ],
+    [
+      "a loaded value whose keys are not listed",
+      {
+        ...valid,
+        load: { outcome: "loaded", value: { type: "number", ownKeys: null } },
       },
     ],
   ];
@@ -762,6 +872,114 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     ["an exit code that is no integer", { ...valid, exit: { code: 1.5 } }],
     ["a process identifier of zero", { ...valid, pid: 0 }],
     ["an array for the report", [valid]],
+    ["the previous protocol", { ...valid, protocol: "xspec-module-run/1" }],
+    ["calls while still loading", { ...loading, calls }],
+    ["calls without a loaded module", { ...failedLoad, calls }],
+    ["a loaded module without calls", { ...valid, calls: null }],
+    [
+      "the phase calling without calls",
+      { ...valid, phase: "calling", calls: null },
+    ],
+    [
+      "completed with defineConfig unread",
+      { ...valid, calls: { ...calls, reading: null, results: [] } },
+    ],
+    [
+      "completed with a call missing",
+      { ...valid, calls: withResults(results.slice(0, -1)) },
+    ],
+    [
+      "calls out of the bootstrap's order",
+      {
+        ...valid,
+        calls: withResults([
+          ...results.slice(1, 2),
+          ...results.slice(0, 1),
+          ...results.slice(2),
+        ]),
+      },
+    ],
+    [
+      "a call of its own",
+      { ...valid, calls: withResults([...results, returned("another")]) },
+    ],
+    [
+      "calls made with no function read",
+      {
+        ...valid,
+        calls: { ...calls, reading: { type: "object", thrown: null } },
+      },
+    ],
+    [
+      "a reading with both a type and a thrown value",
+      { ...valid, calls: { ...calls, reading: { type: "function", thrown } } },
+    ],
+    [
+      "a returned value beside the outcome returned-argument",
+      {
+        ...valid,
+        calls: withResults([
+          { ...returned("object"), returned: { type: "object", text: null } },
+          ...results.slice(1),
+        ]),
+      },
+    ],
+    [
+      "the outcome threw without the thrown value",
+      {
+        ...valid,
+        calls: withResults([
+          { ...returned("object"), outcome: "threw" },
+          ...results.slice(1),
+        ]),
+      },
+    ],
+    [
+      "a call outcome of its own",
+      {
+        ...valid,
+        calls: withResults([
+          { ...returned("object"), outcome: "returned" },
+          ...results.slice(1),
+        ]),
+      },
+    ],
+    [
+      "a trap of its own",
+      {
+        ...valid,
+        calls: { ...calls, traps: [{ proxy: "first", trap: "call" }] },
+      },
+    ],
+    [
+      "a proxy of its own",
+      {
+        ...valid,
+        calls: { ...calls, traps: [{ proxy: "third", trap: "get" }] },
+      },
+    ],
+    [
+      "a string key with no name",
+      listing([{ kind: "string", name: null, enumerable: true }]),
+    ],
+    [
+      "a key of another kind",
+      listing([{ kind: "number", name: "0", enumerable: true }]),
+    ],
+    [
+      "an enumerability that is no boolean",
+      listing([{ ...DEFINE_CONFIG_KEY, enumerable: "yes" }]),
+    ],
+    [
+      "the previous listing of names",
+      {
+        ...valid,
+        load: {
+          outcome: "loaded",
+          value: { type: "object", ownPropertyNames: ["defineConfig"] },
+        },
+      },
+    ],
   ];
   for (const [label, value] of malformed) {
     const decoding = decodeModuleRunReport(encode(value));
