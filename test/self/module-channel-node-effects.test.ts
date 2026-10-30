@@ -2,14 +2,15 @@
 // (TEST-SPEC 17 preamble: internal self-tests cover harness machinery
 // certification does not exercise; T7.6-7(b), (c), and (e), §7.6 Pairing,
 // H-2, H-3, S-3, E-1; helpers/module-channel-node.ts and its bootstrap,
-// helpers/module-channel-bootstrap.cjs). No runtime test of 7.6 is
-// registered yet, and S-10's checks — each observation catching the effect
-// it exists for on each release and route — build on these; here the
-// observations' plumbing is pinned before any product exists, on each of
-// E-1's releases, so XSPEC_NODE_RELEASES_DIR must name them, as CI's
-// harness-self job and AGENTS.md's recipe do (unset, every test here that
-// runs a release fails as the harness error NodeReleaseError, never a
-// skip):
+// helpers/module-channel-bootstrap.cjs). T7.6-7, whose observations these
+// are, is not registered yet (T7.6-6 is the one runtime test of 7.6 so far,
+// test/suite/registry/section-7.6-ii.ts), and S-10's checks — each
+// observation catching the effect it exists for on each release and route —
+// build on these; here the observations' plumbing is pinned before any
+// product exists, on each of E-1's releases, so XSPEC_NODE_RELEASES_DIR
+// must name them, as CI's harness-self job and AGENTS.md's recipe do
+// (unset, every test here that runs a release fails as the harness error
+// NodeReleaseError, never a skip):
 // - a conforming dual stand-in, along each route on each release, with
 //   T7.6-7(e)'s FIFOs staged — `xspec.config.ts` in the working directory,
 //   in the importing module's directory, and in HOME — leaves every

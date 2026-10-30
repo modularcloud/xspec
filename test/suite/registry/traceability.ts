@@ -587,6 +587,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // 7's, 7.4's, and 7.5's rules, a premise of the staging, asserted of no
   // product), so it carries 7.6 alone.
   "T7.6-3": ["7.6"],
+  // T7.6-6: 7.6's runtime contract (Runtime, through Reach's routes) for
+  // the module's exports and defineConfig's return, on every release E-1
+  // provisions along each of Node.js's routes; it stages no configuration
+  // and asserts no other passage, so it carries 7.6 alone.
+  "T7.6-6": ["7.6"],
   "T8-1": ["8"],
   "T8-2": ["8"],
   "T8-3": ["8"],
