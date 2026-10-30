@@ -202,13 +202,14 @@ async function expectDiagnosed(
   }
 }
 
-test("no package directory given: making a staging fails as a diagnosed assertion failure declining shrinking, on the built product's binding and any other alike, before anything is staged (TEST-SPEC H-8, C-2)", async () => {
+test("no package directory given: making a staging fails as a diagnosed assertion failure declining shrinking, its diagnosis naming the executable beside which none is given (the absent artifact S-7's no-product sweep requires named), on the built product's binding and any other alike, before anything is staged (TEST-SPEC H-8, C-2)", async () => {
   const parent = await freshDirectory();
   for (const binding of [standInBinding(), builtBinding()]) {
     await expectDiagnosed(
       ModuleStaging.create(binding, "no package directory", { parent }),
       `${binding.label} with no package directory`,
       "no package directory is given",
+      [binding.command, ...(binding.prefixArgs ?? [])].join(" "),
       "Nothing was staged",
     );
   }

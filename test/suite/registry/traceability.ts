@@ -571,6 +571,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T7.5-4": ["7.5", "7", "14"],
   "T7.5-5": ["7.5", "14"],
   "T7.5-6": ["7.5", "12.1", "14"],
+  // T7.6-2: 7.6's type contract for valid configurations, in every
+  // covered setup; the files are 7's declarative form, staged valid
+  // under 7, 7.3, 7.4, and 7.5 (a premise of the staging, asserted of no
+  // product), so it carries 7.6 alone.
+  "T7.6-2": ["7.6"],
   "T8-1": ["8"],
   "T8-2": ["8"],
   "T8-3": ["8"],

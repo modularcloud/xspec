@@ -84,7 +84,11 @@
 //      full-suite job (the product built), and, like the stub, keeps its
 //      subject in every phase. Each body must fail diagnosed, its diagnosis
 //      naming the absent artifact: the driver's pre-flight refuses the
-//      body's first product invocation, before anything is spawned. The
+//      body's first product invocation, before anything is spawned — or,
+//      for a test of 7.6, which invokes no executable, the module channel
+//      finds no package directory given (that binding carries none) and
+//      fails diagnosed, naming the executable beside which none is given
+//      (helpers/module-channel.ts `modulePackageDirectory`). The
 //      probe also runs against an unflagged binding of the certification
 //      fixtures' shape over the same absent path, which must end a harness
 //      error: an unbuilt fixture is a harness defect, never a certified

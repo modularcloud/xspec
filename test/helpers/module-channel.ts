@@ -19,7 +19,11 @@
 // - The package directory (`modulePackageDirectory`; C-2, H-8), checked
 //   before anything is staged. None given: every body of 7.6 fails there as
 //   a diagnosed assertion failure (`HarnessAssertionError`, declining
-//   shrinking), the module channel counting as part of the product. Given,
+//   shrinking), the module channel counting as part of the product, its
+//   diagnosis naming the executable — the binding's command line — beside
+//   which none is given, as every product-facing body's diagnosis names the
+//   absent artifact when no product is installed (H-8; S-7's no-product
+//   sweep, test/self/s7-red-green-sweep.test.ts). Given,
 //   it must be an absolute path — never resolved against the working
 //   directory, as helpers/node-releases.ts refuses a relative
 //   XSPEC_NODE_RELEASES_DIR — naming a directory. On the built product's
@@ -724,9 +728,11 @@ export async function modulePackageDirectory(
 ): Promise<PackageDirectory> {
   const given = binding.packageDir;
   if (given === undefined) {
+    const executable = [binding.command, ...(binding.prefixArgs ?? [])];
     fail(
       `${context}: ${binding.label}: no package directory is given beside ` +
-        `the executable — the module channel counts as part of the product, ` +
+        `the executable (${executable.join(" ")}) — the module channel ` +
+        `counts as part of the product, ` +
         `so every test of 7.6 fails here, diagnosed (TEST-SPEC H-8, C-2; ` +
         `H-2's module channel). Give the directory ` +
         `.github/scripts/pack-package.sh prints as XSPEC_PACKAGE_DIR ` +
