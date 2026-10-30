@@ -585,17 +585,29 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // (6.5); and a baseline whose discovered configuration fails validation
   // failing `impact --base` and `review create --base` as the code-less
   // usage error (6.3, 12.0), `review create` writing no session (10.7).
+  // (d)'s baselines: a baseline's configuration read as the current one's
+  // (7, 6.3) — `impact --base` over an undiscovered configuration
+  // importing from any specifier resolving, its impact information (9.3:
+  // categories with attributions, collapsed chains, deleted and added
+  // identities, impacted locations with witness edges and paths) the
+  // `"xspec"` twin's, the edited section `changed` (5.6); `review create
+  // --base` and `review status`, which reconstructs the recorded baseline,
+  // answering the twin's items (10.7); and a baseline whose configuration
+  // spells a scanner-rejected escape failing as the code-less usage error
+  // (6.3, 12.0).
   "T7-10": [
     "7",
     "1.7",
     "4",
     "4.5",
+    "5.6",
     "6.3",
     "6.4",
     "6.5",
     "6.6",
     "7.2",
     "7.3",
+    "9.3",
     "10.7",
     "11.1",
     "11.4",

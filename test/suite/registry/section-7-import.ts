@@ -1,11 +1,12 @@
 // TEST-SPEC §7 configuration import — T7-9's arms (a), the specifier's
 // spellings, (b), the scanner-rejected escapes, (c), the specifier's
 // designations, and (d), installs; and T7-10's arms (a) and (b), the
-// configuration file as a source, undiscovered and discovered, and (c), its
-// consequences, with the converse (below the T7-9 header). Configuration
-// basics (T7-1…T7-3) and T7-7 live in section-7-basics.ts, discovery
-// (T7-4…T7-6, T7-8) in section-7-discovery.ts, and P-19, the property
-// searching the spellings (a) never stages, in section-16-p19.ts.
+// configuration file as a source, undiscovered and discovered, (c), its
+// consequences, with the converse, and (d), baselines (below the T7-9
+// header). Configuration basics (T7-1…T7-3) and T7-7 live in
+// section-7-basics.ts, discovery (T7-4…T7-6, T7-8) in
+// section-7-discovery.ts, and P-19, the property searching the spellings
+// (a) never stages, in section-16-p19.ts.
 //
 // Registered product-facing body (C-2 "one code path"): each arm builds its
 // own fresh workspace (H-1), drives the product strictly as a subprocess
@@ -220,9 +221,10 @@
 // designating derived-file paths, 13.4), and `"./specs/A.md"` (the Markdown
 // emit destination of `specs/A.mdx` while emission is enabled, 7.3). Every
 // configuration is a staged-source record made at module load and
-// declared well-formed (S-9), composed through the shared builder's head
-// (`CONFIG_IMPORT_HEAD`); none of these literals spells an escape (checked
-// at load).
+// declared well-formed (S-9) — but (d)'s not-well-formed baseline's,
+// declared unparseable — composed through the shared builder's head
+// (`CONFIG_IMPORT_HEAD`); none of these literals spells an escape but that
+// baseline's, built from `BACKSLASH` (checked at load).
 //
 // (a) Undiscovered (`T7_10_A_ARMS`): T7-9's configuration over each
 // specifier (`configImportText`), no code group at all, so no configured
@@ -318,14 +320,64 @@
 // protocol (helpers/snapshot.ts `assertLeavesUnchanged`), H-6's lock-path
 // exclusion applied around the mutating `move` and `review create`.
 //
+// (d) Baselines (`T7_10_D_ARMS`; SPEC 7: a baseline's configuration, 6.3,
+// is read alike). Each arm's workspace is a repository at the workspace
+// root (the builder's scripted commits, H-1) whose commit `c1` holds an
+// undiscovered configuration — T7-9's, no code group — importing from
+// `""`, `"./nowhere"`, `"XSPEC"`, `"./fifo"`, or `"trap"`, one arm each,
+// beside `specs/A.mdx` holding `<S id="a">Old A</S>`
+// (`T7_10_D_C1_SOURCE`); the working tree then takes T7-9's twin
+// configuration, importing from `"xspec"`, and T7-10's source, `<S
+// id="a">A</S>` — its sources differing from `c1`'s by one section's edited
+// text, its workspace valid (a premise `build --json`, exit 0
+// finding-free) — and, what the specifier designates varied as T7-9(c) and
+// (d) vary it for the current configuration, the FIFO arm a FIFO at `fifo`
+// (`stageFifo`, never opened by the harness) and the trap arm T7-9(d)'s
+// trap package at `node_modules/trap` (`trapManifest` and `TRAP_ENTRY`),
+// each staged in the working tree alone, once `c1` is committed and the
+// premise has run. `impact --base c1 --json` exits 0, its impact
+// information — the report decoded through H-3's adapter but for the
+// baseline a product may echo: categories with their attributions,
+// collapsed chains, deleted and added identities, and each impacted
+// location with its witness edge and path (9.3) — reporting the edited
+// section `specs/A.mdx#a` `changed` (5.6) and equal to that against the
+// twin commit; the reports are never compared byte for byte, the two
+// commits' identities differing (E-6). In the FIFO and trap arms, `review
+// create --base c1 --name n --json` and then `review status n --json`
+// (which resolves and reconstructs the recorded baseline, reading its
+// configuration again, 10.7) each exit 0, the items `status` reports —
+// their kinds, scopes, statuses, and blocked states, in item order (10.5)
+// — equal to the twin's. After each of those commands, the FIFO is still a
+// FIFO in place (`assertFifosIntact`), the command having ended within its
+// own guard (S-3; a hang renamed for its arm, as (c)'s are), and no trap
+// marker stands at the workspace root and neither stream carries the
+// trap's tell (`assertTrapNeverRan`). The twin (`runBaselineReadTwin`) runs
+// first, in a workspace of its own: `c1` importing from `"xspec"` beside
+// the same source, the working tree the arms' but for the FIFO and the
+// trap (as T7-9(d)'s twin holds no `node_modules`: discovery under
+// `specs/*.mdx` examines no root-level entry but `specs`, SPEC 7, so
+// neither reaches a conforming product's answer). It runs the three
+// commands, its answers each arm's comparison basis; its diagnosed failure
+// is collected as an arm of its own, each comparison then failing
+// diagnosed. And a commit whose configuration spells T7-9(b)'s hexadecimal
+// escape with one hex digit as its specifier (`T7_10_D_ESCAPE`, its
+// backslash `BACKSLASH`, declared unparseable, S-9, and pinned as T7-9's
+// records are), the working tree's configuration and sources valid as
+// above: `impact --base c1 --json` fails as T6.3-4's baseline whose
+// configuration fails validation does — exit 2, the error document's
+// `code` and `path` `null`, standard error naming `xspec.config.ts` (6.3,
+// 14.20).
+//
 // Every T7-10 arm builds its own fresh workspace (H-1); its diagnosed
 // failure is collected and the body fails once at the end naming every
 // failed arm, a harness error or a hang propagating at once, as in T7-9.
 // Certification: T7-10 is in no conformer's scope (CERTIFICATIONS.md,
 // Exclusions, "T7-9 and T7-10": its findings for the discovered
 // configuration, its gated reads, its refused `move`, and its failing
-// baselines, each beside its undiscovered twin's clean outcome, fail loud
-// against the product each targets; the converse's unrewritten import is
+// baselines, each beside its undiscovered twin's clean outcome, and each
+// baseline configuration of (d) answering exactly as its `"xspec"` twin,
+// fail loud against the product each targets, (d)'s FIFO asserted
+// afterwards still a FIFO in place; the converse's unrewritten import is
 // braced by its discovered twin's refusal over the same import; and the
 // modifies-nothing compares share the compare-around machinery
 // VIOL-CORE-CHATTYREADS certifies).
@@ -344,6 +396,7 @@ import {
   decodeInventoryDocument,
   decodePreviewReport,
   decodeSessionListReport,
+  decodeSessionStatusReport,
   decodeViewReport,
   pathValueBytes,
   renderPathValue,
@@ -395,6 +448,7 @@ import {
   diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
@@ -831,8 +885,9 @@ export const T7_9_C_ARMS: readonly DesignationArm[] = [
  * builder's head, the literal, and the builder's tail, nothing else, and the
  * literal spells exactly what the arm states. A mismatch is a harness error
  * thrown at load — the registry fails to load — never a product verdict.
+ * `test` names the arm's test in the diagnosis (T7-10(d) reuses the check).
  */
-function assertStagedAsSpelled(arm: ImportArm): void {
+function assertStagedAsSpelled(arm: ImportArm, test = "T7-9"): void {
   const { literal, spelled } = arm;
   const problems: string[] = [];
   if (arm.config.source !== CONFIG_IMPORT_HEAD + literal + CONFIG_IMPORT_TAIL) {
@@ -877,7 +932,7 @@ function assertStagedAsSpelled(arm: ImportArm): void {
   }
   if (problems.length > 0) {
     throw new Error(
-      `T7-9 ${arm.label}: the staged record ${JSON.stringify(arm.config.name)} ` +
+      `${test} ${arm.label}: the staged record ${JSON.stringify(arm.config.name)} ` +
         `is not spelled as its arm states — ${problems.join("; ")} (module ` +
         "header: a literal reaches its file exactly as spelled; the " +
         `literal's code points: ${codePointsOf(literal)})`,
@@ -1895,19 +1950,21 @@ async function runInstallTwin(
 /**
  * After each (d) command (module header): no marker at the workspace root,
  * and neither standard output nor standard error holding the trap's tell —
- * the trap package's entry never ran.
+ * the trap package's entry never ran. `rule` says why (T7-10(d) reuses the
+ * check for a baseline configuration's import).
  */
 async function assertTrapNeverRan(
   workspace: TestWorkspace,
   result: RunResult,
   context: string,
+  rule = INSTALL_RULE,
 ): Promise<void> {
   const marker = await workspace.kind(TRAP_MARKER);
   if (marker !== "absent") {
     fail(
       `${context}: the trap's marker ${TRAP_MARKER} stands at the ` +
         `workspace root (${marker}) — the trap package's entry ran, ` +
-        `loaded through the configuration's import — where ${INSTALL_RULE}; ` +
+        `loaded through the configuration's import — where ${rule}; ` +
         summarizeResult(result),
     );
   }
@@ -1920,7 +1977,7 @@ async function assertTrapNeverRan(
       fail(
         `${context}: its ${stream} carries what the trap package's entry ` +
           `prints (${JSON.stringify(TRAP_TELL)}) — the entry ran, loaded ` +
-          `through the configuration's import — where ${INSTALL_RULE}; ` +
+          `through the configuration's import — where ${rule}; ` +
           summarizeResult(result),
       );
     }
@@ -3071,22 +3128,25 @@ function createArgv(c1: string): readonly string[] {
   ];
 }
 
+/** Why (c)'s discovered baseline fails (module header). */
+const DISCOVERED_BASELINE_WHY =
+  "c1's configuration, discovered by its own code group, is a code source " +
+  "failing validation (14.15 and 14.18), so the baseline content cannot " +
+  "be parsed and validated as a workspace: a usage error, exit 2 (SPEC " +
+  "6.3, 12.0; TEST-SPEC T7-10(c), T6.3-4; H-5)";
+
 /**
  * A baseline-taking command failing as T6.3-4's baseline failing validation
  * does (module header): exit 2, the 12.7 error document the whole of
  * standard output, its `code` and `path` `null`, and standard error naming
- * the offending file, `xspec.config.ts`.
+ * the offending file, `xspec.config.ts`. `why` says why the baseline fails.
  */
-function expectFailingBaseline(result: RunResult, context: string): void {
-  assertExitCode(
-    result,
-    2,
-    `${context} — c1's configuration, discovered by its own code group, ` +
-      "is a code source failing validation (14.15 and 14.18), so the " +
-      "baseline content cannot be parsed and validated as a workspace: a " +
-      "usage error, exit 2 (SPEC 6.3, 12.0; TEST-SPEC T7-10(c), T6.3-4; " +
-      "H-5)",
-  );
+function expectFailingBaseline(
+  result: RunResult,
+  context: string,
+  why: string,
+): void {
+  assertExitCode(result, 2, `${context} — ${why}`);
   const error = expectErrorDocument(result, context);
   assertSameJson(
     { code: error.code, path: error.path },
@@ -3195,6 +3255,7 @@ async function runBaselineArm(
     expectFailingBaseline(
       await runAt(product, workspace, impactArgv(c1)),
       `${label}: ${IMPACT_LABEL}`,
+      DISCOVERED_BASELINE_WHY,
     );
     const createContext = `${label}: ${CREATE_LABEL}`;
     await assertLeavesUnchanged(
@@ -3203,6 +3264,7 @@ async function runBaselineArm(
         expectFailingBaseline(
           await runAt(product, workspace, createArgv(c1)),
           createContext,
+          DISCOVERED_BASELINE_WHY,
         );
       },
       `${createContext}: refused at baseline resolution, review create ` +
@@ -3361,6 +3423,536 @@ const T7_10_C_ARMS: readonly ConsequenceArm[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// T7-10 (d): baselines
+
+/**
+ * (d)'s `c1` source (module header): `specs/A.mdx` with its one section's
+ * text before the edit the working tree holds — T7-10's own source,
+ * `<S id="a">A</S>` — so that `c1`'s sources differ from the working
+ * tree's by that section's edited text alone.
+ */
+const T7_10_D_C1_SOURCE: StagedMdx = stagedMdx(
+  `T7-10 specs/A.mdx ((d) c1's source, its one section's text before the working tree's edit: <S id="a">Old A</S>)`,
+  `<S id="a">Old A</S>
+`,
+);
+
+/** The section whose text `c1` and the working tree differ by (5.6). */
+const EDITED_SECTION = `${T7_10_SOURCE_PATH}#a`;
+
+/** The opening tag both texts of `specs/A.mdx` spell, its id `a`. */
+const EDITED_SECTION_OPENING = '<S id="a">';
+
+// c1's source and the working tree's each spell the one section `a` once,
+// their texts differing (module header).
+for (const record of [T7_10_D_C1_SOURCE, T7_10_SOURCE]) {
+  if (
+    typeof record.source !== "string" ||
+    !record.source.startsWith(EDITED_SECTION_OPENING) ||
+    occurrences(record.source, EDITED_SECTION_OPENING) !== 1
+  ) {
+    throw new Error(
+      `T7-10(d) fixture self-check: ${record.name} must spell the one ` +
+        `section a, opening with ${EDITED_SECTION_OPENING}, once (harness bug)`,
+    );
+  }
+}
+if (T7_10_D_C1_SOURCE.source === T7_10_SOURCE.source) {
+  throw new Error(
+    "T7-10(d) fixture self-check: c1's source must differ from the " +
+      "working tree's by its section's edited text (harness bug)",
+  );
+}
+
+/**
+ * What a resolving (d) arm stages in the working tree once `c1` is
+ * committed (module header): nothing; a FIFO at the path `"./fifo"`
+ * designates; or T7-9(d)'s trap package at `node_modules/trap`, where
+ * resolving `"trap"` from the configuration file's directory looks.
+ */
+type BaselineReadStaging = "none" | "fifo" | "trap";
+
+/** One (d) arm whose `c1` resolves (module header). */
+interface BaselineReadArm {
+  /** `c1`'s specifier as diagnoses name it, with what it designates. */
+  readonly label: string;
+  /** `c1`'s specifier exactly as it stands in the file, its quotes included. */
+  readonly literal: string;
+  /** `c1`'s configuration: T7-9's over `literal`, no code group. */
+  readonly c1Config: StagedTs;
+  readonly staging: BaselineReadStaging;
+}
+
+/** A resolving (d) arm: `c1`'s configuration declared well-formed (S-9). */
+function baselineReadArm(
+  label: string,
+  literal: string,
+  staging: BaselineReadStaging,
+): BaselineReadArm {
+  return {
+    label,
+    literal,
+    staging,
+    c1Config: stagedTs(
+      `T7-10 xspec.config.ts ((d) c1's undiscovered configuration, importing from ${literal})`,
+      configImportText(literal),
+    ),
+  };
+}
+
+/** T7-10(d)'s five resolving baselines (TEST-SPEC T7-10(d)). */
+const T7_10_D_ARMS: readonly BaselineReadArm[] = [
+  baselineReadArm('the empty string ""', '""', "none"),
+  baselineReadArm(
+    'the relative specifier "./nowhere", designating nothing',
+    '"./nowhere"',
+    "none",
+  ),
+  baselineReadArm(
+    'the bare name "XSPEC", a single-casing arm (12.0: no case folding)',
+    '"XSPEC"',
+    "none",
+  ),
+  baselineReadArm(
+    `the relative specifier "./${FIFO_PATH}", designating a FIFO at that ` +
+      "path in the working tree",
+    DOUBLE_QUOTE + "./" + FIFO_PATH + DOUBLE_QUOTE,
+    "fifo",
+  ),
+  baselineReadArm(
+    `the bare name "${TRAP_NAME}", beside T7-9(d)'s trap package at ` +
+      `${installedDirectory(TRAP_NAME)} in the working tree`,
+    DOUBLE_QUOTE + TRAP_NAME + DOUBLE_QUOTE,
+    "trap",
+  ),
+];
+
+/**
+ * (d)'s not-well-formed baseline (module header): `c1`'s configuration
+ * spells T7-9(b)'s hexadecimal escape with one hex digit as its specifier —
+ * a scanning error of TypeScript 5.9.3, the record declared unparseable
+ * (S-9) — its backslash `BACKSLASH`, so that this module spells no escape.
+ */
+const T7_10_D_ESCAPE: ImportArm = (() => {
+  const escape = `${BACKSLASH}x4`;
+  const literal = DOUBLE_QUOTE + escape + DOUBLE_QUOTE;
+  return {
+    label:
+      "a hexadecimal escape with one hex digit (a backslash, x, then 4), " +
+      "T7-9(b)'s first",
+    literal,
+    spelled: {
+      ...PLAIN_DOUBLE,
+      backslashes: 1,
+      escape: { spelling: escape, at: 1 },
+    },
+    config: stagedTs(
+      "T7-10 xspec.config.ts ((d) c1's configuration spelling a hexadecimal escape with one hex digit as its specifier, a scanning error)",
+      configImportText(literal),
+      "unparseable",
+    ),
+  };
+})();
+
+// (d)'s module-load self-checks (module header): each resolving baseline's
+// literal is one double-quoted literal spelling no escape, its record the
+// builder's over it, the FIFO arm's designating the FIFO's path and the
+// trap arm's the trap package's name; and the not-well-formed baseline's
+// literal is T7-9(b)'s first, staged exactly as spelled.
+for (const arm of T7_10_D_ARMS) {
+  const value = arm.literal.slice(1, -1);
+  if (
+    arm.literal.length < 2 ||
+    !arm.literal.startsWith(DOUBLE_QUOTE) ||
+    !arm.literal.endsWith(DOUBLE_QUOTE) ||
+    value.includes(DOUBLE_QUOTE) ||
+    value.includes(BACKSLASH) ||
+    arm.c1Config.source !== configImportText(arm.literal) ||
+    (arm.staging === "fifo" && value !== "./" + FIFO_PATH) ||
+    (arm.staging === "trap" && value !== TRAP_NAME)
+  ) {
+    throw new Error(
+      `T7-10(d) fixture self-check: the baseline importing from ` +
+        `${arm.literal} must be one double-quoted literal spelling no ` +
+        "escape, its record the builder's over it, designating where its " +
+        "staging stands (harness bug)",
+    );
+  }
+}
+if (T7_9_B_ARMS[0]?.literal !== T7_10_D_ESCAPE.literal) {
+  throw new Error(
+    "T7-10(d) fixture self-check: the not-well-formed baseline's specifier " +
+      "must be T7-9(b)'s first, a hexadecimal escape with one hex digit " +
+      "(harness bug)",
+  );
+}
+assertStagedAsSpelled(T7_10_D_ESCAPE, "T7-10(d)");
+
+/** Why each resolving (d) baseline answers as the twin's (module header). */
+const BASELINE_READ_RULE =
+  "a baseline's configuration is read as the current one's (SPEC 7, 6.3): " +
+  "xspec never interprets, resolves, or loads its import's specifier, " +
+  "making no read on its account, so c1 resolves and everything xspec " +
+  "derives from it is independent of the specifier's spelling and of what " +
+  "it designates — nothing, a FIFO, or an installed package alike " +
+  "(TEST-SPEC T7-10(d))";
+
+/** Why a (d) command's hang is the product's (module header). */
+const BASELINE_READ_BLOCKED =
+  "a product resolving, reading through, or loading c1's configuration's " +
+  'specifier — in the FIFO arm opening the FIFO "./fifo" designates in ' +
+  "the working tree, which has no writer — blocks there, where xspec " +
+  "never resolves, reads, or loads a baseline configuration's specifier " +
+  "(SPEC 7, 6.3; TEST-SPEC T7-10(d))";
+
+/** Why each (d) working tree's premise `build` passes (module header). */
+const BASELINE_READ_PREMISE =
+  "the working tree's configuration imports from " +
+  CONFIG_IMPORT_TWIN_LITERAL +
+  ", no group discovering it, beside a valid source, so the workspace is " +
+  "valid (TEST-SPEC T7-10(d))";
+
+/** Why (d)'s not-well-formed baseline fails (module header). */
+const ESCAPE_BASELINE_WHY =
+  "c1's configuration spells a scanner-rejected escape as its specifier, " +
+  "so it is not well-formed TypeScript (14.20) and the baseline content " +
+  "cannot be parsed and validated as a workspace — a baseline's " +
+  "configuration read as the current one's is (SPEC 7) — the code-less " +
+  "usage error, exit 2 (SPEC 6.3, 7, 12.0; TEST-SPEC T7-10(d), T6.3-4; H-5)";
+
+/** (d)'s twin as diagnoses name it (module header). */
+const BASELINE_TWIN_LABEL =
+  "the twin commit importing from " +
+  CONFIG_IMPORT_TWIN_LITERAL +
+  ", beside the same sources and working tree";
+
+/** `review status n --json`, which reconstructs the recorded baseline. */
+const STATUS_ARGV: readonly string[] = [
+  "review",
+  "status",
+  BASELINE_SESSION,
+  "--json",
+];
+
+/** `review status n --json`, as diagnoses name it. */
+const STATUS_LABEL = "`review status " + BASELINE_SESSION + " --json`";
+
+/** A (d) workspace as `c1` commits it: `c1Config` beside `c1`'s source. */
+function baselineReadDecl(c1Config: StagedTs): WorkspaceDecl {
+  return {
+    files: {
+      [CONFIG_IMPORT_CONFIG_PATH]: c1Config,
+      [T7_10_SOURCE_PATH]: T7_10_D_C1_SOURCE,
+    },
+  };
+}
+
+/**
+ * A (d) staging (module header): `c1` committed over the workspace as
+ * created, the working tree then taking T7-9's twin configuration and
+ * T7-10's source, its premise `build --json` exiting 0 finding-free.
+ * Returns `c1`'s commit identity.
+ */
+async function stageBaselineRead(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<string> {
+  await workspace.gitInit();
+  const c1 = await workspace.gitCommitAll(`c1: ${label}`);
+  await workspace.file(CONFIG_IMPORT_CONFIG_PATH, CONFIG_IMPORT_TWIN_CONFIG);
+  await workspace.file(T7_10_SOURCE_PATH, T7_10_SOURCE);
+  await expectPremiseBuild(product, workspace, label, BASELINE_READ_PREMISE);
+  return c1;
+}
+
+/** After each (d) command: what the arm's staging asserts (module header). */
+type BaselineReadCheck = (result: RunResult, context: string) => Promise<void>;
+
+/**
+ * Stage what `staging` names in the working tree (module header) — the FIFO
+ * made by `stageFifo`, verified a FIFO in place and never opened by the
+ * harness; the trap package's manifest and entry — and return the check
+ * that follows each command.
+ */
+async function stageBaselineDesignation(
+  workspace: TestWorkspace,
+  staging: BaselineReadStaging,
+): Promise<BaselineReadCheck> {
+  if (staging === "fifo") {
+    const fifo = await stageFifo(workspace, FIFO_PATH);
+    return async (_result, context) => {
+      await assertFifosIntact(
+        fifo,
+        `${context}: the FIFO "./${FIFO_PATH}" designates in the working ` +
+          "tree is still a FIFO in place, the command having ended within " +
+          "its own guard — unopened, as xspec never resolves, reads, or " +
+          "loads a baseline configuration's specifier (SPEC 7, 6.3; " +
+          "TEST-SPEC T7-10(d), S-3)",
+      );
+    };
+  }
+  if (staging === "trap") {
+    const at = installedDirectory(TRAP_NAME);
+    await workspace.file(`${at}/${PACKAGE_MANIFEST}`, trapManifest(TRAP_NAME));
+    await workspace.file(`${at}/${TRAP_ENTRY_FILE}`, TRAP_ENTRY);
+    return async (result, context) => {
+      await assertTrapNeverRan(workspace, result, context, BASELINE_READ_RULE);
+    };
+  }
+  return async () => undefined;
+}
+
+/**
+ * A resolving (d) baseline's `impact --base c1 --json` (module header):
+ * exit 0 — impact is informational (9.3) — with one impact report decoded
+ * through H-3's adapter, reporting the edited section `changed` (5.6).
+ * Returns its impact information: the report but the baseline a product
+ * may echo, which the two commits' identities make differ (E-6).
+ */
+function expectBaselineImpact(
+  result: RunResult,
+  context: string,
+  why: string,
+): unknown {
+  assertExitCode(
+    result,
+    0,
+    `${context} — ${why}; impact is informational, exit 0 (SPEC 9.3, 6.3; ` +
+      "H-5)",
+  );
+  const report = decodeImpactReport(parseJsonStdout(result, context), context);
+  const edited = report.requirements.some(
+    (entry) =>
+      !entry.deleted &&
+      entry.nodes.includes(EDITED_SECTION) &&
+      entry.categories.some((category) => category.category === "changed"),
+  );
+  if (!edited) {
+    fail(
+      `${context}: the impact information reports the edited section ` +
+        `${EDITED_SECTION} changed — c1's sources differ from the working ` +
+        "tree's by that section's edited text (SPEC 5.6, 9.3; TEST-SPEC " +
+        "T7-10(d)); its requirements: " +
+        JSON.stringify(report.requirements),
+    );
+  }
+  return { requirements: report.requirements, code: report.code };
+}
+
+/**
+ * A resolving (d) baseline's `review status n --json` (module header): exit
+ * 0 with one status report decoded through H-3's adapter. Returns its
+ * items' kinds, scopes, statuses, and blocked states, in item order.
+ */
+function expectBaselineItems(
+  result: RunResult,
+  context: string,
+  why: string,
+): unknown {
+  assertExitCode(result, 0, `${context} — ${why} (SPEC 10.7; H-5)`);
+  return decodeSessionStatusReport(
+    parseJsonStdout(result, context),
+    context,
+  ).items.map((row) => ({
+    kind: row.kind,
+    scope: row.scope,
+    status: row.status,
+    blocked: row.blocked,
+  }));
+}
+
+/** What (d)'s twin reports, each arm's comparison basis (module header). */
+interface BaselineReadTwin {
+  /** Its impact information (`expectBaselineImpact`). */
+  readonly impact: unknown;
+  /** Its status items (`expectBaselineItems`). */
+  readonly items: unknown;
+}
+
+/**
+ * (d)'s twin (module header): `c1` importing from `"xspec"` beside `c1`'s
+ * source, the working tree the arms' but for their FIFO and trap; `impact
+ * --base c1 --json`, `review create --base c1 --name n --json`, and
+ * `review status n --json` each exit 0.
+ */
+async function runBaselineReadTwin(
+  product: ProductBinding,
+): Promise<BaselineReadTwin> {
+  const label = `T7-10(d), ${BASELINE_TWIN_LABEL}`;
+  const resolves =
+    "c1's configuration, undiscovered, is the working tree's own, so the " +
+    "baseline resolves (SPEC 6.3, 7)";
+  const workspace = await TestWorkspace.create(
+    baselineReadDecl(CONFIG_IMPORT_TWIN_CONFIG),
+  );
+  try {
+    const c1 = await stageBaselineRead(product, workspace, label);
+    const impact = expectBaselineImpact(
+      await runAt(product, workspace, impactArgv(c1)),
+      `${label}: ${IMPACT_LABEL}`,
+      resolves,
+    );
+    assertExitCode(
+      await runAt(product, workspace, createArgv(c1)),
+      0,
+      `${label}: ${CREATE_LABEL} — ${resolves}, so the session is created ` +
+        "(SPEC 10.7; H-5)",
+    );
+    const items = expectBaselineItems(
+      await runAt(product, workspace, STATUS_ARGV),
+      `${label}: ${STATUS_LABEL}`,
+      "the session exists and its recorded baseline resolves and " +
+        "reconstructs",
+    );
+    return { impact, items };
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * The twin's answers, for an arm comparing with them; where the twin's run
+ * failed — its diagnosis collected among the body's failures — the
+ * comparison fails diagnosed, the arm never skipped (H-9).
+ */
+function twinOf(
+  twin: BaselineReadTwin | undefined,
+  context: string,
+): BaselineReadTwin {
+  if (twin === undefined) {
+    fail(
+      `${context}: its answer is compared with that against ` +
+        `${BASELINE_TWIN_LABEL}, whose run failed (diagnosed among this ` +
+        "test's failed arms), so the comparison cannot hold (H-9: an arm " +
+        "is never skipped)",
+    );
+  }
+  return twin;
+}
+
+/**
+ * One resolving (d) baseline (module header): its staging, then `impact
+ * --base c1 --json` answering as the twin's; in the FIFO and trap arms,
+ * `review create --base c1 --name n --json` and `review status n --json`
+ * too, each exiting 0, status's items the twin's; after each command, the
+ * FIFO still a FIFO in place, or the trap never run.
+ */
+async function runBaselineReadArm(
+  product: ProductBinding,
+  twin: BaselineReadTwin | undefined,
+  arm: BaselineReadArm,
+): Promise<void> {
+  const label =
+    "T7-10(d), c1's undiscovered configuration importing from " + arm.label;
+  const workspace = await TestWorkspace.create(baselineReadDecl(arm.c1Config));
+  try {
+    const c1 = await stageBaselineRead(product, workspace, label);
+    const check = await stageBaselineDesignation(workspace, arm.staging);
+    const run = async (
+      argv: readonly string[],
+      context: string,
+    ): Promise<RunResult> => {
+      const result = await runGuardedCommand(
+        product,
+        workspace,
+        argv,
+        context,
+        BASELINE_READ_BLOCKED,
+      );
+      await check(result, context);
+      return result;
+    };
+    const impactContext = `${label}: ${IMPACT_LABEL}`;
+    assertSameJson(
+      expectBaselineImpact(
+        await run(impactArgv(c1), impactContext),
+        impactContext,
+        BASELINE_READ_RULE,
+      ),
+      twinOf(twin, impactContext).impact,
+      `${impactContext}: its impact information — categories with their ` +
+        "attributions, collapsed chains, deleted and added identities, and " +
+        "each impacted location with its witness edge and path, decoded " +
+        "through H-3's adapter, never compared byte for byte (E-6) — " +
+        `equals that against ${BASELINE_TWIN_LABEL} (SPEC 9.3; ` +
+        `${BASELINE_READ_RULE})`,
+    );
+    if (arm.staging === "none") return;
+    const createContext = `${label}: ${CREATE_LABEL}`;
+    assertExitCode(
+      await run(createArgv(c1), createContext),
+      0,
+      `${createContext} — ${BASELINE_READ_RULE}, so the session is created ` +
+        "(SPEC 10.7; H-5)",
+    );
+    const statusContext = `${label}: ${STATUS_LABEL}`;
+    assertSameJson(
+      expectBaselineItems(
+        await run(STATUS_ARGV, statusContext),
+        statusContext,
+        "reconstructing the recorded baseline reads c1's configuration " +
+          "again, as the current one's is read (SPEC 10.7, 7)",
+      ),
+      twinOf(twin, statusContext).items,
+      `${statusContext}: the items it reports — their kinds, scopes, ` +
+        "statuses, and blocked states, in item order, decoded through " +
+        "H-3's adapter — equal those the same two commands report against " +
+        `${BASELINE_TWIN_LABEL} (SPEC 10.7, 10.5; ${BASELINE_READ_RULE})`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (d)'s not-well-formed baseline (module header): `c1`'s configuration
+ * spells T7-9(b)'s hexadecimal escape with one hex digit as its specifier,
+ * the working tree's configuration and sources valid; `impact --base c1
+ * --json` fails as T6.3-4's baseline whose configuration fails validation
+ * does.
+ */
+async function runBaselineEscapeArm(product: ProductBinding): Promise<void> {
+  const label =
+    `T7-10(d), c1's configuration spelling ${T7_10_D_ESCAPE.label} as its ` +
+    "specifier, not well-formed TypeScript (14.20)";
+  const workspace = await TestWorkspace.create(
+    baselineReadDecl(T7_10_D_ESCAPE.config),
+  );
+  try {
+    const c1 = await stageBaselineRead(product, workspace, label);
+    expectFailingBaseline(
+      await runAt(product, workspace, impactArgv(c1)),
+      `${label}: ${IMPACT_LABEL}`,
+      ESCAPE_BASELINE_WHY,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * Run (d)'s twin, collecting its diagnosed failure as `collectArmFailure`
+ * does (module header): its answers, or `undefined` once its failure is
+ * recorded; anything else propagates at once.
+ */
+async function collectTwinFailure(
+  failures: string[],
+  twin: () => Promise<BaselineReadTwin>,
+): Promise<BaselineReadTwin | undefined> {
+  try {
+    return await twin();
+  } catch (error) {
+    if (!(error instanceof HarnessAssertionError)) throw error;
+    failures.push(error.message);
+    return undefined;
+  }
+}
+
+/** How many (d) arms T7-10 runs: the twin, the resolving ones, the escape. */
+const T7_10_D_ARM_COUNT = 1 + T7_10_D_ARMS.length + 1;
+
+// ---------------------------------------------------------------------------
 // Registration
 
 const T7_9 = defineProductTest({
@@ -3457,7 +4049,8 @@ const T7_9 = defineProductTest({
 const T7_10 = defineProductTest({
   id: "T7-10",
   title:
-    "the configuration file as a source (TEST-SPEC T7-10 (a), (b), (c)): " +
+    "the configuration file as a source (TEST-SPEC T7-10 (a), (b), (c), " +
+    "(d)): " +
     "on a valid workspace — one spec group globbing specs/*.mdx over " +
     "specs/A.mdx, Markdown emitted next to sources — the configuration " +
     'importing, one arm each, from "./specs/A.xspec" (a spec module ' +
@@ -3502,8 +4095,28 @@ const T7_10 = defineProductTest({
     "`move` exits 0 leaving xspec.config.ts byte-identical, and `build` " +
     "and `check` then exit 0 finding-free, while the discovered twin's " +
     "`move` is refused as an invalid workspace: exit 1, (b)'s findings " +
-    "alone, nothing modified (SPEC 7, 1.7, 4, 4.5, 6.3, 6.4, 6.5, 6.6, " +
-    "7.2, 7.3, 10.7, 11.1, 11.4, 11.6, 12.0, 12.1, 12.7, 13.3, 13.4, 14)",
+    "alone, nothing modified; (d) baselines, the working tree's " +
+    `configuration importing from "xspec" and its source one section's ` +
+    "text edited since a commit c1 whose undiscovered configuration " +
+    'imports from "", "./nowhere", or "XSPEC", or from "./fifo" (a FIFO at ' +
+    `that path in the working tree) or "trap" (T7-9(d)'s trap package at ` +
+    "node_modules/trap in the working tree): `impact --base c1 --json` " +
+    "exits 0, its impact information decoded through H-3's adapter — " +
+    "categories with their attributions, collapsed chains, deleted and " +
+    "added identities, impacted locations with witness edges and paths, " +
+    "never byte for byte — equal to that against the twin commit " +
+    'importing from "xspec", the edited section changed; in the FIFO and ' +
+    "trap arms `review create --base c1 --name n --json` and `review " +
+    "status n --json` each exit 0, status's items (kinds, scopes, " +
+    "statuses, blocked states) the twin's, the FIFO after each command " +
+    "still a FIFO in place, each command ending within its guard, no trap " +
+    "marker written and neither stream carrying the trap's tell; and a " +
+    "commit whose configuration spells a hexadecimal escape with one hex " +
+    "digit as its specifier, not well-formed: `impact --base c1 --json` " +
+    "exits 2, the error document's code and path null, standard error " +
+    "naming xspec.config.ts (SPEC 7, 1.7, 4, 4.5, 5.6, 6.3, 6.4, 6.5, 6.6, " +
+    "7.2, 7.3, 9.3, 10.7, 11.1, 11.4, 11.6, 12.0, 12.1, 12.7, 13.3, 13.4, " +
+    "14)",
   run: async (product) => {
     const failures: string[] = [];
     for (const arm of T7_10_A_ARMS) {
@@ -3522,8 +4135,17 @@ const T7_10 = defineProductTest({
     for (const arm of T7_10_C_ARMS) {
       await collectArmFailure(failures, () => arm(product));
     }
+    const baselineTwin = await collectTwinFailure(failures, () =>
+      runBaselineReadTwin(product),
+    );
+    for (const arm of T7_10_D_ARMS) {
+      await collectArmFailure(failures, () =>
+        runBaselineReadArm(product, baselineTwin, arm),
+      );
+    }
+    await collectArmFailure(failures, () => runBaselineEscapeArm(product));
     if (failures.length > 0) {
-      const arms = T7_10_AB_ARM_COUNT + T7_10_C_ARMS.length;
+      const arms = T7_10_AB_ARM_COUNT + T7_10_C_ARMS.length + T7_10_D_ARM_COUNT;
       fail(
         `T7-10: ${String(failures.length)} of ${String(arms)} ` +
           "arms failed, each diagnosed below:" +
