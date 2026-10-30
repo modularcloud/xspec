@@ -1,6 +1,6 @@
-// TEST-SPEC §7.6 (the `defineConfig` module): T7.6-2, valid configurations,
-// and T7.6-3, shape violations. The rest of §7.6 — T7.6-1 and T7.6-4
-// through T7.6-7 — and P-17 and P-18 are not registered yet.
+// TEST-SPEC §7.6 (the `defineConfig` module): T7.6-1, declared exports;
+// T7.6-2, valid configurations; and T7.6-3, shape violations. The rest of
+// §7.6 — T7.6-4 through T7.6-7 — and P-17 and P-18 are not registered yet.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never
@@ -11,6 +11,45 @@
 // (helpers/module-channel-ts.ts). With no package directory given, the body
 // fails diagnosed before anything is staged (H-8: the module channel counts
 // as part of the product).
+//
+// T7.6-1 (SPEC 7.6 Type contract: exports): in every covered setup, the
+// module TypeScript resolves the covered file's import to declares exactly
+// one export, `defineConfig`, carrying a value meaning and neither a type
+// nor a namespace meaning, and no other export, type-only or not. The
+// exports are read from the TypeScript driver's export listing
+// (helpers/module-channel-ts.ts, `listExports`): TypeScript's own
+// resolution of the file's import in that setup's program — the compiler's
+// listing of the module's exports, an implicit export of a declaration
+// module holding neither `export {}` nor `export =` among them, and, where
+// the module declares an export assignment, the members of the assigned
+// value that a named import binds — each with its meanings, never probed
+// by names the harness chooses. TypeScript's synthetic default is never in
+// that listing, so a default import TypeScript admits only through its
+// interoperation with CommonJS fails nothing; a declared default export
+// (`default`) is listed, and fails.
+//
+// Conservative operationalizations (noted per H-4):
+// - The covered file is T7.6-2(d)'s, the minimal configuration: any
+//   covered file's import reads the same module in a setup, and (d)'s
+//   records are named for both tests. T7.6-1 asserts the listing alone;
+//   whether the file type-checks is T7.6-2's assertion.
+// - One staging per project kind, the file written under each covered
+//   extension beside the canonical placement, nothing else installed, and
+//   judged in each covered setup of its project, a program of its own each,
+//   with its listing: each setup is read through its own resolution, so a
+//   package serving different declaration files to `import` and to
+//   `require`, or to different resolution modes, is read through each.
+// - A listing naming no module — TypeScript resolving the import to no
+//   module it reads declarations from, as beside S-7's stub package —
+//   fails as a module declaring no `defineConfig`. A value meaning reached
+//   only through `export type`, `import type`, or `export type *`, which no
+//   import may use as a value, is no value meaning.
+// - The body stops at the first setup whose listing deviates, failing
+//   once, diagnosed, with every deviation, the listing whole, and
+//   TypeScript's errors for the program as a diagnostic aid
+//   (`assertDeclaredExports`, which T7.6-4's placements and P-17's draws
+//   may reuse); where every setup holds, it confirms that it judged all
+//   173.
 //
 // T7.6-2 (SPEC 7.6 Covered files, Type contract: valid configurations): each
 // of these covered files, valid under 7, type-checks in every covered setup
@@ -167,11 +206,15 @@ import {
   assertShapeViolation,
   assertTypeChecks,
   COVERED_SETUP_COUNT,
+  describeErrors,
+  describeExportListing,
+  describeListedExport,
   stageCoveredFiles,
 } from "../../helpers/module-channel-ts.js";
 import type {
   CoveredFiles,
   CoveredVerdict,
+  ExportListing,
 } from "../../helpers/module-channel-ts.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -1770,11 +1813,17 @@ interface T762File {
  * T7.6-2's files, each rendered and checked for each canonical-name
  * candidate at module load, each rendering a staged-source record (S-9),
  * judged as plain TypeScript and, for the `.tsx` name, as TSX. (a)'s records
- * are T7.6-3's twin too, so their names lead with both IDs.
+ * are T7.6-3's twin too, and (d)'s T7.6-1's covered file, so their names
+ * lead with both IDs.
  */
 const T762_FILES: readonly T762File[] = T762_ARMS.map((arm) => {
   const records = new Map<string, T762Records>();
-  const ids = arm.arm === "(a)" ? "T7.6-2/T7.6-3" : "T7.6-2";
+  const ids =
+    arm.arm === "(a)"
+      ? "T7.6-2/T7.6-3"
+      : arm.arm === "(d)"
+        ? "T7.6-1/T7.6-2"
+        : "T7.6-2";
   for (const name of CANONICAL_MODULE_NAMES) {
     const text = composeFile(arm, name);
     const record = `${ids} ${arm.arm} ${arm.what}, importing ${JSON.stringify(name)}`;
@@ -1894,6 +1943,182 @@ const T7_6_2 = defineProductTest({
     "string-literal keys; (f) the empty, omitted, and repeated forms (SPEC " +
     "7.6 Covered files, Type contract)",
   run: runValidConfigurations,
+});
+
+// ---------------------------------------------------------------------------
+// T7.6-1: declared exports (module header)
+// ---------------------------------------------------------------------------
+
+/** The one export SPEC 7.6 lets the module declare. */
+const DEFINE_CONFIG = "defineConfig";
+
+/** T7.6-1's covered file: T7.6-2(d)'s, the minimal configuration. */
+const T761_FILE: T762File = (() => {
+  const file = T762_FILES.find((candidate) => candidate.arm === "(d)");
+  if (file === undefined) {
+    throw new Error(
+      "T7.6-1: T7.6-2(d)'s file, the minimal configuration, is not among " +
+        "T7.6-2's files: a harness defect",
+    );
+  }
+  return file;
+})();
+
+/**
+ * Each way `listing` deviates from T7.6-1, in a fixed order: none where it
+ * holds.
+ */
+function declaredExportsDeviations(listing: ExportListing): readonly string[] {
+  if (listing.module === undefined) {
+    return [
+      "TypeScript resolves the import to no module it reads declarations " +
+        "from, so the module declares no export, defineConfig among them",
+    ];
+  }
+  const deviations: string[] = [];
+  const entry = listing.exports.find(
+    (candidate) => candidate.name === DEFINE_CONFIG,
+  );
+  if (entry === undefined) {
+    deviations.push("the module declares no export named defineConfig");
+  } else {
+    if (entry.typeOnlyValue) {
+      deviations.push(
+        "defineConfig's value meaning is reached only through export type, " +
+          "import type, or export type *, so no import may use it as a value",
+      );
+    } else if (!entry.value) {
+      deviations.push("defineConfig carries no value meaning");
+    }
+    if (entry.type) deviations.push("defineConfig carries a type meaning");
+    if (entry.namespace) {
+      deviations.push("defineConfig carries a namespace meaning");
+    }
+  }
+  const others = listing.exports.filter(
+    (candidate) => candidate.name !== DEFINE_CONFIG,
+  );
+  if (others.length > 0) {
+    deviations.push(
+      `the module declares ${count(others.length, "other export")}: ` +
+        others.map(describeListedExport).join(", "),
+    );
+  }
+  return deviations;
+}
+
+/**
+ * Assert T7.6-1 of one verdict (module header): the module TypeScript
+ * resolves the covered file's import to, in the verdict's setup, declares
+ * exactly one export, `defineConfig`, carrying a value meaning an import may
+ * use as a value and neither a type nor a namespace meaning, and no other
+ * export, type-only or not — read from the verdict's export listing, never
+ * probed by names. A listing naming no module, as beside S-7's stub
+ * package, fails too. A failure is diagnosed, naming the setup, the file,
+ * the placement, every deviation, the listing whole, and TypeScript's
+ * errors for the program; a verdict carrying no listing (its request did
+ * not ask for one) is a misuse.
+ */
+export function assertDeclaredExports(
+  verdict: CoveredVerdict,
+  context: string,
+): void {
+  const listing = verdict.exportListing;
+  if (listing === undefined) {
+    throw new Error(
+      `T7.6-1: the verdict for ${verdict.label} in ${verdict.setup.label} ` +
+        "carries no export listing, which a request asks for with " +
+        "listExports (helpers/module-channel-ts.ts): a harness defect " +
+        `(${context})`,
+    );
+  }
+  const deviations = declaredExportsDeviations(listing);
+  if (deviations.length === 0) return;
+  const beside =
+    verdict.placement === undefined
+      ? ""
+      : `, beside the placement ${verdict.placement}`;
+  fail(
+    `${context}: in ${verdict.setup.label}${beside}, the import of the ` +
+      `configuration file ${verdict.label} (${verdict.file}) does not reach ` +
+      "a module declaring exactly one export, defineConfig, a value with " +
+      `neither a type nor a namespace meaning: ${deviations.join("; ")}. ` +
+      `TypeScript 5.9.3's listing for that import: ` +
+      `${describeExportListing(listing)}. TypeScript's errors for the ` +
+      `program, a diagnostic aid: ${describeErrors(verdict.errors)} ` +
+      "(TEST-SPEC T7.6-1: in every covered setup, the module TypeScript " +
+      "resolves the covered file's import to declares exactly one export, " +
+      "defineConfig, carrying a value meaning and neither a type nor a " +
+      "namespace meaning, and no other export, type-only or not; SPEC 7.6 " +
+      "Type contract, Exports)",
+  );
+}
+
+/** T7.6-1's body (module header). */
+async function runDeclaredExports(product: ProductBinding): Promise<void> {
+  let judged = 0;
+  for (const project of PROJECT_KINDS) {
+    const context = `T7.6-1 (declared exports), the ${project} project`;
+    const staging = await ModuleStaging.create(product, context);
+    try {
+      await staging.stageProject(PROJECT_DIR, project);
+      const placement = await staging.placeCanonical(
+        PROJECT_DIR,
+        TYPE_CHECKING_ARM,
+      );
+      const files = await stageCoveredFiles({
+        staging,
+        directory: PROJECT_DIR,
+        project,
+        placement,
+        alone: true,
+        files: [
+          {
+            label: T761_FILE.label,
+            text: textFor(T761_FILE, placement.name),
+          },
+        ],
+        listExports: true,
+        context,
+      });
+      for (const setup of files.setups) {
+        const [verdict] = files.judge(setup);
+        if (verdict === undefined) throw new Error("unreachable: one verdict");
+        assertDeclaredExports(
+          verdict,
+          `${context}: the first covered setup whose listing deviates, ` +
+            `after ${count(judged, "setup")} where every listing held; the ` +
+            "body stops here",
+        );
+        judged += 1;
+      }
+    } finally {
+      await staging.dispose();
+    }
+  }
+  if (judged !== COVERED_SETUP_COUNT) {
+    throw new Error(
+      `T7.6-1: ${String(judged)} covered setups judged, not TEST-SPEC ` +
+        `§7.6's ${String(COVERED_SETUP_COUNT)}; no setup is sampled away: ` +
+        "a harness defect",
+    );
+  }
+}
+
+const T7_6_1 = defineProductTest({
+  id: "T7.6-1",
+  title:
+    "in all 173 covered setups beside the canonical placement, the module " +
+    "TypeScript resolves the covered file's import to (T7.6-2(d)'s minimal " +
+    "configuration) declares exactly one export, defineConfig, carrying a " +
+    "value meaning and neither a type nor a namespace meaning, and no other " +
+    "export, type-only or not: read from TypeScript's own listing of the " +
+    "module's exports (implicit exports of a declaration module included) " +
+    "and, for an export assignment, the assigned value's members, each " +
+    "setup through its own resolution; TypeScript's synthetic default is no " +
+    "export, a declared default export is one (SPEC 7.6 Type contract, " +
+    "Exports)",
+  run: runDeclaredExports,
 });
 
 // ---------------------------------------------------------------------------
@@ -3102,7 +3327,7 @@ function textFor(file: T762File | T763File, name: string): string {
   const records = file.records.get(name);
   if (records === undefined || typeof records.ts.source !== "string") {
     throw new Error(
-      `T7.6-3: no record holds ${file.label} beside N ` +
+      `TEST-SPEC §7.6: no record holds ${file.label} beside N ` +
         `${JSON.stringify(name)}; the canonical N is one of ` +
         `${CANONICAL_MODULE_NAMES.join(", ")} (helpers/module-channel.ts ` +
         "canonicalModuleName): a harness defect",
@@ -3222,4 +3447,8 @@ const T7_6_3 = defineProductTest({
   run: runShapeViolations,
 });
 
-export const section76Tests: readonly ProductTestEntry[] = [T7_6_2, T7_6_3];
+export const section76Tests: readonly ProductTestEntry[] = [
+  T7_6_1,
+  T7_6_2,
+  T7_6_3,
+];
