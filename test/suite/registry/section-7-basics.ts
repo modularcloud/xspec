@@ -272,6 +272,39 @@
 //   boundary the same group, the target set is the group's one leaf,
 //   uncovered (8.1, 8.2); the `target: "product"` twin differs in that one
 //   value alone and is refused as an unknown group (7.4, 14.14).
+// - T7-2 keys and enumerated values read as spelled (SPEC 7, 2.4; the
+//   spellings 7.6's covered-file bar cites), an identifier key's alike:
+//   `specs` with its `s` written as the hexadecimal escape of U+0073 as a
+//   string-literal top-level key, and as the Unicode escape of U+0073 as an
+//   identifier one; `direct` with its `d` written as the hexadecimal escape
+//   of U+0064 as a profile's `mode`; `ab` with its `b` written as the
+//   hexadecimal (string literal) or Unicode (identifier) escape of U+0062
+//   as a group key beside `ab`; and the verbatim group name keyed as an
+//   identifier. Each spelling is built from `BACKSLASH` and pinned at
+//   module load (`checkedEscapeSpelling`: one backslash, then the escape's
+//   text, which designates the character it replaces, and the spelling
+//   with it decoded), and each composed file is checked to hold the
+//   backslashes its spellings bring and no other. The refused top-level-key
+//   and `mode` arms (`SPELLED_KEY_VIOLATIONS`, and the first row of
+//   `SPELLED_IDENTIFIER_KEY_VIOLATIONS`) are each the canonical
+//   configuration — for `mode`, the `targetTags: null` row's valid twin —
+//   with the one escape as its deviation, valid with it decoded
+//   (`canonicalWithSpecsKey`, pinned to the canonical text for the plain
+//   key), so a product decoding escapes loads each and builds (exit 0).
+//   The identifier-keyed group name is the group-name arm above with its
+//   key an identifier: refused under `target: "product"` (the table's
+//   second row; a product decoding every escape loads it, one decoding the
+//   identifier alone refuses its resolving twin) and resolving under the
+//   escape spelling, observed alike (`expectVerbatimGroupNameResolves`).
+//   "Two groups, no key repeated — it loads, `inventory` reporting both,
+//   each discovering its own glob's file" is observed after `build` exits
+//   0 as `inventory`'s `configuration.specs`, exactly `ab` (`a/*.mdx`) and
+//   the escape-spelled key's group (`b/*.mdx`) named as spelled, in
+//   configuration order, and its `sources`, exactly `a/A.mdx` a member of
+//   `ab` alone and `b/B.mdx` of the other alone, in byte order of path
+//   (11.6), over the minimal sources a and b (`expectTwoSpelledGroups`); a
+//   product decoding the escape reads the key `ab` twice and refuses the
+//   file (14.14), failing `build`'s exit code.
 // - T7-2 encoding: the non-UTF-8 fixture carries its one invalid byte
 //   (0xFF) inside a trailing line comment, so the decoded text is a valid
 //   configuration and the encoding is the sole defect; the BOM fixture is
@@ -436,21 +469,22 @@ function mdxSection(id: string): string {
 
 // The minimal sources the §7 modules stage in workspaces created after a
 // body's first product invocation (module header): byte-identical wherever
-// they are staged — `mdxSection("a")` at `specs/A.mdx` here and in
-// section-7-discovery.ts, section-7.1-7.3.ts, section-7.4-7.5.ts (T7.4-1,
-// T7.5-1; T7.5-2 at `lo/BASE.mdx` alone; T7.5-5 also at `tgt/a.mdx`), and
-// section-12.6.ts (T12.6-1, T12.6-2: the version workspaces' minimal
-// source, the same bytes); `mdxSection("b")` at `specs/sub/B.mdx` (T7-3,
-// T7-6, T7.3-1) and
+// they are staged — `mdxSection("a")` at `specs/A.mdx` here (and at
+// `a/A.mdx`, T7-2's keys read as spelled) and in section-7-discovery.ts,
+// section-7.1-7.3.ts, section-7.4-7.5.ts (T7.4-1, T7.5-1; T7.5-2 at
+// `lo/BASE.mdx` alone; T7.5-5 also at `tgt/a.mdx`), and section-12.6.ts
+// (T12.6-1, T12.6-2: the version workspaces' minimal source, the same
+// bytes); `mdxSection("b")` at `specs/sub/B.mdx` (T7-3, T7-6, T7.3-1),
+// `b/B.mdx` (T7-2's keys read as spelled), and
 // `specs2/B.mdx` (T7-4) — so each is ONE staged-source record, named with
 // every staging test in ID order and every path; the other modules import
 // them (section-7.4-7.5.ts and section-12.6.ts the `a` alone).
 export const SECTION_A_SOURCE = stagedMdx(
-  "T7-1/T7-2/T7-3/T7-4/T7-6/T7-7/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-2/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7.5-2's lo/BASE.mdx; T7.5-5's tgt/a.mdx)",
+  "T7-1/T7-2/T7-3/T7-4/T7-6/T7-7/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-2/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7-2's a/A.mdx; T7.5-2's lo/BASE.mdx; T7.5-5's tgt/a.mdx)",
   mdxSection("a"),
 );
 export const SECTION_B_SOURCE = stagedMdx(
-  "T7-3/T7-4/T7-6/T7.3-1 the minimal section b (specs/sub/B.mdx; T7-4's specs2/B.mdx)",
+  "T7-2/T7-3/T7-4/T7-6/T7.3-1 the minimal section b (specs/sub/B.mdx; T7-2's b/B.mdx; T7-4's specs2/B.mdx)",
   mdxSection("b"),
 );
 
@@ -1877,13 +1911,17 @@ export default defineConfig({
 // `target: "product"` is then an unknown group (14.14, SPEC 7.4) while the
 // same escape spelling resolves. `boundary` carries the verbatim spelling
 // in both fixtures, so the profile's target is their only difference.
+// `groupKey` spells the group's key: the string literal here, and the
+// identifier `prod`, backslash, `u0075`, `ct` in the identifier-key arms
+// below (SPEC 7, 2.4: an identifier key is read as spelled too).
 const VERBATIM_GROUP_NAME = `prod${BACKSLASH}u0075ct`;
-function verbatimNameConfig(target: string): string {
+const VERBATIM_GROUP_STRING_KEY = `"${VERBATIM_GROUP_NAME}"`;
+function verbatimNameConfig(groupKey: string, target: string): string {
   return `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
-    "${VERBATIM_GROUP_NAME}": ["specs/**/*.mdx"]
+    ${groupKey}: ["specs/**/*.mdx"]
   },
   coverage: [
     {
@@ -1901,12 +1939,374 @@ export default defineConfig({
 // both after a product invocation (S-9's timing clause).
 const VERBATIM_NAME_UNKNOWN_TARGET_CONFIG = stagedTs(
   'T7-2 xspec.config.ts (verbatim group name: a profile\'s target "product")',
-  verbatimNameConfig("product"),
+  verbatimNameConfig(VERBATIM_GROUP_STRING_KEY, "product"),
 );
 const VERBATIM_NAME_CONFIG = stagedTs(
   "T7-2 xspec.config.ts (verbatim group name: the target spelled as the group's key)",
-  verbatimNameConfig(VERBATIM_GROUP_NAME),
+  verbatimNameConfig(VERBATIM_GROUP_STRING_KEY, VERBATIM_GROUP_NAME),
 );
+
+// Keys and enumerated values read as spelled (SPEC 7, 2.4; the spellings
+// 7.6's covered-file bar cites; module header): a key or an enumerated
+// value spelled with an escape is read as its characters, as every
+// configuration literal is, and an identifier key alike — its characters
+// as spelled, where TypeScript decodes an identifier's Unicode escapes.
+// Each spelling below holds one escape, built from `BACKSLASH` so that this
+// source spells none, and is pinned at module load.
+
+/**
+ * An escape spelling pinned at module load (T7-2; module header): `spelled`
+ * holds exactly one backslash, followed by `escapeText` — `x` and two
+ * hexadecimal digits, or `u` and four — which designates `character`, and
+ * with that one escape decoded the spelling is `decoded`. So a staged file
+ * differs from its decoded twin in that escape alone, and no escape was
+ * decoded or lost on its way to the staged text. A mismatch is a harness
+ * error thrown at load, never a product verdict.
+ */
+function checkedEscapeSpelling(
+  spelled: string,
+  escapeText: string,
+  character: string,
+  decoded: string,
+): string {
+  const sequence = `${BACKSLASH}${escapeText}`;
+  if (
+    !/^(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4})$/.test(escapeText) ||
+    String.fromCodePoint(Number.parseInt(escapeText.slice(1), 16)) !==
+      character ||
+    spelled.split(BACKSLASH).length !== 2 ||
+    !spelled.includes(sequence) ||
+    spelled.replace(sequence, character) !== decoded
+  ) {
+    throw new Error(
+      `T7-2 fixture self-check: ${JSON.stringify(spelled)} must hold ` +
+        `exactly one backslash, followed by ${escapeText} (an escape of ` +
+        `${JSON.stringify(character)}), and decode to ` +
+        `${JSON.stringify(decoded)} (module header)`,
+    );
+  }
+  return spelled;
+}
+
+// The string-literal spellings: the top-level key `"specs"` with its `s`
+// written as the hexadecimal escape of U+0073 (backslash, `x73`); the
+// `mode` value `"direct"` with its `d` written as that of U+0064
+// (backslash, `x64`); and the group key `"ab"` with its `b` written as that
+// of U+0062 (backslash, `x62`), distinct as spelled from `"ab"`.
+const ESCAPED_SPECS_STRING_KEY = checkedEscapeSpelling(
+  `"${BACKSLASH}x73pecs"`,
+  "x73",
+  "s",
+  '"specs"',
+);
+const ESCAPED_DIRECT_MODE = checkedEscapeSpelling(
+  `"${BACKSLASH}x64irect"`,
+  "x64",
+  "d",
+  '"direct"',
+);
+const ESCAPED_AB_STRING_KEY = checkedEscapeSpelling(
+  `"a${BACKSLASH}x62"`,
+  "x62",
+  "b",
+  '"ab"',
+);
+// The identifier twins: the keys `specs` and `ab` with their `s` and `b`
+// written as the Unicode escapes of U+0073 and U+0062 (backslash, `u0073`;
+// backslash, `u0062`), and the verbatim group name keyed as an identifier
+// (`prod`, backslash, `u0075`, `ct`).
+const ESCAPED_SPECS_IDENTIFIER = checkedEscapeSpelling(
+  `${BACKSLASH}u0073pecs`,
+  "u0073",
+  "s",
+  "specs",
+);
+const ESCAPED_AB_IDENTIFIER = checkedEscapeSpelling(
+  `a${BACKSLASH}u0062`,
+  "u0062",
+  "b",
+  "ab",
+);
+const VERBATIM_GROUP_IDENTIFIER_KEY = checkedEscapeSpelling(
+  VERBATIM_GROUP_NAME,
+  "u0075",
+  "u",
+  "product",
+);
+
+/** The canonical configuration with its top-level key spelled `key`. */
+function canonicalWithSpecsKey(key: string): string {
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  ${key}: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`;
+}
+
+// The refused string-literal arms (14.14, exit 2), one each, every file the
+// canonical configuration — for `mode`, the `targetTags: null` row's valid
+// twin, a profile over `main` — with one escape as its deviation, valid
+// with that escape decoded, so a product decoding escapes loads it and
+// builds (exit 0). Read as spelled, the top-level key is no `specs` (an
+// unknown key, `specs` then missing) and the `mode` value is no mode.
+const SPELLED_KEY_VIOLATIONS = refusedConfigArms("T7-2", [
+  {
+    label:
+      'keys read as spelled: a top-level string-literal key "specs" with ' +
+      "its s written as the hexadecimal escape of U+0073 — an unknown key, " +
+      "specs then missing",
+    config: canonicalWithSpecsKey(ESCAPED_SPECS_STRING_KEY),
+  },
+  {
+    label:
+      "enumerated values read as spelled: a coverage profile with mode " +
+      '"direct", its d written as the hexadecimal escape of U+0064 — no ' +
+      "mode",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p",
+      target: "main",
+      boundary: "main",
+      mode: ${ESCAPED_DIRECT_MODE}
+    }
+  ]
+})
+`,
+  },
+]);
+
+// The refused identifier twins (14.14, exit 2), one each: the canonical
+// configuration with its top-level identifier key `specs` written with the
+// escape of its `s` — read as spelled, an unknown key, `specs` then missing
+// — and the verbatim group name keyed as an identifier under a profile
+// whose `target: "product"` names no configured group, its resolving twin
+// (`IDENTIFIER_NAME_CONFIG`) differing in that target alone.
+const SPELLED_IDENTIFIER_KEY_VIOLATIONS = refusedConfigArms("T7-2", [
+  {
+    label:
+      "identifier keys read as spelled: a top-level identifier key specs " +
+      "with its s written as the Unicode escape of U+0073 — an unknown " +
+      "key, specs then missing",
+    config: canonicalWithSpecsKey(ESCAPED_SPECS_IDENTIFIER),
+  },
+  {
+    label:
+      "identifier keys read as spelled: a spec group keyed by the " +
+      "identifier product with its u written as the Unicode escape of " +
+      'U+0075 — a profile target "product" names no configured group',
+    config: verbatimNameConfig(VERBATIM_GROUP_IDENTIFIER_KEY, "product"),
+  },
+]);
+
+// The identifier-keyed group named by a target spelled as its key — a
+// record made at module load: T7-2 stages it after a product invocation
+// (S-9's timing clause).
+const IDENTIFIER_NAME_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (identifier keys read as spelled: a spec group keyed by the identifier product with its u written as the Unicode escape of U+0075, the target spelled as its key)",
+  verbatimNameConfig(VERBATIM_GROUP_IDENTIFIER_KEY, VERBATIM_GROUP_NAME),
+);
+
+// Keys distinct as spelled (SPEC 7, 2.4): the spec groups keyed `ab` and its
+// escape-spelled twin — string literals, or identifiers — are two groups,
+// no key repeated, each globbing its own directory over one minimal source
+// there (`expectTwoSpelledGroups`); a product decoding the escape reads the
+// key `ab` twice and refuses the file (14.14). Records made at module load:
+// T7-2 stages both after a product invocation (S-9's timing clause).
+function twoSpelledGroupsConfig(firstKey: string, secondKey: string): string {
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    ${firstKey}: ["a/*.mdx"],
+    ${secondKey}: ["b/*.mdx"]
+  }
+})
+`;
+}
+const STRING_KEYS_TWO_GROUPS_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (keys read as spelled: the string-literal group keys "ab" and "ab" with its b written as the hexadecimal escape of U+0062)',
+  twoSpelledGroupsConfig('"ab"', ESCAPED_AB_STRING_KEY),
+);
+const IDENTIFIER_KEYS_TWO_GROUPS_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (identifier keys read as spelled: the group keys ab and ab with its b written as the Unicode escape of U+0062)",
+  twoSpelledGroupsConfig("ab", ESCAPED_AB_IDENTIFIER),
+);
+
+// The module-load self-check of the composed files: the canonical
+// composition with the plain key is the canonical text byte for byte, so
+// each top-level-key arm differs from it in the key's spelling alone; and
+// each file holds the backslashes its spellings bring and no other — one in
+// each refused arm but the identifier-keyed group's, two there (its key
+// and its boundary), three in its resolving twin, and one in each
+// two-group file. A mismatch is a harness error thrown at load, never a
+// product verdict.
+const SPELLED_KEY_BACKSLASHES = [
+  ...SPELLED_KEY_VIOLATIONS.map((arm) => arm.config),
+  ...SPELLED_IDENTIFIER_KEY_VIOLATIONS.map((arm) => arm.config),
+  IDENTIFIER_NAME_CONFIG,
+  STRING_KEYS_TWO_GROUPS_CONFIG,
+  IDENTIFIER_KEYS_TWO_GROUPS_CONFIG,
+].map((config) => configText(config).split(BACKSLASH).length - 1);
+if (
+  canonicalWithSpecsKey("specs") !== configText(SPECS_ONLY_CONFIG) ||
+  JSON.stringify(SPELLED_KEY_BACKSLASHES) !==
+    JSON.stringify([1, 1, 1, 2, 3, 1, 1])
+) {
+  throw new Error(
+    "T7-2 fixture self-check: the canonical composition with the plain " +
+      "top-level key must be the canonical text, and the files of the keys " +
+      "read as spelled must hold 1, 1, 1, 2, 3, 1, and 1 backslashes " +
+      "(module header); got " +
+      JSON.stringify(SPELLED_KEY_BACKSLASHES),
+  );
+}
+
+/**
+ * A verbatim group name resolving (T7-2's group-name arms; module header):
+ * `config` — the spec group keyed `prod`, backslash, `u0075`, `ct`, as a
+ * string literal or as an identifier, its profile's target and boundary
+ * spelled as that key is — staged beside the minimal source; `build` loads
+ * it (exit 0), `inventory` names the group as spelled, and the profile's
+ * rows show its target resolved: with the boundary the same group, the
+ * target set is the group's one leaf, uncovered (8.1, 8.2).
+ */
+async function expectVerbatimGroupNameResolves(
+  product: ProductBinding,
+  config: StagedTs,
+  label: string,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": config,
+        "specs/A.mdx": SECTION_A_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${label}: ` +
+          "`build` — the profile's target and boundary, spelled as the " +
+          "group's key is, resolve (SPEC 7, 2.4, 7.4)",
+      );
+      const inventoryLabel = `${label} ` + "`inventory --json`";
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          inventoryLabel,
+        ),
+        inventoryLabel,
+      );
+      assertSameJson(
+        inventory.configuration.specs.map((group) => group.name),
+        [VERBATIM_GROUP_NAME],
+        `${inventoryLabel}: the group is named as spelled — eleven ` +
+          `characters, the six of the escape included — never the ` +
+          `interpreted "product" (SPEC 7, 2.4, 11.6)`,
+      );
+      const coverageLabel = `${label} ` + "`coverage --json`";
+      const coverage = decodeCoverageReport(
+        await runJson(
+          product,
+          workspace,
+          ["coverage", "--json"],
+          coverageLabel,
+        ),
+        coverageLabel,
+      );
+      assertSameJson(
+        coverage.profiles.map((row) => ({
+          name: row.name,
+          covered: row.covered.map((entry) => entry.identity),
+          uncovered: [...row.uncovered].sort(),
+        })),
+        [{ name: "verbatim", covered: [], uncovered: ["specs/A.mdx#a"] }],
+        `${coverageLabel}: the profile resolved its target — the ` +
+          `group's one leaf is its target set, uncovered under a ` +
+          `boundary sourcing no edge into it (SPEC 7, 2.4, 7.4, 8.1, 8.2)`,
+      );
+    },
+  );
+}
+
+/**
+ * Keys distinct as spelled (T7-2; module header): `config` — the spec
+ * groups keyed `ab` (`a/*.mdx`) and its escape-spelled twin (`b/*.mdx`),
+ * whose name as spelled is `secondName` — staged beside the minimal sources
+ * `a/A.mdx` and `b/B.mdx`; `build` loads it (exit 0), and `inventory --json`
+ * reports both groups in configuration order, the second named as spelled,
+ * and each source a member of its own glob's group alone, in byte order of
+ * path (11.6).
+ */
+async function expectTwoSpelledGroups(
+  product: ProductBinding,
+  config: StagedTs,
+  secondName: string,
+  label: string,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": config,
+        "a/A.mdx": SECTION_A_SOURCE,
+        "b/B.mdx": SECTION_B_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${label}: ` +
+          "`build` — two groups, no key repeated: the configuration loads " +
+          "(SPEC 7, 2.4)",
+      );
+      const inventoryLabel = `${label} ` + "`inventory --json`";
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          inventoryLabel,
+        ),
+        inventoryLabel,
+      );
+      assertSameJson(
+        inventory.configuration.specs,
+        [
+          { name: "ab", globs: ["a/*.mdx"] },
+          { name: secondName, globs: ["b/*.mdx"] },
+        ],
+        `${inventoryLabel}: both groups are reported in configuration ` +
+          `order, the escape-spelled key's group named as spelled — ` +
+          `${JSON.stringify(secondName)} as a JSON string, the escape's ` +
+          `characters included — never the decoded "ab" (SPEC 7, 2.4, 11.6)`,
+      );
+      assertSameJson(
+        inventory.sources,
+        [
+          { path: "a/A.mdx", groups: [{ name: "ab", kind: "spec" }] },
+          { path: "b/B.mdx", groups: [{ name: secondName, kind: "spec" }] },
+        ],
+        `${inventoryLabel}: each group discovers its own glob's file — ` +
+          `a/A.mdx a member of "ab" alone and b/B.mdx of the ` +
+          `escape-spelled key's group alone, in byte order of path ` +
+          `(SPEC 7, 7.1, 11.6)`,
+      );
+    },
+  );
+}
 
 // Encoding (SPEC 7: the file's bytes MUST be valid UTF-8 and MUST NOT begin
 // with a byte-order mark; either violation is 14.14). The non-UTF-8 fixture
@@ -2180,7 +2580,15 @@ const T7_2 = defineProductTest({
     "load, discover, and resolve in a coverage profile and a policy " +
     "selector (SPEC 7, 7.4, 7.5, 8); literals are read verbatim — an " +
     "escape-spelled glob matches nothing and an escape-spelled group name " +
-    "is named only by the same spelling (2.4); a non-UTF-8 file, a " +
+    "is named only by the same spelling (2.4); keys and enumerated values " +
+    "are read as spelled, an identifier key alike — an escape-spelled " +
+    "top-level key, a string literal or an identifier, is an unknown key " +
+    "(specs then missing) and an escape-spelled mode no mode, each a " +
+    "configuration error, while keys distinct only as spelled (ab and its " +
+    "escape-spelled twin, string literals or identifiers) load as two " +
+    "groups, each discovering its own glob's file, and an escape-spelled " +
+    "identifier group key is named only by the same spelling (2.4); a " +
+    "non-UTF-8 file, a " +
     "byte-order mark, a repeated key, and an empty spec group, code " +
     "group, profile, or rule name are configuration errors; comments " +
     "anywhere contribute nothing (inventory's configuration " +
@@ -2465,60 +2873,50 @@ const T7_2 = defineProductTest({
       'T7-2 (verbatim group name: a profile\'s target "product" names no ' +
         "configured group — the group's spelling contains a backslash)",
     );
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": VERBATIM_NAME_CONFIG,
-          "specs/A.mdx": SECTION_A_SOURCE,
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T7-2 (verbatim group name): `build` — the profile's target and " +
-            "boundary, spelled as the group's key is, resolve (SPEC 7, " +
-            "2.4, 7.4)",
-        );
-        const inventoryLabel = "T7-2 (verbatim group name) `inventory --json`";
-        const inventory = decodeInventoryDocument(
-          await runJson(
-            product,
-            workspace,
-            ["inventory", "--json"],
-            inventoryLabel,
-          ),
-          inventoryLabel,
-        );
-        assertSameJson(
-          inventory.configuration.specs.map((group) => group.name),
-          [VERBATIM_GROUP_NAME],
-          `${inventoryLabel}: the group is named as spelled — eleven ` +
-            `characters, the six of the escape included — never the ` +
-            `interpreted "product" (SPEC 7, 2.4, 11.6)`,
-        );
-        const coverageLabel = "T7-2 (verbatim group name) `coverage --json`";
-        const coverage = decodeCoverageReport(
-          await runJson(
-            product,
-            workspace,
-            ["coverage", "--json"],
-            coverageLabel,
-          ),
-          coverageLabel,
-        );
-        assertSameJson(
-          coverage.profiles.map((row) => ({
-            name: row.name,
-            covered: row.covered.map((entry) => entry.identity),
-            uncovered: [...row.uncovered].sort(),
-          })),
-          [{ name: "verbatim", covered: [], uncovered: ["specs/A.mdx#a"] }],
-          `${coverageLabel}: the profile resolved its target — the ` +
-            `group's one leaf is its target set, uncovered under a ` +
-            `boundary sourcing no edge into it (SPEC 7, 2.4, 7.4, 8.1, 8.2)`,
-        );
-      },
+    await expectVerbatimGroupNameResolves(
+      product,
+      VERBATIM_NAME_CONFIG,
+      "T7-2 (verbatim group name)",
+    );
+
+    // Keys and enumerated values are read as spelled too (SPEC 7, 2.4): a
+    // string-literal top-level key and a profile's `mode` spelled with an
+    // escape are refused (14.14) — no `specs`, and no mode — while the
+    // keys "ab" and its escape-spelled twin declare two groups that load,
+    // each discovering its own glob's file.
+    for (const arm of SPELLED_KEY_VIOLATIONS) {
+      await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
+    }
+    await expectTwoSpelledGroups(
+      product,
+      STRING_KEYS_TWO_GROUPS_CONFIG,
+      // The name as spelled: the characters between its delimiters (2.4).
+      ESCAPED_AB_STRING_KEY.slice(1, -1),
+      'T7-2 (keys read as spelled: the string-literal group keys "ab" and ' +
+        "its escape-spelled twin)",
+    );
+
+    // Identifier keys are read as spelled alike (SPEC 7, 2.4): the top-level
+    // identifier key `specs` with its `s` so escaped, and the verbatim group
+    // name keyed as an identifier under a profile targeting `product`, are
+    // refused (14.14); the identifier keys `ab` and its escape-spelled twin
+    // declare two groups that load; and the identifier-keyed group is named
+    // by a target spelled as its key.
+    for (const arm of SPELLED_IDENTIFIER_KEY_VIOLATIONS) {
+      await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
+    }
+    await expectTwoSpelledGroups(
+      product,
+      IDENTIFIER_KEYS_TWO_GROUPS_CONFIG,
+      ESCAPED_AB_IDENTIFIER,
+      "T7-2 (identifier keys read as spelled: the group keys ab and its " +
+        "escape-spelled twin)",
+    );
+    await expectVerbatimGroupNameResolves(
+      product,
+      IDENTIFIER_NAME_CONFIG,
+      "T7-2 (identifier keys read as spelled: the group keyed by the " +
+        "identifier spelling, the target spelled as its key)",
     );
 
     // Encoding (SPEC 7, 14.14): bytes that are not valid UTF-8; a
