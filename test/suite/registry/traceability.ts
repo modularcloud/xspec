@@ -556,8 +556,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // document carrying 14.14's stable code; (c)'s twin compares are 7's —
   // the specifier never resolved, read, or loaded, whatever it designates
   // — its sealed directory staging a refused read (14.25) the product must
-  // not meet, that condition's absence, rule (c).
-  "T7-9": ["7", "2.4", "12.0", "12.7", "14"],
+  // not meet, that condition's absence, rule (c); (d)'s installs are 7's
+  // (no command's outcome depends, through the import, on the module or on
+  // whether a project installed it) and 7.6's (no name is privileged: the
+  // trap and the FIFO manifest staged under `trap`, `xspec`, and the name
+  // the package's manifest gives, read as T7.6-4(a) reads it), its
+  // representative commands' outcomes T7-8's.
+  "T7-9": ["7", "2.4", "7.6", "12.0", "12.7", "14"],
   // T7.1-1: its wrong-case extension arm the byte-wise, case-sensitive
   // extension test (12.0: no case folding), and `inventory`'s `derived`
   // entry for the file without `.mdx` (11.6), `module` and `markdown` null

@@ -1,6 +1,6 @@
 // TEST-SPEC §7 configuration import — T7-9's arms (a), the specifier's
-// spellings, (b), the scanner-rejected escapes, and (c), the specifier's
-// designations. Configuration basics
+// spellings, (b), the scanner-rejected escapes, (c), the specifier's
+// designations, and (d), installs. Configuration basics
 // (T7-1…T7-3) and T7-7 live in section-7-basics.ts, discovery (T7-4…T7-6,
 // T7-8) in section-7-discovery.ts, and P-19, the property searching the
 // spellings (a) never stages, in section-16-p19.ts.
@@ -25,10 +25,11 @@
 // and `markdown: { emit: true }`, emitting next to sources — no code group,
 // so no configured group discovers the configuration file — over
 // `specs/A.mdx` (`<S id="a">A</S>`) and `specs/B.mdx` (`<S id="b">B</S>`);
-// no git repository and no `node_modules`. Every workspace is fresh (H-1),
-// and every configuration and source is a staged-source record made at
-// module load (S-9's timing clause: each arm's workspace is created after
-// the body's first product invocation, the twin's).
+// no git repository, and no `node_modules` but (d)'s. Every workspace is
+// fresh (H-1), and every configuration and source is a staged-source record
+// made at module load (S-9's timing clause: each arm's workspace is created
+// after the body's first product invocation, the twin's) but (d)'s one
+// configuration composed at run time (below).
 //
 // The twin imports from `"xspec"` (`CONFIG_IMPORT_TWIN_CONFIG`). It runs
 // first, in a workspace of its own, and holds the outcome such a workspace
@@ -129,20 +130,89 @@
 // are pinned as (a)'s are (`assertStagedAsSpelled`), and its literal
 // against the path its arm stages at (`assertDesignates`).
 //
+// (d) Installs (SPEC 7: no command's outcome depends, through a
+// configuration's import, on the `defineConfig` module or on whether a
+// project installed it; 7.6: no name is privileged). The configuration
+// imports from `"N"`, double-quoted, beside one of two stagings
+// (`T7_9_D_KINDS`) at `node_modules/N`, where resolving `N` from the
+// configuration file's directory, the workspace root, looks: a trap
+// package — its manifest (`trapManifest`) giving `N` as its `name` and
+// naming `index.js` as its entry (`main`, and `exports`), the entry
+// (`TRAP_ENTRY`, a CommonJS module, so that it parses as script code too,
+// S-9), if loaded, writing the marker `t7-9-trap-marker` at the workspace
+// root (the parent of its own nearest `node_modules` ancestor, and nowhere
+// where it has none), printing a line holding `TRAP_TELL` on each stream,
+// and exiting 113 — and, separately, a `node_modules/N` holding only its
+// `package.json`, a FIFO (`stageFifo`, never opened by the harness). Each
+// is staged under three names: `trap` and `xspec`, the executable's name
+// (`T7_9_D_FIXED_NAMES`); and the `name` the module channel's package
+// manifest gives (`thirdInstallName`), read as T7.6-4(a) reads it
+// (helpers/module-channel.ts `modulePackageDirectory`:
+// the binding's package directory checked as every test of 7.6 checks it,
+// its `package.json` read strictly by `readManifestName`), wherever that is
+// a name of 7.6's grammar (`moduleNameGrammarProblem`; 7.6's exclusions
+// concern TypeScript's and Node.js's resolution, which no command
+// performs, so none applies) — staged once where it is `trap` or `xspec`
+// (TEST-SPEC: the last two coinciding where it is `xspec`), and not at all
+// where the manifest gives no such name, as TEST-SPEC stages it only where
+// it is one. That name's configuration, known only once the package
+// directory is read, is composed through `configImportText` and judged by
+// S-9's TypeScript check, as module and as script code, before anything is
+// staged (`composedInstallConfig`, as T7.6-4(a)'s composed files are), then
+// staged under the per-draw declaration (`ts.perDraw`: judged again at
+// staging, no module-level record being able to hold it); the fixed
+// names' configurations are records. With no package directory given —
+// or, on the built product's binding, one that does not exist — that
+// name's two arms each fail as a diagnosed assertion failure naming the
+// missing package directory: the module channel counts as part of the
+// product (H-8), and an arm is never skipped (H-9) — a conservative
+// choice, TEST-SPEC naming no outcome for a name it cannot read.
+//
+// Each name's twin — the same configuration and sources, holding no
+// `node_modules` — runs first, in a workspace of its own, T7-8's
+// representative commands (`T7_9_D_COMMANDS`): `build`, `check`, `ids`,
+// `view specs/A.mdx`, `inventory`, `review list`, and `rename specs/A.mdx a
+// b`, each under `--json`, in that order, the files each writes taken as
+// T7-8 takes them (the workspace's snapshots around the run, the lock path
+// pruned, H-6). Then each kind's arm runs them in its own fresh workspace,
+// and after each command asserts: no marker at the workspace root, and
+// neither standard output nor standard error holding `TRAP_TELL`; the
+// FIFO, where staged, still a FIFO in place (`assertFifosIntact`), the
+// command having ended within its own guard — all that "unopened" asserts
+// (S-3); the exit outcome and standard output equal to the twin's same
+// command's; the files it wrote byte-equal to those the twin's wrote
+// (`assertWriteDeltasEqual`, graph data included, the two configurations
+// being byte-identical; the lock path aside, H-6); and the outcome such a
+// workspace gives it (H-5) — `build` and `check` exit 0 finding-free, `ids`
+// 0 with its listing (`a` in `specs/A.mdx`, `b` in `specs/B.mdx`), `view`
+// and `inventory` 0 finding-free, `review list` 0 listing no session and
+// no finding, and the `rename` 0 with its applied mapping `specs/A.mdx#a`
+// to `specs/A.mdx#b` — so that the arm stays red against S-7's stub, whose
+// runs equal its twin's.
+//
 // Every arm runs: each arm's diagnosed failure (a `HarnessAssertionError`,
 // its message naming the arm) is collected, and the body fails once at the
-// end naming every failed arm, so one run diagnoses every spelling and
-// designation; a harness error or a hang propagates at once — a (c) arm's
-// hang renamed for its arm and command, the driver's kill kept as its
-// cause, so the certification runner still records the hang it is
-// (helpers/hang-guards.ts `isHangGuardKill`; S-3: a tripped guard ends its
-// test). Certification: T7-9 is in no
+// end naming every failed arm, so one run diagnoses every spelling,
+// designation, and install; a harness error or a hang propagates at once —
+// a (c) or (d) arm's hang renamed for its arm and command, the driver's
+// kill kept as its cause, so the certification runner still records the
+// hang it is (helpers/hang-guards.ts `isHangGuardKill`; S-3: a tripped
+// guard ends its test). Certification: T7-9 is in no
 // conformer's scope (CERTIFICATIONS.md, Exclusions, "T7-9 and T7-10": its
 // operative assertions are positive, each failing loud against the product
-// it targets).
+// it targets; every FIFO, (d)'s manifest among them, is asserted afterwards
+// still a FIFO in place, so a staging whose effect misses fails loud).
 
 import { Buffer } from "node:buffer";
-import { decodeFindingsReport } from "../../helpers/adapters/index.js";
+import type { AppliedMappingPair } from "../../helpers/adapters/index.js";
+import {
+  decodeAppliedMappingReport,
+  decodeFindingsReport,
+  decodeIdsReport,
+  decodeInventoryDocument,
+  decodeSessionListReport,
+  decodeViewReport,
+} from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
@@ -160,8 +230,16 @@ import {
   CONFIG_IMPORT_TWIN_LITERAL,
   configImportText,
 } from "../../helpers/config-import.js";
+import type { WriteDeltaLabels } from "../../helpers/determinism.js";
+import { assertWriteDeltasEqual } from "../../helpers/determinism.js";
 import { isHangGuardKill } from "../../helpers/hang-guards.js";
+import { EXCLUDE_LOCK_PATH } from "../../helpers/lock-path.js";
+import type { StagedLeftover } from "../../helpers/lock-staging.js";
 import { assertFifosIntact, stageFifo } from "../../helpers/lock-staging.js";
+import {
+  moduleNameGrammarProblem,
+  modulePackageDirectory,
+} from "../../helpers/module-channel.js";
 import {
   HarnessStagingError,
   stageDirectoryMode,
@@ -172,19 +250,27 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   DirectorySnapshot,
+  SnapshotChange,
   SnapshotOptions,
 } from "../../helpers/snapshot.js";
 import {
   assertSnapshotsEqual,
+  diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
+import { guardSyncStep } from "../../helpers/step-guards.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
+import {
+  judgeTypeScript,
+  tsDeclarationProblem,
+} from "../../helpers/ts-derivability.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { EntryKind, WorkspaceDecl } from "../../helpers/workspace.js";
 import {
+  assertAppliedMapping,
   assertSameJson,
   expectConfigurationError,
   expectErrorDocument,
@@ -925,25 +1011,26 @@ const TWIN_RULE =
  * An arm's run answers exactly as the twin's: the same exit outcome — exit
  * code, or death by signal — and byte-equal standard output (for
  * `inventory`, its `configuration` byte-identical among it). Standard error
- * is not compared: its wording is free (12.0).
+ * is not compared: its wording is free (12.0). `twinLabel` and `rule` name
+ * the twin and why (defaulting to (a)'s, (c)'s, and their `"xspec"` twin's).
  */
 function assertAnswersAsTwin(
   result: RunResult,
   twin: RunResult,
   context: string,
+  twinLabel = `its twin importing from ${CONFIG_IMPORT_TWIN_LITERAL}`,
+  rule = TWIN_RULE,
 ): void {
   if (result.exitCode !== twin.exitCode || result.signal !== twin.signal) {
     fail(
-      `${context}: it exits exactly as on its twin importing from ` +
-        `${CONFIG_IMPORT_TWIN_LITERAL} — ${TWIN_RULE}; the arm: ` +
+      `${context}: it exits exactly as on ${twinLabel} — ${rule}; the arm: ` +
         `${summarizeResult(result)}; the twin: ${summarizeResult(twin)}`,
     );
   }
   assertBytesEqual(
     result.stdoutBytes,
     twin.stdoutBytes,
-    `${context}: its standard output is byte-equal to the twin's — ` +
-      TWIN_RULE,
+    `${context}: its standard output is byte-equal to the twin's — ${rule}`,
   );
 }
 
@@ -1041,37 +1128,39 @@ async function runRejectedEscapeArm(
 }
 
 /**
- * A (c) arm's `command`, run from the workspace root under `--json` within
+ * A (c) or (d) arm's command, `argv` run from the workspace root within
  * the driver's own guard (S-3). Its hang propagates at once, ending the test
  * (S-3: a tripped guard ends its test), renamed for the arm and the command
- * with the driver's kill as its cause, so the certification runner still
- * records it as the hang it is (`isHangGuardKill`); anything else the run
- * rejects with propagates unchanged.
+ * — `blocked` saying what a product blocking there opened — with the
+ * driver's kill as its cause, so the certification runner still records it
+ * as the hang it is (`isHangGuardKill`); anything else the run rejects with
+ * propagates unchanged.
  */
-async function runDesignationCommand(
+async function runGuardedCommand(
   product: ProductBinding,
   workspace: TestWorkspace,
-  command: ImportCommand,
+  argv: readonly string[],
   context: string,
+  blocked: string,
 ): Promise<RunResult> {
   try {
-    return await runProduct(product, {
-      cwd: workspace.root,
-      argv: [command.word, "--json"],
-    });
+    return await runProduct(product, { cwd: workspace.root, argv });
   } catch (error) {
     if (!isHangGuardKill(error)) throw error;
     throw new Error(
       `${context}: the command did not end within its own guard, which ` +
-        "killed it — a product opening what the specifier designates, a " +
-        "FIFO with no writer among them, blocks there, where xspec never " +
-        "resolves, reads, or loads the specifier (SPEC 7; TEST-SPEC " +
-        "T7-9(c), S-3: a tripped guard ends its test) — " +
+        `killed it — ${blocked} (S-3: a tripped guard ends its test) — ` +
         (error instanceof Error ? error.message : String(error)),
       { cause: error },
     );
   }
 }
+
+/** Why a (c) command's hang is the product's (module header). */
+const DESIGNATION_BLOCKED =
+  "a product opening what the specifier designates, a FIFO with no " +
+  "writer among them, blocks there, where xspec never resolves, reads, or " +
+  "loads the specifier (SPEC 7; TEST-SPEC T7-9(c))";
 
 /**
  * One (c) arm (module header): a fresh workspace staging the arm's
@@ -1098,11 +1187,12 @@ async function runDesignationArm(
         }
         const context =
           `T7-9(c), importing from ${arm.label}: ` + commandLabel(command);
-        const result = await runDesignationCommand(
+        const result = await runGuardedCommand(
           product,
           workspace,
-          command,
+          [command.word, "--json"],
           context,
+          DESIGNATION_BLOCKED,
         );
         assertAnswersAsTwin(result, twinResult, context);
         await staging?.afterCommand(context);
@@ -1145,12 +1235,681 @@ async function collectArmFailure(
 }
 
 // ---------------------------------------------------------------------------
+// (d) Installs: the names, the trap package, and the FIFO manifest
+
+/** T7-9(d)'s first name (module header). */
+const TRAP_NAME = "trap";
+/** T7-9(d)'s second name, the executable's (module header). */
+const EXECUTABLE_NAME = "xspec";
+
+/** The marker the trap's entry writes at the workspace root, if loaded. */
+const TRAP_MARKER = "t7-9-trap-marker";
+/** What every line the trap's entry prints holds, on either stream. */
+const TRAP_TELL = "T7-9(d) trap entry ran";
+/**
+ * The trap's exit code: non-zero, outside 12.0's partition (0, 1, 2), and
+ * apart from S-7's stub's 87, so that a diagnosis quoting it names the trap.
+ */
+const TRAP_EXIT_CODE = 113;
+
+/** A package's manifest within its directory (SPEC 7.6). */
+const PACKAGE_MANIFEST = "package.json";
+/** The trap package's entry within its directory, its manifest naming it. */
+const TRAP_ENTRY_FILE = "index.js";
+
+/**
+ * The trap package's entry (module header): a CommonJS module that, if
+ * loaded, finds its own nearest `node_modules` ancestor and writes the
+ * marker in that directory's parent, the workspace root (nowhere where it
+ * finds none), prints a line holding `TRAP_TELL` on each stream, and exits
+ * `TRAP_EXIT_CODE`. Its strings are plain ASCII, with no backslash (checked
+ * at load): its line feed is built from its code point when it runs.
+ */
+const TRAP_ENTRY_TEXT = [
+  '"use strict";',
+  'const fs = require("node:fs");',
+  'const path = require("node:path");',
+  "const lineFeed = String.fromCharCode(10);",
+  "let holder = __dirname;",
+  'while (path.basename(holder) !== "node_modules") {',
+  "  const parent = path.dirname(holder);",
+  "  if (parent === holder) break;",
+  "  holder = parent;",
+  "}",
+  'if (path.basename(holder) === "node_modules") {',
+  "  fs.writeFileSync(",
+  `    path.join(path.dirname(holder), ${JSON.stringify(TRAP_MARKER)}),`,
+  `    ${JSON.stringify(TRAP_TELL)} + lineFeed`,
+  "  );",
+  "}",
+  `process.stdout.write(${JSON.stringify(`${TRAP_TELL}: standard output`)} + lineFeed);`,
+  `process.stderr.write(${JSON.stringify(`${TRAP_TELL}: standard error`)} + lineFeed);`,
+  `process.exit(${String(TRAP_EXIT_CODE)});`,
+  "",
+].join(LINE_FEED);
+
+const TRAP_ENTRY: StagedTs = stagedTs(
+  `T7-9 node_modules/N/${TRAP_ENTRY_FILE} ((d) the trap package's entry under each name N: if loaded, it writes the marker ${TRAP_MARKER} at the workspace root, prints a line on each stream, and exits ${String(TRAP_EXIT_CODE)})`,
+  TRAP_ENTRY_TEXT,
+);
+
+/**
+ * The trap package's manifest under `name` (module header): `name` itself,
+ * a version, and the entry for every resolution — `main`, and `exports` —
+ * so that a product resolving `N` from the configuration file's directory
+ * and loading it runs the trap. Plain JSON, which nothing judges (S-9).
+ */
+function trapManifest(name: string): string {
+  const manifest = {
+    name,
+    version: "1.0.0",
+    main: TRAP_ENTRY_FILE,
+    exports: `./${TRAP_ENTRY_FILE}`,
+  };
+  return JSON.stringify(manifest, null, 2) + LINE_FEED;
+}
+
+/** One of T7-9(d)'s names N (module header), with its configuration. */
+interface InstallName {
+  readonly name: string;
+  /** How diagnoses describe the name beside its spelling. */
+  readonly what: string;
+  /**
+   * The configuration importing from `"N"`, double-quoted: a record for a
+   * fixed name, else the text composed once the package directory was
+   * read, declared per draw (module header).
+   */
+  readonly config: StagedTs | string;
+}
+
+/** The configuration importing from `"N"`, double-quoted (module header). */
+function installConfigText(name: string): string {
+  return configImportText(DOUBLE_QUOTE + name + DOUBLE_QUOTE);
+}
+
+/** T7-9(d)'s two fixed names (module header), each configuration a record. */
+const T7_9_D_FIXED_NAMES: readonly InstallName[] = [
+  {
+    name: TRAP_NAME,
+    what: "the name trap",
+    config: stagedTs(
+      'T7-9 xspec.config.ts ((d) importing from "trap": beside the trap package or the FIFO manifest at node_modules/trap, and in its twin)',
+      installConfigText(TRAP_NAME),
+    ),
+  },
+  {
+    name: EXECUTABLE_NAME,
+    what: "xspec, the executable's name",
+    config: CONFIG_IMPORT_TWIN_CONFIG,
+  },
+];
+
+// The module-load self-checks of (d)'s staging (module header): the trap's
+// entry holds no backslash and its tell no character JSON or a line could
+// re-spell; each fixed name is a name of 7.6's grammar — so that a
+// manifest's name equal to it is recognized as it — and its configuration's
+// bytes are the builder's over the double-quoted name.
+if (
+  occurrences(TRAP_ENTRY_TEXT, BACKSLASH) !== 0 ||
+  !/^[A-Za-z0-9 ():-]+$/.test(TRAP_TELL) ||
+  !/^[a-z0-9.-]+$/.test(TRAP_MARKER)
+) {
+  throw new Error(
+    "T7-9(d): the trap's entry holds a backslash, or its tell or marker a " +
+      "character outside plain ASCII words (module header)",
+  );
+}
+for (const fixed of T7_9_D_FIXED_NAMES) {
+  const problem = moduleNameGrammarProblem(fixed.name);
+  if (
+    problem !== null ||
+    typeof fixed.config === "string" ||
+    fixed.config.source !== installConfigText(fixed.name)
+  ) {
+    throw new Error(
+      `T7-9(d): the fixed name ${JSON.stringify(fixed.name)} ` +
+        (problem === null
+          ? "has no configuration record whose bytes are the builder's over " +
+            "the double-quoted name"
+          : `is no name of 7.6's grammar: it ${problem}`) +
+        " (module header)",
+    );
+  }
+}
+
+/** T7-9(d)'s two stagings at `node_modules/N` (module header). */
+type InstallKind = "trap" | "fifo";
+
+/** The stagings, in the order each name's arms run. */
+const T7_9_D_KINDS: readonly InstallKind[] = ["trap", "fifo"];
+
+/** `node_modules/N`, workspace-relative. */
+function installedDirectory(name: string): string {
+  return `node_modules/${name}`;
+}
+
+/** An arm as diagnoses name it. */
+function installArmLabel(installName: InstallName, kind: InstallKind): string {
+  const { name } = installName;
+  const at = installedDirectory(name);
+  return (
+    `importing from ${JSON.stringify(name)} (${installName.what}) ` +
+    (kind === "trap"
+      ? `beside a trap package at ${at}`
+      : `beside ${at} whose ${PACKAGE_MANIFEST} is a FIFO`)
+  );
+}
+
+/**
+ * A (d) workspace (module header): the configuration and the two sources,
+ * and, for an arm, its staging's files and directories — the trap package's
+ * manifest and entry, or the directory the FIFO manifest is made in once
+ * the workspace stands. A composed configuration is declared per draw.
+ */
+function installDecl(
+  installName: InstallName,
+  kind?: InstallKind,
+): WorkspaceDecl {
+  const at = installedDirectory(installName.name);
+  return {
+    files: {
+      [CONFIG_IMPORT_CONFIG_PATH]: installName.config,
+      ...CONFIG_IMPORT_SOURCES,
+      ...(kind === "trap"
+        ? {
+            [`${at}/${PACKAGE_MANIFEST}`]: trapManifest(installName.name),
+            [`${at}/${TRAP_ENTRY_FILE}`]: TRAP_ENTRY,
+          }
+        : {}),
+    },
+    ...(kind === "fifo" ? { dirs: [at] } : {}),
+    ...(typeof installName.config === "string"
+      ? { ts: { perDraw: [CONFIG_IMPORT_CONFIG_PATH] } }
+      : {}),
+  };
+}
+
+/**
+ * The configuration importing from `name`, composed once the package
+ * directory is read (module header): `installConfigText` over it, judged by
+ * S-9's TypeScript check — accepted as module code and as script code —
+ * before anything is staged, a failure a harness error (H-11), as
+ * T7.6-4(a)'s composed files' is.
+ */
+function composedInstallConfig(name: string, context: string): string {
+  const text = installConfigText(name);
+  const problem = guardSyncStep(
+    `judging the configuration importing from ${JSON.stringify(name)} ` +
+      "(T7-9(d), S-9)",
+    () =>
+      tsDeclarationProblem(
+        judgeTypeScript(text, CONFIG_IMPORT_CONFIG_PATH),
+        "well-formed",
+      ),
+  );
+  if (problem !== undefined) {
+    throw new HarnessStagingError(
+      "ts-derivability",
+      CONFIG_IMPORT_CONFIG_PATH,
+      `${context}: the configuration importing from ${JSON.stringify(name)}, ` +
+        `composed once the package directory was read, is ${problem} ` +
+        "(TEST-SPEC S-9: a composed configuration file is judged " +
+        "well-formed before the product is driven on it)",
+    );
+  }
+  return text;
+}
+
+/**
+ * T7-9(d)'s third name (module header): the name the module channel's
+ * package manifest gives, staged as `name`; none to stage where the
+ * manifest gives no name of 7.6's grammar, or one of the fixed names; or
+ * the diagnosis its missing package directory is (H-8, H-9).
+ */
+type ThirdInstallName =
+  | { readonly kind: "name"; readonly installName: InstallName }
+  | { readonly kind: "none" }
+  | { readonly kind: "missing"; readonly diagnosis: string };
+
+/** How diagnoses name the third name where it cannot be read. */
+const THIRD_NAME_CONTEXT =
+  "T7-9(d), under its third name, the name the module channel's package " +
+  "manifest gives";
+
+/**
+ * Read T7-9(d)'s third name off `product`'s package directory, as
+ * T7.6-4(a) reads it (module header): the directory checked by
+ * `modulePackageDirectory`, its manifest read strictly. None given, or the
+ * built product's missing one, is a diagnosis to record for each of the
+ * name's arms; every other refusal of the directory is a harness error.
+ */
+async function thirdInstallName(
+  product: ProductBinding,
+): Promise<ThirdInstallName> {
+  if (product.packageDir === undefined) {
+    const executable = [product.command, ...(product.prefixArgs ?? [])];
+    return {
+      kind: "missing",
+      diagnosis:
+        `${product.label}: no package directory is given beside the ` +
+        `executable (${executable.join(" ")}), so that name cannot be ` +
+        "read — the module channel counts as part of the product " +
+        "(TEST-SPEC H-8) and an arm is never skipped (H-9), so each of its " +
+        "arms fails here, diagnosed. Give the directory " +
+        ".github/scripts/pack-package.sh prints as XSPEC_PACKAGE_DIR " +
+        "(AGENTS.md). Nothing was staged.",
+    };
+  }
+  let manifestName: string | undefined;
+  try {
+    const pkg = await modulePackageDirectory(
+      product,
+      "T7-9(d), reading its third name",
+    );
+    manifestName = pkg.manifestName.name;
+  } catch (error) {
+    if (!(error instanceof HarnessAssertionError)) throw error;
+    return { kind: "missing", diagnosis: error.message };
+  }
+  if (
+    manifestName === undefined ||
+    moduleNameGrammarProblem(manifestName) !== null ||
+    T7_9_D_FIXED_NAMES.some((fixed) => fixed.name === manifestName)
+  ) {
+    return { kind: "none" };
+  }
+  return {
+    kind: "name",
+    installName: {
+      name: manifestName,
+      what: "the name the module channel's package manifest gives",
+      config: composedInstallConfig(manifestName, THIRD_NAME_CONTEXT),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// (d) Installs: the representative commands
+
+/** One of T7-9(d)'s representative commands (T7-8's), under `--json`. */
+interface InstallCommand {
+  readonly argv: readonly string[];
+  /** The outcome such a workspace gives it (H-5; module header). */
+  readonly expect: (result: RunResult, context: string) => void;
+}
+
+/** One `{file, ids}` entry of `ids`'s flat listing (SPEC 12.3). */
+interface IdsListingEntry {
+  readonly file: string;
+  readonly ids: readonly string[];
+}
+
+/** A listing sorted bytewise by file path (membership is the subject). */
+function sortedIdsListing(
+  entries: readonly IdsListingEntry[],
+): IdsListingEntry[] {
+  return entries
+    .map((entry) => ({ file: entry.file, ids: entry.ids }))
+    .sort((a, b) =>
+      Buffer.compare(Buffer.from(a.file, "utf8"), Buffer.from(b.file, "utf8")),
+    );
+}
+
+/** Every (d) workspace's discovered set: `a` and `b`, by file (SPEC 12.3). */
+const T7_9_D_LISTING: readonly IdsListingEntry[] = [
+  { file: "specs/A.mdx", ids: ["a"] },
+  { file: "specs/B.mdx", ids: ["b"] },
+];
+
+/** The representative `rename`'s applied mapping (SPEC 6.4, 12.7). */
+const T7_9_D_MAPPING: readonly AppliedMappingPair[] = [
+  { from: "specs/A.mdx#a", to: "specs/A.mdx#b" },
+];
+
+/**
+ * T7-9(d)'s commands (module header): T7-8's representative commands, each
+ * under `--json`, in TEST-SPEC's order — the `rename`, the one writing
+ * sources, last — each with the outcome such a workspace gives it (H-5).
+ */
+const T7_9_D_COMMANDS: readonly InstallCommand[] = [
+  {
+    argv: ["build", "--json"],
+    expect: (result, context) => {
+      expectFindingFree(result, context, "SPEC 12.1");
+    },
+  },
+  {
+    argv: ["check", "--json"],
+    expect: (result, context) => {
+      expectFindingFree(result, context, "SPEC 12.2: graph data current");
+    },
+  },
+  {
+    argv: ["ids", "--json"],
+    expect: (result, context) => {
+      assertExitCode(
+        result,
+        0,
+        `${context} — a valid workspace's ` +
+          "`ids` answers, exit 0 (SPEC 12.3, 13.3; H-5)",
+      );
+      const report = decodeIdsReport(parseJsonStdout(result, context), context);
+      assertSameJson(
+        sortedIdsListing(report.files),
+        sortedIdsListing(T7_9_D_LISTING),
+        `${context}: its listing — requirement IDs grouped by file, compared ` +
+          "bytewise-sorted by path — is the workspace's discovered set, a " +
+          "in specs/A.mdx and b in specs/B.mdx (SPEC 12.3, 7)",
+      );
+    },
+  },
+  {
+    argv: ["view", "specs/A.mdx", "--json"],
+    expect: (result, context) => {
+      assertExitCode(
+        result,
+        0,
+        `${context} — ` +
+          "`view` answers for a discovered source, exit 0 (SPEC 11.4, 12.0; H-5)",
+      );
+      assertSameJson(
+        decodeViewReport(
+          parseJsonStdout(result, context),
+          { text: false },
+          context,
+        ).findings,
+        [],
+        `${context}: the answer is finding-free — the workspace is valid ` +
+          "(SPEC 11.4, 11.2)",
+      );
+    },
+  },
+  {
+    argv: ["inventory", "--json"],
+    expect: (result, context) => {
+      assertExitCode(
+        result,
+        0,
+        `${context} — ` + "`inventory` answers, exit 0 (SPEC 11.6, 12.0; H-5)",
+      );
+      assertSameJson(
+        decodeInventoryDocument(parseJsonStdout(result, context), context)
+          .findings,
+        [],
+        `${context}: the inventory is finding-free — no journal, session, ` +
+          "or record condition stands on the workspace (SPEC 11.6)",
+      );
+    },
+  },
+  {
+    argv: ["review", "list", "--json"],
+    expect: (result, context) => {
+      assertExitCode(
+        result,
+        0,
+        `${context} — ` +
+          "`review list` answers, exit 0 (SPEC 10.7, 10.1; H-5)",
+      );
+      const listing = decodeSessionListReport(
+        parseJsonStdout(result, context),
+        context,
+      );
+      assertSameJson(
+        { sessions: listing.sessions, findings: listing.findings ?? [] },
+        { sessions: [], findings: [] },
+        `${context}: no session is listed and no finding reported — the ` +
+          "workspace holds no session directory (SPEC 10.1: an absent " +
+          "session directory holds no sessions; 10.7)",
+      );
+    },
+  },
+  {
+    argv: ["rename", "specs/A.mdx", "a", "b", "--json"],
+    expect: (result, context) => {
+      assertExitCode(
+        result,
+        0,
+        `${context} — the rename applies, exit 0 (SPEC 6.4, 12.0; H-5)`,
+      );
+      assertAppliedMapping(
+        decodeAppliedMappingReport(parseJsonStdout(result, context), context),
+        T7_9_D_MAPPING,
+        `${context}: its applied mapping is exactly specs/A.mdx#a → ` +
+          "specs/A.mdx#b — IDs are unique within a file, so b in " +
+          "specs/B.mdx collides with nothing (SPEC 6.4, 12.7)",
+      );
+    },
+  },
+];
+
+/** A (d) command as diagnoses name it. */
+function installCommandLabel(command: InstallCommand): string {
+  return "`" + command.argv.join(" ") + "`";
+}
+
+// ---------------------------------------------------------------------------
+// (d) Installs: the twins and the arms
+
+/** Why each (d) answer must be the twin's (TEST-SPEC T7-9(d); SPEC 7, 7.6). */
+const INSTALL_RULE =
+  "no command's outcome depends, through a configuration's import, on the " +
+  "defineConfig module or on whether a project installed it, and no name " +
+  "is privileged: xspec never executes the configuration and never " +
+  "resolves or loads its import, so nothing node_modules holds reaches an " +
+  "answer (SPEC 7, 7.6; TEST-SPEC T7-9(d))";
+
+/** Why a (d) command's hang is the product's (module header). */
+const INSTALL_BLOCKED =
+  "a product resolving or loading the configuration's import opens the " +
+  "installed package's manifest, here a FIFO with no writer, and blocks " +
+  "there, where xspec never resolves or loads the import (SPEC 7, 7.6; " +
+  "TEST-SPEC T7-9(d))";
+
+/** A (d) arm's twin, as diagnoses name it. */
+const INSTALL_TWIN_LABEL =
+  "its twin, the same workspace and configuration holding no node_modules";
+
+/** How the written-file compare names a (d) arm's two runs. */
+const T7_9_D_TWIN_LABELS: WriteDeltaLabels = {
+  first: "the arm's workspace",
+  second: "its twin",
+  pair: "the arm's workspace and its twin",
+};
+
+/** One of a (d) twin's runs: its result, and the files it wrote. */
+interface InstallTwinRun {
+  readonly result: RunResult;
+  /** Its workspace's changes across the run (the lock path pruned, H-6). */
+  readonly delta: readonly SnapshotChange[];
+  /** Its workspace after the run (the lock path pruned). */
+  readonly after: DirectorySnapshot;
+}
+
+/**
+ * A name's twin (module header): its configuration and the two sources in
+ * a fresh workspace holding no `node_modules`, the commands run in order,
+ * each with the files it writes — the workspace's snapshots around the
+ * run, the lock path pruned (H-6). The workspace is disposed once they are
+ * taken; a run the twin's guard kills propagates as the hang it is.
+ */
+async function runInstallTwin(
+  product: ProductBinding,
+  installName: InstallName,
+): Promise<readonly InstallTwinRun[]> {
+  const workspace = await TestWorkspace.create(installDecl(installName));
+  try {
+    const runs: InstallTwinRun[] = [];
+    for (const command of T7_9_D_COMMANDS) {
+      const before = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+      const result = await runProduct(product, {
+        cwd: workspace.root,
+        argv: command.argv,
+      });
+      const after = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+      runs.push({ result, delta: diffSnapshots(before, after), after });
+    }
+    return runs;
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * After each (d) command (module header): no marker at the workspace root,
+ * and neither standard output nor standard error holding the trap's tell —
+ * the trap package's entry never ran.
+ */
+async function assertTrapNeverRan(
+  workspace: TestWorkspace,
+  result: RunResult,
+  context: string,
+): Promise<void> {
+  const marker = await workspace.kind(TRAP_MARKER);
+  if (marker !== "absent") {
+    fail(
+      `${context}: the trap's marker ${TRAP_MARKER} stands at the ` +
+        `workspace root (${marker}) — the trap package's entry ran, ` +
+        `loaded through the configuration's import — where ${INSTALL_RULE}; ` +
+        summarizeResult(result),
+    );
+  }
+  const streams: ReadonlyArray<readonly [string, Uint8Array]> = [
+    ["standard output", result.stdoutBytes],
+    ["standard error", result.stderrBytes],
+  ];
+  for (const [stream, bytes] of streams) {
+    if (Buffer.from(bytes).includes(TRAP_TELL)) {
+      fail(
+        `${context}: its ${stream} carries what the trap package's entry ` +
+          `prints (${JSON.stringify(TRAP_TELL)}) — the entry ran, loaded ` +
+          `through the configuration's import — where ${INSTALL_RULE}; ` +
+          summarizeResult(result),
+      );
+    }
+  }
+}
+
+/**
+ * One (d) arm (module header): a fresh workspace staging `installName`'s
+ * configuration, the two sources, and `kind`'s staging at `node_modules/N`
+ * — the FIFO made and verified once the workspace stands, never opened by
+ * the harness — then each command in order: the trap never ran, the FIFO
+ * still in place, the twin's answer and written files, and the outcome
+ * such a workspace gives it (H-5).
+ */
+async function runInstallArm(
+  product: ProductBinding,
+  installName: InstallName,
+  kind: InstallKind,
+  twin: readonly InstallTwinRun[],
+): Promise<void> {
+  const label = installArmLabel(installName, kind);
+  const manifest = `${installedDirectory(installName.name)}/${PACKAGE_MANIFEST}`;
+  const workspace = await TestWorkspace.create(installDecl(installName, kind));
+  try {
+    const fifo: StagedLeftover | undefined =
+      kind === "fifo" ? await stageFifo(workspace, manifest) : undefined;
+    for (const [index, command] of T7_9_D_COMMANDS.entries()) {
+      const twinRun = twin[index];
+      if (twinRun === undefined) {
+        throw new Error(
+          `T7-9(d): no twin run for ${installCommandLabel(command)}`,
+        );
+      }
+      const context = `T7-9(d), ${label}: ${installCommandLabel(command)}`;
+      const before = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+      const result = await runGuardedCommand(
+        product,
+        workspace,
+        command.argv,
+        context,
+        INSTALL_BLOCKED,
+      );
+      const after = await snapshotDirectory(workspace.root, EXCLUDE_LOCK_PATH);
+      await assertTrapNeverRan(workspace, result, context);
+      if (fifo !== undefined) {
+        await assertFifosIntact(
+          fifo,
+          `${context}: ${manifest} is still a FIFO in place, the command ` +
+            "having ended within its own guard — unopened, as xspec never " +
+            "resolves or loads the configuration's import (SPEC 7, 7.6; " +
+            "TEST-SPEC T7-9(d), S-3)",
+        );
+      }
+      assertAnswersAsTwin(
+        result,
+        twinRun.result,
+        context,
+        INSTALL_TWIN_LABEL,
+        INSTALL_RULE,
+      );
+      assertWriteDeltasEqual(
+        diffSnapshots(before, after),
+        after,
+        twinRun.delta,
+        twinRun.after,
+        `${context}: the files it writes are byte-equal to those the same ` +
+          `command writes on ${INSTALL_TWIN_LABEL}, the two configurations ` +
+          "byte-identical (TEST-SPEC T7-9(d); H-6: the lock path left out " +
+          "of every written-file compare across workspaces)",
+        T7_9_D_TWIN_LABELS,
+      );
+      command.expect(result, context);
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * T7-9(d) (module header): the third name read first, so that a refused
+ * package directory ends the body before anything runs; then each name in
+ * turn — `trap`, `xspec`, and the manifest's where staged — its twin, then
+ * its two arms, each arm's diagnosed failure collected into `failures`;
+ * with the third name's package directory missing, a diagnosis for each of
+ * its arms. Returns how many arms it counted.
+ */
+async function runInstalls(
+  product: ProductBinding,
+  failures: string[],
+): Promise<number> {
+  const third = await thirdInstallName(product);
+  const names: readonly InstallName[] =
+    third.kind === "name"
+      ? [...T7_9_D_FIXED_NAMES, third.installName]
+      : T7_9_D_FIXED_NAMES;
+  let arms = 0;
+  for (const installName of names) {
+    const twin = await runInstallTwin(product, installName);
+    for (const kind of T7_9_D_KINDS) {
+      arms += 1;
+      await collectArmFailure(failures, () =>
+        runInstallArm(product, installName, kind, twin),
+      );
+    }
+  }
+  if (third.kind === "missing") {
+    for (const kind of T7_9_D_KINDS) {
+      arms += 1;
+      failures.push(
+        `${THIRD_NAME_CONTEXT}, its arm beside ` +
+          (kind === "trap"
+            ? "a trap package"
+            : `a ${PACKAGE_MANIFEST} that is a FIFO`) +
+          `: ${third.diagnosis}`,
+      );
+    }
+  }
+  return arms;
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 
 const T7_9 = defineProductTest({
   id: "T7-9",
   title:
-    "configuration import (TEST-SPEC T7-9 (a), (b), (c)): on a valid " +
+    "configuration import (TEST-SPEC T7-9 (a), (b), (c), (d)): on a valid " +
     "workspace — one spec group globbing specs/*.mdx over specs/A.mdx and " +
     "specs/B.mdx, Markdown emitted next to sources, no group discovering " +
     "the configuration file — (a) the import's module specifier spelled as " +
@@ -1185,7 +1944,24 @@ const T7_9 = defineProductTest({
     "verified on the harness itself — answers as the twin, as (a) " +
     "compares, the arm's staged entry left out of the file compare, and " +
     "the FIFO after each command still a FIFO in place, each command " +
-    "ending within its guard (SPEC 7, 2.4, 12.7, 14; S-3)",
+    "ending within its guard; (d) the configuration importing from " +
+    '"N" beside a trap package at node_modules/N — its manifest naming an ' +
+    "entry that, if loaded, writes a marker into the workspace, prints to " +
+    "both streams, and exits non-zero — and, separately, beside a " +
+    "node_modules/N whose package.json is a FIFO, under each of the names " +
+    "trap, xspec, and the name the module channel's package manifest " +
+    "gives, wherever that is a name of 7.6's grammar (no package " +
+    "directory given, its arms fail diagnosed): `build`, `check`, `ids`, " +
+    "`view specs/A.mdx`, `inventory`, `review list`, and `rename " +
+    "specs/A.mdx a b`, each under `--json`, exit and answer exactly as on " +
+    "the twin holding no node_modules — exit code and standard output " +
+    "equal, the files each writes byte-equal, the lock path aside — and " +
+    "as such a workspace gives them (`build` and `check` 0 finding-free, " +
+    "`ids` 0 with its listing, `view` and `inventory` 0 finding-free, " +
+    "`review list` 0, the `rename` 0 with its applied mapping), no marker " +
+    "written, neither stream carrying what the entry prints, the FIFO " +
+    "after each command still a FIFO in place, each command ending within " +
+    "its guard (SPEC 7, 7.6, 2.4, 12.7, 14; S-3)",
   run: async (product) => {
     const twin = await runImportTwin(product);
     const failures: string[] = [];
@@ -1204,8 +1980,13 @@ const T7_9 = defineProductTest({
         runDesignationArm(product, twin, arm),
       );
     }
+    const installArms = await runInstalls(product, failures);
     if (failures.length > 0) {
-      const arms = T7_9_A_ARMS.length + T7_9_B_ARMS.length + T7_9_C_ARMS.length;
+      const arms =
+        T7_9_A_ARMS.length +
+        T7_9_B_ARMS.length +
+        T7_9_C_ARMS.length +
+        installArms;
       fail(
         `T7-9: ${String(failures.length)} of ${String(arms)} arms failed, ` +
           "each diagnosed below:" +

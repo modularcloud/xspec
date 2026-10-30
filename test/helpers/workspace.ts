@@ -120,7 +120,9 @@
 //   effective TypeScript declaration is `unchecked` (P-8's and P-11's
 //   mutations, a noise file, a tampered product-written module) or
 //   `per-draw` (a property draw's composed configuration or code source,
-//   judged well-formed at staging — the section-16 modules' alone). An MDX
+//   judged well-formed at staging — the section-16 modules' alone, and
+//   T7-9(d)'s one configuration composed once the package directory's
+//   manifest is read, test/suite/registry/section-7-import.ts). An MDX
 //   record carrying no `ts` at a path the TypeScript check judges (a
 //   code-group `.mdx` path) is refused likewise: the self-test judged it as
 //   MDX alone. `edit()` is a declared staging by construction, and so is
@@ -345,9 +347,12 @@ export interface WorkspaceTsDecl {
    * undeclared-staging guard exempts the path, at creation and for a later
    * plain `file()` staging — the initial-file form of `per-draw`. Only the
    * section-16 modules list a path here (`tsPathsOf` over a rendered map,
-   * plus any code source at another name); a deterministic test never does
-   * (a later-arm workspace's initial code sources and configuration are
-   * records).
+   * plus any code source at another name), and T7-9(d) its configuration
+   * importing the name the module channel's package manifest gives, known
+   * only once the package directory is read and judged before staging
+   * (test/suite/registry/section-7-import.ts `composedInstallConfig`); a
+   * deterministic test never does (a later-arm workspace's initial code
+   * sources and configuration are records).
    */
   readonly perDraw?: readonly string[];
 }
@@ -360,8 +365,9 @@ export interface WorkspaceTsDecl {
  * staging exactly as `well-formed` is — and generated per trial, so no
  * module-level record can hold it and the undeclared-staging guard exempts
  * it. Only the section-16 modules pass it — to `file()`, or as the
- * workspace declaration's `ts.perDraw` list for a draw's initial files; a
- * deterministic test never does, and a staged-source record never carries
+ * workspace declaration's `ts.perDraw` list for a draw's initial files —
+ * beside T7-9(d)'s one composed configuration (`WorkspaceTsDecl.perDraw`);
+ * a deterministic test never does, and a staged-source record never carries
  * it.
  */
 export type TsFileDeclaration = TsDeclaration | "unchecked" | "per-draw";
