@@ -1,0 +1,10 @@
+{
+  "name": "s10-reparents-prototype-standin",
+  "version": "1.0.0",
+  "exports": {
+    ".": {
+      "import": "./index.mjs",
+      "require": "./index.cjs"
+    }
+  }
+}
