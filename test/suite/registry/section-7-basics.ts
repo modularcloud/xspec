@@ -132,6 +132,26 @@
 //   code and as script code, so each record is declared well-formed (S-9)
 //   and the refusal is the declarative form's (14.14), never a parse
 //   failure's.
+// - T7-2's wrapped forms and call variants (SPEC 7: the file consists of
+//   exactly the import and a default export of one call to that binding
+//   whose sole argument is statically literal — no other statement or
+//   expression form, comments alone permitted beside them): nine arms, one
+//   each, every one the canonical configuration with one deviation — the
+//   call wrapped (`export default defineConfig({…}) satisfies object`,
+//   `export default (defineConfig({…}))`, and `export default
+//   defineConfig({…})!`), the argument wrapped (`defineConfig({…} as
+//   const)`, `defineConfig(({…}))`), a value inside it wrapped (`markdown:
+//   { emit: true as boolean }`, the fixture valid with `emit: true`, and
+//   `specs: ({…})`), and the call spelled with syntax outside 7's list
+//   (`defineConfig<object>({…})`, carrying type arguments, and
+//   `defineConfig?.({…})`, an optional call). Every one is a text
+//   TypeScript 5.9.3 accepts both as module code and as script code, so
+//   each record is declared well-formed (S-9) and the refusal is the
+//   declarative form's (14.14), never a parse failure's; a product
+//   skipping TypeScript's outer expressions (parentheses, type assertions,
+//   `satisfies`, and non-null assertions) before reading the form, or
+//   reading a call by its callee and arguments alone, loads each and
+//   builds (exit 0), failing the exit-code assertion.
 // - T7-2 string-literal keys arm: "both groups discover their globs' files"
 //   is observed as the spec group's exact `ids` listing plus whole-graph
 //   edge-set equality carrying the code file's marker edge (T7-3's
@@ -1081,9 +1101,9 @@ const T7_1 = defineProductTest({
 // form, no spread, no computed value. The rows follow TEST-SPEC's order: a
 // syntax error, the missing import, extra statements, each non-literal
 // argument form, the `null` literal, a non-call default export, a call
-// without a sole argument, a numeric-literal key, and the import's
-// modifiers. No row varies the specifier: any static string literal is
-// valid there (SPEC 7), T7-9's subject.
+// without a sole argument, a numeric-literal key, the wrapped forms and
+// call variants, and the import's modifiers. No row varies the specifier:
+// any static string literal is valid there (SPEC 7), T7-9's subject.
 const FORM_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
@@ -1286,6 +1306,121 @@ export default defineConfig({
 
 export default defineConfig({
   specs: { 1: ["specs/*.mdx"] }
+})
+`,
+  },
+  // Wrapped forms and call variants (SPEC 7: exactly the import and a
+  // default export of one call to that binding whose sole argument is
+  // statically literal — no other statement or expression form): the call
+  // wrapped, the argument wrapped, a value inside it wrapped, and the call
+  // spelled with syntax outside 7's list — nine well-formed texts, one arm
+  // each (module header).
+  {
+    label:
+      "the call wrapped: export default defineConfig({…}) satisfies object",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+}) satisfies object
+`,
+  },
+  {
+    label: "the call wrapped: export default (defineConfig({…}))",
+    config: `import { defineConfig } from "xspec"
+
+export default (defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+}))
+`,
+  },
+  {
+    label:
+      "the call wrapped: export default defineConfig({…})!, a non-null " +
+      "assertion",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})!
+`,
+  },
+  {
+    label: "the argument wrapped: defineConfig({…} as const)",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+} as const)
+`,
+  },
+  {
+    label: "the argument wrapped: defineConfig(({…}))",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig(({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+}))
+`,
+  },
+  {
+    label:
+      "a value inside the argument wrapped: markdown: { emit: true as " +
+      "boolean }",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true as boolean }
+})
+`,
+  },
+  {
+    label: "a value inside the argument wrapped: specs: ({…})",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: ({
+    main: ["specs/**/*.mdx"]
+  })
+})
+`,
+  },
+  {
+    label:
+      "the call spelled outside 7's list: export default " +
+      "defineConfig<object>({…}), carrying type arguments",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig<object>({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      "the call spelled outside 7's list: export default " +
+      "defineConfig?.({…}), an optional call",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig?.({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
 })
 `,
   },
@@ -1680,8 +1815,12 @@ const T7_2 = defineProductTest({
     "statements, each non-literal argument form, a " +
     "null literal (markdown's outDir, a profile's targetTags), a non-call " +
     "default export, a call without a sole argument (defineConfig(), " +
-    "defineConfig({…}, {})), and a numeric-literal key are configuration " +
-    "errors (14.14, exit 2); an aliased defineConfig import is valid; " +
+    "defineConfig({…}, {})), a numeric-literal key, the call, its " +
+    "argument, or a value inside it wrapped (satisfies object, " +
+    "parentheses, a non-null assertion, as const, as boolean), and the " +
+    "call spelled with type arguments or as an optional call are " +
+    "configuration errors (14.14, exit 2); an aliased defineConfig import " +
+    "is valid; " +
     "string-literal group-name keys are part of the accepted form — they " +
     "load, discover, and resolve in a coverage profile and a policy " +
     "selector (SPEC 7, 7.4, 7.5, 8); literals are read verbatim — an " +
