@@ -549,6 +549,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // refusal its discovery must not meet — 14.25's absence at the read
   // scope's boundary, rule (c); its twin compares and outcomes are 7's.
   "T7-8": ["7", "14"],
+  // T7-9: (a)'s twin compares are 7's reading of the specifier as a static
+  // string literal spelled as written (2.4), its single-casing arm read
+  // byte-wise with no case folding (12.0); (b)'s scanner-rejected escapes,
+  // the file not well-formed (14.20), each answered with the 12.7 error
+  // document carrying 14.14's stable code.
+  "T7-9": ["7", "2.4", "12.0", "12.7", "14"],
   // T7.1-1: its wrong-case extension arm the byte-wise, case-sensitive
   // extension test (12.0: no case folding), and `inventory`'s `derived`
   // entry for the file without `.mdx` (11.6), `module` and `markdown` null

@@ -20,9 +20,11 @@
 // re-quoting — and the workspace builder writes that text's UTF-8 bytes as
 // they stand (test/self/p19-fixed-seed-draws.test.ts reads each fixed-seed
 // draw's staged file back and pins its bytes). P-19's draws
-// (test/suite/registry/section-16-p19.ts) and T7-9(a)'s escape-spelled,
-// single-quoted, and raw-U+FFFD arms are staged through this module, so that
-// those arms ride VIOL-IMPORT-BRACED's and VIOL-IMPORT-SINGLE's
+// (test/suite/registry/section-16-p19.ts) and every configuration of T7-9's
+// (a) and (b) (test/suite/registry/section-7-import.ts, which pins each of
+// its records' bytes at module load) are staged through this module, so
+// that (a)'s escape-spelled, line-continuation, single-quoted, and
+// raw-U+FFFD arms ride VIOL-IMPORT-BRACED's and VIOL-IMPORT-SINGLE's
 // certification of P-19 representatively (CERTIFICATIONS.md, Exclusions).
 // A literal holding a backslash is built by its caller from code point
 // U+005C (the BACKSLASH constant below), never spelled in harness source,
@@ -85,22 +87,26 @@ export function configImportText(literal: string): string {
 
 /**
  * The twin's configuration, a staged-source record (S-9's timing clause:
- * every twin workspace P-19 stages is created at module load's bytes).
+ * every twin workspace T7-9 and P-19 stage is created at module load's
+ * bytes).
  */
 export const CONFIG_IMPORT_TWIN_CONFIG: StagedTs = stagedTs(
-  'P-19 xspec.config.ts (the twin: the specifier "xspec", one spec group main over specs/*.mdx, Markdown emitted next to sources)',
+  'T7-9/P-19 xspec.config.ts (the twin: the specifier "xspec", one spec group main over specs/*.mdx, Markdown emitted next to sources)',
   configImportText(CONFIG_IMPORT_TWIN_LITERAL),
 );
 
-/** The workspace's two sources, staged-source records (module header). */
+/**
+ * The workspace's two sources, staged-source records (module header): T7-9
+ * and P-19 stage them in workspaces created after a product invocation.
+ */
 export const CONFIG_IMPORT_SOURCES: Readonly<Record<string, StagedMdx>> = {
   "specs/A.mdx": stagedMdx(
-    `P-19 specs/A.mdx (one section, its id alone around plain text: <S id="a">A</S>)`,
+    `T7-9/P-19 specs/A.mdx (one section, its id alone around plain text: <S id="a">A</S>)`,
     `<S id="a">A</S>
 `,
   ),
   "specs/B.mdx": stagedMdx(
-    `P-19 specs/B.mdx (one section, its id alone around plain text: <S id="b">B</S>)`,
+    `T7-9/P-19 specs/B.mdx (one section, its id alone around plain text: <S id="b">B</S>)`,
     `<S id="b">B</S>
 `,
   ),
