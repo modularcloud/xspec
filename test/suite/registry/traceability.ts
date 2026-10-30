@@ -1380,6 +1380,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // form staged valid under 7 (a premise of the staging, asserted of no
   // product), so it carries 7.6 alone.
   "P-17": ["7.6"],
+  // P-18: 7.6's type contract over drawn configurations — valid ones
+  // type-checking in a drawn covered setup, each paired with a mutant
+  // holding one drawn violation of 7.6's type-error class failing to
+  // type-check there; its draws are 7's declarative form staged valid under
+  // 7, 7.3, 7.4, and 7.5, and its mutants breaches of those rules (premises
+  // of the staging, asserted of no product), so it carries 7.6 alone.
+  "P-18": ["7.6"],
   // P-19 asserts 7's reading of the configuration's import: its specifier
   // any static string literal (2.4), read as spelled and never interpreted,
   // resolved, or loaded, so that every answer and every generated file is

@@ -5,7 +5,12 @@
 // section-7.6-ii.ts's — T7.6-4 and T7.6-5 staging the files
 // `placementFiles` composes here, the canonical runs' own beside any N;
 // P-17, installation names, is section-16-p17.ts's, its draws staging those
-// files beside each drawn N; P-18 is not registered yet.
+// files beside each drawn N; and P-18, the type contract over generated
+// configurations, is section-16-p18.ts's, its draws read and mutated
+// through this module's readings of 7 and of the type-error class
+// (`problemsUnder7`, `shapeNodes`, `classViolations`), T7.6-3's kind
+// table, and the covered-file read-back (`readBack`, `scanComments`),
+// which it exports for that.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never
@@ -425,7 +430,7 @@ export function renderConfiguration(
  * module code, `eval` and `arguments`, and the two names TypeScript
  * reserves in a file it compiles as CommonJS (SPEC 7.6 Covered files).
  */
-const BARRED_BINDINGS: ReadonlySet<string> = new Set([
+export const BARRED_BINDINGS: ReadonlySet<string> = new Set([
   "arguments",
   "await",
   "break",
@@ -479,7 +484,7 @@ const BARRED_BINDINGS: ReadonlySet<string> = new Set([
 ]);
 
 /** One key of a read-back file: where it stands and how it is spelled. */
-interface SpelledKey {
+export interface SpelledKey {
   /** The keys of the objects enclosing it, outermost first. */
   readonly path: readonly string[];
   readonly key: string;
@@ -487,7 +492,7 @@ interface SpelledKey {
 }
 
 /** A covered file read back with the harness's TypeScript. */
-interface ReadBack {
+export interface ReadBack {
   /** The specifier's value, and its spelling with its quotes. */
   readonly specifier: string;
   readonly specifierSpelling: string;
@@ -573,7 +578,10 @@ function readValue(
  * to that binding whose one argument is an object literal of 7's form; a
  * deviation goes to `problem`.
  */
-function readBack(text: string, problem: (detail: string) => never): ReadBack {
+export function readBack(
+  text: string,
+  problem: (detail: string) => never,
+): ReadBack {
   const source = ts.createSourceFile(
     "covered-file.ts",
     text,
@@ -658,7 +666,7 @@ function readBack(text: string, problem: (detail: string) => never): ReadBack {
 }
 
 /** One comment of a file, as TypeScript's scanner reads it. */
-interface ScannedComment {
+export interface ScannedComment {
   readonly kind: "line" | "block";
   readonly start: number;
   readonly end: number;
@@ -666,7 +674,7 @@ interface ScannedComment {
 }
 
 /** Every comment of `text`, scanned as TypeScript scans it. */
-function scanComments(text: string): readonly ScannedComment[] {
+export function scanComments(text: string): readonly ScannedComment[] {
   const scanner = ts.createScanner(
     ts.ScriptTarget.ESNext,
     false,
@@ -788,11 +796,11 @@ const PROFILE_KEYS = [
 const RULE_KEYS = ["name", "type", "from", "to", "kinds"];
 const SELECTOR_KEYS = ["group", "kind", "files", "tags"];
 const SELECTOR_FORMS = ["group", "files", "tags"];
-const EDGE_KINDS = ["depends", "embeds", "references"];
-const GROUP_KINDS = ["spec", "code"];
-const TARGETS = ["leaves", "all"];
-const MODES = ["direct", "transitive"];
-const RULE_TYPES = ["forbidden", "allowedOnly"];
+export const EDGE_KINDS = ["depends", "embeds", "references"];
+export const GROUP_KINDS = ["spec", "code"];
+export const TARGETS = ["leaves", "all"];
+export const MODES = ["direct", "transitive"];
+export const RULE_TYPES = ["forbidden", "allowedOnly"];
 
 /** The configured groups of one kind, by name. */
 type Groups = ReadonlyMap<string, readonly string[]>;
@@ -1129,7 +1137,7 @@ const T762_MINIMAL: ConfigObject = configObject(["specs", configObject()]);
  * The seven members of TypeScript's global `Object` interface, then
  * `__proto__` (T7.6-2(e)).
  */
-const OBJECT_MEMBER_NAMES: readonly string[] = [
+export const OBJECT_MEMBER_NAMES: readonly string[] = [
   "constructor",
   "toString",
   "toLocaleString",
@@ -1714,7 +1722,7 @@ const T762_ARMS: readonly T762Arm[] = [
 ];
 
 /** Whether two values of 7's form are equal, object keys in order. */
-function sameValue(a: ConfigValue, b: ConfigValue): boolean {
+export function sameValue(a: ConfigValue, b: ConfigValue): boolean {
   if (typeof a !== "object" || typeof b !== "object") return a === b;
   if (isConfigList(a) || isConfigList(b)) {
     return (
@@ -2132,10 +2140,10 @@ const T7_6_1 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 /** A kind SPEC 7.6's type-error class names: what 7 admits at a position. */
-type ConfigKind = "boolean" | "string" | "list" | "object";
+export type ConfigKind = "boolean" | "string" | "list" | "object";
 
 /** The four kinds, in T7.6-3's order. */
-const CONFIG_KINDS: readonly ConfigKind[] = [
+export const CONFIG_KINDS: readonly ConfigKind[] = [
   "boolean",
   "string",
   "list",
@@ -2143,7 +2151,7 @@ const CONFIG_KINDS: readonly ConfigKind[] = [
 ];
 
 /** A value's kind. */
-function kindOf(value: ConfigValue): ConfigKind {
+export function kindOf(value: ConfigValue): ConfigKind {
   if (typeof value === "boolean") return "boolean";
   if (typeof value === "string") return "string";
   return isConfigList(value) ? "list" : "object";
@@ -2158,7 +2166,7 @@ export type ConfigPath = readonly (string | number)[];
  * keys, a group map's entries, a list's elements, and whether 7.4 or 7.5
  * forbids the list empty or holds the object to a selector's forms.
  */
-interface ShapeSchema {
+export interface ShapeSchema {
   /** T7.6-3's name for the position: its row of the kind table. */
   readonly position: string;
   /** The kind 7 admits there. */
@@ -2317,7 +2325,7 @@ function shapesWithin(shape: ShapeSchema): readonly ShapeSchema[] {
 }
 
 /** One value of a configuration, where it stands, and its shape there. */
-interface ShapeNode {
+export interface ShapeNode {
   readonly path: ConfigPath;
   readonly value: ConfigValue;
   readonly shape: ShapeSchema;
@@ -2329,7 +2337,7 @@ interface ShapeNode {
  * at its position, so a misplaced value's insides stand at no position, and
  * never into an unknown key, which 7 gives no kind.
  */
-function shapeNodes(config: ConfigObject): readonly ShapeNode[] {
+export function shapeNodes(config: ConfigObject): readonly ShapeNode[] {
   const nodes: ShapeNode[] = [];
   const visit = (
     value: ConfigValue,
@@ -2515,121 +2523,125 @@ const T763_NON_EMPTY_POSITIONS: readonly string[] = [
  * `emit: "true"`, `targetTags: "a"`, `from: "src/*.ts"`). Each value is
  * staged at every value of (a)'s file standing at that position.
  */
-const T763_KIND_TABLE: ReadonlyMap<string, readonly ConfigValue[]> = new Map<
-  string,
-  readonly ConfigValue[]
->([
-  ["specs", [true, false, "specs/**/*.mdx", ["a/*.mdx"]]],
-  ["code", [true, false, "src/**/*.ts", ["src/**/*.ts"]]],
-  [
-    "a group",
-    [true, false, "src/**/*.ts", configObject(["globs", ["src/**/*.ts"]])],
-  ],
-  [
-    "a group's glob element",
-    [true, ["src/**/*.ts"], configObject(["glob", "src/**/*.ts"])],
-  ],
-  ["markdown", [true, false, "docs", ["docs"]]],
-  ["emit", ["true", [true], configObject(["enabled", true])]],
-  ["outDir", [true, ["docs"], configObject(["path", "docs"])]],
-  [
-    "coverage",
+export const T763_KIND_TABLE: ReadonlyMap<string, readonly ConfigValue[]> =
+  new Map<string, readonly ConfigValue[]>([
+    ["specs", [true, false, "specs/**/*.mdx", ["a/*.mdx"]]],
+    ["code", [true, false, "src/**/*.ts", ["src/**/*.ts"]]],
     [
-      true,
-      false,
-      "product-tested",
-      configObject(
-        ["name", "product-tested"],
-        ["target", "product"],
-        ["boundary", "tests"],
-        ["boundaryKind", "code"],
-        ["mode", "direct"],
-      ),
+      "a group",
+      [true, false, "src/**/*.ts", configObject(["globs", ["src/**/*.ts"]])],
     ],
-  ],
-  ["a profile", [true, false, "product-tested", ["product-tested"]]],
-  [
-    "a profile's name",
-    [true, ["product-tested"], configObject(["name", "product-tested"])],
-  ],
-  [
-    "a profile's target",
-    [true, ["product"], configObject(["group", "product"])],
-  ],
-  [
-    "a profile's targetTags",
-    [true, false, "a", configObject(["tags", ["core"]])],
-  ],
-  [
-    "a profile's targets",
-    [true, ["leaves"], configObject(["targets", "leaves"])],
-  ],
-  [
-    "a profile's boundary",
-    [true, ["tests"], configObject(["group", "tests"], ["kind", "code"])],
-  ],
-  [
-    "a profile's boundaryKind",
-    [true, ["code"], configObject(["kind", "code"])],
-  ],
-  ["a profile's mode", [true, ["direct"], configObject(["mode", "direct"])]],
-  [
-    "a profile's edgeKinds",
-    [true, false, "depends", configObject(["depends", true])],
-  ],
-  [
-    "an element of a profile's targetTags",
-    [true, ["core"], configObject(["tag", "core"])],
-  ],
-  [
-    "an element of a profile's edgeKinds",
-    [true, ["depends"], configObject(["kind", "depends"])],
-  ],
-  [
-    "policy",
     [
-      true,
-      false,
-      "app-avoids-test-code",
-      configObject(
-        ["name", "app-avoids-test-code"],
-        ["type", "forbidden"],
-        ["from", configObject(["group", "app"])],
-        ["to", configObject(["group", "tests"], ["kind", "code"])],
-      ),
+      "a group's glob element",
+      [true, ["src/**/*.ts"], configObject(["glob", "src/**/*.ts"])],
     ],
-  ],
-  ["a rule", [true, false, "app-avoids-test-code", ["app-avoids-test-code"]]],
-  [
-    "a rule's name",
+    ["markdown", [true, false, "docs", ["docs"]]],
+    ["emit", ["true", [true], configObject(["enabled", true])]],
+    ["outDir", [true, ["docs"], configObject(["path", "docs"])]],
     [
-      true,
-      ["app-avoids-test-code"],
-      configObject(["name", "app-avoids-test-code"]),
+      "coverage",
+      [
+        true,
+        false,
+        "product-tested",
+        configObject(
+          ["name", "product-tested"],
+          ["target", "product"],
+          ["boundary", "tests"],
+          ["boundaryKind", "code"],
+          ["mode", "direct"],
+        ),
+      ],
     ],
-  ],
-  ["a rule's type", [true, ["forbidden"], configObject(["type", "forbidden"])]],
-  ["a rule's kinds", [true, false, "depends", configObject(["depends", true])]],
-  [
-    "an element of a rule's kinds",
-    [true, ["depends"], configObject(["kind", "depends"])],
-  ],
-  [
-    "a selector (a rule's from or to)",
-    [true, false, "src/*.ts", [configObject(["group", "app"])]],
-  ],
-  ["a selector's group", [true, ["app"], configObject(["name", "app"])]],
-  ["a selector's kind", [true, ["code"], configObject(["kind", "code"])]],
-  [
-    "a selector's files",
-    [true, ["src/*.ts"], configObject(["glob", "src/*.ts"])],
-  ],
-  ["a selector's tags", [true, false, "core", configObject(["tag", "core"])]],
-  [
-    "an element of a selector's tags",
-    [true, ["core"], configObject(["tag", "core"])],
-  ],
-]);
+    ["a profile", [true, false, "product-tested", ["product-tested"]]],
+    [
+      "a profile's name",
+      [true, ["product-tested"], configObject(["name", "product-tested"])],
+    ],
+    [
+      "a profile's target",
+      [true, ["product"], configObject(["group", "product"])],
+    ],
+    [
+      "a profile's targetTags",
+      [true, false, "a", configObject(["tags", ["core"]])],
+    ],
+    [
+      "a profile's targets",
+      [true, ["leaves"], configObject(["targets", "leaves"])],
+    ],
+    [
+      "a profile's boundary",
+      [true, ["tests"], configObject(["group", "tests"], ["kind", "code"])],
+    ],
+    [
+      "a profile's boundaryKind",
+      [true, ["code"], configObject(["kind", "code"])],
+    ],
+    ["a profile's mode", [true, ["direct"], configObject(["mode", "direct"])]],
+    [
+      "a profile's edgeKinds",
+      [true, false, "depends", configObject(["depends", true])],
+    ],
+    [
+      "an element of a profile's targetTags",
+      [true, ["core"], configObject(["tag", "core"])],
+    ],
+    [
+      "an element of a profile's edgeKinds",
+      [true, ["depends"], configObject(["kind", "depends"])],
+    ],
+    [
+      "policy",
+      [
+        true,
+        false,
+        "app-avoids-test-code",
+        configObject(
+          ["name", "app-avoids-test-code"],
+          ["type", "forbidden"],
+          ["from", configObject(["group", "app"])],
+          ["to", configObject(["group", "tests"], ["kind", "code"])],
+        ),
+      ],
+    ],
+    ["a rule", [true, false, "app-avoids-test-code", ["app-avoids-test-code"]]],
+    [
+      "a rule's name",
+      [
+        true,
+        ["app-avoids-test-code"],
+        configObject(["name", "app-avoids-test-code"]),
+      ],
+    ],
+    [
+      "a rule's type",
+      [true, ["forbidden"], configObject(["type", "forbidden"])],
+    ],
+    [
+      "a rule's kinds",
+      [true, false, "depends", configObject(["depends", true])],
+    ],
+    [
+      "an element of a rule's kinds",
+      [true, ["depends"], configObject(["kind", "depends"])],
+    ],
+    [
+      "a selector (a rule's from or to)",
+      [true, false, "src/*.ts", [configObject(["group", "app"])]],
+    ],
+    ["a selector's group", [true, ["app"], configObject(["name", "app"])]],
+    ["a selector's kind", [true, ["code"], configObject(["kind", "code"])]],
+    [
+      "a selector's files",
+      [true, ["src/*.ts"], configObject(["glob", "src/*.ts"])],
+    ],
+    ["a selector's tags", [true, false, "core", configObject(["tag", "core"])]],
+    [
+      "an element of a selector's tags",
+      [true, ["core"], configObject(["tag", "core"])],
+    ],
+  ]);
 
 /**
  * T7.6-3's selector-form violations (module header): each two of `group`,
@@ -2658,13 +2670,13 @@ const T763_SELECTOR_FORM_VIOLATIONS: readonly (readonly [
 const T763_UNKNOWN_KEY = "extra";
 
 /** The edge kind 5.2 defines and 7.4 and 7.5 leave out (T7.6-3). */
-const CONTAINS = "contains";
+export const CONTAINS = "contains";
 
 /**
  * Two near misses of an enumerated value (module header): capitalized, and
  * cut by its last letter — `"Direct"` and `"depend"` among them.
  */
-function nearMisses(value: string): readonly string[] {
+export function nearMisses(value: string): readonly string[] {
   return [value.charAt(0).toUpperCase() + value.slice(1), value.slice(0, -1)];
 }
 
@@ -2703,7 +2715,7 @@ function describePath(path: ConfigPath): string {
 }
 
 /** How a label spells a value: as the file does, on one line. */
-function describeValue(value: ConfigValue): string {
+export function describeValue(value: ConfigValue): string {
   if (typeof value === "string") return JSON.stringify(value);
   if (typeof value === "boolean") return String(value);
   if (isConfigList(value)) return `[${value.map(describeValue).join(", ")}]`;

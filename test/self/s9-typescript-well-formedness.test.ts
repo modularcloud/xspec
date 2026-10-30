@@ -49,6 +49,7 @@ import { P14_TS_FORM_VECTORS } from "../suite/registry/section-16-p14.js";
 import { P15_TS_FORM_VECTORS } from "../suite/registry/section-16-p15.js";
 import { P16_TS_FORM_VECTORS } from "../suite/registry/section-16-p16.js";
 import { P17_TS_FORM_VECTORS } from "../suite/registry/section-16-p17.js";
+import { P18_TS_FORM_VECTORS } from "../suite/registry/section-16-p18.js";
 import { P19_TS_FORM_VECTORS } from "../suite/registry/section-16-p19.js";
 import { P2_P3_TS_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import { P4_TS_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
@@ -716,9 +717,12 @@ describe("S-9 (TypeScript): every code source and configuration T14-12's positiv
 // generated workspace is valid by construction, no draw declared
 // unparseable). The fixed vector set: every registered property's
 // configuration file (the coverage check below reads the registry) — P-7's,
-// P-13's, P-17's, and P-19's composed per draw (P-17's three files beside a
-// name holding every character N may hold, as plain TypeScript and as TSX,
-// through the composition its draws are staged with; P-19's twin a fixed
+// P-13's, P-17's, P-18's, and P-19's composed per draw (P-17's three files
+// beside a name holding every character N may hold, as plain TypeScript and
+// as TSX, through the composition its draws are staged with; P-18's vector
+// draw — comments of both kinds in every gap, names of each class, keys of
+// both spellings — and its mutant, as plain TypeScript and as TSX, through
+// the composition and read-back its draws are staged with; P-19's twin a fixed
 // record, and its drawn specifiers' families — every shape text raw, every
 // escape of their characters, every inserted piece, in each quote style —
 // through the shared builder its draws are staged with), the rest fixed
@@ -754,6 +758,7 @@ const GENERATED_TS_FORM_VECTORS: Readonly<
   "P-15": P15_TS_FORM_VECTORS,
   "P-16": P16_TS_FORM_VECTORS,
   "P-17": P17_TS_FORM_VECTORS,
+  "P-18": P18_TS_FORM_VECTORS,
   "P-19": P19_TS_FORM_VECTORS,
 };
 
@@ -778,7 +783,7 @@ describe("S-9 (TypeScript): every configuration file and code source the §16 ge
     for (const vectors of Object.values(GENERATED_TS_FORM_VECTORS)) {
       expect(vectors.some(([, path]) => path === "xspec.config.ts")).toBe(true);
     }
-    expect(GENERATED_TS_VECTORS.length).toBe(44);
+    expect(GENERATED_TS_VECTORS.length).toBe(48);
     expect(new Set(GENERATED_TS_VECTORS.map(([name]) => name)).size).toBe(
       GENERATED_TS_VECTORS.length,
     );
