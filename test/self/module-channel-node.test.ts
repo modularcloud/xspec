@@ -59,6 +59,7 @@ import {
   moduleRunEnvironment,
   prepareModuleRun,
   runModuleRoute,
+  STATE_OBSERVATIONS,
 } from "../helpers/module-channel-node.js";
 import type {
   ModuleRoute,
@@ -675,7 +676,7 @@ test("the importing modules' place: each route's file, named for its route and n
   );
 });
 
-test("the report's decoder reads exactly the bootstrap's members, each of its kind and consistent with the phase — T7.6-6's own-key listing and calls among them — and says what makes any other report malformed — a missing or extra member, another protocol, a value of another kind, a phase of its own, a load outcome or calls inconsistent with the phase or the note, calls out of the bootstrap's order or unfinished at completion, a call verdict inconsistent with its values, a trap or proxy of its own, bytes that are no UTF-8 or no JSON (TEST-SPEC H-3: failing loudly when required information is absent)", () => {
+test("the report's decoder reads exactly the bootstrap's members, each of its kind and consistent with the phase — T7.6-6's own-key listing and calls, and T7.6-7(c)'s comparison of the process state, among them — and says what makes any other report malformed — a missing or extra member, another protocol, a value of another kind, a phase of its own, a load outcome, calls, or a state compared inconsistent with the phase or the note, calls out of the bootstrap's order or unfinished at completion, a call verdict inconsistent with its values, a trap or proxy of its own, an observation of its own, a count of omitted differences that is no non-negative integer, bytes that are no UTF-8 or no JSON (TEST-SPEC H-3: failing loudly when required information is absent)", () => {
   const encode = (value: unknown): Uint8Array =>
     new TextEncoder().encode(JSON.stringify(value));
   const thrown = {
@@ -708,6 +709,16 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
   const withResults = (
     altered: readonly Record<string, unknown>[],
   ): Record<string, unknown> => ({ ...calls, results: altered });
+  const state = {
+    subjects: ["the global object", "Array", "Array.prototype", "process"],
+    changes: [],
+    omitted: 0,
+  };
+  const change = {
+    observation: "global-object",
+    subject: "the global object",
+    detail: 'an own property "x" was added',
+  };
   const valid = {
     protocol: MODULE_RUN_PROTOCOL,
     argv: ["/run/bootstrap.cjs", "/staging/importing.cjs", "/run/r", "require"],
@@ -722,6 +733,7 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
       value: { type: "object", ownKeys: [DEFINE_CONFIG_KEY] },
     },
     calls,
+    state,
     bootstrapError: null,
     warnings: [warning],
     exit: { code: 0 },
@@ -738,6 +750,7 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     load: { outcome: "failed", error: thrown },
     importingModule: null,
     calls: null,
+    state: null,
   };
   const loading = {
     ...valid,
@@ -745,7 +758,9 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     load: null,
     importingModule: null,
     calls: null,
+    state: null,
   };
+  const calling = { ...valid, phase: "calling", state: null };
   const listing = (ownKeys: unknown): Record<string, unknown> => ({
     ...valid,
     load: { outcome: "loaded", value: { type: "object", ownKeys } },
@@ -758,23 +773,36 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     [
       "a run ending while reading defineConfig",
       {
-        ...valid,
-        phase: "calling",
+        ...calling,
         calls: { ...calls, reading: null, results: [] },
       },
     ],
     [
       "a run ending during the calls",
-      { ...valid, phase: "calling", calls: withResults(results.slice(0, 3)) },
+      { ...calling, calls: withResults(results.slice(0, 3)) },
     ],
+    ["a run ending as the state was compared", calling],
     [
       "a bootstrap failure during the calls",
       {
-        ...valid,
-        phase: "calling",
+        ...calling,
         calls: withResults(results.slice(0, 1)),
         bootstrapError: thrown,
         exit: null,
+      },
+    ],
+    [
+      "a state compared with differences listed, each observation's, and more omitted",
+      {
+        ...valid,
+        state: {
+          ...state,
+          changes: STATE_OBSERVATIONS.map((observation) => ({
+            ...change,
+            observation,
+          })),
+          omitted: 3,
+        },
       },
     ],
     [
@@ -872,7 +900,42 @@ test("the report's decoder reads exactly the bootstrap's members, each of its ki
     ["an exit code that is no integer", { ...valid, exit: { code: 1.5 } }],
     ["a process identifier of zero", { ...valid, pid: 0 }],
     ["an array for the report", [valid]],
-    ["the previous protocol", { ...valid, protocol: "xspec-module-run/1" }],
+    ["the previous protocol", { ...valid, protocol: "xspec-module-run/2" }],
+    ["an older protocol", { ...valid, protocol: "xspec-module-run/1" }],
+    ["a loaded module whose state was not compared", { ...valid, state: null }],
+    ["a state compared while still loading", { ...loading, state }],
+    ["a state compared in the phase calling", { ...valid, phase: "calling" }],
+    ["a state compared beside a failed load", { ...failedLoad, state }],
+    [
+      "an observation of its own",
+      {
+        ...valid,
+        state: { ...state, changes: [{ ...change, observation: "memory" }] },
+      },
+    ],
+    [
+      "a difference missing its detail",
+      {
+        ...valid,
+        state: { ...state, changes: [omit(change, "detail")] },
+      },
+    ],
+    [
+      "a negative count of omitted differences",
+      { ...valid, state: { ...state, omitted: -1 } },
+    ],
+    [
+      "a fractional count of omitted differences",
+      { ...valid, state: { ...state, omitted: 1.5 } },
+    ],
+    [
+      "a subject that is no string",
+      { ...valid, state: { ...state, subjects: [1] } },
+    ],
+    [
+      "a state missing its subjects",
+      { ...valid, state: omit(state, "subjects") },
+    ],
     ["calls while still loading", { ...loading, calls }],
     ["calls without a loaded module", { ...failedLoad, calls }],
     ["a loaded module without calls", { ...valid, calls: null }],

@@ -55,10 +55,10 @@
 //   is never the importing module's directory, so that T7.6-7(e) can stage
 //   a FIFO named `xspec.config.ts` in each of the three places it names,
 //   and which T7.6-7(b) compares before and after the run with the staging,
-//   `HOME`, and `TMPDIR`. The report lies outside all four. The directory is
-//   removed when the run is disposed of; a caller staging more for a run
-//   (T7.6-7's FIFOs and snapshots) does so between `prepareModuleRun` and
-//   `PreparedModuleRun.launch`, then disposes of it.
+//   `HOME`, and `TMPDIR` (a run asked to observe its effects, below). The
+//   report lies outside all four. The directory is removed when the run is
+//   disposed of; a caller staging more for a run does so between
+//   `prepareModuleRun` and `PreparedModuleRun.launch`, then disposes of it.
 // - The environment (`moduleRunEnvironment`): explicit and minimal, never
 //   the ambient one filtered — `HOME` and `TMPDIR`, the run's fresh
 //   directories, and `PATH`, the harness's own where it has one (kept as
@@ -91,21 +91,27 @@
 //   kind and location, the load's outcome (the loaded value's type and own
 //   keys — each key's kind, name, and enumerability — or the error the load
 //   threw: its type, name, code, message, and stack), T7.6-6's calls
-//   (below), a failure of the bootstrap's own, each warning delivered (its
-//   type, name, code, message, detail, and stack), and the exit code the
-//   `exit` listener saw. Anything else — absent members, an extra one, a
-//   value of another kind, members inconsistent with the phase, calls out
-//   of `CALL_CASES`' order, bytes that are no UTF-8 JSON — is a malformed
-//   report: H-3's rule, failing loudly, never a pass.
+//   (below), T7.6-7(c)'s comparison of the process state (below; present
+//   exactly where the module loaded and the phase completed), a failure of
+//   the bootstrap's own, each warning delivered (its type, name, code,
+//   message, detail, and stack), and the exit code the `exit` listener saw.
+//   Anything else — absent members, an extra one, a value of another kind,
+//   members inconsistent with the phase, calls out of `CALL_CASES`' order,
+//   an observation of its own, bytes that are no UTF-8 JSON — is a
+//   malformed report: H-3's rule, failing loudly, never a pass.
 // - The run's conditions, checked on every report that decodes (S-10 pins
 //   them on stand-ins): the arguments round-trip exactly as passed; the
 //   release in effect is the one provisioned (`process.version` and
 //   `process.execPath`, the executable's physical path); the run carries no
 //   option (`process.execArgv` empty); its environment is exactly the one
-//   set; its working directory is the run's; and, where the module loaded,
-//   the importing module ran as its route's kind, from its physical path. A
-//   breach is a harness error (H-11): the harness sets every one of them
-//   before anything of the package loads.
+//   set; its working directory is the run's; where the module loaded, the
+//   importing module ran as its route's kind, from its physical path; and,
+//   where the state was compared, it observed the global object, `process`,
+//   and ECMAScript's global constructors and namespace objects with each
+//   constructor's prototype (`REQUIRED_STATE_SUBJECTS`), so that no
+//   comparison passes over an empty set. A breach is a harness error
+//   (H-11): the harness sets every one of them before anything of the
+//   package loads.
 // - Outcomes (`ModuleRunOutcome`): `loaded`, the route's load handed back a
 //   value; `load-failed`, it threw (a stub package's missing entry, an
 //   ES-module-only package along `require` on a release before 22.12.0);
@@ -179,20 +185,81 @@
 //   a release printing a warning in any other form — the separators and
 //   the line structure above included — fails the calibration as a harness
 //   error naming the release, never a verdict.
-// - T7.6-7's other observations (writes, process state, and FIFOs) extend
-//   the bootstrap's report and this module's decoder together, each
-//   absence under the same pairing.
+// - T7.6-7(c), process state (`stateProblems`): observed in every run, by
+//   the bootstrap (its header) — the state read once to settle what the
+//   runtime materializes on a first read, then as the baseline, both after
+//   the `warning` and `exit` listeners are registered and before the
+//   importing module's own loading begins, and again once T7.6-6's calls
+//   are made, compared in the run, each difference recorded under the
+//   observation that found it (`STATE_OBSERVATIONS`): the global object's
+//   own properties with their descriptors, read without invoking accessors
+//   (`global-object`); the own properties of the built-ins — every
+//   string-keyed own data property of the global object holding an object
+//   or a function, ECMAScript's constructors and namespace objects and the
+//   runtime's own among them, a superset of TEST-SPEC's "global built-in
+//   constructors and namespace objects", and each such function's own
+//   prototype (`built-ins`); the extensibility and the prototype of each of
+//   them, the global object and `process` included (`extensibility`,
+//   `prototype`); `process`'s own properties with their descriptors
+//   (`process`); `process.env` (`environment`); the process title
+//   (`title`); the working directory (`working-directory`);
+//   `process.exitCode` (`exit-code`); the `write` each of `process.stdout`
+//   and `process.stderr` resolves to (`stream-write`); the listeners
+//   registered on `process` (`listeners`); and the runtime's active handles
+//   and pending timers and immediates — never its pending requests, which
+//   its own loading leaves in flight (`timers-and-handles`). None may
+//   differ. No probe found the runtime's own loading changing any of them,
+//   on any of E-1's releases and routes, its own warnings printed included
+//   (S-10 pins it on stand-ins).
+// - T7.6-7(b) and (e), writes and FIFOs (`writeProblems`, `fifoProblems`):
+//   observed in a run asked to (`ModuleRunRequest.effects`). Before it is
+//   launched, a FIFO named `xspec.config.ts` is staged in the run's working
+//   directory, in the importing module's directory (in the staging, staged
+//   once and found there by a later run), and in its `HOME`
+//   (helpers/lock-staging.ts `stageFifo`: `mkfifo` beside, then a hard link,
+//   read back as a FIFO of its mode, never opened); then each of the four
+//   places — the staging, the placement included, the working directory,
+//   `HOME`, and `TMPDIR` — is snapshotted (`snapshotPlace`): every entry
+//   under it and the place itself, by its kind — a plain file with its
+//   bytes, a directory, a symbolic link with its target, never followed,
+//   and a FIFO, a socket, or a device by its kind alone, never opened (S-3)
+//   — a read the entry's mode refuses recorded as such. Once the run ends,
+//   each place is snapshotted again and compared entry by entry
+//   (`comparePlaceSnapshots`: an entry created, removed, or modified — its
+//   kind, a plain file's bytes, a link's target), and each FIFO's path is
+//   read back, still a FIFO or not. A dedicated walk, not
+//   helpers/snapshot.ts's, names every kind (a FIFO turned into a socket is
+//   a change there) and records a refused read instead of throwing, and no
+//   lock path is left out: no product command runs here. That a FIFO stayed
+//   unopened is observed by the run's promptness — a reader opening a FIFO
+//   no writer holds blocks, so a run that opens one ends at its guard
+//   (S-3), its kill propagating unchanged — as the rest of the harness
+//   observes it (helpers/lock-staging.ts); no test observes a system call.
+//   Such a run compares the whole staging: while it is launched, the
+//   driver refuses to write into that staging for another run (an
+//   importing module, a FIFO) as a usage error, so prepare every run of a
+//   staging before launching one that observes its effects, or run them
+//   one after another.
+// - T7.6-7(d), network: every run is network-denied by the environment it
+//   inherits, as every product invocation is — CI's Linux jobs run inside
+//   `.github/scripts/run-without-network.sh` (E-1) — so an attempted access
+//   fails rather than reaching a network; nothing here observes it.
+// - Each of T7.6-7's absences counts only under the pairing above:
+//   `stateProblems`, `writeProblems`, and `fifoProblems` each report
+//   `pairingProblem` first, as `outputProblems` does.
 // - Every examination and write here is a harness step under its own guard
 //   (helpers/step-guards.ts); the run itself is a product invocation under
 //   its own (S-3). E-1 exercises the releases on the Linux leg alone, and
 //   this driver serves POSIX paths alone.
 
 import { Buffer } from "node:buffer";
+import type { Stats } from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bytesEqual, describeByteDifference, fail } from "./assertions.js";
+import { stageFifo } from "./lock-staging.js";
 import type {
   ModuleStaging,
   Placement,
@@ -203,6 +270,7 @@ import { moduleNameGrammarProblem } from "./module-channel.js";
 import type { NodeRelease } from "./node-releases.js";
 import type { StagingMode } from "./permissions.js";
 import { HarnessStagingError } from "./permissions.js";
+import { displaySnapshotPath } from "./snapshot.js";
 import { guardStep, guardSyncStep } from "./step-guards.js";
 import type { ProductBinding, RunGuards, RunResult } from "./subprocess.js";
 import {
@@ -218,7 +286,10 @@ const MODE: StagingMode = "module-channel";
 export const MODULE_RUN_PREFIX = "xspec-module-run-";
 
 /** The protocol the bootstrap's report names, which the decoder requires. */
-export const MODULE_RUN_PROTOCOL = "xspec-module-run/2";
+export const MODULE_RUN_PROTOCOL = "xspec-module-run/3";
+
+/** The name of each of T7.6-7(e)'s FIFOs (module header). */
+export const RUN_FIFO_NAME = "xspec.config.ts";
 
 /** The prefix of each warning calibration's directory (module header). */
 export const WARNING_CALIBRATION_PREFIX = "xspec-warning-calibration-";
@@ -255,6 +326,9 @@ const TMPDIR_NAME = "tmp";
 const WORK_NAME = "work";
 
 const LF = String.fromCodePoint(0x0a);
+
+/** `/`, joining the names of a snapshot key's path (module header). */
+const SLASH_BYTES = Buffer.from([0x2f]);
 
 /** How much of a stream a diagnosis quotes. */
 const QUOTED_STREAM_LIMIT = 800;
@@ -630,6 +704,119 @@ export interface ImportingModuleNote {
   readonly location: string | null;
 }
 
+/**
+ * T7.6-7(c)'s observations (module header; the bootstrap's header), each
+ * the name the bootstrap records a difference under.
+ */
+export const STATE_OBSERVATIONS = Object.freeze([
+  "global-object",
+  "built-ins",
+  "extensibility",
+  "prototype",
+  "process",
+  "environment",
+  "title",
+  "working-directory",
+  "exit-code",
+  "stream-write",
+  "listeners",
+  "timers-and-handles",
+] as const);
+
+/** One of T7.6-7(c)'s observations. */
+export type StateObservationName = (typeof STATE_OBSERVATIONS)[number];
+
+/** One difference the bootstrap found in the process state. */
+export interface StateChange {
+  /** The observation that found it. */
+  readonly observation: StateObservationName;
+  /**
+   * What differs: an observed object by its label ("the global object",
+   * "Array", "Array.prototype", "process"), or another observation's
+   * subject ("process.env", "process.stdout.write", ...).
+   */
+  readonly subject: string;
+  /** How it differs, in words. */
+  readonly detail: string;
+}
+
+/** T7.6-7(c)'s comparison, as the bootstrap made it (its header). */
+export interface StateObservation {
+  /** The labels of the objects observed: the global object, each built-in, `process`. */
+  readonly subjects: readonly string[];
+  /** Each difference listed, at most the bootstrap's limit. */
+  readonly changes: readonly StateChange[];
+  /** How many differences were found beyond those listed. */
+  readonly omitted: number;
+}
+
+/** ECMAScript's global namespace objects: ECMA-262's, and ECMA-402's `Intl`. */
+const ECMASCRIPT_NAMESPACES = ["Atomics", "Intl", "JSON", "Math", "Reflect"];
+
+/**
+ * ECMAScript's global constructors (ECMA-262's, `Iterator` among them),
+ * each of which every one of E-1's releases holds as a data property.
+ */
+const ECMASCRIPT_CONSTRUCTORS = [
+  "AggregateError",
+  "Array",
+  "ArrayBuffer",
+  "BigInt",
+  "BigInt64Array",
+  "BigUint64Array",
+  "Boolean",
+  "DataView",
+  "Date",
+  "Error",
+  "EvalError",
+  "FinalizationRegistry",
+  "Float32Array",
+  "Float64Array",
+  "Function",
+  "Int8Array",
+  "Int16Array",
+  "Int32Array",
+  "Iterator",
+  "Map",
+  "Number",
+  "Object",
+  "Promise",
+  "Proxy",
+  "RangeError",
+  "ReferenceError",
+  "RegExp",
+  "Set",
+  "SharedArrayBuffer",
+  "String",
+  "Symbol",
+  "SyntaxError",
+  "TypeError",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Uint16Array",
+  "Uint32Array",
+  "URIError",
+  "WeakMap",
+  "WeakRef",
+  "WeakSet",
+];
+
+/**
+ * The labels every compared state must have observed (module header): the
+ * global object, `process`, ECMAScript's global namespace objects and
+ * constructors, and each constructor's prototype, `Proxy` (which has none)
+ * aside.
+ */
+export const REQUIRED_STATE_SUBJECTS: readonly string[] = Object.freeze([
+  "the global object",
+  "process",
+  ...ECMASCRIPT_NAMESPACES,
+  ...ECMASCRIPT_CONSTRUCTORS,
+  ...ECMASCRIPT_CONSTRUCTORS.filter((name) => name !== "Proxy").map(
+    (name) => `${name}.prototype`,
+  ),
+]);
+
 /** How far a run got (module header). */
 export type ModuleRunPhase = "loading" | "calling" | "completed";
 
@@ -662,6 +849,11 @@ export interface ModuleRunReport {
   readonly load: LoadObservation | null;
   /** Where the module loaded: T7.6-6's calls; null otherwise. */
   readonly calls: CallsObservation | null;
+  /**
+   * Where the module loaded and the phase completed: T7.6-7(c)'s
+   * comparison of the process state; null otherwise.
+   */
+  readonly state: StateObservation | null;
   /** A failure of the bootstrap's own flow, if any. */
   readonly bootstrapError: ThrownDescription | null;
   /** Each warning delivered to the `warning` listener, in order. */
@@ -691,9 +883,12 @@ const REPORT_MEMBERS = [
   "pid",
   "protocol",
   "release",
+  "state",
   "warnings",
 ];
 const RELEASE_MEMBERS = ["execArgv", "execPath", "version"];
+const STATE_MEMBERS = ["changes", "omitted", "subjects"];
+const STATE_CHANGE_MEMBERS = ["detail", "observation", "subject"];
 const THROWN_MEMBERS = ["code", "message", "name", "stack", "type"];
 const WARNING_MEMBERS = [...THROWN_MEMBERS, "detail"];
 const NOTE_MEMBERS = ["location", "topLevelThis"];
@@ -775,6 +970,7 @@ function readReport(value: unknown): ModuleRunReport {
         : readNote(record["importingModule"]),
     load: record["load"] === null ? null : readLoad(record["load"]),
     calls: record["calls"] === null ? null : readCalls(record["calls"]),
+    state: record["state"] === null ? null : readState(record["state"]),
     bootstrapError:
       record["bootstrapError"] === null
         ? null
@@ -799,25 +995,32 @@ function readReport(value: unknown): ModuleRunReport {
 
 /**
  * The members each phase holds (module header): `loading`, neither a load
- * outcome nor calls; `calling`, a loaded module and its calls so far;
- * `completed`, a load outcome, no failure of the bootstrap's own, and,
- * for a loaded module, `defineConfig` read and every call made where it
- * is a function, none otherwise.
+ * outcome, calls, nor a state compared; `calling`, a loaded module and its
+ * calls so far, no state compared yet; `completed`, a load outcome, no
+ * failure of the bootstrap's own, and, for a loaded module, the state
+ * compared, `defineConfig` read, and every call made where it is a
+ * function, none otherwise.
  */
 function checkPhase(report: ModuleRunReport): void {
   const loaded = report.load?.outcome === "loaded";
   switch (report.phase) {
     case "loading":
-      if (report.load !== null || report.calls !== null) {
+      if (
+        report.load !== null ||
+        report.calls !== null ||
+        report.state !== null
+      ) {
         throw new ReportShapeError(
-          "it holds a load outcome or calls while still in the phase loading",
+          "it holds a load outcome, calls, or a state compared while still " +
+            "in the phase loading",
         );
       }
       return;
     case "calling":
-      if (!loaded || report.calls === null) {
+      if (!loaded || report.calls === null || report.state !== null) {
         throw new ReportShapeError(
-          "it reached the phase calling without a loaded module and its calls",
+          "it reached the phase calling without a loaded module and its " +
+            "calls, or with a state compared",
         );
       }
       return;
@@ -833,6 +1036,12 @@ function checkPhase(report: ModuleRunReport): void {
         throw new ReportShapeError(
           "it holds calls without a loaded module, or a loaded module " +
             "without calls",
+        );
+      }
+      if ((report.state !== null) !== loaded) {
+        throw new ReportShapeError(
+          "it holds a state compared without a loaded module, or a loaded " +
+            "module whose state was not compared",
         );
       }
       if (calls === null) return;
@@ -877,6 +1086,43 @@ function readCalls(value: unknown): CallsObservation {
     );
   }
   return { reading, results, traps };
+}
+
+function readState(value: unknown): StateObservation {
+  const record = readRecord(value, "state", STATE_MEMBERS);
+  const omitted = record["omitted"];
+  if (
+    typeof omitted !== "number" ||
+    !Number.isSafeInteger(omitted) ||
+    omitted < 0
+  ) {
+    throw new ReportShapeError(
+      `state.omitted ${JSON.stringify(omitted)} is no non-negative integer`,
+    );
+  }
+  return {
+    subjects: readStrings(record["subjects"], "state.subjects"),
+    changes: readArray(record["changes"], "state.changes").map((entry, index) =>
+      readStateChange(entry, `state.changes[${String(index)}]`),
+    ),
+    omitted,
+  };
+}
+
+function readStateChange(value: unknown, where: string): StateChange {
+  const record = readRecord(value, where, STATE_CHANGE_MEMBERS);
+  const observation = record["observation"];
+  if (!STATE_OBSERVATIONS.some((name) => name === observation)) {
+    throw new ReportShapeError(
+      `${where}.observation ${JSON.stringify(observation)} is none of ` +
+        "STATE_OBSERVATIONS",
+    );
+  }
+  return {
+    observation: observation as StateObservationName,
+    subject: readString(record["subject"], `${where}.subject`),
+    detail: readString(record["detail"], `${where}.detail`),
+  };
 }
 
 function readReading(value: unknown): DefineConfigReading {
@@ -1147,6 +1393,14 @@ export interface ModuleRunRequest {
   /** Whether nothing but the placement is installed, confirmed where set. */
   readonly alone?: boolean;
   /**
+   * Whether the run also observes T7.6-7(b) and (e) (module header): its
+   * FIFOs staged before it, and the staging, its working directory, `HOME`,
+   * and `TMPDIR` snapshotted around it ({@link ModuleRun.effects}). Such a
+   * run compares the whole staging, so the driver refuses to prepare
+   * another run into that staging while it is launched.
+   */
+  readonly effects?: boolean;
+  /**
    * The run's guards: {@link MODULE_RUN_TIMEOUT_MS} and the subprocess
    * driver's capture limit unless given. Registered bodies never pass them;
    * a self-test's stand-in may lower them.
@@ -1188,6 +1442,11 @@ export interface ModuleRun {
   readonly report: ModuleRunReport | undefined;
   /** What makes the report malformed, for `malformed-report`. */
   readonly reportProblem: string | undefined;
+  /**
+   * T7.6-7(b) and (e)'s observations, for a run asked for them
+   * ({@link ModuleRunRequest.effects}); undefined otherwise.
+   */
+  readonly effects: RunEffects | undefined;
 }
 
 /** A run whose module loaded and whose process exited 0 on its own. */
@@ -1199,7 +1458,83 @@ export interface LoadedModuleRun extends ModuleRun {
     readonly calls: CallsObservation & {
       readonly reading: DefineConfigReading;
     };
+    readonly state: StateObservation;
   };
+}
+
+/** The places T7.6-7(b) compares around a run (module header). */
+export type RunPlace = "staging" | "working directory" | "HOME" | "TMPDIR";
+
+/** An entry's kind, by name (T7.6-7(b): a FIFO compared by its kind alone). */
+export type PlaceEntryKind =
+  | "plain file"
+  | "directory"
+  | "symbolic link"
+  | "FIFO"
+  | "socket"
+  | "character device"
+  | "block device"
+  | "entry of another kind";
+
+/** One entry of a place, as {@link snapshotPlace} records it. */
+export type PlaceEntry =
+  | {
+      readonly kind: "plain file";
+      /** Its bytes; null where its mode refused the read. */
+      readonly bytes: Uint8Array | null;
+    }
+  | {
+      readonly kind: "directory";
+      /** Whether it could be listed (its entries recorded). */
+      readonly listed: boolean;
+    }
+  | { readonly kind: "symbolic link"; readonly target: Uint8Array }
+  | { readonly kind: OtherPlaceEntryKind };
+
+/** The kinds of entry compared by their kind alone: never opened. */
+export type OtherPlaceEntryKind = Exclude<
+  PlaceEntryKind,
+  "plain file" | "directory" | "symbolic link"
+>;
+
+/**
+ * A place's entries (module header), each keyed by its path's bytes
+ * relative to the place, latin1-encoded and `/`-separated (helpers/
+ * snapshot.ts's keys), the place itself under `""`.
+ */
+export type PlaceSnapshot = ReadonlyMap<string, PlaceEntry>;
+
+/** One entry created, modified, or removed in a place. */
+export interface PlaceChange {
+  /** Its path in the place, for a diagnosis: `.` for the place itself. */
+  readonly path: string;
+  readonly change: "created" | "modified" | "removed";
+  /** What it was, is, or became, in words. */
+  readonly detail: string;
+}
+
+/** One place T7.6-7(b) compared, and what changed in it. */
+export interface PlaceWrites {
+  readonly place: RunPlace;
+  /** The place's root, absolute and physical. */
+  readonly root: string;
+  readonly changes: readonly PlaceChange[];
+}
+
+/** One of T7.6-7(e)'s FIFOs, read back after the run. */
+export interface FifoAfter {
+  /** Its absolute path. */
+  readonly path: string;
+  /** What occupies the path afterwards: its kind, or null for nothing. */
+  readonly found: PlaceEntryKind | null;
+}
+
+/** T7.6-7(b) and (e)'s observations of a run (module header). */
+export interface RunEffects {
+  /** (b): each of the four places, and what changed in it. */
+  readonly writes: readonly PlaceWrites[];
+  /** (e): each FIFO staged, and what its path holds afterwards. */
+  readonly fifos: readonly FifoAfter[];
 }
 
 /**
@@ -1212,8 +1547,9 @@ export type RunAttribution = "product" | "stand-in";
 /**
  * Prepare one run (module header): the importing module written in its
  * place (or found byte-equal there), and the run's own directory made —
- * its bootstrap, and its fresh `HOME`, `TMPDIR`, and working directory.
- * Nothing runs yet: a caller may stage more in those directories before
+ * its bootstrap, and its fresh `HOME`, `TMPDIR`, and working directory —
+ * and, for a run observing its effects, T7.6-7(e)'s FIFOs staged. Nothing
+ * runs yet: a caller may stage more in those directories before
  * {@link PreparedModuleRun.launch}, and disposes of the run once done.
  */
 export async function prepareModuleRun(
@@ -1263,6 +1599,9 @@ export class PreparedModuleRun {
   readonly description: string;
   readonly #reach: ReachStaging;
   readonly #guards: RunGuards;
+  /** Whether it observes T7.6-7(b) and (e) ({@link ModuleRunRequest.effects}). */
+  readonly #effects: boolean;
+  readonly #fifos: string[] = [];
   #launched = false;
   #disposed = false;
 
@@ -1295,6 +1634,16 @@ export class PreparedModuleRun {
       ...(request.alone === undefined ? {} : { alone: request.alone }),
     };
     this.#guards = request.guards ?? {};
+    this.#effects = request.effects === true;
+  }
+
+  /**
+   * T7.6-7(e)'s FIFOs, absolute — in the working directory, in the
+   * importing module's directory, and in `HOME` — for a run observing its
+   * effects; none otherwise.
+   */
+  get fifos(): readonly string[] {
+    return this.#fifos;
   }
 
   /** See {@link prepareModuleRun}. */
@@ -1336,6 +1685,7 @@ export class PreparedModuleRun {
           );
         },
       );
+      if (prepared.#effects) await prepared.#stageFifos(importingDir);
       return prepared;
     } catch (error) {
       await removeRunDirectory(root, request.context);
@@ -1346,12 +1696,13 @@ export class PreparedModuleRun {
   /**
    * Run it (module header): Reach and H-1 verified first, under the run's
    * exact environment, working directory, and executable; then the release
-   * run through the subprocess driver under the run's own guard; then its
-   * report read, decoded, and its conditions checked. Resolves with the run
-   * whatever its outcome; rejects with the hang-guard kill, any other
-   * rejection of the run's spawn, an unmet staging precondition
-   * (`HarnessStagingError`), or a breach of the run's conditions (a harness
-   * error).
+   * run through the subprocess driver under the run's own guard — for a run
+   * observing its effects, its four places snapshotted just before and
+   * just after, and its FIFOs read back; then its report read, decoded, and
+   * its conditions checked. Resolves with the run whatever its outcome;
+   * rejects with the hang-guard kill, any other rejection of the run's
+   * spawn, an unmet staging precondition (`HarnessStagingError`), or a
+   * breach of the run's conditions (a harness error).
    */
   async launch(): Promise<ModuleRun> {
     if (this.#launched || this.#disposed) {
@@ -1388,15 +1739,24 @@ export class PreparedModuleRun {
           `${this.reportPath} is occupied before the run`,
       );
     }
-    const result = await runProduct(binding, {
-      cwd: this.cwd,
-      argv: [this.bootstrap, this.importingModule, this.reportPath, this.route],
-      env: overrides,
-      timeoutMs: this.#guards.timeoutMs ?? MODULE_RUN_TIMEOUT_MS,
-      ...(this.#guards.maxOutputBytes === undefined
-        ? {}
-        : { maxOutputBytes: this.#guards.maxOutputBytes }),
-    });
+    const spawn = (): Promise<RunResult> =>
+      runProduct(binding, {
+        cwd: this.cwd,
+        argv: [
+          this.bootstrap,
+          this.importingModule,
+          this.reportPath,
+          this.route,
+        ],
+        env: overrides,
+        timeoutMs: this.#guards.timeoutMs ?? MODULE_RUN_TIMEOUT_MS,
+        ...(this.#guards.maxOutputBytes === undefined
+          ? {}
+          : { maxOutputBytes: this.#guards.maxOutputBytes }),
+      });
+    const { result, effects } = this.#effects
+      ? await this.#observeEffects(spawn)
+      : { result: await spawn(), effects: undefined };
     const bytes = await readReportBytes(this.reportPath, this.description);
     const decoding =
       bytes === null
@@ -1415,6 +1775,7 @@ export class PreparedModuleRun {
       tmp: this.tmp,
       environment: this.environment,
       result,
+      effects,
     };
     if (decoding === null) {
       return {
@@ -1448,6 +1809,116 @@ export class PreparedModuleRun {
     if (this.#disposed) return;
     this.#disposed = true;
     await removeRunDirectory(this.root, this.description);
+  }
+
+  /**
+   * Stage T7.6-7(e)'s FIFOs (module header): `xspec.config.ts` in the
+   * working directory and in `HOME`, fresh for the run, and in the
+   * importing module's directory, `importingDir` in the staging — found
+   * there already as a FIFO, staged by an earlier run, or staged now; any
+   * other occupant a `HarnessStagingError`.
+   */
+  async #stageFifos(importingDir: string): Promise<void> {
+    const inStaging =
+      importingDir === "" || importingDir === "."
+        ? RUN_FIFO_NAME
+        : `${importingDir}/${RUN_FIFO_NAME}`;
+    const stagingFifo = this.staging.path(inStaging);
+    const occupant = await guardStep(
+      `reading what occupies ${stagingFifo} (${this.description})`,
+      () => readEntryKind(stagingFifo),
+    );
+    if (occupant === null) {
+      refuseWhileObserved(
+        this.staging,
+        `the FIFO ${stagingFifo}`,
+        this.description,
+      );
+      await guardStep(
+        `staging the FIFO ${stagingFifo} (${this.description})`,
+        () =>
+          stageFifo(
+            { root: this.staging.root, tempRoot: this.root },
+            inStaging,
+          ),
+      );
+    } else if (occupant !== "FIFO") {
+      throw new HarnessStagingError(
+        MODE,
+        stagingFifo,
+        `${this.description}: the place of T7.6-7(e)'s FIFO in the ` +
+          `importing module's directory, ${stagingFifo}, is occupied by ` +
+          `${withArticle(occupant)} (TEST-SPEC T7.6-7(e): a FIFO named ` +
+          `${RUN_FIFO_NAME} in the importing module's directory)`,
+      );
+    }
+    for (const directory of [this.cwd, this.home]) {
+      await guardStep(
+        `staging the FIFO ${path.join(directory, RUN_FIFO_NAME)} ` +
+          `(${this.description})`,
+        () =>
+          stageFifo({ root: directory, tempRoot: this.root }, RUN_FIFO_NAME),
+      );
+    }
+    this.#fifos.push(
+      path.join(this.cwd, RUN_FIFO_NAME),
+      stagingFifo,
+      path.join(this.home, RUN_FIFO_NAME),
+    );
+  }
+
+  /**
+   * Spawn the run observing T7.6-7(b) and (e) (module header): the four
+   * places snapshotted just before it and just after, compared, and each
+   * FIFO read back; the staging held as observed meanwhile, so that no
+   * other run is prepared into it.
+   */
+  async #observeEffects(
+    spawn: () => Promise<RunResult>,
+  ): Promise<{ result: RunResult; effects: RunEffects }> {
+    const places: readonly (readonly [RunPlace, string])[] = [
+      ["staging", this.staging.root],
+      ["working directory", this.cwd],
+      ["HOME", this.home],
+      ["TMPDIR", this.tmp],
+    ];
+    observedLaunches.set(
+      this.staging,
+      (observedLaunches.get(this.staging) ?? 0) + 1,
+    );
+    try {
+      const before: PlaceSnapshot[] = [];
+      for (const [, root] of places) {
+        before.push(await snapshotPlace(root, this.description));
+      }
+      const result = await spawn();
+      const writes: PlaceWrites[] = [];
+      for (const [index, [place, root]] of places.entries()) {
+        writes.push({
+          place,
+          root,
+          changes: comparePlaceSnapshots(
+            before[index] ?? new Map(),
+            await snapshotPlace(root, this.description),
+          ),
+        });
+      }
+      const fifos: FifoAfter[] = [];
+      for (const fifo of this.#fifos) {
+        fifos.push({
+          path: fifo,
+          found: await guardStep(
+            `reading back the FIFO ${fifo} (${this.description})`,
+            () => readEntryKind(fifo),
+          ),
+        });
+      }
+      return { result, effects: { writes, fifos } };
+    } finally {
+      const count = (observedLaunches.get(this.staging) ?? 1) - 1;
+      if (count > 0) observedLaunches.set(this.staging, count);
+      else observedLaunches.delete(this.staging);
+    }
   }
 
   /**
@@ -1518,6 +1989,20 @@ export class PreparedModuleRun {
             `${JSON.stringify(note.location)}, where ${describeRoute(this.route)} ` +
             `runs one whose top-level this is ${JSON.stringify(topLevelThis)}, ` +
             `at ${JSON.stringify(location)}`,
+        );
+      }
+    }
+    const state = report.state;
+    if (state !== null) {
+      const missing = REQUIRED_STATE_SUBJECTS.filter(
+        (label) => !state.subjects.includes(label),
+      );
+      if (missing.length > 0) {
+        breaches.push(
+          `its comparison of the process state observed none of ` +
+            `${JSON.stringify(missing)} (TEST-SPEC T7.6-7(c): the global ` +
+            `object, process, and the global built-in constructors and ` +
+            `namespace objects with those constructors' prototypes)`,
         );
       }
     }
@@ -2130,6 +2615,146 @@ export async function runtimeOutputProblems(
 }
 
 // ---------------------------------------------------------------------------
+// T7.6-7(b), (c), and (e)
+// ---------------------------------------------------------------------------
+
+/** SPEC 7.6 Runtime's effect clause, which T7.6-7(c)'s problems cite. */
+const STATE_CITATION =
+  "(TEST-SPEC T7.6-7(c); SPEC 7.6 Runtime: beyond the runtime's own " +
+  "resolution of the specifier and loading of the package's files, neither " +
+  "loading the module nor calling defineConfig has any effect — no change " +
+  "to the global object or to any other state of the process)";
+
+/** SPEC 7.6 Runtime's effect clause, which T7.6-7(b)'s problems cite. */
+const WRITES_CITATION =
+  "(TEST-SPEC T7.6-7(b); SPEC 7.6 Runtime: beyond the runtime's own " +
+  "resolution of the specifier and loading of the package's files, neither " +
+  "loading the module nor calling defineConfig has any effect — no " +
+  "filesystem write)";
+
+/** SPEC 7.6 Runtime's effect clause, which T7.6-7(e)'s problems cite. */
+const FIFOS_CITATION =
+  "(TEST-SPEC T7.6-7(e), S-3; SPEC 7.6 Runtime: beyond the runtime's own " +
+  "resolution of the specifier and loading of the package's files, neither " +
+  "loading the module nor calling defineConfig has any effect — no " +
+  "filesystem read outside the package)";
+
+const STATE_OBSERVATION_DESCRIPTIONS: Readonly<
+  Record<StateObservationName, string>
+> = {
+  "global-object": "the global object's own properties",
+  "built-ins": "a global built-in object's own properties",
+  extensibility: "an observed object's extensibility",
+  prototype: "an observed object's prototype",
+  process: "process's own properties",
+  environment: "process.env",
+  title: "the process title",
+  "working-directory": "the working directory",
+  "exit-code": "process.exitCode",
+  "stream-write": "the write a standard stream resolves to",
+  listeners: "the listeners registered on process",
+  "timers-and-handles": "the pending timers and handles",
+};
+
+/** One of T7.6-7(c)'s observations, in words. */
+export function describeStateObservation(name: StateObservationName): string {
+  return STATE_OBSERVATION_DESCRIPTIONS[name];
+}
+
+/**
+ * T7.6-7(c) on `run` (module header): the pairing, and the process state
+ * unchanged across the load and the calls, as the bootstrap compared it.
+ * Each problem in words, led by the run's description; none where it
+ * holds.
+ */
+export function stateProblems(run: LoadedModuleRun): string[] {
+  const problems: string[] = [];
+  const pairing = pairingProblem(run);
+  if (pairing !== null) problems.push(pairing);
+  const { changes, omitted } = run.report.state;
+  for (const change of changes) {
+    problems.push(
+      `${run.description}: ${describeStateObservation(change.observation)} ` +
+        `changed across the load and the calls — ${change.subject}: ` +
+        `${change.detail} ${STATE_CITATION}`,
+    );
+  }
+  if (omitted > 0) {
+    problems.push(
+      `${run.description}: the process state differs in ${String(omitted)} ` +
+        `more way(s) beyond those listed ${STATE_CITATION}`,
+    );
+  }
+  return problems;
+}
+
+/** `run`'s effects, which a run must have been asked to observe. */
+function requireEffects(run: ModuleRun, reader: string): RunEffects {
+  if (run.effects === undefined) {
+    throw new Error(
+      `module channel: ${reader} reads T7.6-7(b) and (e)'s observations, ` +
+        `which ${run.description} was not asked to make ` +
+        `(ModuleRunRequest.effects)`,
+    );
+  }
+  return run.effects;
+}
+
+/** A place, in words, with its root. */
+function describePlace(writes: PlaceWrites): string {
+  return writes.place === "staging"
+    ? `the staging (${writes.root})`
+    : writes.place === "working directory"
+      ? `the run's working directory (${writes.root})`
+      : `the run's ${writes.place} (${writes.root})`;
+}
+
+/**
+ * T7.6-7(b) on `run`, a run observing its effects (module header): the
+ * pairing, and no entry created, modified, or removed in the staging, the
+ * working directory, `HOME`, or `TMPDIR`. Each problem in words, led by
+ * the run's description; none where it holds.
+ */
+export function writeProblems(run: LoadedModuleRun): string[] {
+  const effects = requireEffects(run, "writeProblems");
+  const problems: string[] = [];
+  const pairing = pairingProblem(run);
+  if (pairing !== null) problems.push(pairing);
+  for (const writes of effects.writes) {
+    for (const change of writes.changes) {
+      problems.push(
+        `${run.description}: in ${describePlace(writes)}, ` +
+          `${JSON.stringify(change.path)} was ${change.change}: ` +
+          `${change.detail} ${WRITES_CITATION}`,
+      );
+    }
+  }
+  return problems;
+}
+
+/**
+ * T7.6-7(e) on `run`, a run observing its effects (module header): the
+ * pairing, and each FIFO still a FIFO in place — and, the run having ended
+ * within its guard, unopened. Each problem in words, led by the run's
+ * description; none where it holds.
+ */
+export function fifoProblems(run: LoadedModuleRun): string[] {
+  const effects = requireEffects(run, "fifoProblems");
+  const problems: string[] = [];
+  const pairing = pairingProblem(run);
+  if (pairing !== null) problems.push(pairing);
+  for (const fifo of effects.fifos) {
+    if (fifo.found === "FIFO") continue;
+    problems.push(
+      `${run.description}: the FIFO ${fifo.path} is ` +
+        (fifo.found === null ? "gone" : `now ${withArticle(fifo.found)}`) +
+        `, no longer a FIFO in place ${FIFOS_CITATION}`,
+    );
+  }
+  return problems;
+}
+
+// ---------------------------------------------------------------------------
 // Learning each release's printed form (module header)
 // ---------------------------------------------------------------------------
 
@@ -2496,6 +3121,7 @@ async function writeImportingModule(
 ): Promise<void> {
   const target = staging.path(importingFile);
   if ((await readImportingModule(target, context)) === "absent") {
+    refuseWhileObserved(staging, `the importing module ${target}`, context);
     try {
       await staging.writeFile(importingFile, text);
       return;
@@ -2520,6 +3146,34 @@ async function writeImportingModule(
         `importing file's place)`,
     );
   }
+}
+
+/**
+ * The launches observing their effects in flight, by staging (module
+ * header): while one is, nothing is written into its staging for another
+ * run.
+ */
+const observedLaunches = new WeakMap<ModuleStaging, number>();
+
+/**
+ * Refuse, as a usage error, to write `what` into `staging` while a run
+ * observing its effects is launched on it (module header): that run's
+ * comparison of the staging would charge the write to its module.
+ */
+function refuseWhileObserved(
+  staging: ModuleStaging,
+  what: string,
+  context: string,
+): void {
+  if ((observedLaunches.get(staging) ?? 0) === 0) return;
+  throw new Error(
+    `module channel: ${what} would be written into the staging ` +
+      `${staging.root} while a run observing its effects is launched on it, ` +
+      `whose comparison of the staging would charge the write to its module ` +
+      `(TEST-SPEC T7.6-7(b)); prepare every run of a staging before ` +
+      `launching one that observes its effects, or run them one after ` +
+      `another (${context})`,
+  );
 }
 
 /** What occupies an importing module's place: its bytes, if a plain file. */
@@ -2604,6 +3258,203 @@ async function makeDirectoriesWritable(directory: string): Promise<void> {
 }
 
 /**
+ * A place's entries (module header): `root` itself, under `""`, and every
+ * entry under it, each by its kind — a plain file with its bytes (null
+ * where its mode refuses the read), a directory (whether it lists), a
+ * symbolic link with its target, never followed, and a FIFO, a socket, or a
+ * device by its kind alone, never opened (TEST-SPEC T7.6-7(b), S-3). An
+ * absent root yields no entry. One harness step under its own guard.
+ */
+export async function snapshotPlace(
+  root: string,
+  context: string,
+): Promise<PlaceSnapshot> {
+  return guardStep(`snapshotting ${root} (${context})`, async () => {
+    const entries = new Map<string, PlaceEntry>();
+    await recordPlaceEntry(Buffer.from(root), null, entries);
+    return entries;
+  });
+}
+
+/** Record the entry at `abs` (`rel` in the place; null for its root), and those under it. */
+async function recordPlaceEntry(
+  abs: Buffer,
+  rel: Buffer | null,
+  entries: Map<string, PlaceEntry>,
+): Promise<void> {
+  let stats: Stats;
+  try {
+    stats = await fsp.lstat(abs);
+  } catch (error) {
+    if (isAbsence(error)) return;
+    throw error;
+  }
+  const key = rel === null ? "" : rel.toString("latin1");
+  if (stats.isFile()) {
+    let bytes: Buffer | null;
+    try {
+      bytes = await fsp.readFile(abs);
+    } catch (error) {
+      if (!isRefusal(error)) throw error;
+      bytes = null;
+    }
+    entries.set(key, { kind: "plain file", bytes });
+    return;
+  }
+  if (stats.isSymbolicLink()) {
+    entries.set(key, {
+      kind: "symbolic link",
+      target: await fsp.readlink(abs, { encoding: "buffer" }),
+    });
+    return;
+  }
+  if (!stats.isDirectory()) {
+    entries.set(key, { kind: otherKind(stats) });
+    return;
+  }
+  let names: Buffer[] | null;
+  try {
+    names = (await fsp.readdir(abs, { encoding: "buffer" })).sort(
+      Buffer.compare,
+    );
+  } catch (error) {
+    if (!isRefusal(error)) throw error;
+    names = null;
+  }
+  entries.set(key, { kind: "directory", listed: names !== null });
+  for (const name of names ?? []) {
+    await recordPlaceEntry(
+      Buffer.concat([abs, SLASH_BYTES, name]),
+      rel === null ? name : Buffer.concat([rel, SLASH_BYTES, name]),
+      entries,
+    );
+  }
+}
+
+/**
+ * How a place changed between two snapshots (module header), entry by
+ * entry in bytewise path order: an entry created, removed, or modified —
+ * its kind, a plain file's bytes, a symbolic link's target, or whether a
+ * plain file reads or a directory lists.
+ */
+export function comparePlaceSnapshots(
+  before: PlaceSnapshot,
+  after: PlaceSnapshot,
+): PlaceChange[] {
+  const keys = [...new Set([...before.keys(), ...after.keys()])].sort();
+  const changes: PlaceChange[] = [];
+  for (const key of keys) {
+    const was = before.get(key);
+    const now = after.get(key);
+    const shown = key === "" ? "." : displaySnapshotPath(key);
+    if (was === undefined && now !== undefined) {
+      changes.push({
+        path: shown,
+        change: "created",
+        detail: `it is ${describePlaceEntry(now)}`,
+      });
+    } else if (was !== undefined && now === undefined) {
+      changes.push({
+        path: shown,
+        change: "removed",
+        detail: `it was ${describePlaceEntry(was)}`,
+      });
+    } else if (was !== undefined && now !== undefined) {
+      const detail = placeEntryDifference(was, now);
+      if (detail !== null) {
+        changes.push({ path: shown, change: "modified", detail });
+      }
+    }
+  }
+  return changes;
+}
+
+/** An entry of a place, in words. */
+function describePlaceEntry(entry: PlaceEntry): string {
+  switch (entry.kind) {
+    case "plain file":
+      return entry.bytes === null
+        ? "a plain file whose bytes could not be read"
+        : `a plain file of ${String(entry.bytes.length)} byte(s)`;
+    case "directory":
+      return entry.listed
+        ? "a directory"
+        : "a directory whose listing was refused";
+    case "symbolic link":
+      return (
+        `a symbolic link to ` +
+        JSON.stringify(Buffer.from(entry.target).toString("utf8"))
+      );
+    default:
+      return withArticle(entry.kind);
+  }
+}
+
+/** How two entries at one path differ, in words; null where they do not. */
+function placeEntryDifference(was: PlaceEntry, now: PlaceEntry): string | null {
+  if (was.kind !== now.kind) {
+    return `${describePlaceEntry(was)} became ${describePlaceEntry(now)}`;
+  }
+  if (was.kind === "plain file" && now.kind === "plain file") {
+    if (was.bytes === null || now.bytes === null) {
+      if (was.bytes === now.bytes) return null;
+      return was.bytes === null
+        ? "its bytes, which could not be read before, now can be"
+        : "its bytes can no longer be read";
+    }
+    return bytesEqual(was.bytes, now.bytes)
+      ? null
+      : `its bytes changed — ${describeByteDifference(was.bytes, now.bytes, "before", "after")}`;
+  }
+  if (was.kind === "directory" && now.kind === "directory") {
+    if (was.listed === now.listed) return null;
+    return now.listed
+      ? "its listing, refused before, now succeeds"
+      : "its listing is now refused";
+  }
+  if (was.kind === "symbolic link" && now.kind === "symbolic link") {
+    return bytesEqual(was.target, now.target)
+      ? null
+      : `its target changed from ` +
+          `${JSON.stringify(Buffer.from(was.target).toString("utf8"))} to ` +
+          JSON.stringify(Buffer.from(now.target).toString("utf8"));
+  }
+  return null;
+}
+
+/** What occupies `abs`, by its kind, read without following or opening it; null for nothing. */
+async function readEntryKind(abs: string): Promise<PlaceEntryKind | null> {
+  try {
+    return entryKind(await fsp.lstat(abs));
+  } catch (error) {
+    if (isAbsence(error)) return null;
+    throw error;
+  }
+}
+
+/** An entry's kind, from its `lstat`. */
+function entryKind(stats: Stats): PlaceEntryKind {
+  if (stats.isFile()) return "plain file";
+  if (stats.isDirectory()) return "directory";
+  if (stats.isSymbolicLink()) return "symbolic link";
+  return otherKind(stats);
+}
+
+/** The kind of an entry that is no plain file, directory, or symbolic link. */
+function otherKind(stats: Stats): OtherPlaceEntryKind {
+  if (stats.isFIFO()) return "FIFO";
+  if (stats.isSocket()) return "socket";
+  if (stats.isCharacterDevice()) return "character device";
+  if (stats.isBlockDevice()) return "block device";
+  return "entry of another kind";
+}
+
+/** An entry's kind with its indefinite article. */
+function withArticle(kind: PlaceEntryKind): string {
+  return kind === "entry of another kind" ? `an ${kind}` : `a ${kind}`;
+}
+
+/**
  * The report's bytes, or null where none was written. Anything at the path
  * but a plain file is no report either: it is never opened.
  */
@@ -2625,6 +3476,12 @@ async function readReportBytes(
 function isAbsence(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException | undefined)?.code;
   return code === "ENOENT";
+}
+
+/** Whether `error` is an entry's mode refusing a read or a listing. */
+function isRefusal(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return code === "EACCES" || code === "EPERM";
 }
 
 function describeError(error: unknown): string {

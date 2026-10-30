@@ -709,11 +709,13 @@ function vectorRun(
         results: fields.results ?? ALL_RETURNED,
         traps: fields.traps ?? [],
       },
+      state: { subjects: [], changes: [], omitted: 0 },
       bootstrapError: null,
       warnings: fields.warnings ?? [],
       exit: { code: 0 },
     },
     reportProblem: undefined,
+    effects: undefined,
   };
 }
 
