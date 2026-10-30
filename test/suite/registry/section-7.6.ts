@@ -1,8 +1,9 @@
 // TEST-SPEC §7.6 (the `defineConfig` module): T7.6-1, declared exports;
-// T7.6-2, valid configurations; and T7.6-3, shape violations. T7.6-6 and
-// T7.6-7, the runtime's exports and identity and its absence of effects,
-// are section-7.6-ii.ts's; the rest of §7.6 — T7.6-4 and T7.6-5 — and P-17
-// and P-18 are not registered yet.
+// T7.6-2, valid configurations; and T7.6-3, shape violations. T7.6-4, the
+// placements, and T7.6-6 and T7.6-7, the runtime's exports and identity and
+// its absence of effects, are section-7.6-ii.ts's — T7.6-4 staging the files
+// `placementFiles` composes here, the canonical runs' own beside any N; the
+// rest of §7.6 — T7.6-5 — and P-17 and P-18 are not registered yet.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never
@@ -49,8 +50,8 @@
 // - The body stops at the first setup whose listing deviates, failing
 //   once, diagnosed, with every deviation, the listing whole, and
 //   TypeScript's errors for the program as a diagnostic aid
-//   (`assertDeclaredExports`, which T7.6-4's placements and P-17's draws
-//   may reuse); where every setup holds, it confirms that it judged all
+//   (`assertDeclaredExports`, which T7.6-4's placements reuse and P-17's
+//   draws may); where every setup holds, it confirms that it judged all
 //   173.
 //
 // T7.6-2 (SPEC 7.6 Covered files, Type contract: valid configurations): each
@@ -200,6 +201,7 @@ import ts from "typescript-5.9.3";
 import { fail, HarnessAssertionError } from "../../helpers/assertions.js";
 import {
   CANONICAL_MODULE_NAMES,
+  moduleNameGrammarProblem,
   ModuleStaging,
   PROJECT_KINDS,
   TYPE_CHECKING_ARM,
@@ -3448,6 +3450,117 @@ const T7_6_3 = defineProductTest({
     "Type contract, shape violations; TEST-SPEC §7.6 Pairing)",
   run: runShapeViolations,
 });
+
+// ---------------------------------------------------------------------------
+// T7.6-4's files: the canonical runs' files beside any N (section-7.6-ii.ts)
+// ---------------------------------------------------------------------------
+
+/** One file a placement's type-checking runs stage: its label and bytes. */
+export interface PlacementFile {
+  /** Names the file in every diagnosis; unique among the three. */
+  readonly label: string;
+  readonly text: string;
+}
+
+/**
+ * The files of the runs each of T7.6-4's placements stands in for the
+ * canonical one in, beside one N (TEST-SPEC T7.6-4): T7.6-1's, T7.6-2(a)'s,
+ * and T7.6-3's unknown-top-level-key arm's.
+ */
+export interface PlacementFiles {
+  /** T7.6-1's covered file: T7.6-2(d)'s, the minimal configuration. */
+  readonly declaredExports: PlacementFile;
+  /** T7.6-2(a)'s file: the unknown-top-level-key arm's valid twin. */
+  readonly valid: PlacementFile;
+  /** T7.6-3's arm: (a)'s file with an unknown key at its top level. */
+  readonly unknownKey: PlacementFile;
+}
+
+/** T7.6-2's file lettered `letter`, or a harness defect. */
+function t762Arm(letter: string): T762Arm {
+  const arm = T762_ARMS.find((candidate) => candidate.arm === letter);
+  if (arm === undefined) {
+    throw new Error(
+      `T7.6-4: T7.6-2 holds no ${letter} file, which T7.6-4's placements ` +
+        "stage: a harness defect",
+    );
+  }
+  return arm;
+}
+
+/** T7.6-3's arm with an unknown key at the top level, and its own files. */
+const T763_UNKNOWN_TOP_LEVEL_KEY: {
+  readonly arm: T763Arm;
+  readonly file: T763File;
+} = (() => {
+  const arm = T763_ARMS.find(
+    (candidate) =>
+      candidate.edits.length === 1 &&
+      candidate.edits[0]?.violation.category === "unknown key" &&
+      candidate.edits[0].violation.path.length === 1,
+  );
+  const file = T763_FILES.find((candidate) => candidate.label === arm?.label);
+  if (arm === undefined || file === undefined) {
+    throw new Error(
+      "T7.6-4: T7.6-3 holds no arm with an unknown key at the top level " +
+        "alone, which T7.6-4's placements pair with T7.6-2(a)'s file: a " +
+        "harness defect",
+    );
+  }
+  return { arm, file };
+})();
+
+/**
+ * T7.6-4's three files beside the placement N `name`, a name of 7.6's
+ * grammar: T7.6-1's covered file (T7.6-2(d)'s), T7.6-2(a)'s file, and
+ * T7.6-3's unknown-top-level-key arm, each rendered with the specifier
+ * `name` and held to everything its own test's files are held to at module
+ * load (`composeFile`, `composeT763File`) — a deviation throws, a harness
+ * defect. Beside a canonical candidate the bytes are those tests' own
+ * records' (checked at module load below), so each placement's runs are
+ * runs of T7.6-1, of T7.6-2(a), and of that arm, N aside.
+ */
+export function placementFiles(name: string): PlacementFiles {
+  const problem = moduleNameGrammarProblem(name);
+  if (problem !== null) {
+    throw new Error(
+      `T7.6-4: the placement N ${JSON.stringify(name)} ${problem}; a ` +
+        "configuration file imports from a name of 7.6's grammar: a harness " +
+        "defect",
+    );
+  }
+  return {
+    declaredExports: {
+      label: `T7.6-1's covered file, ${T761_FILE.label}`,
+      text: composeFile(t762Arm("(d)"), name),
+    },
+    valid: { label: T763_TWIN.label, text: composeFile(t762Arm("(a)"), name) },
+    unknownKey: {
+      label: `T7.6-3's arm, ${T763_UNKNOWN_TOP_LEVEL_KEY.arm.label}`,
+      text: composeT763File(T763_UNKNOWN_TOP_LEVEL_KEY.arm, name),
+    },
+  };
+}
+
+for (const name of CANONICAL_MODULE_NAMES) {
+  const files = placementFiles(name);
+  const own: readonly (readonly [PlacementFile, T762File | T763File])[] = [
+    [files.declaredExports, T761_FILE],
+    [files.valid, T763_TWIN],
+    [files.unknownKey, T763_UNKNOWN_TOP_LEVEL_KEY.file],
+  ];
+  for (const [file, recorded] of own) {
+    if (file.text !== textFor(recorded, name)) {
+      throw new Error(
+        `T7.6-4: ${file.label} beside ${JSON.stringify(name)} holds other ` +
+          `bytes than its own test's record (${recorded.label}): each ` +
+          "placement stands in for the canonical one in a run of T7.6-1, " +
+          "of T7.6-2(a), and of T7.6-3's unknown-top-level-key arm (TEST-SPEC " +
+          "T7.6-4): a harness defect",
+      );
+    }
+  }
+}
 
 export const section76Tests: readonly ProductTestEntry[] = [
   T7_6_1,

@@ -1,9 +1,9 @@
 // Self-checks for the module channel's stagings (TEST-SPEC 17 preamble:
 // internal self-tests cover harness machinery certification does not
 // exercise; §7.6 Placement, H-1, H-2, H-8, C-2; SPEC 7.6 Package and
-// installation, Reach; helpers/module-channel.ts). No test of 7.6 is
-// registered yet, so the machinery every one of them will stage through is
-// pinned here on its own, before any product exists:
+// installation, Reach; helpers/module-channel.ts). The machinery every test
+// of 7.6 stages through is pinned here on its own, before any product
+// exists:
 // - the package directory: none given fails diagnosed before anything is
 //   staged (H-8); on the built product's binding a directory that does not
 //   exist is its missing product, diagnosed likewise, and on any other a
@@ -29,7 +29,9 @@
 //   nothing (an unrelated package at `node_modules/a` beside `a.js`, an
 //   ancestor manifest named `unrelated`), and the canonical placement's
 //   "nothing else installed";
-// - no staging write lands in a placed copy (H-2).
+// - no staging write lands in a placed copy (H-2), and a directory copied
+//   beside a placement (T7.6-4(e)'s TypeScript package) is byte-equal to
+//   its source.
 //
 // The stand-in package, test/fixtures/module-channel-standin/, documented
 // here since JSON holds no comment: a small hand-written, non-xspec package
@@ -1172,7 +1174,7 @@ test("nothing else installed: the canonical placement alone in the staging — a
   );
 });
 
-test("no staging write lands in a placed copy: a file, a directory, a link, or a project at or below a placement or the copy a symbolic-link placement reaches is refused, the copies left byte-equal to the package directory (TEST-SPEC H-2: nothing installed into it afterwards)", async () => {
+test("no staging write lands in a placed copy: a file, a directory, a link, a copied directory, or a project at or below a placement or the copy a symbolic-link placement reaches is refused, the copies left byte-equal to the package directory (TEST-SPEC H-2: nothing installed into it afterwards); a directory copied elsewhere in the staging — another package installed beside a placement (T7.6-4(e)) — is byte-equal to its source, its own mode, modes, and links kept, and an occupied destination fails", async () => {
   const staging = await stagingBeside();
   const copied = await staging.placeCanonical("", TYPE_CHECKING_ARM);
   const linked = await staging.place({
@@ -1208,6 +1210,11 @@ test("no staging write lands in a placed copy: a file, a directory, a link, or a
       `a project at ${rel}`,
       "lies in the placed copy",
     );
+    await expectRefused(
+      staging.copyDirectory(rel, STANDIN_PACKAGE_DIR),
+      `a copied directory at ${rel}`,
+      "lies in the placed copy",
+    );
   }
   const refused = (detail: string): HarnessStagingError =>
     new HarnessStagingError("module-channel", STANDIN_PACKAGE_DIR, detail);
@@ -1225,4 +1232,25 @@ test("no staging write lands in a placed copy: a file, a directory, a link, or a
       copy,
     ).toBeNull();
   }
+  const varied = await variedPackage();
+  const variedTree = await readPackageTree(varied, "the source", refused);
+  const other = await staging.copyDirectory(
+    "other/node_modules/typescript",
+    varied,
+  );
+  expect(other).toBe(
+    path.join(staging.root, "other", "node_modules", "typescript"),
+  );
+  const otherTree = await readPackageTree(
+    other,
+    "the copied directory",
+    refused,
+  );
+  expect(describeTreeDifference(variedTree, otherTree)).toBeNull();
+  expect(otherTree.mode, "the copy keeps the directory's own mode").toBe(0o750);
+  expect(entriesOf(otherTree)).toContain("lib/alias.js -> helper.js");
+  await expect(
+    staging.copyDirectory("other/node_modules/typescript", varied),
+    "an occupied destination",
+  ).rejects.toThrow(/EEXIST/);
 });

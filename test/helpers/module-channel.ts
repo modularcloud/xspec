@@ -74,6 +74,10 @@
 //   as links), given the package directory's own mode, and read back equal
 //   to the package as read before anything was staged. No staging write
 //   lands in a placed copy afterwards (H-2: nothing installed into it).
+//   Another package a staging installs beside a placement (T7.6-4(c), (e))
+//   is written file by file, or copied entry by entry from a directory of
+//   the harness (`copyDirectory`: TypeScript's package), never at or below
+//   a placement.
 // - Reach (`verifyReach`), checked on the finished staging before any tool
 //   runs, for each importing file: physical naming (the file named by its
 //   physical path, the path each tool is given); the holding directory the
@@ -1180,6 +1184,35 @@ export class ModuleStaging {
       },
     );
     return at;
+  }
+
+  /**
+   * Copy the directory `source` entry by entry (helpers/tree-copy.ts: bytes,
+   * modes, and symbolic links kept) to the new directory `rel`, given
+   * `source`'s own mode, creating its parents: another package installed in
+   * the staging beside a placement (T7.6-4(e): TypeScript's package at
+   * `node_modules/typescript`), never at or below a placement — the package
+   * directory itself is installed by {@link place} alone. An occupied `rel`
+   * fails. Returns the copy's absolute path.
+   */
+  async copyDirectory(rel: string, source: string): Promise<string> {
+    const target = this.path(rel);
+    this.#refuseInsidePlacement(target, "the copied directory");
+    await guardStep(
+      `making ${target} for a copy of ${source} (${this.context})`,
+      async () => {
+        await fsp.mkdir(path.dirname(target), { recursive: true });
+        await fsp.mkdir(target);
+      },
+    );
+    await copyTreeBytes(Buffer.from(source), Buffer.from(target));
+    await guardStep(
+      `giving ${target} the mode of ${source} (${this.context})`,
+      async () => {
+        await fsp.chmod(target, (await fsp.stat(source)).mode & 0o7777);
+      },
+    );
+    return target;
   }
 
   /**
