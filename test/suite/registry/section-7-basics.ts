@@ -181,6 +181,35 @@
 //   the name's escape, or taking any import that binds or reaches
 //   `defineConfig` for the import of it — loads a refused text and builds
 //   (exit 0), failing the exit-code assertion.
+// - T7-2's statement forms (SPEC 7: exactly an import of `defineConfig` and
+//   a default export of one call to that binding, no other statement form):
+//   TypeScript's two CommonJS-interop statements, one arm each, every one
+//   the canonical configuration with one deviation — an export assignment,
+//   `export = defineConfig({…})` beside `import { defineConfig } from
+//   "xspec"`, which is no default export, and an import assignment, `import
+//   defineConfig = require("xspec")` beside `export default
+//   defineConfig({…})`, which binds the module itself and, like the default
+//   and namespace imports, imports no `defineConfig`. Each is a text
+//   TypeScript 5.9.3 accepts both as module code and as script code, so
+//   each record is declared well-formed (S-9) and the refusal is the
+//   declarative form's (14.14), never a parse failure's; a product taking
+//   an export assignment for a default export, or an import assignment for
+//   an import of `defineConfig`, loads it and builds (exit 0), failing the
+//   exit-code assertion.
+// - T7-2's statement order (SPEC 7 fixes which statements the file holds,
+//   never their order; an import binds its name throughout its module, so
+//   a call spelled before it calls that binding): the canonical
+//   configuration's two statements exchanged, `export default
+//   defineConfig({…})` first and `import { defineConfig } from "xspec"`
+//   after it — a text TypeScript 5.9.3 accepts both as module code and as
+//   script code — loads: `build` and then `check` exit 0, and `inventory`'s
+//   `configuration` is byte-identical to its import-first twin's, the
+//   canonical file itself (compared as the comments arm compares, below).
+//   `twoStatementConfig` composes both orders from the same two statements,
+//   and a module-load self-check pins the import-first order to the
+//   canonical text, so the two files differ in the statements' order
+//   alone. A product requiring the import first refuses the file and fails
+//   `build`'s exit code.
 // - T7-2 string-literal keys arm: "both groups discover their globs' files"
 //   is observed as the spec group's exact `ids` listing plus whole-graph
 //   edge-set equality carrying the code file's marker edge (T7-3's
@@ -253,12 +282,14 @@
 //   product reporting it through a compiler diagnostic and one detecting
 //   it itself pass alike, while one taking the last member loads and
 //   builds (exit 0).
-// - T7-2 comments and the string-literal import name: "inventory's
-//   `configuration` byte-identical to its comment-free twin's" (to its
-//   identifier-named twin's) is compared as the `configuration` member of
-//   each `inventory --json` document (form-decoded first), as values and as
-//   serializations — member order included (`configurationViewOf`, after
-//   `build` loads the file, and `assertConfigurationViewsIdentical`).
+// - T7-2 comments, the string-literal import name, and statement order:
+//   "inventory's `configuration` byte-identical to its comment-free twin's"
+//   (to its identifier-named twin's, to its import-first twin's) is
+//   compared as the `configuration` member of each `inventory --json`
+//   document (form-decoded first), as values and as serializations — member
+//   order included (`configurationViewOf`, after `build` loads the file and,
+//   for the statement-order arm, `check` exits 0, and
+//   `assertConfigurationViewsIdentical`).
 // - T7-3 U+FFFD names: the character is staged as the validly encoded code
 //   point EF BF BD between two letters — a spec group's and a code group's
 //   string-literal key, a profile name, a rule name — so 14.14's name rule,
@@ -426,11 +457,12 @@ export const SECTION_B_SOURCE = stagedMdx(
 // The canonical valid configuration (SPEC 7): exactly one spec group, no
 // optional keys. Every T7-2 violation below is this file with one deviation.
 // A staged-source record (module header): T7-1's occupancy and name-casing
-// workspaces and T7-3's omission arms stage it in workspaces created after
-// a product invocation; T7-1's first workspace passes the record too, and
-// T7-2's encoding arms compose their bytes from its text.
+// workspaces, T7-2's statement-order arm (the import-first twin), and T7-3's
+// omission arms stage it in workspaces created after a product invocation;
+// T7-1's first workspace passes the record too, and T7-2's encoding arms
+// compose their bytes from its text.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T7-1/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys)",
+  "T7-1/T7-2/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1186,11 +1218,11 @@ if (
 // syntax error, the missing import, extra statements, each non-literal
 // argument form, the `null` literal, a non-call default export, a call
 // without a sole argument, a numeric-literal key, the wrapped forms and
-// call variants, the refused binding forms, and the import's modifiers. The
-// escape-spelled import name's valid twin is the string-literal import
-// name's file (`bindingFormConfig`, loaded by the body), the escape its one
-// deviation. No row varies the specifier: any static string literal is
-// valid there (SPEC 7), T7-9's subject.
+// call variants, the refused binding forms, the import's modifiers, and the
+// statement forms. The escape-spelled import name's valid twin is the
+// string-literal import name's file (`bindingFormConfig`, loaded by the
+// body), the escape its one deviation. No row varies the specifier: any
+// static string literal is valid there (SPEC 7), T7-9's subject.
 const FORM_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
@@ -1622,6 +1654,40 @@ export default defineConfig({
 })
 `,
   },
+  // Statement forms (SPEC 7: exactly an import of `defineConfig` and a
+  // default export of one call to that binding, no other statement form):
+  // TypeScript's two CommonJS-interop statements — an export assignment,
+  // which is no default export, and an import assignment, which binds the
+  // module itself and imports no `defineConfig` — two well-formed texts,
+  // one arm each (module header).
+  {
+    label:
+      "a statement form: an export assignment, export = " +
+      'defineConfig({…}) beside import { defineConfig } from "xspec" — no ' +
+      "default export",
+    config: `import { defineConfig } from "xspec"
+
+export = defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      "a statement form: an import assignment, import defineConfig = " +
+      'require("xspec") beside export default defineConfig({…}) — it ' +
+      "binds the module itself, importing no defineConfig",
+    config: `import defineConfig = require("xspec")
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
 ]);
 
 // The valid arm: an aliased defineConfig import (SPEC 7: optionally aliased).
@@ -1650,6 +1716,54 @@ const IDENTIFIER_IMPORT_NAME_CONFIG = stagedTs(
   'T7-2 xspec.config.ts (binding forms: the identifier-named twin, import { defineConfig as d } from "xspec")',
   bindingFormConfig("defineConfig"),
 );
+
+// Statement order (SPEC 7 fixes which statements the file holds, never
+// their order; an import binds its name throughout its module, so a call
+// spelled before it calls that binding; module header): the canonical
+// configuration's two statements, the default export first and the import
+// after it. `twoStatementConfig` composes a file from the two statements in
+// the order given, one blank line between them; the import-first order is
+// the canonical text itself (`SPECS_ONLY_CONFIG`, the twin the body
+// compares against), so the two files differ in the statements' order
+// alone. A record made at module load: T7-2 stages it after a product
+// invocation (S-9's timing clause).
+const CANONICAL_IMPORT_STATEMENT = 'import { defineConfig } from "xspec"';
+const CANONICAL_EXPORT_STATEMENT = `export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})`;
+function twoStatementConfig(first: string, second: string): string {
+  return `${first}
+
+${second}
+`;
+}
+const STATEMENT_ORDER_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (statement order: export default defineConfig({…}) followed by import { defineConfig } from "xspec")',
+  twoStatementConfig(CANONICAL_EXPORT_STATEMENT, CANONICAL_IMPORT_STATEMENT),
+);
+
+// The module-load self-check of the statement-order pair: the import-first
+// composition is the canonical configuration byte for byte, and the
+// export-first file holds the same two statements in the other order — so
+// the arm's one deviation from its twin is the order. A mismatch is a
+// harness error thrown at load, never a product verdict.
+if (
+  twoStatementConfig(CANONICAL_IMPORT_STATEMENT, CANONICAL_EXPORT_STATEMENT) !==
+    configText(SPECS_ONLY_CONFIG) ||
+  configText(STATEMENT_ORDER_CONFIG).indexOf(CANONICAL_IMPORT_STATEMENT) <=
+    configText(STATEMENT_ORDER_CONFIG).indexOf(CANONICAL_EXPORT_STATEMENT)
+) {
+  throw new Error(
+    "T7-2 fixture self-check: the statement-order arm must be the canonical " +
+      "configuration's import and default export exchanged — the " +
+      "import-first composition equal to the canonical text, the " +
+      "export-first file holding the default export before the import " +
+      "(module header); got " +
+      JSON.stringify(configText(STATEMENT_ORDER_CONFIG)),
+  );
+}
 
 // The string-literal keys arm (SPEC 7: the statically literal argument's
 // object literals carry "non-computed identifier or string-literal keys"):
@@ -1970,16 +2084,19 @@ export default defineConfig({
 );
 
 /**
- * The resolved configuration view under `config` (T7-2's comments and
- * string-literal import name arms; module header): `config` staged as
- * `xspec.config.ts` beside the minimal source in a fresh workspace, `build`
- * required to load it (exit 0), and the `configuration` member of
- * `inventory --json` returned as reported, the document form-decoded first.
+ * The resolved configuration view under `config` (T7-2's comments,
+ * string-literal import name, and statement-order arms; module header):
+ * `config` staged as `xspec.config.ts` beside the minimal source in a fresh
+ * workspace, `build` required to load it (exit 0) — then, where `check` is
+ * asked for (the statement-order arm), `check` required to exit 0 too — and
+ * the `configuration` member of `inventory --json` returned as reported,
+ * the document form-decoded first.
  */
 async function configurationViewOf(
   product: ProductBinding,
   config: StagedTs,
   label: string,
+  options: { readonly check?: true } = {},
 ): Promise<unknown> {
   return await withWorkspace(
     {
@@ -1994,6 +2111,17 @@ async function configurationViewOf(
         workspace,
         `${label}: ` + "`build` — the configuration loads (SPEC 7)",
       );
+      if (options.check === true) {
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          `${label}: ` +
+            "`check` after the build — the configuration loads, and the " +
+            "freshly built workspace yields no finding (SPEC 7, 12.0)",
+        );
+      }
       const inventoryLabel = `${label} ` + "`inventory --json`";
       const raw = await runJson(
         product,
@@ -2038,12 +2166,16 @@ const T7_2 = defineProductTest({
     "argument, or a value inside it wrapped (satisfies object, " +
     "parentheses, a non-null assertion, as const, as boolean), the call " +
     "spelled with type arguments or as an optional call, an escape-spelled " +
-    "string-literal import name, a default or namespace import, and an " +
-    "extra default or named binding are configuration errors (14.14, exit " +
-    "2); an aliased defineConfig import is valid, and so is a " +
-    "string-literal import name spelling defineConfig, read verbatim (2.4) " +
-    "— it loads, inventory's configuration byte-identical to its " +
-    "identifier-named twin's; " +
+    "string-literal import name, a default or namespace import, an extra " +
+    "default or named binding, an export assignment (export = " +
+    "defineConfig({…})), and an import assignment (import defineConfig = " +
+    'require("xspec")) are configuration errors (14.14, exit 2); an ' +
+    "aliased defineConfig import is valid, and so is a string-literal " +
+    "import name spelling defineConfig, read verbatim (2.4) — it loads, " +
+    "inventory's configuration byte-identical to its identifier-named " +
+    "twin's; the default export may precede the import — it loads, build " +
+    "and check exit 0, inventory's configuration byte-identical to its " +
+    "import-first twin's; " +
     "string-literal group-name keys are part of the accepted form — they " +
     "load, discover, and resolve in a coverage profile and a policy " +
     "selector (SPEC 7, 7.4, 7.5, 8); literals are read verbatim — an " +
@@ -2111,6 +2243,34 @@ const T7_2 = defineProductTest({
         '"xspec", is byte-identical to its identifier-named twin' +
         "'s — the name, read verbatim, spells defineConfig, so the import " +
         "is that import, aliased (SPEC 7, 2.4, 11.6)",
+    );
+
+    // Statement order (SPEC 7 fixes which statements the file holds, never
+    // their order): the default export spelled before the import loads —
+    // `build` and `check` exit 0 — and the inventory's resolved
+    // `configuration` view is byte-identical to its import-first twin's,
+    // the canonical file's (compared as the comments arm compares). The
+    // statement forms are FORM_VIOLATIONS rows, refused above.
+    const exportFirstView = await configurationViewOf(
+      product,
+      STATEMENT_ORDER_CONFIG,
+      'T7-2 (statement order: export default defineConfig({…}) followed by import { defineConfig } from "xspec")',
+      { check: true },
+    );
+    const importFirstView = await configurationViewOf(
+      product,
+      SPECS_ONLY_CONFIG,
+      "T7-2 (statement order: the import-first twin, the canonical " +
+        "configuration)",
+    );
+    assertConfigurationViewsIdentical(
+      exportFirstView,
+      importFirstView,
+      "T7-2 (statement order): `inventory`'s `configuration` member under " +
+        "the configuration whose default export precedes its import is " +
+        "byte-identical to its import-first twin's — an import binds its " +
+        "name throughout its module, and SPEC 7 fixes which statements the " +
+        "file holds, never their order (SPEC 7, 11.6)",
     );
 
     // String-literal group-name keys are part of the accepted form (SPEC 7):
