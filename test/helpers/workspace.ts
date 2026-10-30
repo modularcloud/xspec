@@ -57,8 +57,10 @@
 //   whose name ends in a TypeScript or JavaScript source suffix
 //   (`TS_DEFAULT_SUFFIXES`: `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`,
 //   `.mjs`, `.cjs` — so `.d.ts` names and every configuration file the suite
-//   stages, `xspec.config.ts` and each `--config` target, all named `.ts`)
-//   is declared well-formed and must be accepted both ways. A staging
+//   stages, `xspec.config.ts` and each `--config` target, all named `.ts`,
+//   but T7-10(e)'s `xspec.config.mdx`, an MDX staged-source record carrying
+//   its TypeScript declaration, below) is declared well-formed and must be
+//   accepted both ways. A staging
 //   declares the exceptions per path in `ts: { unparseable, unchecked,
 //   wellFormed }` (or per `file()` call, `{ ts: ... }`): `unparseable` for a
 //   file TEST-SPEC declares unparseable (14.20: a TypeScript syntax error,
@@ -1411,8 +1413,9 @@ export function judgeMdxDeclaration(
  * included) and JavaScript's, which a code group globbing them discovers as
  * code sources parsed as plain TypeScript (SPEC 14.20: any name but `.tsx`
  * selects plain TypeScript). Every configuration file the suite stages is
- * named `.ts` (`xspec.config.ts`, each `--config` target). Matched
- * case-sensitively, as SPEC spells the `.tsx` suffix.
+ * named `.ts` (`xspec.config.ts`, each `--config` target) but T7-10(e)'s
+ * `xspec.config.mdx`, whose MDX staged-source record carries its TypeScript
+ * declaration. Matched case-sensitively, as SPEC spells the `.tsx` suffix.
  */
 export const TS_DEFAULT_SUFFIXES = [
   ".ts",

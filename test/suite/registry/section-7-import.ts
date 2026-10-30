@@ -2,8 +2,9 @@
 // spellings, (b), the scanner-rejected escapes, (c), the specifier's
 // designations, and (d), installs; and T7-10's arms (a) and (b), the
 // configuration file as a source, undiscovered and discovered, (c), its
-// consequences, with the converse, and (d), baselines (below the T7-9
-// header). Configuration basics (T7-1…T7-3) and T7-7 live in
+// consequences, with the converse, (d), baselines, and (e), discovered by
+// a spec group (below the T7-9 header). Configuration basics (T7-1…T7-3)
+// and T7-7 live in
 // section-7-basics.ts, discovery (T7-4…T7-6, T7-8) in
 // section-7-discovery.ts, and P-19, the property searching the spellings
 // (a) never stages, in section-16-p19.ts.
@@ -368,13 +369,59 @@
 // `code` and `path` `null`, standard error naming `xspec.config.ts` (6.3,
 // 14.20).
 //
+// (e) Discovered by a spec group (`T7_10_E_FAMILIES`; SPEC 2.1, 7.1): the
+// configuration imports from `"xspec"`, its default export spelled with no
+// blank line inside it, so that, read as MDX, its import and its export
+// each derive as an ESM block (14.20) — MDX 3 reads a flow line beginning
+// `import` or `export` as an ESM block running to the next blank line, and
+// one blank line follows the import's. (i) `xspec.config.ts`, the spec
+// group `main` globbing `specs/*.mdx` and `xspec.config.ts` and,
+// separately, `specs/*.mdx` and `*.ts`, is a spec-group file without the
+// `.mdx` extension: `build` and `check`, each under `--json`, exit 1, never
+// 2, reporting 14.19 concerning it (`"invalid-source-path"`, its `path`
+// the file's, `locations` `[]`) and — its content analyzed as a spec
+// source's, an invalid path masking nothing (SPEC 14) — 14.15
+// (`"invalid-import"`) at its import declaration by the import range of
+// 11.4, the file's first bytes, `import` through the specifier's closing
+// quote, and 14.16 (`"invalid-construct"`) at its export statement whole,
+// `export` through the call's closing parenthesis, the line feed ending
+// the file excluded (SPEC 14), each `path` `null`; `inventory --json` exits
+// 0 listing `xspec.config.ts` once among its `sources`, in `main` alone,
+// its `derived` entry's `module` and `markdown` `null` (13.1, 11.6;
+// T7.1-1). (ii) `xspec.config.mdx`, given by `--config xspec.config.mdx`
+// on every invocation, no `xspec.config.ts` existing — judged as plain
+// TypeScript, the grammar its name selects (14.20) — and matched by the
+// spec glob `*.mdx` beside `specs/*.mdx`, is a spec source: `build` and
+// `check` exit 1, never 2, reporting 14.15 at its import declaration (2.1:
+// a named binding, its specifier designating no spec source) and 14.16 at
+// its export statement (2.7), located as in (i); `inventory` exits 0
+// listing it once among its `sources`, in `main` alone, its `derived`
+// entry's `module` its generated-module path, `xspec.config.xspec.ts`
+// (13.1). TEST-SPEC pins no count and names no other finding, so each
+// named condition is asserted reported at least once, every finding of it
+// located exactly, and no other finding is examined. Each family's
+// undiscovered twin runs first, in a workspace of its own — the spec group
+// globbing `specs/*.mdx` alone: (i)'s T7-9's twin configuration at
+// `xspec.config.ts`, (ii)'s the same bytes at `xspec.config.mdx`, given by
+// `--config` — its `build` and `check`, each under `--json`, exiting 0
+// finding-free. A configuration a spec group discovers is read both as a
+// configuration (plain TypeScript) and as a spec source (MDX), and (ii)'s
+// twin, an `.mdx` path, is judged as MDX by the builder's default: each is
+// an MDX staged-source record carrying its TypeScript declaration, declared
+// well-formed under each grammar (S-9; helpers/staged-mdx.ts). Both ranges
+// are composed from the record's parts and self-checked at module load
+// (`specDiscoveredArm`); the MDX parse S-9 judges by and TypeScript 5.9.3's
+// parser give the same spans (`[0, 36)` and `[38, 158)` for (i)'s first
+// configuration).
+//
 // Every T7-10 arm builds its own fresh workspace (H-1); its diagnosed
 // failure is collected and the body fails once at the end naming every
 // failed arm, a harness error or a hang propagating at once, as in T7-9.
 // Certification: T7-10 is in no conformer's scope (CERTIFICATIONS.md,
 // Exclusions, "T7-9 and T7-10": its findings for the discovered
-// configuration, its gated reads, its refused `move`, and its failing
-// baselines, each beside its undiscovered twin's clean outcome, and each
+// configuration — (b)'s 14.15 and 14.18, and (e)'s 14.19, 14.15, and 14.16
+// — its gated reads, its refused `move`, and its failing baselines, each
+// beside its undiscovered twin's clean outcome, and each
 // baseline configuration of (d) answering exactly as its `"xspec"` twin,
 // fail loud against the product each targets, (d)'s FIFO asserted
 // afterwards still a FIFO in place; the converse's unrewritten import is
@@ -2491,18 +2538,18 @@ function pinnedFinding(finding: Finding): unknown {
   };
 }
 
-/** What (b) pins for a finding locating `range` in the configuration file. */
-function locatedInConfig(code: string, range: SourceRange): unknown {
+/** What (b) and (e) pin for a finding locating `range` in `file`. */
+function locatedAt(file: string, code: string, range: SourceRange): unknown {
   return {
     code,
-    locations: [
-      {
-        file: CONFIG_IMPORT_CONFIG_PATH,
-        range: { start: range.start, end: range.end },
-      },
-    ],
+    locations: [{ file, range: { start: range.start, end: range.end } }],
     path: null,
   };
+}
+
+/** What (b) pins for a finding locating `range` in the configuration file. */
+function locatedInConfig(code: string, range: SourceRange): unknown {
+  return locatedAt(CONFIG_IMPORT_CONFIG_PATH, code, range);
 }
 
 /**
@@ -3953,6 +4000,473 @@ async function collectTwinFailure(
 const T7_10_D_ARM_COUNT = 1 + T7_10_D_ARMS.length + 1;
 
 // ---------------------------------------------------------------------------
+// T7-10 (e): discovered by a spec group
+
+/** The one spec group of every T7-10 configuration (T7-9's tail names it). */
+const T7_10_SPEC_GROUP = "main";
+
+/** (e)(ii)'s configuration file, named by `--config` on every invocation. */
+const MDX_CONFIG_PATH = "xspec.config.mdx";
+
+/** `xspec.config.mdx`'s generated-module path, `NAME.xspec.ts` (SPEC 13.1). */
+const MDX_CONFIG_MODULE = "xspec.config.xspec.ts";
+
+/** (e)(ii)'s `--config` option and value, carried by every invocation. */
+const MDX_CONFIG_ARGV: readonly string[] = ["--config", MDX_CONFIG_PATH];
+
+/**
+ * (e)'s configuration text after its specifier: T7-9's tail
+ * (`CONFIG_IMPORT_TAIL`) with the spec group `main` globbing `specs/*.mdx`
+ * and `glob` — the import's line end, a blank line, and the default export
+ * spelled with no blank line inside it, so that, read as MDX, the import and
+ * the export each derive as an ESM block (module header; SPEC 14.20).
+ */
+function specDiscoveredTail(glob: string): string {
+  return `
+
+export default defineConfig({
+  specs: {
+    ${T7_10_SPEC_GROUP}: ["specs/*.mdx", "${glob}"]
+  },
+  markdown: { emit: true }
+})
+`;
+}
+
+/**
+ * One of T7-10(e)'s configurations a spec group discovers (module header):
+ * its record, and the ranges its findings locate.
+ */
+interface SpecDiscoveredArm {
+  /** The arm as diagnoses name it. */
+  readonly label: string;
+  /** The configuration file's workspace-relative path. */
+  readonly configPath: string;
+  /** The spec group's glob matching the configuration file. */
+  readonly glob: string;
+  /** `--config` and its value where the arm names the file, else none. */
+  readonly configArgv: readonly string[];
+  /**
+   * The configuration, read both as a configuration (plain TypeScript, the
+   * grammar its name selects, 14.20) and as a spec source (MDX): an MDX
+   * record carrying its TypeScript declaration, well-formed under each
+   * (S-9; helpers/staged-mdx.ts).
+   */
+  readonly config: StagedMdx;
+  /**
+   * The import declaration by its own characters, the import range of
+   * 11.4: the file's first bytes, `import` through the specifier's closing
+   * quote, no terminator spelled (SPEC 14, 1.7).
+   */
+  readonly importRange: SourceRange;
+  /**
+   * The export statement whole: `export` through the call's closing
+   * parenthesis, the line feed ending the file excluded (SPEC 14).
+   */
+  readonly exportRange: SourceRange;
+  /**
+   * The file lacks the `.mdx` extension ((i); SPEC 7.1): 14.19 concerning
+   * it, and its `derived` entry's `module` and `markdown` `null` (13.1,
+   * 11.6). Otherwise ((ii)) its `derived` entry's `module` is its
+   * generated-module path, `xspec.config.xspec.ts` (13.1).
+   */
+  readonly withoutMdxExtension: boolean;
+}
+
+/**
+ * Compose (e)'s configuration at `configPath` — the shared builder's head,
+ * `"xspec"`, and `specDiscoveredTail(glob)` — as an MDX record carrying its
+ * TypeScript declaration, declared well-formed as MDX and as TypeScript
+ * (S-9), and pin its two ranges, checking at module
+ * load that the text is ASCII (its code units its bytes), its first line
+ * the import declaration ending at the specifier's closing quote, then one
+ * blank line, then the export statement — `import` and `export` each
+ * spelled once — running through the call's closing parenthesis with no
+ * blank line inside it, and one line feed ending the file.
+ */
+function specDiscoveredArm(
+  part: "(i)" | "(ii)",
+  configPath: string,
+  glob: string,
+): SpecDiscoveredArm {
+  const declaration = CONFIG_IMPORT_HEAD + CONFIG_IMPORT_TWIN_LITERAL;
+  const tail = specDiscoveredTail(glob);
+  const text = declaration + tail;
+  const exportStart = declaration.length + 2 * LINE_FEED.length;
+  const exportEnd = text.length - LINE_FEED.length;
+  const statement = text.slice(exportStart, exportEnd);
+  if (
+    Buffer.byteLength(text, "utf8") !== text.length ||
+    !tail.startsWith(LINE_FEED + LINE_FEED) ||
+    !statement.startsWith(EXPORT_DEFAULT_PREFIX + DEFINE_CONFIG + "(") ||
+    !statement.endsWith(")") ||
+    statement.includes(LINE_FEED + LINE_FEED) ||
+    !text.endsWith(")" + LINE_FEED) ||
+    occurrences(text, "import") !== 1 ||
+    occurrences(text, "export") !== 1 ||
+    !text.startsWith("import ")
+  ) {
+    throw new Error(
+      `T7-10(e) fixture self-check: the configuration ${part} over the ` +
+        `glob ${glob} must be ASCII, its first line the import declaration ` +
+        "ending at the specifier's closing quote, then one blank line, " +
+        "then the export statement through the call's closing parenthesis " +
+        "with no blank line inside it, and one line feed ending the file " +
+        "(harness bug)",
+    );
+  }
+  const where =
+    configPath === MDX_CONFIG_PATH
+      ? `given by --config, no ${CONFIG_IMPORT_CONFIG_PATH} existing`
+      : "found by the upward search";
+  const label =
+    `${configPath} (${where}) discovered by the spec group ` +
+    `${T7_10_SPEC_GROUP} globbing specs/*.mdx and ${glob}`;
+  return {
+    label,
+    configPath,
+    glob,
+    configArgv: configPath === MDX_CONFIG_PATH ? MDX_CONFIG_ARGV : [],
+    config: stagedMdx(
+      `T7-10 ${configPath} ((e)${part} discovered by the spec group ` +
+        `${T7_10_SPEC_GROUP} globbing specs/*.mdx and ${glob}: importing ` +
+        `from ${CONFIG_IMPORT_TWIN_LITERAL}, read as a configuration and ` +
+        "as a spec source)",
+      text,
+      "well-formed",
+      "well-formed",
+    ),
+    importRange: { start: 0, end: declaration.length },
+    exportRange: { start: exportStart, end: exportEnd },
+    withoutMdxExtension: !configPath.endsWith(".mdx"),
+  };
+}
+
+/**
+ * One of (e)'s undiscovered twins (module header): the spec group globbing
+ * `specs/*.mdx` alone, so no configured group discovers the configuration.
+ */
+interface SpecUndiscoveredTwin {
+  readonly label: string;
+  readonly configPath: string;
+  readonly configArgv: readonly string[];
+  readonly config: StagedTs | StagedMdx;
+}
+
+/** One (e) family: its undiscovered twin, then its discovered arms. */
+interface SpecDiscoveryFamily {
+  /** `"(i)"` or `"(ii)"`, as diagnoses name the family. */
+  readonly part: string;
+  readonly twin: SpecUndiscoveredTwin;
+  readonly arms: readonly SpecDiscoveredArm[];
+}
+
+/** T7-10(e)'s two families (TEST-SPEC T7-10(e)). */
+const T7_10_E_FAMILIES: readonly SpecDiscoveryFamily[] = [
+  {
+    part: "(i)",
+    twin: {
+      label:
+        `${CONFIG_IMPORT_CONFIG_PATH}, the spec group ${T7_10_SPEC_GROUP} ` +
+        "globbing specs/*.mdx alone",
+      configPath: CONFIG_IMPORT_CONFIG_PATH,
+      configArgv: [],
+      config: CONFIG_IMPORT_TWIN_CONFIG,
+    },
+    arms: [
+      specDiscoveredArm("(i)", CONFIG_IMPORT_CONFIG_PATH, "xspec.config.ts"),
+      specDiscoveredArm("(i)", CONFIG_IMPORT_CONFIG_PATH, "*.ts"),
+    ],
+  },
+  {
+    part: "(ii)",
+    twin: {
+      label:
+        `${MDX_CONFIG_PATH} given by --config, no ` +
+        `${CONFIG_IMPORT_CONFIG_PATH} existing, the spec group ` +
+        `${T7_10_SPEC_GROUP} globbing specs/*.mdx alone`,
+      configPath: MDX_CONFIG_PATH,
+      configArgv: MDX_CONFIG_ARGV,
+      config: stagedMdx(
+        `T7-10 ${MDX_CONFIG_PATH} ((e)(ii)'s undiscovered twin, given by ` +
+          `--config: T7-9's twin configuration, the spec group ` +
+          `${T7_10_SPEC_GROUP} globbing specs/*.mdx alone)`,
+        configImportText(CONFIG_IMPORT_TWIN_LITERAL),
+        "well-formed",
+        "well-formed",
+      ),
+    },
+    arms: [specDiscoveredArm("(ii)", MDX_CONFIG_PATH, "*.mdx")],
+  },
+];
+
+/** How many (e) arms T7-10 runs: each family's twin and its arms. */
+const T7_10_E_ARM_COUNT = T7_10_E_FAMILIES.reduce(
+  (count, family) => count + 1 + family.arms.length,
+  0,
+);
+
+/** Why each (e) twin is clean (TEST-SPEC T7-10(e)'s undiscovered twin). */
+const SPEC_UNDISCOVERED_RULE =
+  "the spec group globs specs/*.mdx alone, so no configured group " +
+  "discovers the configuration file and reading it applies no source's " +
+  "rules (SPEC 7; TEST-SPEC T7-10(e)'s undiscovered twin)";
+
+/** Why each (e) arm reports its findings, the configuration staying valid. */
+const SPEC_DISCOVERED_RULE =
+  "a spec group discovers the configuration file, so xspec analyzes it as " +
+  "it does every spec source it discovers — read as MDX, its import a " +
+  "named binding whose specifier designates no spec source (2.1) and its " +
+  "default export an export statement (2.7) — while the configuration " +
+  "itself stays valid (SPEC 7, 7.1, 2.1, 2.7, 14; TEST-SPEC T7-10(e))";
+
+/** One condition (e) asserts reported, and how each finding of it is pinned. */
+interface SpecSourceExpectation {
+  readonly condition: string;
+  readonly code: string;
+  readonly expected: unknown;
+  /** What each finding of the condition carries, and why. */
+  readonly what: string;
+}
+
+/**
+ * An (e) arm's `build` or `check` findings (module header): 14.19 where the
+ * file lacks the `.mdx` extension, 14.15, and 14.16 each reported, every
+ * finding of each pinned — 14.19 concerning the configuration file, its
+ * `locations` `[]`; 14.15 at the import declaration by the import range of
+ * 11.4; 14.16 at the export statement whole, each `path` `null`. TEST-SPEC
+ * pins no count and names no other finding, so no other is examined.
+ */
+function assertSpecSourceFindings(
+  findings: readonly Finding[],
+  arm: SpecDiscoveredArm,
+  context: string,
+): void {
+  const reported =
+    "the report's findings (code, locations, path): " +
+    JSON.stringify(findings.map(pinnedFinding));
+  const range = (pinned: SourceRange): string =>
+    `[${String(pinned.start)}, ${String(pinned.end)}) of ${arm.configPath}`;
+  const expectations: SpecSourceExpectation[] = [];
+  if (arm.withoutMdxExtension) {
+    expectations.push({
+      condition: "14.19",
+      code: "invalid-source-path",
+      expected: {
+        code: "invalid-source-path",
+        locations: [],
+        path: arm.configPath,
+      },
+      what:
+        `concerning ${arm.configPath}, its path, ` +
+        "`locations` [] — a " +
+        "spec-group file without the .mdx extension (SPEC 7.1, 14.19, 14, " +
+        "12.7)",
+    });
+  }
+  expectations.push(
+    {
+      condition: "14.15",
+      code: "invalid-import",
+      expected: locatedAt(arm.configPath, "invalid-import", arm.importRange),
+      what:
+        "locating the configuration's import declaration by its own " +
+        `characters, the import range of 11.4 — ${range(arm.importRange)}, ` +
+        "`import` through the specifier's closing quote — its path null: a " +
+        "spec source's import that is a named binding, its specifier " +
+        "designating no spec source (SPEC 2.1, 14, 1.7, 11.4, 12.7)",
+    },
+    {
+      condition: "14.16",
+      code: "invalid-construct",
+      expected: locatedAt(arm.configPath, "invalid-construct", arm.exportRange),
+      what:
+        "locating the export statement whole — " +
+        `${range(arm.exportRange)}, ` +
+        "`export` through the call's closing " +
+        "parenthesis — its path null: an export statement in a spec source " +
+        "(SPEC 2.7, 14, 1.7, 12.7)",
+    },
+  );
+  for (const expectation of expectations) {
+    const matching = findings.filter(
+      (finding) => finding.condition === expectation.condition,
+    );
+    if (matching.length === 0) {
+      fail(
+        `${context}: the report carries ${expectation.condition} ` +
+          `(${expectation.code}) ${expectation.what} ` +
+          `(${SPEC_DISCOVERED_RULE}; an invalid path masks nothing, SPEC ` +
+          `14); ${reported}`,
+      );
+    }
+    for (const finding of matching) {
+      assertSameJson(
+        pinnedFinding(finding),
+        expectation.expected,
+        `${context}: each ${expectation.condition} finding carries the ` +
+          `stable code "${expectation.code}", ${expectation.what} ` +
+          "(TEST-SPEC T7-10(e))",
+      );
+    }
+  }
+}
+
+/**
+ * One (e) family's undiscovered twin (module header): a fresh workspace
+ * staging its configuration beside `specs/A.mdx`; `build` and `check`, each
+ * under `--json` and the family's `--config`, exit 0 finding-free.
+ */
+async function runSpecUndiscoveredTwin(
+  product: ProductBinding,
+  family: SpecDiscoveryFamily,
+): Promise<void> {
+  const { twin } = family;
+  const workspace = await TestWorkspace.create({
+    files: {
+      [twin.configPath]: twin.config,
+      [T7_10_SOURCE_PATH]: T7_10_SOURCE,
+    },
+  });
+  const label = `T7-10(e)${family.part}'s undiscovered twin, ${twin.label}`;
+  try {
+    for (const word of T7_10_VALIDATING_WORDS) {
+      const argv = [word, "--json", ...twin.configArgv];
+      const result = await runProduct(product, {
+        cwd: workspace.root,
+        argv,
+      });
+      expectFindingFree(
+        result,
+        `${label}: ${sourceCommandLabel(argv)}`,
+        SPEC_UNDISCOVERED_RULE,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * One (e) arm (module header): a fresh workspace staging the arm's
+ * configuration beside `specs/A.mdx`; `build` and `check`, each under
+ * `--json` and the arm's `--config`, exit 1 with the arm's findings; then
+ * `inventory --json` exits 0, listing the configuration file among the spec
+ * group's sources with its `derived` entry.
+ */
+async function runSpecDiscoveredArm(
+  product: ProductBinding,
+  family: SpecDiscoveryFamily,
+  arm: SpecDiscoveredArm,
+): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: {
+      [arm.configPath]: arm.config,
+      [T7_10_SOURCE_PATH]: T7_10_SOURCE,
+    },
+  });
+  const label = `T7-10(e)${family.part}, ${arm.label}`;
+  const conditions = arm.withoutMdxExtension
+    ? "14.19, 14.15, and 14.16"
+    : "14.15 and 14.16";
+  try {
+    for (const word of T7_10_VALIDATING_WORDS) {
+      const argv = [word, "--json", ...arm.configArgv];
+      const context = `${label}: ${sourceCommandLabel(argv)}`;
+      const result = await runProduct(product, {
+        cwd: workspace.root,
+        argv,
+      });
+      assertExitCode(
+        result,
+        1,
+        `${context} — the configuration file, a spec source, carries ` +
+          `${conditions}, findings: exit 1, never 14.14 or exit 2 ` +
+          `(${SPEC_DISCOVERED_RULE}; SPEC 12.0; H-5)`,
+      );
+      assertSpecSourceFindings(
+        decodeFindingsReport(parseJsonStdout(result, context), context)
+          .findings,
+        arm,
+        context,
+      );
+    }
+    const argv = ["inventory", "--json", ...arm.configArgv];
+    const context = `${label}: ${sourceCommandLabel(argv)}`;
+    const result = await runProduct(product, {
+      cwd: workspace.root,
+      argv,
+    });
+    assertExitCode(
+      result,
+      0,
+      `${context} — the configuration stays valid and the inventory parses ` +
+        `no sources, so it answers, exit 0 (${SPEC_DISCOVERED_RULE}; SPEC ` +
+        "11.6; H-5)",
+    );
+    const inventory = decodeInventoryDocument(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertSameJson(
+      inventory.sources
+        .filter((entry) => entry.path === arm.configPath)
+        .map((entry) => ({
+          path: entry.path,
+          groups: entry.groups.map((group) => ({
+            name: group.name,
+            kind: group.kind,
+          })),
+        })),
+      [
+        {
+          path: arm.configPath,
+          groups: [{ name: T7_10_SPEC_GROUP, kind: "spec" }],
+        },
+      ],
+      `${context}: ${arm.configPath} is listed once among the sources, in ` +
+        `the spec group ${T7_10_SPEC_GROUP} alone — the one group, its ` +
+        `glob ${JSON.stringify(arm.glob)} matching it (SPEC 11.6, 7.1, 7; ` +
+        "TEST-SPEC T7-10(e))",
+    );
+    const derived = inventory.derived.filter(
+      (entry) => entry.source === arm.configPath,
+    );
+    if (arm.withoutMdxExtension) {
+      assertSameJson(
+        derived.map((entry) => ({
+          source: entry.source,
+          module: entry.module,
+          markdown: entry.markdown,
+        })),
+        [{ source: arm.configPath, module: null, markdown: null }],
+        `${context}: ${arm.configPath}'s ` +
+          "`derived` entry carries " +
+          "`module` and `markdown` null — a spec-group file without the " +
+          ".mdx extension generates and emits nothing, though emission is " +
+          "enabled — the stated null, never omission (SPEC 13.1, 11.6, " +
+          "7.3, 12.7; TEST-SPEC T7-10(e), T7.1-1)",
+      );
+    } else {
+      assertSameJson(
+        derived.map((entry) => ({
+          source: entry.source,
+          module: entry.module,
+        })),
+        [{ source: arm.configPath, module: MDX_CONFIG_MODULE }],
+        `${context}: ${arm.configPath}'s ` +
+          "`derived` entry carries its " +
+          `generated-module path, ${MDX_CONFIG_MODULE} — NAME.mdx ` +
+          "generates NAME.xspec.ts in its directory (SPEC 13.1, 11.6; " +
+          "TEST-SPEC T7-10(e))",
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 
 const T7_9 = defineProductTest({
@@ -4050,7 +4564,7 @@ const T7_10 = defineProductTest({
   id: "T7-10",
   title:
     "the configuration file as a source (TEST-SPEC T7-10 (a), (b), (c), " +
-    "(d)): " +
+    "(d), (e)): " +
     "on a valid workspace — one spec group globbing specs/*.mdx over " +
     "specs/A.mdx, Markdown emitted next to sources — the configuration " +
     'importing, one arm each, from "./specs/A.xspec" (a spec module ' +
@@ -4114,9 +4628,30 @@ const T7_10 = defineProductTest({
     "commit whose configuration spells a hexadecimal escape with one hex " +
     "digit as its specifier, not well-formed: `impact --base c1 --json` " +
     "exits 2, the error document's code and path null, standard error " +
-    "naming xspec.config.ts (SPEC 7, 1.7, 4, 4.5, 5.6, 6.3, 6.4, 6.5, 6.6, " +
-    "7.2, 7.3, 9.3, 10.7, 11.1, 11.4, 11.6, 12.0, 12.1, 12.7, 13.3, 13.4, " +
-    "14)",
+    "naming xspec.config.ts; (e) discovered by a spec group, the " +
+    'configuration importing from "xspec", spelled with no blank line ' +
+    "inside its default export so that, read as MDX, its import and its " +
+    "export derive as ESM blocks — (i) xspec.config.ts, the spec group " +
+    "globbing specs/*.mdx and xspec.config.ts and, separately, " +
+    "specs/*.mdx and *.ts: `build` and `check`, each under `--json`, exit " +
+    "1, never 2, reporting 14.19 (invalid-source-path) concerning " +
+    "xspec.config.ts, locations [], 14.15 (invalid-import) locating its " +
+    "import declaration by the import range of 11.4, and 14.16 " +
+    "(invalid-construct) locating its export statement whole, each such " +
+    "finding so located, its path null, and `inventory --json` exits 0, " +
+    "listing xspec.config.ts once among its sources in that spec group " +
+    "alone, its derived entry's module and markdown null; (ii) " +
+    "xspec.config.mdx, given by `--config xspec.config.mdx` on every " +
+    "invocation, no xspec.config.ts existing, the spec group globbing " +
+    "specs/*.mdx and *.mdx: `build` and `check` exit 1, never 2, " +
+    "reporting 14.15 at its import declaration and 14.16 at its export " +
+    "statement, so located, and `inventory` exits 0, listing it once " +
+    "among its sources in that spec group alone, its derived entry's " +
+    "module xspec.config.xspec.ts; each beside its undiscovered twin, the " +
+    "spec group globbing specs/*.mdx alone, whose `build` and `check` " +
+    "exit 0 finding-free (SPEC 7, 1.7, 2.1, 2.7, 4, 4.5, 5.6, 6.3, 6.4, " +
+    "6.5, 6.6, 7.1, 7.2, 7.3, 9.3, 10.7, 11.1, 11.4, 11.6, 12.0, 12.1, " +
+    "12.7, 13.1, 13.3, 13.4, 14)",
   run: async (product) => {
     const failures: string[] = [];
     for (const arm of T7_10_A_ARMS) {
@@ -4144,8 +4679,22 @@ const T7_10 = defineProductTest({
       );
     }
     await collectArmFailure(failures, () => runBaselineEscapeArm(product));
+    for (const family of T7_10_E_FAMILIES) {
+      await collectArmFailure(failures, () =>
+        runSpecUndiscoveredTwin(product, family),
+      );
+      for (const arm of family.arms) {
+        await collectArmFailure(failures, () =>
+          runSpecDiscoveredArm(product, family, arm),
+        );
+      }
+    }
     if (failures.length > 0) {
-      const arms = T7_10_AB_ARM_COUNT + T7_10_C_ARMS.length + T7_10_D_ARM_COUNT;
+      const arms =
+        T7_10_AB_ARM_COUNT +
+        T7_10_C_ARMS.length +
+        T7_10_D_ARM_COUNT +
+        T7_10_E_ARM_COUNT;
       fail(
         `T7-10: ${String(failures.length)} of ${String(arms)} ` +
           "arms failed, each diagnosed below:" +

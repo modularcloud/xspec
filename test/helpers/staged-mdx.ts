@@ -72,7 +72,10 @@
 // code group discovers is an MDX source and a code source at once, so its
 // record here carries its TypeScript declaration too (`ts`): the self-test
 // judges those bytes as plain TypeScript as well, and the builder stages
-// them under both declarations. After a product invocation, a record
+// them under both declarations. So does a configuration file read as a spec
+// source — `xspec.config.ts` a spec group discovers, and `xspec.config.mdx`
+// named by `--config` (T7-10(e)) — its bytes judged as plain TypeScript, the
+// grammar either name selects (14.20). After a product invocation, a record
 // carrying no `ts` at a path the TypeScript check judges is refused by the
 // undeclared-staging guard's TypeScript arm: its TypeScript reading was
 // never judged before any product existed.
@@ -115,9 +118,12 @@ export class StagedMdx {
    * discovers it (SPEC 7.2; T2.1-2's `docs/EXTRA.mdx`) — judged as plain
    * TypeScript too (an `.mdx` name selects plain TypeScript, 14.20); the
    * record then carries the path's TypeScript declaration as well, in place
-   * of the workspace declaration's `ts` entry. Undefined for every other
-   * record: the path is no code source, and S-9's TypeScript check does not
-   * judge it.
+   * of the workspace declaration's `ts` entry — as does the record of a
+   * configuration file read as a spec source (T7-10(e): `xspec.config.ts` a
+   * spec group discovers, `xspec.config.mdx` named by `--config`), judged as
+   * plain TypeScript too. Undefined for every other record: the path is
+   * neither a code source nor a configuration file, and S-9's TypeScript
+   * check does not judge it.
    */
   readonly ts: TsDeclaration | undefined;
 
@@ -158,8 +164,8 @@ export class StagedMdx {
         `staged-source ledger: the record ${JSON.stringify(name)} carries ` +
           `the TypeScript declaration ${JSON.stringify(ts)} — a record's ` +
           'TypeScript declaration is "well-formed" or "unparseable" (14.20), ' +
-          "or absent for a path no code group discovers; a record exists to " +
-          "be judged (S-9)",
+          "or absent for a path that is neither a code source nor a " +
+          "configuration file; a record exists to be judged (S-9)",
       );
     }
     this.name = name;
@@ -177,7 +183,8 @@ export class StagedMdx {
  * very expression the staging used (moved, never re-spelled), `mdx` the
  * declaration in effect for that staging — the former `mdx` option, else the
  * workspace declaration's entry for the path, else well-formed — and `ts`,
- * for a path a code group also discovers as a code source, the TypeScript
+ * for a path a code group also discovers as a code source, or a
+ * configuration file read as a spec source too (T7-10(e)), the TypeScript
  * declaration in effect for it (the former `ts` option, else the workspace
  * declaration's `ts` entry).
  */

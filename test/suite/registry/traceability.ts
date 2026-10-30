@@ -594,10 +594,20 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // --base` and `review status`, which reconstructs the recorded baseline,
   // answering the twin's items (10.7); and a baseline whose configuration
   // spells a scanner-rejected escape failing as the code-less usage error
-  // (6.3, 12.0).
+  // (6.3, 12.0). (e)'s configuration a spec group discovers, read as a spec
+  // source: 7.1's extension rule (14.19 concerning `xspec.config.ts`), 2.1's
+  // import rules (its named binding, its specifier designating no spec
+  // source: 14.15 at the import range) and 2.7's (its export statement:
+  // 14.16, the statement whole), each located byte-exactly (1.7), `path`
+  // null (12.7); `inventory`'s `derived` entry (13.1: a spec-group file
+  // without `.mdx` generating and emitting nothing, `module` and `markdown`
+  // null; `xspec.config.mdx` generating `xspec.config.xspec.ts`), the
+  // configuration named by `--config` on every invocation (12.0).
   "T7-10": [
     "7",
     "1.7",
+    "2.1",
+    "2.7",
     "4",
     "4.5",
     "5.6",
@@ -605,6 +615,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "6.4",
     "6.5",
     "6.6",
+    "7.1",
     "7.2",
     "7.3",
     "9.3",
@@ -615,6 +626,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "12.0",
     "12.1",
     "12.7",
+    "13.1",
     "13.3",
     "13.4",
     "14",
