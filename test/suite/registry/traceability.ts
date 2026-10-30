@@ -574,18 +574,36 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // import range of 11.4, or at the call — `path` null (12.7); `inventory`
   // listing the configuration among its sources in that code group
   // (11.6); the control's whole-file location answering `query edges
-  // --from` (11.1).
+  // --from` (11.1). (c)'s consequences of a discovered configuration's
+  // findings: the failing `build` modifying nothing (12.1); the gated reads
+  // reporting exactly its findings, exit 1, modifying nothing (13.3); the
+  // file move refused over the configuration's designation of the
+  // destination's would-be emit path (6.5's `refused-invalid-destination`)
+  // and, in the converse, refused as an invalid workspace (6.4's
+  // precondition, which 6.5 shares) while undiscovered its preview lists
+  // no edit in the configuration (6.6) and the move leaves it unrewritten
+  // (6.5); and a baseline whose discovered configuration fails validation
+  // failing `impact --base` and `review create --base` as the code-less
+  // usage error (6.3, 12.0), `review create` writing no session (10.7).
   "T7-10": [
     "7",
     "1.7",
     "4",
     "4.5",
+    "6.3",
+    "6.4",
+    "6.5",
+    "6.6",
     "7.2",
     "7.3",
+    "10.7",
     "11.1",
     "11.4",
     "11.6",
+    "12.0",
+    "12.1",
     "12.7",
+    "13.3",
     "13.4",
     "14",
   ],

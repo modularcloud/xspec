@@ -1,11 +1,11 @@
 // TEST-SPEC §7 configuration import — T7-9's arms (a), the specifier's
 // spellings, (b), the scanner-rejected escapes, (c), the specifier's
 // designations, and (d), installs; and T7-10's arms (a) and (b), the
-// configuration file as a source, undiscovered and discovered (below the
-// T7-9 header). Configuration basics
-// (T7-1…T7-3) and T7-7 live in section-7-basics.ts, discovery (T7-4…T7-6,
-// T7-8) in section-7-discovery.ts, and P-19, the property searching the
-// spellings (a) never stages, in section-16-p19.ts.
+// configuration file as a source, undiscovered and discovered, and (c), its
+// consequences, with the converse (below the T7-9 header). Configuration
+// basics (T7-1…T7-3) and T7-7 live in section-7-basics.ts, discovery
+// (T7-4…T7-6, T7-8) in section-7-discovery.ts, and P-19, the property
+// searching the spellings (a) never stages, in section-16-p19.ts.
 //
 // Registered product-facing body (C-2 "one code path"): each arm builds its
 // own fresh workspace (H-1), drives the product strictly as a subprocess
@@ -259,13 +259,76 @@
 // `xspec.config.ts` once among its `sources`, in the code group `app`
 // alone (11.6).
 //
+// (c) Consequences (`T7_10_C_ARMS`), each on the discovered configuration —
+// under each of (b)'s two code groups (`T7_10_C_STAGINGS`) — beside its
+// undiscovered twin, which differs from it by the code group alone in every
+// configuration it stages (`T7_10_C_TWINS`):
+// - The gate. After a successful `build --json` under the control's
+//   `"xspec"`, the configuration is restaged importing from
+//   `"./missing.xspec"` ((b)'s record for that group, through `file()`):
+//   `build --json` exits 1 reporting (b)'s findings for that arm, 14.15 and
+//   14.18, and modifies nothing — a whole-root compare around it, so every
+//   derived file and all graph data byte-identical to the state before it
+//   (12.1) — and the gated reads, `ids --json` and `query nodes` (a
+//   JSON-only surface, 11), each exit 1 reporting exactly `build`'s
+//   findings — every member but the message, in 12.7's order
+//   (`gateComparable`, T12.0-10's projection) — and modify nothing (13.3).
+//   The twin, built under T7-9's twin configuration and restaged importing
+//   from `"./missing.xspec"` ((a)'s record): `build --json` exits 0
+//   finding-free, and `ids --json` and `query nodes` answer, exit 0 with
+//   one JSON document each.
+// - The designation. Importing from `"./specs/B.md"` — no `specs/B.mdx`
+//   existing, so the specifier designates no derived-file path and the
+//   workspace is valid — before any build, `move specs/A.mdx specs/B.mdx
+//   --json` is refused inside a whole-root compare: exit 1 and exactly one
+//   `refused-invalid-destination` finding, `path` the destination as
+//   spelled and `locations` `[]` (T6.5-20's contract), the destination's
+//   would-be emit path `specs/B.md` designated by the configuration's
+//   specifier, a code source's module-linking form (6.5, as T6.5-20(d)
+//   stages one). The twin moves: exit 0, its applied mapping `specs/A.mdx`
+//   to `specs/B.mdx` and `specs/A.mdx#a` to `specs/B.mdx#a` (6.5, 12.7),
+//   `specs/B.mdx` then holding the moved bytes and `specs/A.mdx` gone.
+// - The baseline. A repository at the workspace root (the builder's
+//   scripted commits, H-1) whose commit `c1` holds the discovered
+//   configuration importing from `"./missing.xspec"` beside `specs/A.mdx`,
+//   the working tree then taking the control's configuration back, valid
+//   (`build --json` exits 0 finding-free, the premise): `impact --base c1
+//   --json` and `review create --base c1 --name n --json` each fail as
+//   T6.3-4's baseline failing validation does — exit 2, the 12.7 error
+//   document the whole of standard output, its `code` and `path` `null`,
+//   standard error naming the offending file `xspec.config.ts` (6.3) — and
+//   `review create` modifies nothing, no session written (a whole-root
+//   compare, `.git/` included; 10.7). The twin's commit — no code group in
+//   `c1`'s configuration or the working tree's, T7-9's twin configuration
+//   — resolves: `impact --base c1 --json` exits 0 with one impact report
+//   (decoded through H-3's adapter), and `review create --base c1 --name n
+//   --json` exits 0.
+// - The converse (6.5 reaching no undiscovered configuration): importing
+//   from `"./specs/A.xspec"` undiscovered ((a)'s record), `move specs/A.mdx
+//   specs/B.mdx --preview --json` exits 0, its preview document (decoded
+//   form-exact, 6.6) listing no edit in `xspec.config.ts`; the `move --json`
+//   exits 0 with the applied mapping above, `xspec.config.ts` byte-identical
+//   to its staged bytes afterwards — its import never rewritten to
+//   `"./specs/B.xspec"`; and `build --json` and `check --json` then exit 0
+//   finding-free. Its discovered twin ((b)'s record), invalid per (b): the
+//   `move --json` is refused as 6.4's invalid workspace inside a whole-root
+//   compare — exit 1, (b)'s findings for that arm alone
+//   (`assertSourceFindings`).
+// Every modifies-nothing compare is the shared compare-around-command
+// protocol (helpers/snapshot.ts `assertLeavesUnchanged`), H-6's lock-path
+// exclusion applied around the mutating `move` and `review create`.
+//
 // Every T7-10 arm builds its own fresh workspace (H-1); its diagnosed
 // failure is collected and the body fails once at the end naming every
 // failed arm, a harness error or a hang propagating at once, as in T7-9.
 // Certification: T7-10 is in no conformer's scope (CERTIFICATIONS.md,
 // Exclusions, "T7-9 and T7-10": its findings for the discovered
-// configuration, each beside its undiscovered twin's clean outcome, fail
-// loud against the product each targets).
+// configuration, its gated reads, its refused `move`, and its failing
+// baselines, each beside its undiscovered twin's clean outcome, fail loud
+// against the product each targets; the converse's unrewritten import is
+// braced by its discovered twin's refusal over the same import; and the
+// modifies-nothing compares share the compare-around machinery
+// VIOL-CORE-CHATTYREADS certifies).
 
 import { Buffer } from "node:buffer";
 import type {
@@ -277,13 +340,18 @@ import {
   decodeAppliedMappingReport,
   decodeFindingsReport,
   decodeIdsReport,
+  decodeImpactReport,
   decodeInventoryDocument,
+  decodePreviewReport,
   decodeSessionListReport,
   decodeViewReport,
+  pathValueBytes,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
+  assertFileBytes,
   fail,
   HarnessAssertionError,
   parseJsonStdout,
@@ -322,6 +390,7 @@ import type {
   SnapshotOptions,
 } from "../../helpers/snapshot.js";
 import {
+  assertLeavesUnchanged,
   assertSnapshotsEqual,
   diffSnapshots,
   snapshotDirectory,
@@ -2223,8 +2292,11 @@ const T7_10_B_STAGINGS: readonly DiscoveringStaging[] =
     })),
   }));
 
-/** How many arms T7-10 runs: (a)'s, and each (b) group's control and arms. */
-const T7_10_ARM_COUNT = T7_10_B_STAGINGS.reduce(
+/**
+ * How many (a) and (b) arms T7-10 runs: (a)'s, and each (b) group's control
+ * and arms ((c)'s are `T7_10_C_ARMS`).
+ */
+const T7_10_AB_ARM_COUNT = T7_10_B_STAGINGS.reduce(
   (count, staging) => count + 1 + staging.arms.length,
   T7_10_A_ARMS.length,
 );
@@ -2534,6 +2606,761 @@ async function runDiscoveredArm(
 }
 
 // ---------------------------------------------------------------------------
+// T7-10 (c): consequences, and the converse
+
+/** T7-10's specifier whose literal is `literal` (a harness bug if none). */
+function t710Specifier(literal: string): SourceSpecifier {
+  const specifier = T7_10_SPECIFIERS.find(
+    (candidate) => candidate.literal === literal,
+  );
+  if (specifier === undefined) {
+    throw new Error(
+      `T7-10: no specifier ${literal} among T7_10_SPECIFIERS (harness bug)`,
+    );
+  }
+  return specifier;
+}
+
+/** (c)'s gate and baseline specifier, `"./missing.xspec"` (module header). */
+const MISSING_SPECIFIER = t710Specifier('"./missing.xspec"');
+
+/** The converse's specifier, `"./specs/A.xspec"` (module header). */
+const SPEC_MODULE_SPECIFIER = t710Specifier('"./specs/A.xspec"');
+
+/**
+ * (c)'s designating specifier: the emit destination `specs/B.mdx` would
+ * have while emission is enabled (7.3) — no `specs/B.mdx` existing, so it
+ * designates no derived-file path and the workspace is valid. One
+ * double-quoted literal spelling no escape, as T7-10's five are.
+ */
+const DESIGNATING_LITERAL = '"./specs/B.md"';
+
+/** (a)'s record over `specifier`: undiscovered, no code group. */
+function undiscoveredRecord(specifier: SourceSpecifier): StagedTs {
+  const arm = T7_10_A_ARMS.find(
+    (candidate) => candidate.specifier === specifier,
+  );
+  if (arm === undefined) {
+    throw new Error(
+      `T7-10: (a) holds no arm over ${specifier.literal} (harness bug)`,
+    );
+  }
+  return arm.config;
+}
+
+/** (b)'s arm over `specifier` among one code group's stagings. */
+function discoveredArmOf(
+  staging: DiscoveringStaging,
+  specifier: SourceSpecifier,
+): DiscoveredArm {
+  const arm = staging.arms.find(
+    (candidate) => candidate.specifier === specifier,
+  );
+  if (arm === undefined) {
+    throw new Error(
+      `T7-10: (b) by ${staging.group.label} holds no arm over ` +
+        `${specifier.literal} (harness bug)`,
+    );
+  }
+  return arm;
+}
+
+/** One code group's (c) stagings: (b)'s records, and the designating one. */
+interface ConsequenceStaging {
+  readonly group: DiscoveringGroup;
+  /** (b)'s control: the discovered configuration importing from "xspec". */
+  readonly control: StagedTs;
+  /** (b)'s arm importing from `"./missing.xspec"`: the gate's, the baseline's. */
+  readonly missing: DiscoveredArm;
+  /** (b)'s arm importing from `"./specs/A.xspec"`: the converse's twin. */
+  readonly specModule: DiscoveredArm;
+  /** The discovered configuration importing from `"./specs/B.md"`. */
+  readonly designating: StagedTs;
+}
+
+/** (c)'s stagings, per discovering code group (TEST-SPEC T7-10(c)). */
+const T7_10_C_STAGINGS: readonly ConsequenceStaging[] = T7_10_B_STAGINGS.map(
+  (staging) => ({
+    group: staging.group,
+    control: staging.control,
+    missing: discoveredArmOf(staging, MISSING_SPECIFIER),
+    specModule: discoveredArmOf(staging, SPEC_MODULE_SPECIFIER),
+    designating: sourceConfig(
+      `T7-10 xspec.config.ts ((c) discovered by ${staging.group.label}: importing from ${DESIGNATING_LITERAL})`,
+      DESIGNATING_LITERAL,
+      discoveredTail(staging.group.glob),
+    ).config,
+  }),
+);
+
+/**
+ * (c)'s undiscovered twins (module header): each the configuration its
+ * discovered side stages, the code group left out.
+ */
+interface ConsequenceTwins {
+  /** T7-9's twin configuration, importing from `"xspec"`. */
+  readonly control: StagedTs;
+  /** (a)'s record importing from `"./missing.xspec"`. */
+  readonly missing: StagedTs;
+  /** (a)'s record importing from `"./specs/A.xspec"`: the converse's arm. */
+  readonly specModule: StagedTs;
+  /** The undiscovered configuration importing from `"./specs/B.md"`. */
+  readonly designating: StagedTs;
+}
+
+/** (c)'s undiscovered twins (TEST-SPEC T7-10(c)). */
+const T7_10_C_TWINS: ConsequenceTwins = {
+  control: CONFIG_IMPORT_TWIN_CONFIG,
+  missing: undiscoveredRecord(MISSING_SPECIFIER),
+  specModule: undiscoveredRecord(SPEC_MODULE_SPECIFIER),
+  designating: stagedTs(
+    `T7-10 xspec.config.ts ((c) undiscovered, no code group: importing from ${DESIGNATING_LITERAL})`,
+    configImportText(DESIGNATING_LITERAL),
+  ),
+};
+
+// The designating literal spells no escape and no quote but its own, as
+// T7-10's five do, and is no `.xspec` specifier (its declaration no spec
+// module import, so no 14.18 to bring).
+if (
+  !DESIGNATING_LITERAL.startsWith(DOUBLE_QUOTE) ||
+  !DESIGNATING_LITERAL.endsWith(DOUBLE_QUOTE) ||
+  DESIGNATING_LITERAL.slice(1, -1).includes(DOUBLE_QUOTE) ||
+  DESIGNATING_LITERAL.includes(BACKSLASH) ||
+  DESIGNATING_LITERAL.slice(1, -1).endsWith(".xspec")
+) {
+  throw new Error(
+    `T7-10 fixture self-check: ${DESIGNATING_LITERAL} must be one ` +
+      "double-quoted literal spelling no escape, no .xspec specifier " +
+      "(harness bug)",
+  );
+}
+
+/** The (c) and converse move's destination (6.5's file form). */
+const MOVE_DESTINATION = "specs/B.mdx";
+
+/** `move specs/A.mdx specs/B.mdx`, its options appended per run. */
+const MOVE_ARGV: readonly string[] = [
+  "move",
+  T7_10_SOURCE_PATH,
+  MOVE_DESTINATION,
+];
+
+/**
+ * The file move's applied mapping: the moved file's root, its bare-path
+ * identity, and its one section `a`, each ID kept and its file part
+ * changed, ordered by `from` bytes (SPEC 6.5, 6.6, 12.7).
+ */
+const MOVE_MAPPING: readonly AppliedMappingPair[] = [
+  { from: T7_10_SOURCE_PATH, to: MOVE_DESTINATION },
+  { from: `${T7_10_SOURCE_PATH}#a`, to: `${MOVE_DESTINATION}#a` },
+];
+
+/** The session name (c)'s `review create --base` runs ask for (T6.3-4's). */
+const BASELINE_SESSION = "n";
+
+/** The gated reads (c) runs, representative (TEST-SPEC T7-10(c)). */
+const GATED_READS: readonly (readonly string[])[] = [
+  ["ids", "--json"],
+  ["query", "nodes"],
+];
+
+/** The validating command (c)'s premises and restaged builds run. */
+const BUILD_JSON_ARGV: readonly string[] = ["build", "--json"];
+
+/** Run `argv` from the workspace root. */
+async function runAt(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+): Promise<RunResult> {
+  return await runProduct(product, { cwd: workspace.root, argv });
+}
+
+/**
+ * A finding as the gate compares it: every member but the message — code,
+ * locations, concerned path, identities (T12.0-10's projection; wording
+ * unpinned, H-3).
+ */
+function gateComparable(finding: Finding): unknown {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+    identities: finding.identities,
+  };
+}
+
+/**
+ * A refused or gated `--json` run: exit 1 exactly, its standard output the
+ * 12.7 findings-only report, decoded form-exact (H-3, H-5).
+ */
+function refusedFindings(
+  result: RunResult,
+  context: string,
+  why: string,
+): readonly Finding[] {
+  assertExitCode(result, 1, `${context} — ${why}`);
+  return decodeFindingsReport(parseJsonStdout(result, context), context)
+    .findings;
+}
+
+/** A premise `build --json` on a valid workspace: exit 0 finding-free. */
+async function expectPremiseBuild(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+  rule: string,
+): Promise<void> {
+  expectFindingFree(
+    await runAt(product, workspace, BUILD_JSON_ARGV),
+    `${label}: the premise ${sourceCommandLabel(BUILD_JSON_ARGV)}`,
+    rule,
+  );
+}
+
+/**
+ * The gate's undiscovered twin (module header): built under T7-9's twin
+ * configuration and restaged importing from `"./missing.xspec"`, no code
+ * group in either; `build --json` exits 0 finding-free, and the gated reads
+ * answer, exit 0.
+ */
+async function runGateTwin(product: ProductBinding): Promise<void> {
+  const label = "T7-10(c), the gate's undiscovered twin (no code group)";
+  const workspace = await TestWorkspace.create(
+    sourceDecl(T7_10_C_TWINS.control),
+  );
+  try {
+    await expectPremiseBuild(
+      product,
+      workspace,
+      `${label}, importing from ${CONFIG_IMPORT_TWIN_LITERAL}`,
+      UNDISCOVERED_RULE,
+    );
+    await workspace.file(CONFIG_IMPORT_CONFIG_PATH, T7_10_C_TWINS.missing);
+    const restaged = `${label}, then importing from ${MISSING_SPECIFIER.label}`;
+    expectFindingFree(
+      await runAt(product, workspace, BUILD_JSON_ARGV),
+      `${restaged}: ${sourceCommandLabel(BUILD_JSON_ARGV)}`,
+      UNDISCOVERED_RULE,
+    );
+    for (const argv of GATED_READS) {
+      expectAnswered(
+        await runAt(product, workspace, argv),
+        `${restaged}: ${sourceCommandLabel(argv)}`,
+        `${UNDISCOVERED_RULE}, so the workspace passes build's validations ` +
+          "and the read is no gated non-answer (SPEC 13.3)",
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * The gate, discovered by one code group (module header): built under the
+ * control's `"xspec"`, restaged importing from `"./missing.xspec"`; the
+ * failing `build --json` reports (b)'s findings for that arm and modifies
+ * nothing, and each gated read reports exactly `build`'s findings, exit 1,
+ * modifying nothing.
+ */
+async function runGateArm(
+  product: ProductBinding,
+  staging: ConsequenceStaging,
+): Promise<void> {
+  const label = `T7-10(c), the gate, discovered by ${staging.group.label}`;
+  const workspace = await TestWorkspace.create(sourceDecl(staging.control));
+  try {
+    await expectPremiseBuild(
+      product,
+      workspace,
+      `${label}, importing from ${CONFIG_IMPORT_TWIN_LITERAL}`,
+      CONTROL_RULE,
+    );
+    await workspace.file(
+      CONFIG_IMPORT_CONFIG_PATH,
+      staging.missing.source.config,
+    );
+    const restaged =
+      `${label}, then importing from ` + staging.missing.specifier.label;
+    const buildContext = `${restaged}: ${sourceCommandLabel(BUILD_JSON_ARGV)}`;
+    const built = await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const findings = refusedFindings(
+          await runAt(product, workspace, BUILD_JSON_ARGV),
+          buildContext,
+          "the discovered configuration carries 14.15 and 14.18, so the " +
+            "build fails with findings: exit 1, never 14.14 or exit 2 " +
+            `(${DISCOVERED_RULE}; SPEC 12.1, 12.0; TEST-SPEC T7-10(c); H-5)`,
+        );
+        assertSourceFindings(findings, staging.missing, buildContext);
+        return findings;
+      },
+      `${buildContext}: the failing build modifies nothing — every derived ` +
+        "file and all graph data byte-identical to the state before it " +
+        "(SPEC 12.1; TEST-SPEC T7-10(c))",
+    );
+    for (const argv of GATED_READS) {
+      const context = `${restaged}: ${sourceCommandLabel(argv)}`;
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const findings = refusedFindings(
+            await runAt(product, workspace, argv),
+            context,
+            "on a workspace failing build's validations a gated read " +
+              "reports the findings a build would now report and exits 1, " +
+              "answering nothing (SPEC 13.3, 12.0; TEST-SPEC T7-10(c); H-5)",
+          );
+          assertSameJson(
+            findings.map(gateComparable),
+            built.map(gateComparable),
+            `${context}: the gate reports exactly the findings the build ` +
+              "reported — that arm's 14.15 and 14.18 — every member but " +
+              "the message, in 12.7's order (SPEC 13.3, 12.7, 14; " +
+              "TEST-SPEC T7-10(c))",
+          );
+        },
+        `${context}: the gated read modifies nothing — derived files and ` +
+          "graph data byte-identical (SPEC 13.3; TEST-SPEC T7-10(c))",
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * `move specs/A.mdx specs/B.mdx --json` performed (module header): exit 0
+ * with the applied mapping, `specs/B.mdx` then holding the moved bytes and
+ * `specs/A.mdx` gone.
+ */
+async function expectMoved(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+  rule: string,
+): Promise<void> {
+  const argv = [...MOVE_ARGV, "--json"];
+  const context = `${label}: ${sourceCommandLabel(argv)}`;
+  const result = await runAt(product, workspace, argv);
+  assertExitCode(
+    result,
+    0,
+    `${context} — the move proceeds, exit 0 (${rule}; SPEC 6.5; H-5)`,
+  );
+  assertAppliedMapping(
+    decodeAppliedMappingReport(parseJsonStdout(result, context), context),
+    MOVE_MAPPING,
+    `${context}: its applied mapping is the moved file's root and its ` +
+      "section a, each ID kept and its file part changed (SPEC 6.5, 6.6, " +
+      "12.7)",
+  );
+  await assertFileBytes(
+    workspace.path(MOVE_DESTINATION),
+    T7_10_SOURCE.source,
+    `${context}: ${MOVE_DESTINATION} holds the moved bytes — the moved ` +
+      "file holds no import and no reference, so the move rewrites none " +
+      "of them (SPEC 6.5)",
+  );
+  const origin = await workspace.kind(T7_10_SOURCE_PATH);
+  if (origin !== "absent") {
+    fail(
+      `${context}: the relocated origin ${T7_10_SOURCE_PATH} is gone ` +
+        `after the file move (SPEC 6.5); found a ${origin} there`,
+    );
+  }
+}
+
+/**
+ * The designation's undiscovered twin (module header): importing from
+ * `"./specs/B.md"` with no code group, the move proceeds.
+ */
+async function runMoveTwin(product: ProductBinding): Promise<void> {
+  const workspace = await TestWorkspace.create(
+    sourceDecl(T7_10_C_TWINS.designating),
+  );
+  try {
+    await expectMoved(
+      product,
+      workspace,
+      "T7-10(c), the designation's undiscovered twin (no code group), " +
+        `importing from ${DESIGNATING_LITERAL}`,
+      `${UNDISCOVERED_RULE}, so its specifier designates nothing 6.5 reads`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * The designation, discovered by one code group (module header): the move
+ * is refused with exactly one `refused-invalid-destination` finding,
+ * modifying nothing.
+ */
+async function runRefusedMoveArm(
+  product: ProductBinding,
+  staging: ConsequenceStaging,
+): Promise<void> {
+  const argv = [...MOVE_ARGV, "--json"];
+  const context =
+    `T7-10(c), the designation, discovered by ${staging.group.label}, ` +
+    `importing from ${DESIGNATING_LITERAL}: ${sourceCommandLabel(argv)}`;
+  const workspace = await TestWorkspace.create(sourceDecl(staging.designating));
+  try {
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const findings = refusedFindings(
+          await runAt(product, workspace, argv),
+          context,
+          "the destination's would-be emit path specs/B.md is designated " +
+            "by the relative specifier of a code source's module-linking " +
+            "form — the discovered configuration's import — which the " +
+            "move would make a derived-file path, so the move is refused, " +
+            "exit 1 (SPEC 6.5, 4, 14.15, 12.0; TEST-SPEC T7-10(c), " +
+            "T6.5-20(d); H-5)",
+        );
+        assertSameJson(
+          findings.map(pinnedFinding),
+          [
+            {
+              code: "refused-invalid-destination",
+              locations: [],
+              path: MOVE_DESTINATION,
+            },
+          ],
+          `${context}: exactly one refused-invalid-destination finding, ` +
+            "concerning the destination as spelled, its locations [] — one " +
+            "finding per reason and nothing beside it, the workspace being " +
+            "valid while no specs/B.mdx exists (SPEC 6.5, 14, 12.7; " +
+            "T6.5-20's contract)",
+        );
+      },
+      `${context}: the refused move modifies nothing — sources, derived ` +
+        "files, and the journal alike (SPEC 6.5; TEST-SPEC T7-10(c))",
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** `impact --base <c1> --json`, as diagnoses name it. */
+const IMPACT_LABEL = "`impact --base c1 --json`";
+
+/** `review create --base <c1> --name n --json`, as diagnoses name it. */
+const CREATE_LABEL =
+  "`review create --base c1 --name " + BASELINE_SESSION + " --json`";
+
+/** `impact --base <c1> --json`. */
+function impactArgv(c1: string): readonly string[] {
+  return ["impact", "--base", c1, "--json"];
+}
+
+/** `review create --base <c1> --name n --json`. */
+function createArgv(c1: string): readonly string[] {
+  return [
+    "review",
+    "create",
+    "--base",
+    c1,
+    "--name",
+    BASELINE_SESSION,
+    "--json",
+  ];
+}
+
+/**
+ * A baseline-taking command failing as T6.3-4's baseline failing validation
+ * does (module header): exit 2, the 12.7 error document the whole of
+ * standard output, its `code` and `path` `null`, and standard error naming
+ * the offending file, `xspec.config.ts`.
+ */
+function expectFailingBaseline(result: RunResult, context: string): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — c1's configuration, discovered by its own code group, ` +
+      "is a code source failing validation (14.15 and 14.18), so the " +
+      "baseline content cannot be parsed and validated as a workspace: a " +
+      "usage error, exit 2 (SPEC 6.3, 12.0; TEST-SPEC T7-10(c), T6.3-4; " +
+      "H-5)",
+  );
+  const error = expectErrorDocument(result, context);
+  assertSameJson(
+    { code: error.code, path: error.path },
+    { code: null, path: null },
+    `${context}: a baseline that cannot be reconstructed is a plain usage ` +
+      "error — the error document's code and path null, never a numbered " +
+      "condition's stable code and concerned path (SPEC 6.3, 12.7; " +
+      `T6.3-4) (message: ${JSON.stringify(error.message)})`,
+  );
+  if (!result.stderr.includes(CONFIG_IMPORT_CONFIG_PATH)) {
+    fail(
+      `${context}: the actionable error on standard error names the ` +
+        `offending file, the configuration in c1's tree ` +
+        `(${CONFIG_IMPORT_CONFIG_PATH}) (SPEC 6.3: a baseline whose ` +
+        "content cannot be parsed and validated fails with an error " +
+        "naming the offending entries or files; 12.0: usage-error " +
+        `messages are standard-error content); got ${summarizeResult(result)}`,
+    );
+  }
+}
+
+/**
+ * A baseline staging (module header): `c1` committed over the workspace as
+ * created — its configuration `c1Config` beside `specs/A.mdx` — and the
+ * working tree then taking `currentConfig`, its premise `build --json`
+ * exiting 0 finding-free. Returns `c1`'s commit identity.
+ */
+async function stageBaseline(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  currentConfig: StagedTs,
+  label: string,
+  rule: string,
+): Promise<string> {
+  await workspace.gitInit();
+  const c1 = await workspace.gitCommitAll(`c1: ${label}`);
+  await workspace.file(CONFIG_IMPORT_CONFIG_PATH, currentConfig);
+  await expectPremiseBuild(product, workspace, label, rule);
+  return c1;
+}
+
+/**
+ * The baseline's undiscovered twin (module header): `c1`'s configuration
+ * imports from `"./missing.xspec"`, the working tree's from `"xspec"`, no
+ * code group in either; both baseline-taking commands resolve, exit 0.
+ */
+async function runBaselineTwin(product: ProductBinding): Promise<void> {
+  const label =
+    "T7-10(c), the baseline's undiscovered twin (no code group): c1 " +
+    `importing from ${MISSING_SPECIFIER.literal}, the working tree from ` +
+    CONFIG_IMPORT_TWIN_LITERAL;
+  const resolves =
+    "no configured group discovers c1's configuration, so the baseline " +
+    "content parses and validates as a workspace and the baseline " +
+    "resolves, exit 0 (SPEC 6.3, 7; TEST-SPEC T7-10(c); H-5)";
+  const workspace = await TestWorkspace.create(
+    sourceDecl(T7_10_C_TWINS.missing),
+  );
+  try {
+    const c1 = await stageBaseline(
+      product,
+      workspace,
+      T7_10_C_TWINS.control,
+      label,
+      UNDISCOVERED_RULE,
+    );
+    const impactContext = `${label}: ${IMPACT_LABEL}`;
+    const impact = await runAt(product, workspace, impactArgv(c1));
+    assertExitCode(impact, 0, `${impactContext} — ${resolves}`);
+    decodeImpactReport(parseJsonStdout(impact, impactContext), impactContext);
+    assertExitCode(
+      await runAt(product, workspace, createArgv(c1)),
+      0,
+      `${label}: ${CREATE_LABEL} — ${resolves}`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * The baseline, discovered by one code group (module header): `c1`'s
+ * discovered configuration imports from `"./missing.xspec"`, the working
+ * tree's is the control; both baseline-taking commands fail as T6.3-4's
+ * baseline failing validation does, `review create` modifying nothing.
+ */
+async function runBaselineArm(
+  product: ProductBinding,
+  staging: ConsequenceStaging,
+): Promise<void> {
+  const label =
+    `T7-10(c), the baseline, discovered by ${staging.group.label}: c1 ` +
+    `importing from ${staging.missing.specifier.literal}, the working ` +
+    `tree from ${CONFIG_IMPORT_TWIN_LITERAL}`;
+  const workspace = await TestWorkspace.create(
+    sourceDecl(staging.missing.source.config),
+  );
+  try {
+    const c1 = await stageBaseline(
+      product,
+      workspace,
+      staging.control,
+      label,
+      CONTROL_RULE,
+    );
+    expectFailingBaseline(
+      await runAt(product, workspace, impactArgv(c1)),
+      `${label}: ${IMPACT_LABEL}`,
+    );
+    const createContext = `${label}: ${CREATE_LABEL}`;
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        expectFailingBaseline(
+          await runAt(product, workspace, createArgv(c1)),
+          createContext,
+        );
+      },
+      `${createContext}: refused at baseline resolution, review create ` +
+        "modifies nothing — no session written; sources, derived files, " +
+        "graph data, and .git/ byte-identical (SPEC 10.7, 6.3; TEST-SPEC " +
+        "T7-10(c))",
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * The converse (module header): importing from `"./specs/A.xspec"`,
+ * undiscovered, the preview lists no edit in `xspec.config.ts`, the move
+ * leaves it byte-identical, and `build` and `check` then exit 0
+ * finding-free.
+ */
+async function runConverseArm(product: ProductBinding): Promise<void> {
+  const label =
+    "T7-10(c), the converse, undiscovered (no code group), importing from " +
+    SPEC_MODULE_SPECIFIER.label;
+  const workspace = await TestWorkspace.create(
+    sourceDecl(T7_10_C_TWINS.specModule),
+  );
+  try {
+    const previewArgv = [...MOVE_ARGV, "--preview", "--json"];
+    const previewContext = `${label}: ${sourceCommandLabel(previewArgv)}`;
+    const preview = await runAt(product, workspace, previewArgv);
+    assertExitCode(
+      preview,
+      0,
+      `${previewContext} — valid undiscovered ((a)), the move would ` +
+        "proceed, so its preview completes, exit 0 (SPEC 6.6, 7; H-5)",
+    );
+    const plan = decodePreviewReport(
+      parseJsonStdout(preview, previewContext),
+      previewContext,
+    );
+    if (plan.files === null) {
+      fail(
+        `${previewContext}: the completed preview reports its plan — its ` +
+          "files non-null (SPEC 6.6, 12.7)",
+      );
+    }
+    const configPath = Buffer.from(CONFIG_IMPORT_CONFIG_PATH, "utf8");
+    assertSameJson(
+      plan.files
+        .filter((entry) => pathValueBytes(entry.file).equals(configPath))
+        .flatMap((entry) =>
+          entry.edits.map((edit) => ({
+            file: renderPathValue(entry.file),
+            class: edit.class,
+            range: { start: edit.range.start, end: edit.range.end },
+          })),
+        ),
+      [],
+      `${previewContext}: the preview lists no edit in ` +
+        `${CONFIG_IMPORT_CONFIG_PATH} — no configured group discovers it, ` +
+        "so its import is none of the paths by which other files import " +
+        "the moved file's generated module, and 6.5 rewrites no specifier " +
+        "there (SPEC 6.5, 6.6, 7; TEST-SPEC T7-10(c))",
+    );
+    await expectMoved(product, workspace, label, UNDISCOVERED_RULE);
+    await assertFileBytes(
+      workspace.path(CONFIG_IMPORT_CONFIG_PATH),
+      T7_10_C_TWINS.specModule.source,
+      `${label}: after the move, ${CONFIG_IMPORT_CONFIG_PATH} is ` +
+        "byte-identical to its staged bytes — its import never rewritten " +
+        'to "./specs/B.xspec" (SPEC 6.5, 7; TEST-SPEC T7-10(c))',
+    );
+    for (const word of T7_10_VALIDATING_WORDS) {
+      const argv = [word, "--json"];
+      expectFindingFree(
+        await runAt(product, workspace, argv),
+        `${label}, after the move: ${sourceCommandLabel(argv)}`,
+        UNDISCOVERED_RULE,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * The converse's discovered twin, by one code group (module header):
+ * invalid per (b), the move is refused as 6.4's invalid workspace — exit 1,
+ * (b)'s findings for that arm alone — modifying nothing.
+ */
+async function runConverseTwin(
+  product: ProductBinding,
+  staging: ConsequenceStaging,
+): Promise<void> {
+  const arm = staging.specModule;
+  const argv = [...MOVE_ARGV, "--json"];
+  const context =
+    `T7-10(c), the converse's discovered twin, by ${staging.group.label}, ` +
+    `importing from ${arm.specifier.label}: ${sourceCommandLabel(argv)}`;
+  const workspace = await TestWorkspace.create(sourceDecl(arm.source.config));
+  try {
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const findings = refusedFindings(
+          await runAt(product, workspace, argv),
+          context,
+          "invalid per (b), the workspace fails build's validations, so " +
+            "the move is refused before modifying anything, exit 1 (SPEC " +
+            "6.5, 6.4, 12.0; TEST-SPEC T7-10(c); H-5)",
+        );
+        assertSourceFindings(
+          findings,
+          arm,
+          `${context} — an invalid-workspace refusal reports the ` +
+            "workspace's findings alone, no refusal reason beside them " +
+            "(SPEC 6.4, 6.5, 14)",
+        );
+      },
+      `${context}: the refused move modifies nothing (SPEC 6.5, 6.4; ` +
+        "TEST-SPEC T7-10(c))",
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** One (c) arm's run; each names itself in its diagnoses. */
+type ConsequenceArm = (product: ProductBinding) => Promise<void>;
+
+/** (c)'s arms, in the order the body runs them (module header). */
+const T7_10_C_ARMS: readonly ConsequenceArm[] = [
+  runGateTwin,
+  ...T7_10_C_STAGINGS.map(
+    (staging): ConsequenceArm =>
+      (product) =>
+        runGateArm(product, staging),
+  ),
+  runMoveTwin,
+  ...T7_10_C_STAGINGS.map(
+    (staging): ConsequenceArm =>
+      (product) =>
+        runRefusedMoveArm(product, staging),
+  ),
+  runBaselineTwin,
+  ...T7_10_C_STAGINGS.map(
+    (staging): ConsequenceArm =>
+      (product) =>
+        runBaselineArm(product, staging),
+  ),
+  runConverseArm,
+  ...T7_10_C_STAGINGS.map(
+    (staging): ConsequenceArm =>
+      (product) =>
+        runConverseTwin(product, staging),
+  ),
+];
+
+// ---------------------------------------------------------------------------
 // Registration
 
 const T7_9 = defineProductTest({
@@ -2630,8 +3457,8 @@ const T7_9 = defineProductTest({
 const T7_10 = defineProductTest({
   id: "T7-10",
   title:
-    "the configuration file as a source (TEST-SPEC T7-10 (a), (b)): on a " +
-    "valid workspace — one spec group globbing specs/*.mdx over " +
+    "the configuration file as a source (TEST-SPEC T7-10 (a), (b), (c)): " +
+    "on a valid workspace — one spec group globbing specs/*.mdx over " +
     "specs/A.mdx, Markdown emitted next to sources — the configuration " +
     'importing, one arm each, from "./specs/A.xspec" (a spec module ' +
     'import binding defineConfig), "./missing.xspec" (designating no ' +
@@ -2651,8 +3478,32 @@ const T7_10 = defineProductTest({
     "arms, 14.18 (unsupported-node-usage) locating defineConfig at its " +
     "call, no other finding, and `inventory --json` exits 0 with no " +
     "finding, listing xspec.config.ts among its sources in that code " +
-    "group alone (SPEC 7, 1.7, 4, 4.5, 7.2, 7.3, 11.1, 11.4, 11.6, 12.7, " +
-    "13.4, 14)",
+    "group alone; (c) consequences, each on the configuration discovered " +
+    "by each of those code groups beside its undiscovered twin (no code " +
+    'group): after a successful `build` under "xspec", the configuration ' +
+    'restaged importing from "./missing.xspec", `build --json` exits 1 ' +
+    "reporting (b)'s 14.15 and 14.18 and modifies nothing (a whole-root " +
+    "compare), and the gated reads `ids --json` and `query nodes` each " +
+    "exit 1 reporting exactly `build`'s findings, modifying nothing, " +
+    "while the twin's `build` exits 0 finding-free and its reads answer, " +
+    'exit 0; importing from "./specs/B.md", no specs/B.mdx existing, ' +
+    "`move specs/A.mdx specs/B.mdx --json` is refused — exit 1, exactly " +
+    "one refused-invalid-destination finding concerning specs/B.mdx, " +
+    "locations [], nothing modified — while the twin moves, exit 0 with " +
+    "its applied mapping, specs/B.mdx holding the moved bytes; a commit c1 " +
+    'whose configuration imports from "./missing.xspec", the working ' +
+    "tree's configuration and sources valid: `impact --base c1 --json` " +
+    "and `review create --base c1 --name n --json` each exit 2, the error " +
+    "document's code and path null, standard error naming " +
+    "xspec.config.ts, `review create` modifying nothing, while the twin's " +
+    "commit resolves, both exit 0; and the converse — undiscovered, " +
+    'importing from "./specs/A.xspec", `move specs/A.mdx specs/B.mdx ' +
+    "--preview --json` exits 0 listing no edit in xspec.config.ts, the " +
+    "`move` exits 0 leaving xspec.config.ts byte-identical, and `build` " +
+    "and `check` then exit 0 finding-free, while the discovered twin's " +
+    "`move` is refused as an invalid workspace: exit 1, (b)'s findings " +
+    "alone, nothing modified (SPEC 7, 1.7, 4, 4.5, 6.3, 6.4, 6.5, 6.6, " +
+    "7.2, 7.3, 10.7, 11.1, 11.4, 11.6, 12.0, 12.1, 12.7, 13.3, 13.4, 14)",
   run: async (product) => {
     const failures: string[] = [];
     for (const arm of T7_10_A_ARMS) {
@@ -2668,9 +3519,13 @@ const T7_10 = defineProductTest({
         );
       }
     }
+    for (const arm of T7_10_C_ARMS) {
+      await collectArmFailure(failures, () => arm(product));
+    }
     if (failures.length > 0) {
+      const arms = T7_10_AB_ARM_COUNT + T7_10_C_ARMS.length;
       fail(
-        `T7-10: ${String(failures.length)} of ${String(T7_10_ARM_COUNT)} ` +
+        `T7-10: ${String(failures.length)} of ${String(arms)} ` +
           "arms failed, each diagnosed below:" +
           LINE_FEED +
           failures.join(LINE_FEED),
