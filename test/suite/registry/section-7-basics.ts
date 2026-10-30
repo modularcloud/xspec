@@ -13,10 +13,11 @@
 // `--config <path>` option (a filesystem path resolved against the working
 // directory, 12.0); the configuration file's directory is the workspace
 // root. The configuration is declarative — exactly an import of
-// `defineConfig` from `"xspec"` (optionally aliased) and a default export of
-// one call to that binding with a statically literal argument; anything else
-// is a configuration error (14.14), reported by every command at
-// configuration load as a usage error (exit 2), before all source analysis.
+// `defineConfig` (optionally aliased) whose module specifier is any static
+// string literal, and a default export of one call to that binding with a
+// statically literal argument; anything else is a configuration error
+// (14.14), reported by every command at configuration load as a usage error
+// (exit 2), before all source analysis.
 // `specs` is required; `code`, `markdown`, `coverage`, and `policy` are
 // optional with defined omission semantics; empty `coverage`/`policy` lists
 // equal omission; unknown keys anywhere in the argument are 14.14, as is a
@@ -152,6 +153,34 @@
 //   `satisfies`, and non-null assertions) before reading the form, or
 //   reading a call by its callee and arguments alone, loads each and
 //   builds (exit 0), failing the exit-code assertion.
+// - T7-2's binding forms (SPEC 7: exactly an import of `defineConfig`,
+//   optionally aliased; 2.4: every configuration literal, an import name
+//   spelled as a string literal included, is read verbatim): the
+//   string-literal import name, `import { "defineConfig" as d } from
+//   "xspec"` with `export default d({…})` over the canonical argument, is
+//   that import, aliased — it loads, and `inventory`'s `configuration` is
+//   byte-identical to its identifier-named twin's, `import { defineConfig
+//   as d } from "xspec"`, the same file but for the name's quotes
+//   (compared as the comments arm compares, below; `bindingFormConfig`
+//   composes both). Refused, one arm each (14.14, exit 2): its
+//   escape-spelled twin, the same file with the name's `C` written as the
+//   hexadecimal escape of U+0043 (backslash, `x43`; the backslash built
+//   from `BACKSLASH`, and the spelling checked at module load), which,
+//   read verbatim, imports no `defineConfig`; and a default import
+//   (`import defineConfig from "xspec"`), a namespace import (`import * as
+//   X from "xspec"` with `export default X.defineConfig({…})`), an extra
+//   default binding (`import d, { defineConfig } from "xspec"`), and an
+//   extra named binding (`import { defineConfig, other } from "xspec"`),
+//   each the canonical configuration with only its import line — and, for
+//   the namespace import, the callee — changed. Every one of these texts
+//   is accepted by TypeScript 5.9.3 both as module code and as script code,
+//   so each record is declared well-formed (S-9) and a refusal is the
+//   declarative form's (14.14), never a parse failure's. A product reading
+//   identifier import names alone refuses the string-literal name and
+//   fails `build`'s exit code; one reading the binding loosely — decoding
+//   the name's escape, or taking any import that binds or reaches
+//   `defineConfig` for the import of it — loads a refused text and builds
+//   (exit 0), failing the exit-code assertion.
 // - T7-2 string-literal keys arm: "both groups discover their globs' files"
 //   is observed as the spec group's exact `ids` listing plus whole-graph
 //   edge-set equality carrying the code file's marker edge (T7-3's
@@ -224,10 +253,12 @@
 //   product reporting it through a compiler diagnostic and one detecting
 //   it itself pass alike, while one taking the last member loads and
 //   builds (exit 0).
-// - T7-2 comments: "inventory's `configuration` byte-identical to its
-//   comment-free twin's" is compared as the `configuration` member of each
-//   `inventory --json` document (form-decoded first), as values and as
-//   serializations — member order included.
+// - T7-2 comments and the string-literal import name: "inventory's
+//   `configuration` byte-identical to its comment-free twin's" (to its
+//   identifier-named twin's) is compared as the `configuration` member of
+//   each `inventory --json` document (form-decoded first), as values and as
+//   serializations — member order included (`configurationViewOf`, after
+//   `build` loads the file, and `assertConfigurationViewsIdentical`).
 // - T7-3 U+FFFD names: the character is staged as the validly encoded code
 //   point EF BF BD between two letters — a spec group's and a code group's
 //   string-literal key, a profile name, a rule name — so 14.14's name rule,
@@ -1091,6 +1122,59 @@ const T7_1 = defineProductTest({
 // T7-2 — declarative form
 // ---------------------------------------------------------------------------
 
+// Verbatim spellings (SPEC 7, 2.4: configuration literals are static string
+// literals read exactly as spelled). Every escape spelling this module
+// stages is built from the backslash's code point, so that its characters
+// reach the staged file exactly — a template literal would itself interpret
+// a backslash escape — and this source spells no escape (the header's
+// verbatim-literal note).
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+// Binding forms (SPEC 7: exactly an import of `defineConfig`, optionally
+// aliased; 2.4; module header): the canonical configuration imported under
+// the alias `d`, its import name spelled `importName` — the identifier
+// `defineConfig` (the identifier-named twin), the string literal
+// `"defineConfig"` (that import, aliased: it loads), or that string literal
+// with the name's `C` written as the hexadecimal escape of U+0043 (read
+// verbatim, it imports no `defineConfig`: refused, FORM_VIOLATIONS). The
+// three files differ in the import name's spelling alone.
+function bindingFormConfig(importName: string): string {
+  return `import { ${importName} as d } from "xspec"
+
+export default d({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`;
+}
+const STRING_IMPORT_NAME = '"defineConfig"';
+const ESCAPE_SPELLED_IMPORT_NAME = `"define${BACKSLASH}x43onfig"`;
+
+// The module-load self-check of the escape-spelled import name: it holds
+// exactly one backslash, followed by `x43`, and with that one escape decoded
+// (U+0043 is `C`) it is the string-literal import name — so the refused file
+// differs from the loading one in that escape alone, and no escape was
+// decoded or lost on its way to the staged text. A mismatch is a harness
+// error thrown at load, never a product verdict.
+if (
+  ESCAPE_SPELLED_IMPORT_NAME.split(BACKSLASH).length !== 2 ||
+  ESCAPE_SPELLED_IMPORT_NAME.indexOf(`${BACKSLASH}x43`) !== '"define'.length ||
+  ESCAPE_SPELLED_IMPORT_NAME.replace(
+    `${BACKSLASH}x43`,
+    String.fromCodePoint(0x43),
+  ) !== STRING_IMPORT_NAME ||
+  bindingFormConfig(ESCAPE_SPELLED_IMPORT_NAME).split(BACKSLASH).length !== 2
+) {
+  throw new Error(
+    "T7-2 fixture self-check: the escape-spelled import name must be the " +
+      'string literal "defineConfig" with its C written as the hexadecimal ' +
+      "escape of U+0043 — one backslash, then x43, after define — and its " +
+      "configuration must hold that backslash alone (module header); got " +
+      JSON.stringify(ESCAPE_SPELLED_IMPORT_NAME),
+  );
+}
+
 // Each fixture is SPECS_ONLY_CONFIG with exactly one deviation (module
 // header). SPEC 7: the file MUST consist of exactly an import of
 // `defineConfig` (optionally aliased) whose module specifier is any static
@@ -1102,8 +1186,11 @@ const T7_1 = defineProductTest({
 // syntax error, the missing import, extra statements, each non-literal
 // argument form, the `null` literal, a non-call default export, a call
 // without a sole argument, a numeric-literal key, the wrapped forms and
-// call variants, and the import's modifiers. No row varies the specifier:
-// any static string literal is valid there (SPEC 7), T7-9's subject.
+// call variants, the refused binding forms, and the import's modifiers. The
+// escape-spelled import name's valid twin is the string-literal import
+// name's file (`bindingFormConfig`, loaded by the body), the escape its one
+// deviation. No row varies the specifier: any static string literal is
+// valid there (SPEC 7), T7-9's subject.
 const FORM_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
@@ -1424,6 +1511,67 @@ export default defineConfig?.({
 })
 `,
   },
+  // Binding forms (SPEC 7: exactly an import of `defineConfig`, optionally
+  // aliased; 2.4): the escape-spelled string-literal import name, read
+  // verbatim, imports no `defineConfig`; a default import, a namespace
+  // import, an extra default binding, and an extra named binding are no
+  // import of exactly `defineConfig` — five well-formed texts, one arm each
+  // (module header).
+  {
+    label:
+      "an escape-spelled string-literal import name: import { " +
+      '"defineConfig" as d } from "xspec" with the name' +
+      "'s C written as the hexadecimal escape of U+0043 — read verbatim, " +
+      "it imports no defineConfig (2.4)",
+    config: bindingFormConfig(ESCAPE_SPELLED_IMPORT_NAME),
+  },
+  {
+    label: 'a default import: import defineConfig from "xspec"',
+    config: `import defineConfig from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      'a namespace import: import * as X from "xspec" with export default ' +
+      "X.defineConfig({…})",
+    config: `import * as X from "xspec"
+
+export default X.defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: 'an extra default binding: import d, { defineConfig } from "xspec"',
+    config: `import d, { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      'an extra named binding: import { defineConfig, other } from "xspec"',
+    config: `import { defineConfig, other } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
   // The import carries no `type` or `defer` modifier and no import
   // attributes (SPEC 7): four well-formed texts (module header).
   {
@@ -1487,6 +1635,20 @@ export default makeConfig({
   }
 })
 `,
+);
+
+// The valid binding form (SPEC 7, 2.4; module header): the string-literal
+// import name spelling `defineConfig` is that import, aliased, and loads
+// alike with its identifier-named twin, the same file but for the name's
+// quotes (`bindingFormConfig`). Records made at module load: T7-2 stages
+// both after a product invocation (S-9's timing clause).
+const STRING_IMPORT_NAME_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (binding forms: a string-literal import name, import { "defineConfig" as d } from "xspec")',
+  bindingFormConfig(STRING_IMPORT_NAME),
+);
+const IDENTIFIER_IMPORT_NAME_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (binding forms: the identifier-named twin, import { defineConfig as d } from "xspec")',
+  bindingFormConfig("defineConfig"),
 );
 
 // The string-literal keys arm (SPEC 7: the statically literal argument's
@@ -1572,10 +1734,10 @@ const QUOTED_KEYS_EDGES: readonly GraphEdge[] = [
 
 // Verbatim literals (SPEC 7, 2.4: configuration literals are static string
 // literals read exactly as spelled). The escape spellings below are built
-// from the backslash's code point so the six characters reach the staged
-// file exactly — a template literal would itself interpret a backslash-u
-// escape (the header's verbatim-literal note).
-const BACKSLASH = String.fromCodePoint(0x5c);
+// from the backslash's code point (`BACKSLASH`, defined with T7-2's binding
+// forms above) so the six characters reach the staged file exactly — a
+// template literal would itself interpret a backslash-u escape (the
+// header's verbatim-literal note).
 
 // A glob spelled with the six-character escape of `*` (backslash, `u002A`)
 // is read as those characters: it names only a file literally so called,
@@ -1807,6 +1969,63 @@ export default defineConfig({
 `,
 );
 
+/**
+ * The resolved configuration view under `config` (T7-2's comments and
+ * string-literal import name arms; module header): `config` staged as
+ * `xspec.config.ts` beside the minimal source in a fresh workspace, `build`
+ * required to load it (exit 0), and the `configuration` member of
+ * `inventory --json` returned as reported, the document form-decoded first.
+ */
+async function configurationViewOf(
+  product: ProductBinding,
+  config: StagedTs,
+  label: string,
+): Promise<unknown> {
+  return await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": config,
+        "specs/A.mdx": SECTION_A_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${label}: ` + "`build` — the configuration loads (SPEC 7)",
+      );
+      const inventoryLabel = `${label} ` + "`inventory --json`";
+      const raw = await runJson(
+        product,
+        workspace,
+        ["inventory", "--json"],
+        inventoryLabel,
+      );
+      decodeInventoryDocument(raw, inventoryLabel);
+      return (raw as { readonly configuration: unknown }).configuration;
+    },
+  );
+}
+
+/**
+ * Two resolved configuration views byte-identical (module header): equal
+ * as values and as serializations, member order included.
+ */
+function assertConfigurationViewsIdentical(
+  actual: unknown,
+  twin: unknown,
+  context: string,
+): void {
+  assertSameJson(actual, twin, context);
+  if (JSON.stringify(actual) !== JSON.stringify(twin)) {
+    fail(
+      `${context}; the members are equal as values but serialize ` +
+        `differently (member order): ${JSON.stringify(actual)} vs ` +
+        JSON.stringify(twin),
+    );
+  }
+}
+
 const T7_2 = defineProductTest({
   id: "T7-2",
   title:
@@ -1817,10 +2036,14 @@ const T7_2 = defineProductTest({
     "default export, a call without a sole argument (defineConfig(), " +
     "defineConfig({…}, {})), a numeric-literal key, the call, its " +
     "argument, or a value inside it wrapped (satisfies object, " +
-    "parentheses, a non-null assertion, as const, as boolean), and the " +
-    "call spelled with type arguments or as an optional call are " +
-    "configuration errors (14.14, exit 2); an aliased defineConfig import " +
-    "is valid; " +
+    "parentheses, a non-null assertion, as const, as boolean), the call " +
+    "spelled with type arguments or as an optional call, an escape-spelled " +
+    "string-literal import name, a default or namespace import, and an " +
+    "extra default or named binding are configuration errors (14.14, exit " +
+    "2); an aliased defineConfig import is valid, and so is a " +
+    "string-literal import name spelling defineConfig, read verbatim (2.4) " +
+    "— it loads, inventory's configuration byte-identical to its " +
+    "identifier-named twin's; " +
     "string-literal group-name keys are part of the accepted form — they " +
     "load, discover, and resolve in a coverage profile and a policy " +
     "selector (SPEC 7, 7.4, 7.5, 8); literals are read verbatim — an " +
@@ -1862,6 +2085,32 @@ const T7_2 = defineProductTest({
             `group drives discovery (SPEC 7)`,
         );
       },
+    );
+
+    // Binding forms (SPEC 7, 2.4): the string-literal import name spelling
+    // `defineConfig` is that import, aliased — it loads, and the inventory's
+    // resolved `configuration` view is byte-identical to its
+    // identifier-named twin's (compared as the comments arm compares). Its
+    // escape-spelled twin and the other binding forms are FORM_VIOLATIONS
+    // rows, refused above.
+    const stringImportNameView = await configurationViewOf(
+      product,
+      STRING_IMPORT_NAME_CONFIG,
+      'T7-2 (binding forms: the string-literal import name, import { "defineConfig" as d } from "xspec" — that import, aliased, read verbatim)',
+    );
+    const identifierImportNameView = await configurationViewOf(
+      product,
+      IDENTIFIER_IMPORT_NAME_CONFIG,
+      'T7-2 (binding forms: the identifier-named twin, import { defineConfig as d } from "xspec")',
+    );
+    assertConfigurationViewsIdentical(
+      stringImportNameView,
+      identifierImportNameView,
+      "T7-2 (binding forms): `inventory`'s `configuration` member under the " +
+        'string-literal import name, import { "defineConfig" as d } from ' +
+        '"xspec", is byte-identical to its identifier-named twin' +
+        "'s — the name, read verbatim, spells defineConfig, so the import " +
+        "is that import, aliased (SPEC 7, 2.4, 11.6)",
     );
 
     // String-literal group-name keys are part of the accepted form (SPEC 7):
@@ -2136,56 +2385,25 @@ const T7_2 = defineProductTest({
     // inventory's resolved `configuration` view is byte-identical to its
     // comment-free twin's — compared as the member's serialization, member
     // order and spellings included.
-    const configurationViewOf = async (
-      config: StagedTs,
-      label: string,
-    ): Promise<unknown> =>
-      await withWorkspace(
-        {
-          files: {
-            "xspec.config.ts": config,
-            "specs/A.mdx": SECTION_A_SOURCE,
-          },
-        },
-        async (workspace) => {
-          await buildOk(
-            product,
-            workspace,
-            `${label}: \`build\` — the configuration loads (SPEC 7)`,
-          );
-          const inventoryLabel = `${label} \`inventory --json\``;
-          const raw = await runJson(
-            product,
-            workspace,
-            ["inventory", "--json"],
-            inventoryLabel,
-          );
-          decodeInventoryDocument(raw, inventoryLabel);
-          return (raw as { readonly configuration: unknown }).configuration;
-        },
-      );
     const commented = await configurationViewOf(
+      product,
       COMMENTED_CONFIG,
       "T7-2 (comments)",
     );
     const commentFree = await configurationViewOf(
+      product,
       COMMENT_FREE_CONFIG,
       "T7-2 (comment-free twin)",
     );
-    const commentsContext =
+    assertConfigurationViewsIdentical(
+      commented,
+      commentFree,
       "T7-2 (comments): `inventory`'s `configuration` member under the " +
-      "commented configuration is byte-identical to the comment-free " +
-      "twin's — line and block comments before the import, after it, " +
-      "between keys, inside the glob list, and after the export " +
-      "contribute nothing (SPEC 7, 11.6)";
-    assertSameJson(commented, commentFree, commentsContext);
-    if (JSON.stringify(commented) !== JSON.stringify(commentFree)) {
-      fail(
-        `${commentsContext}; the members are equal as values but ` +
-          `serialize differently (member order): ` +
-          `${JSON.stringify(commented)} vs ${JSON.stringify(commentFree)}`,
-      );
-    }
+        "commented configuration is byte-identical to the comment-free " +
+        "twin's — line and block comments before the import, after it, " +
+        "between keys, inside the glob list, and after the export " +
+        "contribute nothing (SPEC 7, 11.6)",
+    );
   },
 });
 
