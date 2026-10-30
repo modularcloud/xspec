@@ -26,6 +26,9 @@
 // that (a)'s escape-spelled, line-continuation, single-quoted, and
 // raw-U+FFFD arms ride VIOL-IMPORT-BRACED's and VIOL-IMPORT-SINGLE's
 // certification of P-19 representatively (CERTIFICATIONS.md, Exclusions).
+// T7-10's configurations (the same module) are composed from this module's
+// head, `configImportText` for its undiscovered arms, and stage its
+// `specs/A.mdx` record; their literals spell no escape.
 // A literal holding a backslash is built by its caller from code point
 // U+005C (the BACKSLASH constant below), never spelled in harness source,
 // where a string or template literal would itself interpret an escape.

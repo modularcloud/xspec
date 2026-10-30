@@ -1,6 +1,8 @@
 // TEST-SPEC §7 configuration import — T7-9's arms (a), the specifier's
 // spellings, (b), the scanner-rejected escapes, (c), the specifier's
-// designations, and (d), installs. Configuration basics
+// designations, and (d), installs; and T7-10's arms (a) and (b), the
+// configuration file as a source, undiscovered and discovered (below the
+// T7-9 header). Configuration basics
 // (T7-1…T7-3) and T7-7 live in section-7-basics.ts, discovery (T7-4…T7-6,
 // T7-8) in section-7-discovery.ts, and P-19, the property searching the
 // spellings (a) never stages, in section-16-p19.ts.
@@ -202,9 +204,75 @@
 // operative assertions are positive, each failing loud against the product
 // it targets; every FIFO, (d)'s manifest among them, is asserted afterwards
 // still a FIFO in place, so a staging whose effect misses fails loud).
+//
+// T7-10, the configuration file as a source (SPEC 7: the rules of 4 and
+// 14.15 reach the configuration file only where a configured group
+// discovers it, and xspec then analyzes it as it does every source it
+// discovers, its import declaration included, while the configuration
+// itself stays valid). The workspace (T7-10's opening): T7-9's but for
+// `specs/B.mdx` — the one spec group `main` globbing `specs/*.mdx` over
+// `specs/A.mdx` (`<S id="a">A</S>`, T7-9's record of those bytes), Markdown
+// emitted next to sources — its configuration importing, one arm each
+// (`T7_10_SPECIFIERS`), from `"./specs/A.xspec"` (a spec module import
+// binding `defineConfig`, neither the default nor the `text` export),
+// `"./missing.xspec"` (designating no discovered spec source),
+// `"./specs/A.xspec.ts"` and `"./.xspec/x"` (relative specifiers
+// designating derived-file paths, 13.4), and `"./specs/A.md"` (the Markdown
+// emit destination of `specs/A.mdx` while emission is enabled, 7.3). Every
+// configuration is a staged-source record made at module load and
+// declared well-formed (S-9), composed through the shared builder's head
+// (`CONFIG_IMPORT_HEAD`); none of these literals spells an escape (checked
+// at load).
+//
+// (a) Undiscovered (`T7_10_A_ARMS`): T7-9's configuration over each
+// specifier (`configImportText`), no code group at all, so no configured
+// group matches the configuration file: `build` and `check`, each under
+// `--json`, exit 0 finding-free — a product applying a source's import
+// rules to every configuration reports 14.15 there.
+//
+// (b) Discovered (`T7_10_B_STAGINGS`): the same configuration with one code
+// group, `app`, globbing `*.ts` and, separately, `xspec.config.ts` (a code
+// group's glob between `specs` and `markdown`, `discoveredTail`), so that
+// the configuration is a code source. Each group's control runs first:
+// importing from `"xspec"`, the discovered configuration is clean — `build`
+// and `check` exit 0 finding-free — and its whole-file location exists
+// (`query edges --from xspec.config.ts` exits 0 with one JSON document,
+// T7-3's idiom). Then each specifier's arm: `build` and `check`, each under
+// `--json`, exit 1 — never 2, the configuration staying valid — reporting
+// 14.15 and, in the two `.xspec` arms (`specModule`: the declaration a spec
+// module import, so `defineConfig` a spec-module binding and its call a
+// value-level use 4.5 does not sanction), 14.18, and no other finding.
+// TEST-SPEC pins no count ("each such finding": the `"./missing.xspec"`
+// declaration is invalid on two counts, its target and its binding), so
+// each condition is asserted reported at least once, every finding of it
+// located exactly: a 14.15 finding carries the stable code
+// `"invalid-import"` and the one location of the configuration's import
+// declaration by its own characters, the import range of 11.4 — the file's
+// first bytes, `import` through the specifier's closing quote, no
+// terminator spelled (SPEC 14, 1.7) — and a 14.18 finding the stable code
+// `"unsupported-node-usage"` and the one location of `defineConfig`'s
+// spelling at its call, the default export's callee (SPEC 14: the
+// binding's identifier at the offending use; no property chain follows
+// it); each `path` `null` (12.7). Both ranges are composed from the
+// record's parts and self-checked at module load (`sourceConfig`).
+// `inventory --json` then exits 0 with no finding, listing
+// `xspec.config.ts` once among its `sources`, in the code group `app`
+// alone (11.6).
+//
+// Every T7-10 arm builds its own fresh workspace (H-1); its diagnosed
+// failure is collected and the body fails once at the end naming every
+// failed arm, a harness error or a hang propagating at once, as in T7-9.
+// Certification: T7-10 is in no conformer's scope (CERTIFICATIONS.md,
+// Exclusions, "T7-9 and T7-10": its findings for the discovered
+// configuration, each beside its undiscovered twin's clean outcome, fail
+// loud against the product each targets).
 
 import { Buffer } from "node:buffer";
-import type { AppliedMappingPair } from "../../helpers/adapters/index.js";
+import type {
+  AppliedMappingPair,
+  Finding,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
   decodeAppliedMappingReport,
   decodeFindingsReport,
@@ -258,6 +326,7 @@ import {
   diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type { StagedTs } from "../../helpers/staged-ts.js";
 import { guardSyncStep } from "../../helpers/step-guards.js";
@@ -1904,6 +1973,567 @@ async function runInstalls(
 }
 
 // ---------------------------------------------------------------------------
+// T7-10 (a) and (b): the configuration file as a source
+
+/** T7-10's one source's path (TEST-SPEC T7-10's opening). */
+const T7_10_SOURCE_PATH = "specs/A.mdx";
+
+/**
+ * T7-10's one source, `specs/A.mdx` holding `<S id="a">A</S>`: T7-9's record
+ * of those very bytes (helpers/config-import.ts), `specs/B.mdx` left out.
+ */
+const T7_10_SOURCE: StagedMdx = (() => {
+  const record = CONFIG_IMPORT_SOURCES[T7_10_SOURCE_PATH];
+  if (record === undefined) {
+    throw new Error(
+      `T7-10: the shared sources hold no ${T7_10_SOURCE_PATH} record ` +
+        "(helpers/config-import.ts; harness bug)",
+    );
+  }
+  return record;
+})();
+
+/** The code group discovering the configuration file in (b) (module header). */
+const T7_10_CODE_GROUP = "app";
+
+/** One of T7-10(b)'s code groups, each discovering the configuration file. */
+interface DiscoveringGroup {
+  /** The group as diagnoses name it. */
+  readonly label: string;
+  /** Its one glob, matching the configuration file at the workspace root. */
+  readonly glob: string;
+}
+
+/** T7-10(b)'s two code groups (TEST-SPEC T7-10(b)). */
+const T7_10_DISCOVERING_GROUPS: readonly DiscoveringGroup[] = [
+  { label: "a code group globbing *.ts", glob: "*.ts" },
+  {
+    label: "a code group whose glob is xspec.config.ts",
+    glob: CONFIG_IMPORT_CONFIG_PATH,
+  },
+];
+
+/**
+ * The discovered configuration's text after its specifier: T7-9's tail
+ * (`CONFIG_IMPORT_TAIL`) with the code group `app` globbing `glob` between
+ * `specs` and `markdown` (module header).
+ */
+function discoveredTail(glob: string): string {
+  return `
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    ${T7_10_CODE_GROUP}: ["${glob}"]
+  },
+  markdown: { emit: true }
+})
+`;
+}
+
+/** One of T7-10's specifiers (TEST-SPEC T7-10's opening). */
+interface SourceSpecifier {
+  /** The specifier as diagnoses name it, with what it designates. */
+  readonly label: string;
+  /** The double-quoted specifier exactly as it stands in the file. */
+  readonly literal: string;
+  /**
+   * A `.xspec` specifier: the declaration is a spec module import (SPEC 4),
+   * so `defineConfig` is a spec-module binding (14.15) and its call a
+   * value-level use 4.5 does not sanction (14.18).
+   */
+  readonly specModule: boolean;
+}
+
+/** T7-10's five specifiers, one arm each in (a) and in each (b) group. */
+const T7_10_SPECIFIERS: readonly SourceSpecifier[] = [
+  {
+    label:
+      '"./specs/A.xspec" (a spec module import binding defineConfig, ' +
+      "neither the default nor the text export)",
+    literal: '"./specs/A.xspec"',
+    specModule: true,
+  },
+  {
+    label:
+      '"./missing.xspec" (a .xspec specifier designating no discovered ' +
+      "spec source)",
+    literal: '"./missing.xspec"',
+    specModule: true,
+  },
+  {
+    label:
+      '"./specs/A.xspec.ts" (a relative specifier designating a ' +
+      "derived-file path, its file name containing .xspec., 13.4)",
+    literal: '"./specs/A.xspec.ts"',
+    specModule: false,
+  },
+  {
+    label:
+      '"./.xspec/x" (a relative specifier designating a derived-file path, ' +
+      "a path under .xspec/, 13.4)",
+    literal: '"./.xspec/x"',
+    specModule: false,
+  },
+  {
+    label:
+      '"./specs/A.md" (the Markdown emit destination of specs/A.mdx while ' +
+      "emission is enabled, 7.3)",
+    literal: '"./specs/A.md"',
+    specModule: false,
+  },
+];
+
+// Each specifier is one double-quoted literal spelling no escape, and a
+// `.xspec` specifier — its value ending in `.xspec`, SPEC 4's spec module
+// import — exactly where `specModule` says so.
+for (const specifier of T7_10_SPECIFIERS) {
+  const value = specifier.literal.slice(1, -1);
+  if (
+    specifier.literal.length < 2 ||
+    !specifier.literal.startsWith(DOUBLE_QUOTE) ||
+    !specifier.literal.endsWith(DOUBLE_QUOTE) ||
+    value.includes(DOUBLE_QUOTE) ||
+    value.includes(BACKSLASH) ||
+    value.endsWith(".xspec") !== specifier.specModule
+  ) {
+    throw new Error(
+      `T7-10 fixture self-check: the specifier ${specifier.literal} must be ` +
+        "one double-quoted literal spelling no escape, a .xspec specifier " +
+        "exactly where specModule says so (harness bug)",
+    );
+  }
+}
+
+/** The import's one binding, the default export's callee. */
+const DEFINE_CONFIG = "defineConfig";
+
+/** The default export's keywords, before its call's callee. */
+const EXPORT_DEFAULT_PREFIX = "export default ";
+
+/**
+ * A T7-10 configuration over a specifier: its record, and the ranges (b)'s
+ * findings locate (module header), composed from the record's parts.
+ */
+interface SourceConfig {
+  readonly config: StagedTs;
+  /**
+   * The import declaration by its own characters, the import range of
+   * 11.4: the file's first bytes, `import` through the specifier's closing
+   * quote, no terminator spelled (SPEC 14, 1.7).
+   */
+  readonly importRange: SourceRange;
+  /**
+   * `defineConfig`'s spelling at its call, the default export's callee
+   * (SPEC 14: the binding's identifier at the offending use).
+   */
+  readonly callRange: SourceRange;
+}
+
+/**
+ * Compose a configuration — the shared builder's head, `literal`, and
+ * `tail` — as the record `name`, and pin its two ranges, checking at module
+ * load that the text is ASCII (its code units its bytes), that the import
+ * declaration ends at the specifier's closing quote with the line, and that
+ * `defineConfig` is spelled exactly twice: its binding in the declaration,
+ * and its call, the default export's callee, spelled once.
+ */
+function sourceConfig(
+  name: string,
+  literal: string,
+  tail: string,
+): SourceConfig {
+  const declaration = CONFIG_IMPORT_HEAD + literal;
+  const text = declaration + tail;
+  const call = EXPORT_DEFAULT_PREFIX + DEFINE_CONFIG + "(";
+  const callAt = text.indexOf(call);
+  if (
+    Buffer.byteLength(text, "utf8") !== text.length ||
+    !declaration.startsWith("import ") ||
+    !tail.startsWith(LINE_FEED) ||
+    callAt === -1 ||
+    text.lastIndexOf(call) !== callAt ||
+    occurrences(text, DEFINE_CONFIG) !== 2 ||
+    text.indexOf(DEFINE_CONFIG) >= declaration.length
+  ) {
+    throw new Error(
+      `T7-10 fixture self-check: ${name} must be ASCII, its import ` +
+        "declaration ending at the specifier's closing quote with its " +
+        "line, and defineConfig spelled exactly twice — its binding in the " +
+        "declaration and its call, the default export's callee (harness bug)",
+    );
+  }
+  const callStart = callAt + EXPORT_DEFAULT_PREFIX.length;
+  return {
+    config: stagedTs(name, text),
+    importRange: { start: 0, end: declaration.length },
+    callRange: { start: callStart, end: callStart + DEFINE_CONFIG.length },
+  };
+}
+
+/** A T7-10(a) arm: the specifier over T7-9's configuration, no code group. */
+interface UndiscoveredArm {
+  readonly specifier: SourceSpecifier;
+  readonly config: StagedTs;
+}
+
+/** T7-10(a)'s five arms (TEST-SPEC T7-10(a)). */
+const T7_10_A_ARMS: readonly UndiscoveredArm[] = T7_10_SPECIFIERS.map(
+  (specifier) => ({
+    specifier,
+    config: stagedTs(
+      `T7-10 xspec.config.ts ((a) undiscovered, no code group: importing from ${specifier.literal})`,
+      configImportText(specifier.literal),
+    ),
+  }),
+);
+
+/** A T7-10(b) arm: the specifier over the configuration a code group discovers. */
+interface DiscoveredArm {
+  readonly specifier: SourceSpecifier;
+  readonly source: SourceConfig;
+}
+
+/** One code group's (b) stagings: its control and its five arms. */
+interface DiscoveringStaging {
+  readonly group: DiscoveringGroup;
+  /** The control's configuration, importing from `"xspec"`. */
+  readonly control: StagedTs;
+  readonly arms: readonly DiscoveredArm[];
+}
+
+/** T7-10(b)'s stagings, per discovering code group (TEST-SPEC T7-10(b)). */
+const T7_10_B_STAGINGS: readonly DiscoveringStaging[] =
+  T7_10_DISCOVERING_GROUPS.map((group) => ({
+    group,
+    control: sourceConfig(
+      `T7-10 xspec.config.ts (the control, discovered by ${group.label}: importing from ${CONFIG_IMPORT_TWIN_LITERAL})`,
+      CONFIG_IMPORT_TWIN_LITERAL,
+      discoveredTail(group.glob),
+    ).config,
+    arms: T7_10_SPECIFIERS.map((specifier) => ({
+      specifier,
+      source: sourceConfig(
+        `T7-10 xspec.config.ts ((b) discovered by ${group.label}: importing from ${specifier.literal})`,
+        specifier.literal,
+        discoveredTail(group.glob),
+      ),
+    })),
+  }));
+
+/** How many arms T7-10 runs: (a)'s, and each (b) group's control and arms. */
+const T7_10_ARM_COUNT = T7_10_B_STAGINGS.reduce(
+  (count, staging) => count + 1 + staging.arms.length,
+  T7_10_A_ARMS.length,
+);
+
+/** A T7-10 workspace: the arm's configuration beside `specs/A.mdx`. */
+function sourceDecl(config: StagedTs): WorkspaceDecl {
+  return {
+    files: {
+      [CONFIG_IMPORT_CONFIG_PATH]: config,
+      [T7_10_SOURCE_PATH]: T7_10_SOURCE,
+    },
+  };
+}
+
+/** The two validating commands every T7-10 arm runs, each under `--json`. */
+const T7_10_VALIDATING_WORDS: readonly ("build" | "check")[] = [
+  "build",
+  "check",
+];
+
+/** The control's query of the configuration's whole-file location. */
+const CONTROL_QUERY_ARGV: readonly string[] = [
+  "query",
+  "edges",
+  "--from",
+  CONFIG_IMPORT_CONFIG_PATH,
+];
+
+/** A T7-10 command as diagnoses name it, its argv in backticks. */
+function sourceCommandLabel(argv: readonly string[]): string {
+  return "`" + argv.join(" ") + "`";
+}
+
+/** Why each (a) arm is valid (TEST-SPEC T7-10(a); SPEC 7). */
+const UNDISCOVERED_RULE =
+  "no configured group discovers the configuration file, so reading it " +
+  "applies none of the rules 4 and 14.15 set for a TypeScript file's " +
+  "imports, whatever its specifier designates (SPEC 7; TEST-SPEC T7-10(a))";
+
+/** Why each (b) arm reports its findings, the configuration staying valid. */
+const DISCOVERED_RULE =
+  "a code group discovers the configuration file, so xspec analyzes it as " +
+  "it does every source it discovers, its import declaration included, " +
+  "while the configuration itself stays valid (SPEC 7, 4, 14.15; " +
+  "TEST-SPEC T7-10(b))";
+
+/** Why each (b) group's control is clean (TEST-SPEC T7-10(b)). */
+const CONTROL_RULE =
+  'importing from "xspec" — a bare name, no .xspec specifier and no ' +
+  "relative path — the discovered configuration's import breaks none of " +
+  "4's rules, so the workspace is clean (SPEC 7, 4; TEST-SPEC T7-10(b)'s " +
+  "control)";
+
+/**
+ * One (a) arm (module header): a fresh workspace staging the arm's
+ * configuration; `build` and `check`, each under `--json`, exit 0
+ * finding-free.
+ */
+async function runUndiscoveredArm(
+  product: ProductBinding,
+  arm: UndiscoveredArm,
+): Promise<void> {
+  const workspace = await TestWorkspace.create(sourceDecl(arm.config));
+  try {
+    for (const word of T7_10_VALIDATING_WORDS) {
+      const result = await runProduct(product, {
+        cwd: workspace.root,
+        argv: [word, "--json"],
+      });
+      expectFindingFree(
+        result,
+        "T7-10(a), undiscovered (no code group), importing from " +
+          `${arm.specifier.label}: ${sourceCommandLabel([word, "--json"])}`,
+        UNDISCOVERED_RULE,
+      );
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * One (b) group's control (module header): a fresh workspace whose
+ * discovered configuration imports from `"xspec"`; `build` and `check`, each
+ * under `--json`, exit 0 finding-free, and `query edges --from
+ * xspec.config.ts` exits 0 with one JSON document.
+ */
+async function runDiscoveredControl(
+  product: ProductBinding,
+  staging: DiscoveringStaging,
+): Promise<void> {
+  const workspace = await TestWorkspace.create(sourceDecl(staging.control));
+  const label =
+    `T7-10(b)'s control, discovered by ${staging.group.label}, importing ` +
+    `from ${CONFIG_IMPORT_TWIN_LITERAL}`;
+  try {
+    for (const word of T7_10_VALIDATING_WORDS) {
+      const result = await runProduct(product, {
+        cwd: workspace.root,
+        argv: [word, "--json"],
+      });
+      expectFindingFree(
+        result,
+        `${label}: ${sourceCommandLabel([word, "--json"])}`,
+        CONTROL_RULE,
+      );
+    }
+    const context = `${label}: ${sourceCommandLabel(CONTROL_QUERY_ARGV)}`;
+    const result = await runProduct(product, {
+      cwd: workspace.root,
+      argv: CONTROL_QUERY_ARGV,
+    });
+    assertExitCode(
+      result,
+      0,
+      `${context} — the discovered configuration's whole-file location ` +
+        "exists, a code source's known graph node, so the query answers, " +
+        "exit 0 (SPEC 11.1, 4.6, 7; TEST-SPEC T7-10(b), T7-3's idiom; H-5)",
+    );
+    parseJsonStdout(result, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** A finding as (b) pins it: its stable code, locations, and concerned path. */
+function pinnedFinding(finding: Finding): unknown {
+  return {
+    code: finding.code,
+    locations: finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    path: finding.path,
+  };
+}
+
+/** What (b) pins for a finding locating `range` in the configuration file. */
+function locatedInConfig(code: string, range: SourceRange): unknown {
+  return {
+    code,
+    locations: [
+      {
+        file: CONFIG_IMPORT_CONFIG_PATH,
+        range: { start: range.start, end: range.end },
+      },
+    ],
+    path: null,
+  };
+}
+
+/**
+ * A (b) arm's `build` or `check` findings (module header): 14.15 reported,
+ * and 14.18 in a `.xspec` arm, nothing else; every 14.15 finding locating
+ * the import declaration by the import range of 11.4 and every 14.18
+ * finding `defineConfig` at its call, each `path` `null`.
+ */
+function assertSourceFindings(
+  findings: readonly Finding[],
+  arm: DiscoveredArm,
+  context: string,
+): void {
+  const reported =
+    "the report's findings (code, locations, path): " +
+    JSON.stringify(findings.map(pinnedFinding));
+  const { specModule } = arm.specifier;
+  const imports = findings.filter((finding) => finding.condition === "14.15");
+  const calls = findings.filter((finding) => finding.condition === "14.18");
+  const others =
+    findings.length - imports.length - (specModule ? calls.length : 0);
+  if (others > 0) {
+    fail(
+      `${context}: no other finding is reported — ` +
+        (specModule ? "14.15 and 14.18" : "14.15") +
+        " alone, never 14.14 (the configuration stays valid) nor a " +
+        "condition of the workspace's other files, which are valid " +
+        `(${DISCOVERED_RULE}); ${reported}`,
+    );
+  }
+  if (imports.length === 0) {
+    fail(
+      `${context}: the report carries 14.15 (invalid-import), the ` +
+        "configuration's import declaration analyzed as a code source's " +
+        `(${DISCOVERED_RULE}); ${reported}`,
+    );
+  }
+  if (specModule && calls.length === 0) {
+    fail(
+      `${context}: the report carries 14.18 (unsupported-node-usage) — ` +
+        "the declaration is a spec module import (SPEC 4), so defineConfig " +
+        "is a spec-module binding and its call a value-level use 4.5 does " +
+        `not sanction (SPEC 4.5, 14; TEST-SPEC T7-10(b)); ${reported}`,
+    );
+  }
+  const { importRange, callRange } = arm.source;
+  for (const finding of imports) {
+    assertSameJson(
+      pinnedFinding(finding),
+      locatedInConfig("invalid-import", importRange),
+      `${context}: each 14.15 finding carries the stable code ` +
+        `"invalid-import" and locates the configuration's import ` +
+        "declaration by its own characters, the import range of 11.4 — " +
+        `[${String(importRange.start)}, ${String(importRange.end)}) of ` +
+        `${CONFIG_IMPORT_CONFIG_PATH}, ` +
+        "`import` through the specifier's " +
+        "closing quote, no terminator spelled — its path null, a located " +
+        "condition (SPEC 14, 1.7, 11.4, 12.7; TEST-SPEC T7-10(b))",
+    );
+  }
+  if (!specModule) return;
+  for (const finding of calls) {
+    assertSameJson(
+      pinnedFinding(finding),
+      locatedInConfig("unsupported-node-usage", callRange),
+      `${context}: each 14.18 finding carries the stable code ` +
+        `"unsupported-node-usage" and locates defineConfig's spelling at ` +
+        "its call, the default export's callee — " +
+        `[${String(callRange.start)}, ${String(callRange.end)}) of ` +
+        `${CONFIG_IMPORT_CONFIG_PATH} — its path null, a located condition ` +
+        "(SPEC 14, 1.7, 12.7; TEST-SPEC T7-10(b))",
+    );
+  }
+}
+
+/**
+ * One (b) arm (module header): a fresh workspace staging the arm's
+ * discovered configuration; `build` and `check`, each under `--json`, exit 1
+ * with the arm's findings; then `inventory --json` exits 0 with no finding,
+ * listing `xspec.config.ts` among its sources in the discovering group.
+ */
+async function runDiscoveredArm(
+  product: ProductBinding,
+  staging: DiscoveringStaging,
+  arm: DiscoveredArm,
+): Promise<void> {
+  const workspace = await TestWorkspace.create(sourceDecl(arm.source.config));
+  const label =
+    `T7-10(b), discovered by ${staging.group.label}, importing from ` +
+    arm.specifier.label;
+  const conditions = arm.specifier.specModule ? "14.15 and 14.18" : "14.15";
+  try {
+    for (const word of T7_10_VALIDATING_WORDS) {
+      const context = `${label}: ${sourceCommandLabel([word, "--json"])}`;
+      const result = await runProduct(product, {
+        cwd: workspace.root,
+        argv: [word, "--json"],
+      });
+      assertExitCode(
+        result,
+        1,
+        `${context} — the discovered configuration carries ${conditions}, ` +
+          `findings: exit 1, never 14.14 or exit 2 (${DISCOVERED_RULE}; ` +
+          "SPEC 12.0; H-5)",
+      );
+      assertSourceFindings(
+        decodeFindingsReport(parseJsonStdout(result, context), context)
+          .findings,
+        arm,
+        context,
+      );
+    }
+    const context = `${label}: ${sourceCommandLabel(["inventory", "--json"])}`;
+    const result = await runProduct(product, {
+      cwd: workspace.root,
+      argv: ["inventory", "--json"],
+    });
+    assertExitCode(
+      result,
+      0,
+      `${context} — the configuration stays valid, so the inventory ` +
+        `answers, exit 0 (${DISCOVERED_RULE}; SPEC 11.6; H-5)`,
+    );
+    const inventory = decodeInventoryDocument(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertSameJson(
+      inventory.findings,
+      [],
+      `${context}: the answer carries no finding (SPEC 11.6, 12.7; ` +
+        "TEST-SPEC T7-10(b))",
+    );
+    assertSameJson(
+      inventory.sources
+        .filter((entry) => entry.path === CONFIG_IMPORT_CONFIG_PATH)
+        .map((entry) => ({
+          path: entry.path,
+          groups: entry.groups.map((group) => ({
+            name: group.name,
+            kind: group.kind,
+          })),
+        })),
+      [
+        {
+          path: CONFIG_IMPORT_CONFIG_PATH,
+          groups: [{ name: T7_10_CODE_GROUP, kind: "code" }],
+        },
+      ],
+      `${context}: ${CONFIG_IMPORT_CONFIG_PATH} is listed once among the ` +
+        `sources, in the code group ${T7_10_CODE_GROUP} alone — the one ` +
+        `group whose glob, ${JSON.stringify(staging.group.glob)}, matches ` +
+        "it (SPEC 11.6, 7.2, 7; TEST-SPEC T7-10(b))",
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 
 const T7_9 = defineProductTest({
@@ -1997,5 +2627,57 @@ const T7_9 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §7 configuration import: T7-9. */
-export const section7ImportTests: readonly ProductTestEntry[] = [T7_9];
+const T7_10 = defineProductTest({
+  id: "T7-10",
+  title:
+    "the configuration file as a source (TEST-SPEC T7-10 (a), (b)): on a " +
+    "valid workspace — one spec group globbing specs/*.mdx over " +
+    "specs/A.mdx, Markdown emitted next to sources — the configuration " +
+    'importing, one arm each, from "./specs/A.xspec" (a spec module ' +
+    'import binding defineConfig), "./missing.xspec" (designating no ' +
+    'discovered spec source), "./specs/A.xspec.ts" and "./.xspec/x" ' +
+    "(relative specifiers designating derived-file paths), and " +
+    '"./specs/A.md" (the emit destination of specs/A.mdx): (a) ' +
+    "undiscovered, no code group matching it, each arm is valid — " +
+    "`build` and `check`, each under `--json`, exit 0 finding-free; (b) " +
+    "discovered, by a code group globbing *.ts and, separately, by one " +
+    "whose glob is xspec.config.ts — each group's control, importing " +
+    'from "xspec", clean (`build` and `check` exit 0 finding-free) with ' +
+    "its whole-file location existing (`query edges --from " +
+    "xspec.config.ts`, exit 0) — each arm's `build` and `check`, each " +
+    "under `--json`, exit 1, never 2, reporting 14.15 (invalid-import), " +
+    "each such finding locating the configuration's import declaration " +
+    "by the import range of 11.4, its path null, and, in the two .xspec " +
+    "arms, 14.18 (unsupported-node-usage) locating defineConfig at its " +
+    "call, no other finding, and `inventory --json` exits 0 with no " +
+    "finding, listing xspec.config.ts among its sources in that code " +
+    "group alone (SPEC 7, 1.7, 4, 4.5, 7.2, 7.3, 11.1, 11.4, 11.6, 12.7, " +
+    "13.4, 14)",
+  run: async (product) => {
+    const failures: string[] = [];
+    for (const arm of T7_10_A_ARMS) {
+      await collectArmFailure(failures, () => runUndiscoveredArm(product, arm));
+    }
+    for (const staging of T7_10_B_STAGINGS) {
+      await collectArmFailure(failures, () =>
+        runDiscoveredControl(product, staging),
+      );
+      for (const arm of staging.arms) {
+        await collectArmFailure(failures, () =>
+          runDiscoveredArm(product, staging, arm),
+        );
+      }
+    }
+    if (failures.length > 0) {
+      fail(
+        `T7-10: ${String(failures.length)} of ${String(T7_10_ARM_COUNT)} ` +
+          "arms failed, each diagnosed below:" +
+          LINE_FEED +
+          failures.join(LINE_FEED),
+      );
+    }
+  },
+});
+
+/** TEST-SPEC §7 configuration import: T7-9 and T7-10. */
+export const section7ImportTests: readonly ProductTestEntry[] = [T7_9, T7_10];

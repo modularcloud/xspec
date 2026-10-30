@@ -563,6 +563,32 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // the package's manifest gives, read as T7.6-4(a) reads it), its
   // representative commands' outcomes T7-8's.
   "T7-9": ["7", "2.4", "7.6", "12.0", "12.7", "14"],
+  // T7-10: (a)'s clean outcomes and (b)'s findings are 7's (the rules of 4
+  // and 14.15 reach the configuration only where a configured group — here
+  // a code group, 7.2 — discovers it, the configuration staying valid),
+  // 4's (a spec module import's binding and target, and a relative
+  // specifier designating a derived-file path: a `.xspec.` name or a path
+  // under `.xspec/`, 13.4, or the Markdown emit destination emission
+  // enables, 7.3), and 4.5's (the call, a value-level use it does not
+  // sanction, 14.18); each finding located byte-exactly (1.7) — by the
+  // import range of 11.4, or at the call — `path` null (12.7); `inventory`
+  // listing the configuration among its sources in that code group
+  // (11.6); the control's whole-file location answering `query edges
+  // --from` (11.1).
+  "T7-10": [
+    "7",
+    "1.7",
+    "4",
+    "4.5",
+    "7.2",
+    "7.3",
+    "11.1",
+    "11.4",
+    "11.6",
+    "12.7",
+    "13.4",
+    "14",
+  ],
   // T7.1-1: its wrong-case extension arm the byte-wise, case-sensitive
   // extension test (12.0: no case folding), and `inventory`'s `derived`
   // entry for the file without `.mdx` (11.6), `module` and `markdown` null
