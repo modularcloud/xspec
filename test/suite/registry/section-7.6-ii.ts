@@ -1,20 +1,21 @@
-// TEST-SPEC §7.6 (the `defineConfig` module), second part — the placements
-// and the runtime: T7.6-4, placements; T7.6-6, runtime exports and
-// identity; and T7.6-7, runtime: no effect. T7.6-1, T7.6-2, and T7.6-3, the
-// type contract, are section-7.6.ts's business; T7.6-5, P-17, and P-18 are
-// not registered yet.
+// TEST-SPEC §7.6 (the `defineConfig` module), second part — the placements,
+// Reach's open cases, and the runtime: T7.6-4, placements; T7.6-5, Reach's
+// open cases; T7.6-6, runtime exports and identity; and T7.6-7, runtime: no
+// effect. T7.6-1, T7.6-2, and T7.6-3, the type contract, are
+// section-7.6.ts's business; P-17 and P-18 are not registered yet.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never
 // invokes the `xspec` executable: it places the product's package
 // directory, the binding's `packageDir`, in fresh stagings — under the
-// canonical placement, or, for T7.6-4, under each of its placements
-// (helpers/module-channel.ts) — and loads the `defineConfig` module there
-// on the Node.js releases E-1 provisions (helpers/node-releases.ts) through
-// the module channel's release driver (helpers/module-channel-node.ts and
-// its bootstrap), T7.6-4 also type-checking covered files there through the
-// TypeScript driver (helpers/module-channel-ts.ts), as T7.6-1–3's bodies
-// do (T7.6-4 at the end of this header). The driver runs each
+// canonical placement, under each of T7.6-4's placements, or beside each
+// of T7.6-5's manifests (helpers/module-channel.ts) — and loads the
+// `defineConfig` module there on the Node.js releases E-1 provisions
+// (helpers/node-releases.ts) through the module channel's release driver
+// (helpers/module-channel-node.ts and its bootstrap), T7.6-4 and T7.6-5
+// also type-checking covered files there through the TypeScript driver
+// (helpers/module-channel-ts.ts), as T7.6-1–3's bodies do (T7.6-4 and
+// T7.6-5 at the end of this header). The driver runs each
 // release under T7.6-6's run conditions — no option, and an environment of
 // exactly a fresh `HOME` and `TMPDIR` and the harness's `PATH`, so no
 // `NODE_OPTIONS` and no `NODE_PATH`, and with them no user condition and no
@@ -236,7 +237,7 @@
 //   release asked, and on none where every release does. On every other
 //   runtime half the placement itself confirms that no release resolves N
 //   to a built-in module.
-// - Layouts (`T764_LAYOUTS`), staging-relative: the canonical one, the
+// - Layouts (`PLACEMENT_LAYOUTS`), staging-relative: the canonical one, the
 //   importing files and the holding directory both `project/`; for (d)'s
 //   first placement and (e)'s second, the files in `ancestor/project/` and
 //   the placement in `ancestor/`; for (d)'s second, the files in
@@ -260,11 +261,12 @@
 //   an unmet condition is a harness error.
 // - S-9: the files beside each fixed N — the canonical candidates and every
 //   fixed name — are staged-source records made at module load, as plain
-//   TypeScript and as TSX of the same bytes. (a)'s files, whose N only the
-//   package's manifest gives, are composed at run time by the same
-//   composition (a generated form, the records its vector set) and judged
-//   well-formed under both grammars before anything is staged, a failure a
-//   harness error.
+//   TypeScript and as TSX of the same bytes, those beside the canonical
+//   candidates named for T7.6-5 too, which stages them (`T7.6-4/T7.6-5 …`).
+//   (a)'s files, whose N only the package's manifest gives, are composed at
+//   run time by the same composition (a generated form, the records its
+//   vector set) and judged well-formed under both grammars before anything
+//   is staged, a failure a harness error.
 // - The body stops at its first failure, diagnosed, naming the placement,
 //   N, and the placements that held before it: in a type-checking half, the
 //   first covered setup where any of the three runs fails, every failing
@@ -273,6 +275,78 @@
 //   runs are made, the problems they found (T7.6-6's reading). So S-7's
 //   stub package ends the body at (a)'s first setup, and a missing package
 //   directory before anything is staged.
+//
+// T7.6-5 (SPEC 7.6 Reach: its four conditions rule out only what those
+// tools do before they reach the installed package; Covered setups: a
+// project is an ES-module one where the package.json nearest the
+// configuration file holds `"type": "module"`, and a CommonJS one
+// otherwise): stagings meeting every condition of Reach while leaving open
+// what none of them bars, each run as T7.6-4's placements are — standing in
+// for the canonical one in a run of T7.6-1, of T7.6-2(a) with T7.6-3's
+// unknown-top-level-key arm paired to it in every covered setup, and of
+// T7.6-6's exports and identity assertions along every route on every
+// release E-1 provisions, and faring as the canonical placement does:
+// - (a) an ancestor package.json whose `name`, `"unrelated"`, TypeScript
+//   and Node.js read as neither N nor a leading part of it;
+// - (b) an ES-module project beneath an ancestor package.json holding
+//   `"type": "commonjs"`, and a CommonJS project — its nearest package.json
+//   without `type` — beneath an ancestor holding `"type": "module"`;
+// - (c) a nearest package.json holding `"type": "commonjs"`.
+//
+// Conservative operationalizations of T7.6-5 (noted per H-4):
+// - One registered test, its body T7.6-4's (`runPlacements`) over a list of
+//   its own (`T765_STAGINGS`), each staging a record of T7.6-4's
+//   placements' shape run through the same halves, its diagnoses naming
+//   T7.6-5 and its rule. Every staging keeps the canonical placement — a
+//   copy at node_modules/N in the importing files' own directory, N the
+//   canonical name, nothing else installed (confirmed `alone`) — and varies
+//   the manifests alone, so that what must fare as the canonical placement
+//   does is exactly what the staging leaves open.
+// - Each staging is one project, staged afresh for each half: the
+//   type-checking half judges its files in every covered setup of that
+//   project's kind (59 for an ES-module project, 57 for a CommonJS one);
+//   the runtime half makes T7.6-6's 24 runs from that project's directory.
+//   The importing modules' kinds are fixed by their extensions, so the
+//   project kind bears on no route, while each manifest lies where Node.js
+//   reads it in resolving the specifier: its self-reference lookup reads
+//   the manifest nearest the importing module.
+// - (a) is three stagings, its ancestor manifest `ancestor/package.json`,
+//   `{"name": "unrelated"}`, above the files' directory `ancestor/project/`:
+//   an ES-module project and a CommonJS project, each with its own manifest
+//   nearer, and a CommonJS project whose own directory holds none, so that
+//   the manifest naming `unrelated` is the nearest — the one TypeScript's
+//   and Node.js's self-reference lookups read. A project with no
+//   package.json at all cannot lie beneath an ancestor manifest; its
+//   covered setups are a CommonJS project's, and (a)'s third staging, a
+//   CommonJS project whose nearest manifest holds no `type`, is judged in
+//   those, so that (a), like each of T7.6-4's placements, judges 173
+//   programs.
+// - (b) is two stagings, the files in `ancestor/project/` beneath
+//   `ancestor/package.json`: the ES-module project's `{"type": "module"}`
+//   beneath `{"type": "commonjs"}`, and the CommonJS project's `{}` beneath
+//   `{"type": "module"}`.
+// - (c) is one staging, the files in `project/` as the canonical placement
+//   has them, their manifest `{"type": "commonjs"}`, none above it in the
+//   staging: a CommonJS project as SPEC 7.6 reads it, judged in the
+//   CommonJS project's covered setups — whose labels name the CommonJS
+//   project whose package.json holds no type, as its diagnoses say — Reach
+//   confirming the nearest manifest's `type` as `"commonjs"`
+//   (helpers/module-channel.ts `ReachStaging.nearestType`).
+// - Every manifest lies inside the staging, below its root, whose own
+//   ancestors H-1 verifies hold none. Each staging writes its manifests
+//   itself and reads them back before any tool runs: from the files'
+//   directory up to the staging root, each directory holds exactly the
+//   manifest the staging declares there, read strictly, or none where it
+//   declares none (`confirmManifests`), a deviation a harness error. Reach
+//   is verified for each written file and before each run, the project
+//   kind, its nearest manifest's `type` among it, and nothing else
+//   installed confirmed; a module-load check (`checkT765Stagings`) holds
+//   the list to T7.6-5's.
+// - The files are T7.6-4's beside the canonical N, their records named for
+//   both tests. The body stops at its first failure, as T7.6-4's does,
+//   naming the staging and those that held before it, so S-7's stub
+//   package ends it at (a)'s first staging's first setup, and a missing
+//   package directory before anything is staged.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -293,6 +367,7 @@ import {
   TYPE_CHECKING_ARM,
 } from "../../helpers/module-channel.js";
 import type {
+  CommonJsTypeMember,
   ModuleArm,
   PackageDirectory,
   Placement,
@@ -303,6 +378,7 @@ import {
   assertShapeViolation,
   assertTypeChecks,
   COVERED_SETUP_COUNT,
+  coveredSetupsOf,
   stageCoveredFiles,
 } from "../../helpers/module-channel-ts.js";
 import {
@@ -509,6 +585,11 @@ interface RunsPlace {
   readonly importingDir: string;
   /** The project kind staged there, confirmed by Reach before each run. */
   readonly project: ProjectKind;
+  /**
+   * A CommonJS project's nearest manifest's `type`, where it holds one
+   * (T7.6-5(c)), confirmed likewise.
+   */
+  readonly nearestType?: CommonJsTypeMember;
   /** Whether nothing but the placement is installed, confirmed likewise. */
   readonly alone: boolean;
 }
@@ -539,6 +620,9 @@ async function runRoutes(
         release,
         importingDir: place.importingDir,
         project: place.project,
+        ...(place.nearestType === undefined
+          ? {}
+          : { nearestType: place.nearestType }),
         alone: place.alone,
         effects: test.effects,
         context: test.context,
@@ -738,31 +822,52 @@ const T7_6_7 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T7.6-4: placements — what each stages (module header)
+// T7.6-4 and T7.6-5: what a placement or staging stages (module header)
 // ---------------------------------------------------------------------------
 
-/** Leads every diagnosis of T7.6-4. */
-const T764_CONTEXT = "T7.6-4 (placements)";
+/**
+ * A test whose stagings each stand in for the canonical placement in the
+ * runs T7.6-4 names (module header) — T7.6-4, its placements, and T7.6-5,
+ * Reach's open cases, run as those placements are — and how its diagnoses
+ * word them.
+ */
+interface StandInTest {
+  /** Its TEST-SPEC ID. */
+  readonly id: string;
+  /** Leads every diagnosis. */
+  readonly context: string;
+  /** TEST-SPEC's rule, closing its failures. */
+  readonly rule: string;
+  /** What one of its stagings is called in a diagnosis. */
+  readonly unit: "placement" | "staging";
+}
 
-/** TEST-SPEC T7.6-4's rule, closing its failures. */
-const T764_RULE =
-  "(TEST-SPEC T7.6-4: each placement stands in for the canonical one in a " +
-  "run of T7.6-1, of T7.6-2(a) with T7.6-3's unknown-top-level-key arm " +
-  "paired to it in every covered setup, and of T7.6-6's exports and " +
-  "identity assertions along every route on every release E-1 provisions, " +
-  "and fares as the canonical placement does; SPEC 7.6 Package and " +
-  "installation — a copy, a symbolic-link install, and an aliased install " +
-  "are alike — and Reach)";
+/** T7.6-4's words (module header). */
+const T764: StandInTest = {
+  id: "T7.6-4",
+  context: "T7.6-4 (placements)",
+  rule:
+    "(TEST-SPEC T7.6-4: each placement stands in for the canonical one in a " +
+    "run of T7.6-1, of T7.6-2(a) with T7.6-3's unknown-top-level-key arm " +
+    "paired to it in every covered setup, and of T7.6-6's exports and " +
+    "identity assertions along every route on every release E-1 provisions, " +
+    "and fares as the canonical placement does; SPEC 7.6 Package and " +
+    "installation — a copy, a symbolic-link install, and an aliased install " +
+    "are alike — and Reach)",
+  unit: "placement",
+};
 
 /**
  * Where a placement's importing files lie and where it is placed, each
  * staging-relative (module header): the importing file's own directory as
- * the holding directory, as the canonical placement has it; a strict
- * ancestor of it; or a strict ancestor of its physical path alone, the
- * directory also reachable through a symbolic link elsewhere in the
- * staging, on whose path that ancestor does not lie.
+ * the holding directory, as the canonical placement has it, in `project/`
+ * or, beneath a directory of the staging holding T7.6-5's ancestor
+ * manifests, in `ancestor/project/`; a strict ancestor of it; or a strict
+ * ancestor of its physical path alone, the directory also reachable
+ * through a symbolic link elsewhere in the staging, on whose path that
+ * ancestor does not lie.
  */
-type T764Layout = "own" | "ancestor" | "physical ancestor";
+type PlacementLayout = "own" | "beneath" | "ancestor" | "physical ancestor";
 
 interface LayoutShape {
   /** The importing files' directory: the project's, along its physical path. */
@@ -772,9 +877,16 @@ interface LayoutShape {
   readonly link?: { readonly at: string; readonly to: string };
 }
 
-const T764_LAYOUTS: Readonly<Record<T764Layout, LayoutShape>> = {
+/** The directory T7.6-5's ancestor manifests lie in, staging-relative. */
+const ANCESTOR_DIR = "ancestor";
+
+/** The importing files' directory beneath it. */
+const NESTED_PROJECT_DIR = `${ANCESTOR_DIR}/${PROJECT_DIR}`;
+
+const PLACEMENT_LAYOUTS: Readonly<Record<PlacementLayout, LayoutShape>> = {
   own: { importingDir: PROJECT_DIR, holdingDir: PROJECT_DIR },
-  ancestor: { importingDir: `ancestor/${PROJECT_DIR}`, holdingDir: "ancestor" },
+  beneath: { importingDir: NESTED_PROJECT_DIR, holdingDir: NESTED_PROJECT_DIR },
+  ancestor: { importingDir: NESTED_PROJECT_DIR, holdingDir: ANCESTOR_DIR },
   "physical ancestor": {
     importingDir: `physical/${PROJECT_DIR}`,
     holdingDir: "physical",
@@ -794,28 +906,96 @@ type OtherPackage =
  * A placement's N: the name the package's manifest gives ((a)), the
  * canonical N, or a name fixed here.
  */
-type T764Name =
+type PlacementName =
   | { readonly kind: "manifest" }
   | { readonly kind: "canonical" }
   | { readonly kind: "fixed"; readonly name: string };
 
-/** One of T7.6-4's placements (module header). */
-interface T764Placement {
+/**
+ * One manifest a T7.6-5 staging writes (module header): its directory,
+ * staging-relative — the importing files' own or one of its ancestors
+ * below the staging root — and the members its package.json holds.
+ */
+interface StagedManifest {
+  readonly dir: string;
+  readonly members: Readonly<Record<string, string>>;
+}
+
+/**
+ * The project a half stages its importing files' directory as (module
+ * header): a project kind as `ModuleStaging.stageProject` stages it
+ * (T7.6-4's), or, where `manifests` is given (T7.6-5's), exactly those
+ * manifests from that directory up to the staging root; and what Reach
+ * confirms — the project kind, in whose covered setups the files are
+ * judged, and a CommonJS project's nearest `type` where it holds one.
+ */
+interface ProjectStaging {
+  readonly project: ProjectKind;
+  readonly nearestType?: CommonJsTypeMember;
+  readonly manifests?: readonly StagedManifest[];
+}
+
+/** A project kind as `stageProject` stages it (T7.6-4's projects). */
+function projectOfKind(kind: ProjectKind): ProjectStaging {
+  return { project: kind };
+}
+
+/**
+ * How a diagnosis names a staged project (module header): for a
+ * type-checking half (`setups`), with the covered setups a project whose
+ * nearest manifest holds a type is judged in.
+ */
+function describeProject(staged: ProjectStaging, setups: boolean): string {
+  if (staged.manifests === undefined) return `the ${staged.project} project`;
+  const kind =
+    staged.project === "es-module"
+      ? "an ES-module project"
+      : "a CommonJS project";
+  const manifests = staged.manifests
+    .map(
+      (manifest) =>
+        `${manifest.dir}/package.json holding ${JSON.stringify(manifest.members)}`,
+    )
+    .join(" and ");
+  const judged =
+    !setups || staged.nearestType === undefined
+      ? ""
+      : ", judged in the CommonJS project's covered setups, each named " +
+        "below as that project's, whose package.json holds no type: SPEC " +
+        `7.6 reads the type ${JSON.stringify(staged.nearestType)} as it ` +
+        "reads none";
+  return `${kind}, its manifests ${manifests}${judged}`;
+}
+
+/** One of T7.6-4's placements or T7.6-5's stagings (module header). */
+interface PlacementSpec {
   /** The arm as TEST-SPEC letters it, with an ordinal where it holds several. */
   readonly arm: string;
   /** What the placement stages, in words. */
   readonly what: string;
-  readonly name: T764Name;
+  readonly name: PlacementName;
   readonly form: PlacementForm;
-  readonly layout: T764Layout;
+  readonly layout: PlacementLayout;
   /** Other packages installed beside the placement, in its holding directory. */
   readonly beside: readonly OtherPackage[];
   /** Other packages installed in the importing files' own directory. */
   readonly inImportingDir: readonly OtherPackage[];
   /** Whether nothing but the placement is installed (Reach's `alone`). */
   readonly alone: boolean;
-  /** Whether it has a runtime half: every placement but (f)'s. */
+  /** Whether it has a runtime half: every placement but T7.6-4(f)'s. */
   readonly runtime: boolean;
+  /** The projects its type-checking half stages, a staging each. */
+  readonly projects: readonly ProjectStaging[];
+  /** The project its runtime half stages. */
+  readonly runtimeProject: ProjectStaging;
+}
+
+/** The covered setups a placement's type-checking half judges, all told. */
+function setupCount(spec: PlacementSpec): number {
+  return spec.projects.reduce(
+    (sum, staged) => sum + coveredSetupsOf(staged.project).length,
+    0,
+  );
 }
 
 /** (c)'s names across 7.6's grammar (module header). */
@@ -841,12 +1021,16 @@ const UNRELATED_PACKAGE = "unrelated-package";
 /** (f)'s names: the releases resolve each to a built-in module. */
 const BUILT_IN_NAMES: readonly string[] = ["fs", "path"];
 
-/** A placement of the canonical layout, form, and N but for `overrides`. */
+/**
+ * A placement of the canonical layout, form, and N but for `overrides`, its
+ * type-checking half staging each project kind and its runtime half a
+ * CommonJS project, each as `stageProject` stages it, unless overridden.
+ */
 function placementOf(
   arm: string,
   what: string,
-  overrides: Partial<Omit<T764Placement, "arm" | "what">>,
-): T764Placement {
+  overrides: Partial<Omit<PlacementSpec, "arm" | "what">>,
+): PlacementSpec {
   return {
     arm,
     what,
@@ -857,12 +1041,14 @@ function placementOf(
     inImportingDir: [],
     alone: true,
     runtime: true,
+    projects: PROJECT_KINDS.map(projectOfKind),
+    runtimeProject: projectOfKind(PROJECT_KIND),
     ...overrides,
   };
 }
 
 /** T7.6-4's placements, in TEST-SPEC's order (module header). */
-const T764_PLACEMENTS: readonly T764Placement[] = [
+const T764_PLACEMENTS: readonly PlacementSpec[] = [
   placementOf(
     "(a)",
     "a copy under the name the package's manifest gives, the non-aliased " +
@@ -959,9 +1145,10 @@ function cutAtLastSegmentDot(name: string): string {
 /**
  * Hold T7.6-4's placements to its list (module header): its arms' counts,
  * each fixed N a name of 7.6's grammar outside its exclusions with the
- * feature its arm names, the runtime halves, and `alone` exactly where
- * nothing else is installed. A deviation is a harness defect, thrown at
- * module load.
+ * feature its arm names, the runtime halves, `alone` exactly where nothing
+ * else is installed, and each placement's projects the three kinds as
+ * `stageProject` stages them, all 173 covered setups, its runtime project
+ * a CommonJS one. A deviation is a harness defect, thrown at module load.
  */
 function checkT764Placements(): void {
   const problems: string[] = [];
@@ -981,6 +1168,30 @@ function checkT764Placements(): void {
         (placement.beside.length === 0 &&
           placement.inImportingDir.length === 0),
       `${placement.arm} is declared alone exactly where it installs nothing else`,
+    );
+    need(
+      placement.projects.length === PROJECT_KINDS.length &&
+        placement.projects.every(
+          (staged, index) =>
+            staged.project === PROJECT_KINDS[index] &&
+            staged.manifests === undefined &&
+            staged.nearestType === undefined,
+        ) &&
+        setupCount(placement) === COVERED_SETUP_COUNT,
+      `${placement.arm}'s type-checking half stages each project kind as ` +
+        `stageProject stages it, in all ${String(COVERED_SETUP_COUNT)} ` +
+        "covered setups",
+    );
+    need(
+      placement.runtimeProject.project === PROJECT_KIND &&
+        placement.runtimeProject.manifests === undefined &&
+        placement.runtimeProject.nearestType === undefined,
+      `${placement.arm}'s runtime half stages a CommonJS project as ` +
+        "stageProject stages it, as T7.6-6's runs do",
+    );
+    need(
+      placement.layout !== "beneath",
+      `${placement.arm}'s layout is one of T7.6-4's`,
     );
     if (placement.name.kind !== "fixed") continue;
     const { name } = placement.name;
@@ -1041,6 +1252,276 @@ function checkT764Placements(): void {
 checkT764Placements();
 
 // ---------------------------------------------------------------------------
+// T7.6-5: Reach's open cases — what each stages (module header)
+// ---------------------------------------------------------------------------
+
+/** T7.6-5's words (module header). */
+const T765: StandInTest = {
+  id: "T7.6-5",
+  context: "T7.6-5 (Reach's open cases)",
+  rule:
+    "(TEST-SPEC T7.6-5: stagings meeting every condition of Reach while " +
+    "leaving open what none of them bars — (a) an ancestor package.json " +
+    'whose name, "unrelated", TypeScript and Node.js read as neither N nor ' +
+    "a leading part of it; (b) an ES-module project beneath an ancestor " +
+    'package.json holding "type": "commonjs", and a CommonJS project, its ' +
+    "nearest package.json without type, beneath an ancestor holding " +
+    '"type": "module"; and (c) a nearest package.json holding "type": ' +
+    `"commonjs" — each run as T7.6-4's placements are, standing in for the ` +
+    "canonical one in a run of T7.6-1, of T7.6-2(a) with T7.6-3's " +
+    "unknown-top-level-key arm paired to it in every covered setup, and of " +
+    "T7.6-6's exports and identity assertions along every route on every " +
+    "release E-1 provisions, and faring as the canonical placement does; " +
+    "SPEC 7.6 Reach, Covered setups)",
+  unit: "staging",
+};
+
+/** (a)'s ancestor manifest's name: read as neither N nor a leading part of it. */
+const UNRELATED_NAME: string = "unrelated";
+
+/** A manifest at `dir`, staging-relative, holding `members`. */
+function manifestAt(
+  dir: string,
+  members: Readonly<Record<string, string>>,
+): StagedManifest {
+  return { dir, members };
+}
+
+/** (a)'s ancestor manifest, above the files' directory `ancestor/project/`. */
+const UNRELATED_ANCESTOR = manifestAt(ANCESTOR_DIR, { name: UNRELATED_NAME });
+
+/** An ES-module project's own manifest beneath an ancestor's. */
+const NESTED_ES_MODULE = manifestAt(NESTED_PROJECT_DIR, { type: "module" });
+
+/** A CommonJS project's own manifest, holding no type, beneath an ancestor's. */
+const NESTED_COMMONJS = manifestAt(NESTED_PROJECT_DIR, {});
+
+/**
+ * One of T7.6-5's stagings (module header): the canonical placement in the
+ * importing files' own directory, nothing else installed, beside
+ * `project`'s manifests, staged for both halves.
+ */
+function stagingOf(
+  arm: string,
+  what: string,
+  layout: PlacementLayout,
+  project: ProjectStaging,
+): PlacementSpec {
+  return placementOf(arm, what, {
+    layout,
+    projects: [project],
+    runtimeProject: project,
+  });
+}
+
+/** T7.6-5's stagings, in TEST-SPEC's order (module header). */
+const T765_STAGINGS: readonly PlacementSpec[] = [
+  stagingOf(
+    "(a) 1",
+    "an ES-module project beneath an ancestor package.json whose name, " +
+      '"unrelated", TypeScript and Node.js read as neither N nor a leading ' +
+      "part of it",
+    "beneath",
+    { project: "es-module", manifests: [NESTED_ES_MODULE, UNRELATED_ANCESTOR] },
+  ),
+  stagingOf(
+    "(a) 2",
+    "a CommonJS project, its own package.json holding no type, beneath that " +
+      "ancestor package.json",
+    "beneath",
+    { project: "commonjs", manifests: [NESTED_COMMONJS, UNRELATED_ANCESTOR] },
+  ),
+  stagingOf(
+    "(a) 3",
+    "a CommonJS project whose own directory holds no package.json, beneath " +
+      "that ancestor package.json, then the nearest — the one the " +
+      "self-reference lookups read",
+    "beneath",
+    { project: "commonjs", manifests: [UNRELATED_ANCESTOR] },
+  ),
+  stagingOf(
+    "(b) 1",
+    "an ES-module project beneath an ancestor package.json holding " +
+      '"type": "commonjs"',
+    "beneath",
+    {
+      project: "es-module",
+      manifests: [
+        NESTED_ES_MODULE,
+        manifestAt(ANCESTOR_DIR, { type: "commonjs" }),
+      ],
+    },
+  ),
+  stagingOf(
+    "(b) 2",
+    "a CommonJS project, its nearest package.json without type, beneath an " +
+      'ancestor package.json holding "type": "module"',
+    "beneath",
+    {
+      project: "commonjs",
+      manifests: [
+        NESTED_COMMONJS,
+        manifestAt(ANCESTOR_DIR, { type: "module" }),
+      ],
+    },
+  ),
+  stagingOf("(c)", 'a nearest package.json holding "type": "commonjs"', "own", {
+    project: "commonjs",
+    nearestType: "commonjs",
+    manifests: [manifestAt(PROJECT_DIR, { type: "commonjs" })],
+  }),
+];
+
+/**
+ * `rel`, a staging-relative directory, and each of its ancestors below the
+ * staging root, nearest first.
+ */
+function chainBelowRoot(rel: string): readonly string[] {
+  const names = rel.split("/");
+  return names.map((_, index) =>
+    names.slice(0, names.length - index).join("/"),
+  );
+}
+
+/**
+ * Hold T7.6-5's stagings to its list (module header): its arms' counts;
+ * each the canonical placement — a copy in the importing files' own
+ * directory, nothing else installed — with a runtime half; one project
+ * staged for both halves, one manifest at most per directory, each in the
+ * files' directory or an ancestor below the staging root, the declared
+ * kind (and type) the one its nearest manifest gives; (a)'s ancestor
+ * manifest naming "unrelated", read as neither canonical candidate nor a
+ * leading part of one, above an ES-module project, a CommonJS one with its
+ * own manifest, and one whose own directory holds none, 173 setups in all;
+ * (b)'s ancestors' types opposite their projects' kinds; and (c)'s nearest
+ * manifest's type "commonjs", nothing above it. A deviation is a harness
+ * defect, thrown at module load.
+ */
+function checkT765Stagings(): void {
+  const problems: string[] = [];
+  const need = (held: boolean, problem: string): void => {
+    if (!held) problems.push(problem);
+  };
+  const letters = new Map<string, number>();
+  const shapes = new Map<string, string>();
+  let aSetups = 0;
+  for (const staging of T765_STAGINGS) {
+    const letter = staging.arm.slice(0, 3);
+    letters.set(letter, (letters.get(letter) ?? 0) + 1);
+    const layout = PLACEMENT_LAYOUTS[staging.layout];
+    need(
+      staging.name.kind === "canonical" &&
+        staging.form === "copy" &&
+        layout.holdingDir === layout.importingDir &&
+        layout.link === undefined &&
+        staging.alone &&
+        staging.beside.length === 0 &&
+        staging.inImportingDir.length === 0 &&
+        staging.runtime,
+      `${staging.arm} keeps the canonical placement, a copy in the importing ` +
+        "files' own directory with nothing else installed, and has a runtime half",
+    );
+    const [project] = staging.projects;
+    if (
+      staging.projects.length !== 1 ||
+      project?.manifests === undefined ||
+      staging.runtimeProject !== project
+    ) {
+      problems.push(
+        `${staging.arm} stages one project, its manifests its own, for both halves`,
+      );
+      continue;
+    }
+    const chain = chainBelowRoot(layout.importingDir);
+    const manifests = project.manifests;
+    need(
+      manifests.every((manifest) => chain.includes(manifest.dir)) &&
+        new Set(manifests.map((manifest) => manifest.dir)).size ===
+          manifests.length,
+      `${staging.arm}'s manifests lie one at most per directory, each in the ` +
+        "importing files' directory or an ancestor below the staging root",
+    );
+    const at = (dir: string): StagedManifest | undefined =>
+      manifests.find((manifest) => manifest.dir === dir);
+    const own = at(layout.importingDir);
+    const above = chain.slice(1).flatMap((dir) => at(dir) ?? []);
+    const nearest = own ?? above[0];
+    const nearestType = nearest?.members["type"];
+    need(
+      project.project === "es-module"
+        ? nearestType === "module" && project.nearestType === undefined
+        : project.project === "commonjs" &&
+            nearest !== undefined &&
+            nearestType === project.nearestType,
+      `${staging.arm}'s declared project kind is the one its nearest manifest gives`,
+    );
+    const ancestorType = above[0]?.members["type"];
+    shapes.set(
+      staging.arm,
+      [
+        project.project,
+        own === undefined ? "no own" : `own ${String(own.members["type"])}`,
+        `above ${String(above.length)}`,
+        `above-type ${String(ancestorType)}`,
+      ].join(", "),
+    );
+    if (letter === "(a)") {
+      aSetups += setupCount(staging);
+      need(
+        above.length === 1 &&
+          above[0] === UNRELATED_ANCESTOR &&
+          Object.keys(UNRELATED_ANCESTOR.members).join() === "name",
+        `${staging.arm}'s one ancestor manifest names ${UNRELATED_NAME} alone`,
+      );
+    }
+  }
+  for (const name of CANONICAL_MODULE_NAMES) {
+    need(
+      UNRELATED_NAME !== "" &&
+        !name.startsWith("@") &&
+        UNRELATED_NAME !== name &&
+        UNRELATED_NAME !== `${name}/`,
+      `(a)'s name ${UNRELATED_NAME} is read as neither the canonical ` +
+        `candidate ${name}, unscoped, nor a leading part of it`,
+    );
+  }
+  need(
+    aSetups === COVERED_SETUP_COUNT,
+    `(a)'s stagings judge ${String(COVERED_SETUP_COUNT)} setups in all, not ` +
+      String(aSetups),
+  );
+  const expected: readonly [string, string][] = [
+    ["(a) 1", "es-module, own module, above 1, above-type undefined"],
+    ["(a) 2", "commonjs, own undefined, above 1, above-type undefined"],
+    ["(a) 3", "commonjs, no own, above 1, above-type undefined"],
+    ["(b) 1", "es-module, own module, above 1, above-type commonjs"],
+    ["(b) 2", "commonjs, own undefined, above 1, above-type module"],
+    ["(c)", "commonjs, own commonjs, above 0, above-type undefined"],
+  ];
+  need(
+    letters.size === 3 &&
+      letters.get("(a)") === 3 &&
+      letters.get("(b)") === 2 &&
+      letters.get("(c)") === 1 &&
+      shapes.size === expected.length &&
+      expected.every(([arm, shape]) => shapes.get(arm) === shape),
+    "the stagings are (a) an ES-module project, a CommonJS one with its own " +
+      "manifest, and one with none, each beneath the ancestor manifest; (b) " +
+      "an ES-module project beneath a commonjs ancestor and a CommonJS one " +
+      "beneath a module ancestor; and (c) a nearest manifest typed " +
+      `commonjs, not ${JSON.stringify([...shapes])}`,
+  );
+  if (problems.length > 0) {
+    throw new Error(
+      `T7.6-5: its stagings deviate from TEST-SPEC T7.6-5's list: ` +
+        `${problems.join("; ")}: a harness defect`,
+    );
+  }
+}
+
+checkT765Stagings();
+
+// ---------------------------------------------------------------------------
 // T7.6-4: its files, and their S-9 records (module header)
 // ---------------------------------------------------------------------------
 
@@ -1072,13 +1553,17 @@ const T764_FIXED_NAMES: readonly string[] = [
  * T7.6-4's files beside each fixed N (module header), each a staged-source
  * record (S-9) as plain TypeScript and, for the `.tsx` name, as TSX of the
  * same bytes — composed by section-7.6.ts's `placementFiles`, so each is
- * the canonical run's own file but for its specifier.
+ * the canonical run's own file but for its specifier. Those beside the
+ * canonical candidates are T7.6-5's files too, and named for both tests.
  */
 const T764_RECORDS: ReadonlyMap<string, T764Records> = new Map(
   T764_FIXED_NAMES.map((name): [string, T764Records] => {
     const files = placementFiles(name);
+    const tests = CANONICAL_MODULE_NAMES.includes(name)
+      ? `${T764.id}/${T765.id}`
+      : T764.id;
     const record = (file: PlacementFile): T764Record => {
-      const named = `T7.6-4 ${file.label}, importing ${JSON.stringify(name)}`;
+      const named = `${tests} ${file.label}, importing ${JSON.stringify(name)}`;
       return {
         label: file.label,
         ts: stagedTs(named, file.text),
@@ -1148,7 +1633,7 @@ function composedFiles(name: string, context: string): PlacementFiles {
 }
 
 // ---------------------------------------------------------------------------
-// T7.6-4: staging a placement (module header)
+// T7.6-4 and T7.6-5: staging a placement (module header)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1243,20 +1728,86 @@ interface StagedPlacement {
   readonly importingDir: string;
 }
 
+/** A manifest's bytes: its members as JSON, two-space indented. */
+function manifestText(members: Readonly<Record<string, string>>): string {
+  return `${JSON.stringify(members, null, 2)}${LF}`;
+}
+
 /**
- * Stage `spec` under `name` for `arm` (module header): a project of kind
- * `project` in the layout's importing directory, the placement in its
- * holding directory, the layout's symbolic link, and the other packages.
+ * Read back a T7.6-5 staging's manifests before any tool runs (module
+ * header): from the importing directory `importingDir` up to the staging
+ * root, each directory's package.json, read strictly, is exactly the
+ * manifest `manifests` declares there — well-formed, holding exactly its
+ * members — or absent where they declare none, so that a staging stands
+ * for no other. A deviation is a `HarnessStagingError`.
+ */
+async function confirmManifests(
+  staging: ModuleStaging,
+  importingDir: string,
+  manifests: readonly StagedManifest[],
+  context: string,
+): Promise<void> {
+  const chain = [...chainBelowRoot(importingDir), ""];
+  await guardStep(
+    `reading back the manifests from ${staging.path(importingDir)} up to ` +
+      `the staging root (${context})`,
+    async () => {
+      for (const dir of chain) {
+        const file = path.join(staging.path(dir), "package.json");
+        const declared = manifests.find((manifest) => manifest.dir === dir);
+        const reading = await readManifestStrictly(file);
+        const found =
+          reading === undefined
+            ? "no manifest"
+            : reading.wellFormed
+              ? `a manifest holding ${JSON.stringify(reading.members)}`
+              : `a manifest that ${reading.problem}`;
+        const wanted =
+          declared === undefined
+            ? "no manifest"
+            : `a manifest holding ${JSON.stringify(declared.members)}`;
+        if (found !== wanted) {
+          throw new HarnessStagingError(
+            "module-channel",
+            file,
+            `${context}: ${file} is ${found}, where the staging declares ` +
+              `${wanted}: each staging of T7.6-5 holds exactly the manifests ` +
+              "it declares, from the importing files' directory up to the " +
+              "staging root, so that it stages what TEST-SPEC T7.6-5 names",
+          );
+        }
+      }
+    },
+  );
+}
+
+/**
+ * Stage `spec` under `name` for `arm` (module header): `project` in the
+ * layout's importing directory — a project kind as `stageProject` stages
+ * it, or exactly the manifests `project` declares, read back once the
+ * staging is done — the placement in its holding directory, the layout's
+ * symbolic link, and the other packages.
  */
 async function stagePlacement(
   staging: ModuleStaging,
-  spec: T764Placement,
+  spec: PlacementSpec,
   name: string,
-  project: ProjectKind,
+  project: ProjectStaging,
   arm: ModuleArm,
+  context: string,
 ): Promise<StagedPlacement> {
-  const layout = T764_LAYOUTS[spec.layout];
-  await staging.stageProject(layout.importingDir, project);
+  const layout = PLACEMENT_LAYOUTS[spec.layout];
+  if (project.manifests === undefined) {
+    await staging.stageProject(layout.importingDir, project.project);
+  } else {
+    await staging.makeDirectory(layout.importingDir);
+    for (const manifest of project.manifests) {
+      await staging.writeFile(
+        `${manifest.dir}/package.json`,
+        manifestText(manifest.members),
+      );
+    }
+  }
   const placement = await staging.place({
     name,
     holdingDir: layout.holdingDir,
@@ -1272,16 +1823,24 @@ async function stagePlacement(
   for (const other of spec.inImportingDir) {
     await installOther(staging, layout.importingDir, other);
   }
+  if (project.manifests !== undefined) {
+    await confirmManifests(
+      staging,
+      layout.importingDir,
+      project.manifests,
+      context,
+    );
+  }
   return { placement, importingDir: layout.importingDir };
 }
 
 // ---------------------------------------------------------------------------
-// T7.6-4: the body (module header)
+// T7.6-4 and T7.6-5: the body (module header)
 // ---------------------------------------------------------------------------
 
 /** A placement as the body runs it: its N and its files. */
 interface ResolvedPlacement {
-  readonly spec: T764Placement;
+  readonly spec: PlacementSpec;
   readonly name: string;
   readonly files: PlacementFiles;
   /** Leads its diagnoses. */
@@ -1289,16 +1848,17 @@ interface ResolvedPlacement {
 }
 
 /**
- * `spec` as the body runs it beside `pkg` (module header), or undefined for
- * (a) where the manifest gives no name of 7.6's grammar outside the
- * exclusions every arm has — TEST-SPEC stages (a) only where it does.
+ * `spec` as `test`'s body runs it beside `pkg` (module header), or undefined
+ * for T7.6-4(a) where the manifest gives no name of 7.6's grammar outside
+ * the exclusions every arm has — TEST-SPEC stages (a) only where it does.
  */
 function resolvePlacement(
-  spec: T764Placement,
+  test: StandInTest,
+  spec: PlacementSpec,
   pkg: PackageDirectory,
 ): ResolvedPlacement | undefined {
   const describe = (name: string): string =>
-    `${T764_CONTEXT}, placement ${spec.arm} (${spec.what}), N ` +
+    `${test.context}, ${test.unit} ${spec.arm} (${spec.what}), N ` +
     JSON.stringify(name);
   switch (spec.name.kind) {
     case "canonical": {
@@ -1335,8 +1895,9 @@ function resolvePlacement(
 /**
  * The releases `resolved`'s runtime half runs on (module header): every
  * release for a fixed or the canonical N — the placement itself confirming
- * that none resolves it to a built-in module — and, for (a)'s, the manifest's
- * name, each release that resolves it to none, each release asked.
+ * that none resolves it to a built-in module — and, for T7.6-4(a)'s, the
+ * manifest's name, each release that resolves it to none, each release
+ * asked.
  */
 async function runtimeReleases(
   resolved: ResolvedPlacement,
@@ -1356,13 +1917,13 @@ async function runtimeReleases(
   return admitted;
 }
 
-/** Where a placement stands in the body, for a diagnosis (module header). */
-function standing(held: readonly string[]): string {
+/** Where a placement stands in `test`'s body, for a diagnosis (module header). */
+function standing(test: StandInTest, held: readonly string[]): string {
   return held.length === 0
-    ? "the first placement the body runs"
-    : `run after ${count(held.length, "placement")} that ` +
-        `${held.length === 1 ? "fared" : "each fared"} as the canonical one ` +
-        `does — ${held.join("; ")}`;
+    ? `the first ${test.unit} the body runs`
+    : `run after ${count(held.length, test.unit)} that ` +
+        `${held.length === 1 ? "fared" : "each fared"} as the canonical ` +
+        `placement does — ${held.join("; ")}`;
 }
 
 /** Each failing assertion's diagnosis, in order: none where all hold. */
@@ -1380,22 +1941,23 @@ function placementFailures(checks: readonly (() => void)[]): readonly string[] {
 }
 
 /**
- * A placement's type-checking half (module header): in each project kind's
- * staging, T7.6-1's covered file, T7.6-2(a)'s file, and T7.6-3's
- * unknown-top-level-key arm judged in one program per covered setup, the
- * first holding T7.6-1's listing, the second type-checking, and the arm
- * failing to type-check paired with it; the first setup where any fails
- * ends the body, diagnosed.
+ * A placement's type-checking half (module header): in a staging of each
+ * of its projects, T7.6-1's covered file, T7.6-2(a)'s file, and T7.6-3's
+ * unknown-top-level-key arm judged in one program per covered setup of
+ * the project's kind, the first holding T7.6-1's listing, the second
+ * type-checking, and the arm failing to type-check paired with it; the
+ * first setup where any fails ends `test`'s body, diagnosed.
  */
 async function runPlacementTypeChecking(
   product: ProductBinding,
+  test: StandInTest,
   resolved: ResolvedPlacement,
   held: readonly string[],
 ): Promise<void> {
   const { spec, name, files } = resolved;
   let judged = 0;
-  for (const project of PROJECT_KINDS) {
-    const context = `${resolved.context}, the ${project} project`;
+  for (const project of spec.projects) {
+    const context = `${resolved.context}, ${describeProject(project, true)}`;
     const staging = await ModuleStaging.create(product, context);
     try {
       const { placement, importingDir } = await stagePlacement(
@@ -1404,11 +1966,15 @@ async function runPlacementTypeChecking(
         name,
         project,
         TYPE_CHECKING_ARM,
+        context,
       );
       const covered = await stageCoveredFiles({
         staging,
         directory: importingDir,
-        project,
+        project: project.project,
+        ...(project.nearestType === undefined
+          ? {}
+          : { nearestType: project.nearestType }),
         placement,
         alone: spec.alone,
         files: [files.declaredExports, files.valid, files.unknownKey],
@@ -1438,12 +2004,12 @@ async function runPlacementTypeChecking(
           fail(
             `${context}: in ${setup.label}, beside the placement ` +
               `${placement.path}, ${String(failures.length)} of the 3 runs ` +
-              "the placement stands in for the canonical one in " +
+              `the ${test.unit} stands in for the canonical placement in ` +
               `${failures.length === 1 ? "fails" : "fail"} — the first ` +
               "covered setup where any does, after " +
-              `${count(judged, "setup")} of this placement where all 3 ` +
-              `held; the placement is ${standing(held)}; the body stops ` +
-              `here ${T764_RULE}. ${failures.join(" | ")}`,
+              `${count(judged, "setup")} of this ${test.unit} where all 3 ` +
+              `held; the ${test.unit} is ${standing(test, held)}; the body ` +
+              `stops here ${test.rule}. ${failures.join(" | ")}`,
           );
         }
         judged += 1;
@@ -1452,44 +2018,47 @@ async function runPlacementTypeChecking(
       await staging.dispose();
     }
   }
-  if (judged !== COVERED_SETUP_COUNT) {
+  if (judged !== setupCount(spec)) {
     throw new Error(
-      `T7.6-4: ${String(judged)} covered setups judged beside the placement ` +
-        `${spec.arm}, not TEST-SPEC §7.6's ${String(COVERED_SETUP_COUNT)}; no ` +
-        "setup is sampled away: a harness defect",
+      `${test.id}: ${String(judged)} covered setups judged beside the ` +
+        `${test.unit} ${spec.arm}, not the ${String(setupCount(spec))} of ` +
+        "its projects' kinds; no setup is sampled away: a harness defect",
     );
   }
 }
 
 /**
- * A placement's runtime half (module header): a CommonJS project in the
+ * A placement's runtime half (module header): its runtime project in the
  * layout's importing directory beside the placement, and one run per
  * release of `releases` and route, each read for T7.6-6's exports and
- * identity; the first run not loading ends the body, diagnosed, as the
- * problems the runs found do once all have run. `every` is how many
+ * identity; the first run not loading ends `test`'s body, diagnosed, as
+ * the problems the runs found do once all have run. `every` is how many
  * releases E-1 lists.
  */
 async function runPlacementRuntime(
   product: ProductBinding,
+  test: StandInTest,
   resolved: ResolvedPlacement,
   releases: readonly NodeRelease[],
   held: readonly string[],
   every: number,
 ): Promise<void> {
   const { spec, name } = resolved;
-  const test: RuntimeTest = {
-    id: "T7.6-4",
+  const project = spec.runtimeProject;
+  const runtime: RuntimeTest = {
+    id: test.id,
     context: `${resolved.context}, its runtime runs`,
     rule:
-      `— the placement, its type-checking runs having held in all ` +
-      `${String(COVERED_SETUP_COUNT)} covered setups, is ` +
-      `${standing(held)} ${T764_RULE}`,
+      `— the ${test.unit}, its type-checking runs having held in all ` +
+      `${String(setupCount(spec))} covered setups of its ` +
+      `${spec.projects.length === 1 ? "project" : "projects"}, is ` +
+      `${standing(test, held)} ${test.rule}`,
     clauses: "T7.6-6's (a) and (b)",
     effects: false,
     read: (run) =>
       Promise.resolve([...exportsProblems(run), ...identityProblems(run)]),
   };
-  const staging = await ModuleStaging.create(product, test.context);
+  const staging = await ModuleStaging.create(product, runtime.context);
   const found: FoundProblems = { problems: new Map(), runs: [] };
   let made = 0;
   let summary = "";
@@ -1498,8 +2067,9 @@ async function runPlacementRuntime(
       staging,
       spec,
       name,
-      PROJECT_KIND,
+      project,
       runtimeArm(releases),
+      runtime.context,
     );
     const versions = releases.map((release) => release.version).join(", ");
     summary =
@@ -1512,14 +2082,20 @@ async function runPlacementRuntime(
       (placement.form === "symlink"
         ? `, a symbolic link to its copy at ${placement.copy},`
         : "") +
-      ` from its route's importing module in ${staging.path(importingDir)}`;
+      ` from its route's importing module in ${staging.path(importingDir)}` +
+      (project.manifests === undefined
+        ? ""
+        : `, ${describeProject(project, false)}`);
     made = await runRoutes(
-      test,
+      runtime,
       {
         staging,
         placement,
         importingDir,
-        project: PROJECT_KIND,
+        project: project.project,
+        ...(project.nearestType === undefined
+          ? {}
+          : { nearestType: project.nearestType }),
         alone: spec.alone,
       },
       releases,
@@ -1528,22 +2104,31 @@ async function runPlacementRuntime(
   } finally {
     await staging.dispose();
   }
-  failOnProblems(test, found, made, summary);
+  failOnProblems(runtime, found, made, summary);
 }
 
-/** T7.6-4's body (module header). */
-async function runPlacements(product: ProductBinding): Promise<void> {
-  const pkg = await modulePackageDirectory(product, T764_CONTEXT);
+/**
+ * `test`'s body over `specs` (module header): the package directory checked
+ * first, every release E-1 lists resolved, then each placement in order,
+ * its type-checking half, then its runtime half.
+ */
+async function runPlacements(
+  product: ProductBinding,
+  test: StandInTest,
+  specs: readonly PlacementSpec[],
+): Promise<void> {
+  const pkg = await modulePackageDirectory(product, test.context);
   const releases = await resolveNodeReleases();
   const held: string[] = [];
-  for (const spec of T764_PLACEMENTS) {
-    const resolved = resolvePlacement(spec, pkg);
+  for (const spec of specs) {
+    const resolved = resolvePlacement(test, spec, pkg);
     if (resolved === undefined) continue;
-    await runPlacementTypeChecking(product, resolved, held);
+    await runPlacementTypeChecking(product, test, resolved, held);
     const runtime = await runtimeReleases(resolved, releases);
     if (runtime.length > 0) {
       await runPlacementRuntime(
         product,
+        test,
         resolved,
         runtime,
         held,
@@ -1580,11 +2165,40 @@ const T7_6_4 = defineProductTest({
     "strict ancestor, an unrelated package in the importing file's own " +
     "directory; (f) in the type-checking runs alone, N fs, and N path (SPEC " +
     "7.6 Package and installation, Reach)",
-  run: runPlacements,
+  run: (product) => runPlacements(product, T764, T764_PLACEMENTS),
+});
+
+const T7_6_5 = defineProductTest({
+  id: "T7.6-5",
+  title:
+    "stagings meeting every condition of Reach while leaving open what none " +
+    "of them bars, each run as T7.6-4's placements are — the canonical " +
+    "placement, a copy at node_modules/N in the importing files' own " +
+    "directory, standing in a run of T7.6-1 (T7.6-2(d)'s file, the module " +
+    "TypeScript resolves its import to declaring exactly defineConfig) and " +
+    "of T7.6-2(a)'s file type-checking with T7.6-3's unknown-top-level-key " +
+    "arm failing to type-check paired to it, in every covered setup of the " +
+    "staging's project kind, and in T7.6-6's runs from the staging's " +
+    "project, the module loading on every release E-1 provisions along " +
+    "each of Node.js's four routes with its exports exactly defineConfig " +
+    "and defineConfig returning its argument (T7.6-6 (a), (b)): (a) an " +
+    'ancestor package.json whose name, "unrelated", TypeScript and Node.js ' +
+    "read as neither N nor a leading part of it, above an ES-module " +
+    "project, a CommonJS project with its own package.json, and a CommonJS " +
+    "project whose own directory holds none, that ancestor then its nearest " +
+    "(173 setups in all); (b) an ES-module project beneath an ancestor " +
+    'package.json holding "type": "commonjs", and a CommonJS project, its ' +
+    "nearest package.json without type, beneath an ancestor holding " +
+    '"type": "module"; (c) a nearest package.json holding "type": ' +
+    '"commonjs", judged in the CommonJS ' +
+    `project's covered setups (SPEC 7.6 ` +
+    "Reach, Covered setups)",
+  run: (product) => runPlacements(product, T765, T765_STAGINGS),
 });
 
 export const section76iiTests: readonly ProductTestEntry[] = [
   T7_6_4,
+  T7_6_5,
   T7_6_6,
   T7_6_7,
 ];

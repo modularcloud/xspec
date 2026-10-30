@@ -92,6 +92,7 @@ import {
   COVERED_SETUP_COUNT,
   COVERED_SETUPS,
   coveredSetupsOf,
+  describeErrors,
   describeExportListing,
   INITIALIZED_PROJECT_OPTION_SET,
   stageCoveredFiles,
@@ -1052,6 +1053,45 @@ test("misuses are plain errors: no file, a duplicate label, a setup of another p
   expect(listingMisuse).not.toBeInstanceOf(HarnessAssertionError);
   expect(listingMisuse).not.toBeInstanceOf(HarnessStagingError);
   expect(String(listingMisuse)).toMatch(/one import declaration/);
+});
+
+test(`a CommonJS project whose nearest package.json holds "type": "commonjs" is staged with that type declared beside its kind: Reach confirms it for each written file and the valid file type-checks in a CommonJS project's setup; declared without it, the staging is refused before any program exists (TEST-SPEC T7.6-5(c); helpers/module-channel.ts ReachStaging.nearestType)`, async () => {
+  const project: ProjectKind = "commonjs";
+  const context = "a nearest manifest typed commonjs";
+  const { staging, placement } = await stagedProject(
+    STAND_INS.conforming,
+    "no-manifest",
+    context,
+  );
+  await staging.writeFile(
+    `${PROJECT_DIR}/package.json`,
+    lines(JSON.stringify({ type: "commonjs" })),
+  );
+  const setup = setupOf(project, ".ts", strictSet("node16", "node16"));
+  const request = {
+    staging,
+    directory: PROJECT_DIR,
+    project,
+    placement,
+    alone: true,
+    files: [validFile(placement.name)],
+    setups: [setup],
+    context,
+  };
+  const files = await stageCoveredFiles({
+    ...request,
+    nearestType: "commonjs",
+  });
+  const [verdict] = files.judge(setup);
+  expect(verdict?.typeChecks, describeErrors(verdict?.errors ?? [])).toBe(true);
+  let refusal: unknown;
+  try {
+    await stageCoveredFiles(request);
+  } catch (error) {
+    refusal = error;
+  }
+  expect(refusal).toBeInstanceOf(HarnessStagingError);
+  expect(String(refusal)).toContain("is declared");
 });
 
 /** A listed export written out: its meanings, and where it is listed. */

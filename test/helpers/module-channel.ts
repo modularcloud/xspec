@@ -87,8 +87,14 @@
 //   giving a `name` that, each backslash read as `/`, is empty, `N`, or
 //   `N`'s scope, with or without one trailing `/`); and well-formed
 //   manifests. Where the caller declares them, it confirms the project kind
-//   and that nothing but the placement is installed in the staging
-//   (`alone`: the canonical placement's "nothing else installed").
+//   — read off the manifest nearest the file: `"type": "module"` for an
+//   ES-module project; for a CommonJS project, no `type` member, or
+//   `"type": "commonjs"` where the caller declares that member
+//   (`nearestType`: T7.6-5(c), a CommonJS project as SPEC 7.6 reads it,
+//   judged in the CommonJS project's covered setups); no manifest at all
+//   for the third kind — and that nothing but the placement is installed
+//   in the staging (`alone`: the canonical placement's "nothing else
+//   installed").
 // - The strict manifest reading (`readManifestStrictly`,
 //   `judgeManifestBytes`; Reach's well-formed manifests): a readable plain
 //   file — a symbolic link to one followed, anything else never opened —
@@ -1010,6 +1016,16 @@ function projectManifest(kind: ProjectKind): string | undefined {
   }
 }
 
+/**
+ * The `type` member a CommonJS project's nearest `package.json` may hold
+ * (T7.6-5(c)): `"commonjs"`, which TypeScript and Node.js read as they read
+ * a manifest holding no `type` — CommonJS, since SPEC 7.6 makes a project
+ * an ES-module one where its nearest manifest's `type` is `"module"` and a
+ * CommonJS one otherwise — so such a project is judged in the CommonJS
+ * project's covered setups.
+ */
+export type CommonJsTypeMember = "commonjs";
+
 /** A copy at `node_modules/N`, or a symbolic link there to a copy. */
 export type PlacementForm = "copy" | "symlink";
 
@@ -1051,6 +1067,13 @@ export interface ReachStaging {
   readonly placement: Placement;
   /** The project kind the staging declares, confirmed where given. */
   readonly project?: ProjectKind;
+  /**
+   * For a CommonJS project (`project` `"commonjs"`) whose nearest
+   * `package.json` holds a `type` member: that member, `"commonjs"`
+   * (T7.6-5(c)), confirmed with the project kind in place of "no `type`
+   * member". Declared beside any other kind, or none, it is a misuse.
+   */
+  readonly nearestType?: CommonJsTypeMember;
   /**
    * Whether nothing but `placement` is installed in the staging (the
    * canonical placement's "nothing else installed"), confirmed where set.
@@ -1412,11 +1435,22 @@ export class ModuleStaging {
    * placement in place in a holding directory that is the file's own or an
    * ancestor along its physical path, nothing nearer, no self-reference,
    * and well-formed manifests; and, where `reach` declares them, the project
-   * kind and that nothing but the placement is installed in the staging.
+   * kind (with a CommonJS project's nearest `type` member, where declared)
+   * and that nothing but the placement is installed in the staging.
    * Resolves when every one holds; throws `HarnessStagingError` naming the
    * first that fails. One harness step under its own guard.
    */
   async verifyReach(reach: ReachStaging): Promise<void> {
+    if (reach.nearestType !== undefined && reach.project !== "commonjs") {
+      throw new Error(
+        `module channel: a nearest package.json's type member is declared ` +
+          `for a CommonJS project ("commonjs") alone, not beside ` +
+          (reach.project === undefined
+            ? "no project kind"
+            : `the project kind ${JSON.stringify(reach.project)}`) +
+          ` (${this.context})`,
+      );
+    }
     const importingFile = this.path(reach.importingFile);
     const refused = (detail: string): HarnessStagingError =>
       new HarnessStagingError(
@@ -1434,6 +1468,7 @@ export class ModuleStaging {
           importingFile,
           reach.placement.name,
           reach.project,
+          reach.nearestType,
           refused,
         );
         if (reach.alone === true) {
@@ -1694,12 +1729,14 @@ async function entriesBeginning(
  * declared project kind: every `package.json` in the importing file's
  * directory or one of its ancestors, up to the filesystem root, read
  * strictly, none giving a `name` read as N or a leading part of it; the
- * nearest one deciding the project kind.
+ * nearest one deciding the project kind — for a CommonJS project, its
+ * `type` member none, or `nearestType` where declared.
  */
 async function verifyManifests(
   importingFile: string,
   name: string,
   project: ProjectKind | undefined,
+  nearestType: CommonJsTypeMember | undefined,
   refused: (detail: string) => HarnessStagingError,
 ): Promise<void> {
   let nearest: { readonly file: string; readonly type: unknown } | undefined;
@@ -1745,12 +1782,15 @@ async function verifyManifests(
     project === "es-module"
       ? nearest !== undefined && nearest.type === "module"
       : project === "commonjs"
-        ? nearest !== undefined && nearest.type === undefined
+        ? nearest !== undefined && nearest.type === nearestType
         : nearest === undefined;
   if (!holds) {
-    throw refused(
-      `is declared ${PROJECT_KIND_DESCRIPTIONS[project]}, yet it has ${found}`,
-    );
+    const declared =
+      project === "commonjs" && nearestType !== undefined
+        ? "a CommonJS project whose nearest package.json holds the type " +
+          JSON.stringify(nearestType)
+        : PROJECT_KIND_DESCRIPTIONS[project];
+    throw refused(`is declared ${declared}, yet it has ${found}`);
   }
 }
 

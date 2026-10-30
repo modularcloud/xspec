@@ -763,6 +763,85 @@ test('the three project kinds are stageable — an ES-module project, its packag
   });
 });
 
+test('a CommonJS project whose nearest package.json holds "type": "commonjs" is confirmed only with that type declared beside its kind, and refused declared as any project kind alone; a manifest holding no type declared so is refused, a nearest type declared beside another kind or none is a misuse, and a CommonJS project beneath an ancestor manifest — one holding "type": "module" above its own, or one naming "unrelated" with none of its own — is confirmed as such (SPEC 7.6 Covered setups; TEST-SPEC T7.6-5(a), (b), (c))', async () => {
+  const typed = await reachStaging({ kind: "no-manifest" });
+  await typed.staging.writeFile(
+    "project/package.json",
+    JSON.stringify({ type: "commonjs" }),
+  );
+  const at = { importingFile: typed.importingFile, placement: typed.placement };
+  await typed.staging.verifyReach({
+    ...at,
+    project: "commonjs",
+    nearestType: "commonjs",
+    alone: true,
+  });
+  for (const project of PROJECT_KINDS) {
+    await expectRefused(
+      typed.staging.verifyReach({ ...at, project }),
+      `a CommonJS project typed "commonjs" declared ${project} alone`,
+      "is declared",
+    );
+  }
+  const plain = await reachStaging({ kind: "commonjs" });
+  await expectRefused(
+    plain.staging.verifyReach({
+      importingFile: plain.importingFile,
+      placement: plain.placement,
+      project: "commonjs",
+      nearestType: "commonjs",
+    }),
+    "a CommonJS project holding no type declared typed",
+    'holds the type "commonjs"',
+    "holding no type member",
+  );
+  for (const project of [undefined, "es-module", "no-manifest"] as const) {
+    const misuse = await rejectionOf(
+      typed.staging.verifyReach({
+        ...at,
+        ...(project === undefined ? {} : { project }),
+        nearestType: "commonjs",
+      }),
+      `a nearest type declared beside ${String(project)}`,
+    );
+    expect(misuse, String(project)).not.toBeInstanceOf(HarnessStagingError);
+    expect(misuse, String(project)).toBeInstanceOf(Error);
+    expect((misuse as Error).message, String(project)).toContain(
+      "a CommonJS project",
+    );
+  }
+  const beneath = await reachStaging({ kind: "commonjs" });
+  await beneath.staging.writeFile(
+    "package.json",
+    JSON.stringify({ type: "module" }),
+  );
+  await beneath.staging.verifyReach({
+    importingFile: beneath.importingFile,
+    placement: beneath.placement,
+    project: "commonjs",
+    alone: true,
+  });
+  const unrelated = await reachStaging({ kind: "no-manifest" });
+  await unrelated.staging.writeFile(
+    "package.json",
+    JSON.stringify({ name: "unrelated" }),
+  );
+  const nearestAbove = {
+    importingFile: unrelated.importingFile,
+    placement: unrelated.placement,
+  };
+  await unrelated.staging.verifyReach({
+    ...nearestAbove,
+    project: "commonjs",
+    alone: true,
+  });
+  await expectRefused(
+    unrelated.staging.verifyReach({ ...nearestAbove, project: "no-manifest" }),
+    "a project beneath an ancestor manifest declared to have none",
+    "is declared",
+  );
+});
+
 /** One nothing-nearer vector: a Reach staging, and the entries it adds. */
 interface NearerVector {
   readonly label: string;

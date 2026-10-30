@@ -261,6 +261,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { bytesEqual, describeByteDifference, fail } from "./assertions.js";
 import { stageFifo } from "./lock-staging.js";
 import type {
+  CommonJsTypeMember,
   ModuleStaging,
   Placement,
   ProjectKind,
@@ -1390,6 +1391,12 @@ export interface ModuleRunRequest {
   readonly importingDir?: string;
   /** The project kind the staging declares, confirmed by Reach where given. */
   readonly project?: ProjectKind;
+  /**
+   * For a CommonJS project whose nearest `package.json` holds the `type`
+   * `"commonjs"` (T7.6-5(c)): that member, confirmed by Reach with the
+   * project kind (helpers/module-channel.ts `ReachStaging.nearestType`).
+   */
+  readonly nearestType?: CommonJsTypeMember;
   /** Whether nothing but the placement is installed, confirmed where set. */
   readonly alone?: boolean;
   /**
@@ -1631,6 +1638,9 @@ export class PreparedModuleRun {
       importingFile,
       placement: request.placement,
       ...(request.project === undefined ? {} : { project: request.project }),
+      ...(request.nearestType === undefined
+        ? {}
+        : { nearestType: request.nearestType }),
       ...(request.alone === undefined ? {} : { alone: request.alone }),
     };
     this.#guards = request.guards ?? {};

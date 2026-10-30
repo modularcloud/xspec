@@ -595,6 +595,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // declarative form staged valid under 7 (a premise of the staging,
   // asserted of no product), so it carries 7.6 alone.
   "T7.6-4": ["7.6"],
+  // T7.6-5: 7.6's Reach — the cases its four conditions leave open: an
+  // ancestor manifest giving an unrelated name, ancestor manifests whose
+  // types differ from the nearest one's, and a nearest manifest typed
+  // "commonjs" — and its Covered setups' reading of a project's kind,
+  // through runs of T7.6-1, T7.6-2(a) with T7.6-3's unknown-top-level-key
+  // arm, and T7.6-6's exports and identity beside the canonical placement;
+  // its files are 7's declarative form staged valid under 7 (a premise of
+  // the staging, asserted of no product), so it carries 7.6 alone.
+  "T7.6-5": ["7.6"],
   // T7.6-6: 7.6's runtime contract (Runtime, through Reach's routes) for
   // the module's exports and defineConfig's return, on every release E-1
   // provisions along each of Node.js's routes; it stages no configuration

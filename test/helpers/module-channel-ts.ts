@@ -170,6 +170,7 @@ import * as path from "node:path";
 import ts from "typescript-5.9.3";
 import { fail } from "./assertions.js";
 import type {
+  CommonJsTypeMember,
   ModuleStaging,
   Placement,
   ProjectKind,
@@ -1359,6 +1360,13 @@ export interface CoveredFilesRequest {
   /** The project kind staged for `directory`; every setup must be of it. */
   readonly project: ProjectKind;
   /**
+   * For a CommonJS project whose nearest `package.json` holds the `type`
+   * `"commonjs"` (T7.6-5(c)): that member, which Reach confirms with the
+   * project kind (helpers/module-channel.ts `ReachStaging.nearestType`);
+   * the setups stay the CommonJS project's.
+   */
+  readonly nearestType?: CommonJsTypeMember;
+  /**
    * The placement every file's import reaches: Reach is verified for each
    * written file against it, confirming the project kind too. Without one,
    * no package is reached and nothing of Reach is checked.
@@ -1502,6 +1510,9 @@ export async function stageCoveredFiles(
             .join("/"),
           placement: request.placement,
           project: request.project,
+          ...(request.nearestType === undefined
+            ? {}
+            : { nearestType: request.nearestType }),
           ...(request.alone === undefined ? {} : { alone: request.alone }),
         });
       }

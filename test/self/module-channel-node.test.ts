@@ -677,6 +677,34 @@ test("the importing modules' place: each route's file, named for its route and n
   );
 });
 
+test(`a CommonJS project whose nearest package.json holds "type": "commonjs" is declared so to the driver: Reach confirms the project kind with that type before the run, which loads the module; declared as a CommonJS project holding no type, the run is refused before it starts (TEST-SPEC T7.6-5(c); helpers/module-channel.ts ReachStaging.nearestType)`, async () => {
+  const release = await firstRelease();
+  const dual = await writeStandIn(STAND_INS.dual);
+  const context = "driver self-test: a nearest manifest typed commonjs";
+  const staging = await ModuleStaging.create(standInBinding(dual), context);
+  onTestFinished(() => staging.dispose());
+  await staging.stageProject("project", "no-manifest");
+  await staging.writeFile(
+    "project/package.json",
+    manifest({ type: "commonjs" }),
+  );
+  const placement = await staging.placeCanonical(
+    "project",
+    runtimeArm([release]),
+  );
+  const staged = { staging, placement };
+  assertModuleLoaded(
+    await runModuleRoute({
+      ...request(staged, release, "require", context),
+      nearestType: "commonjs",
+    }),
+    "stand-in",
+  );
+  await expect(
+    runModuleRoute(request(staged, release, "require", context)),
+  ).rejects.toBeInstanceOf(HarnessStagingError);
+});
+
 test("the report's decoder reads exactly the bootstrap's members, each of its kind and consistent with the phase — T7.6-6's own-key listing and calls, and T7.6-7(c)'s comparison of the process state, among them — and says what makes any other report malformed — a missing or extra member, another protocol, a value of another kind, a phase of its own, a load outcome, calls, or a state compared inconsistent with the phase or the note, calls out of the bootstrap's order or unfinished at completion, a call verdict inconsistent with its values, a trap or proxy of its own, an observation of its own, a count of omitted differences that is no non-negative integer, bytes that are no UTF-8 or no JSON (TEST-SPEC H-3: failing loudly when required information is absent)", () => {
   const encode = (value: unknown): Uint8Array =>
     new TextEncoder().encode(JSON.stringify(value));
