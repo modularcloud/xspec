@@ -553,7 +553,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // string literal spelled as written (2.4), its single-casing arm read
   // byte-wise with no case folding (12.0); (b)'s scanner-rejected escapes,
   // the file not well-formed (14.20), each answered with the 12.7 error
-  // document carrying 14.14's stable code.
+  // document carrying 14.14's stable code; (c)'s twin compares are 7's —
+  // the specifier never resolved, read, or loaded, whatever it designates
+  // — its sealed directory staging a refused read (14.25) the product must
+  // not meet, that condition's absence, rule (c).
   "T7-9": ["7", "2.4", "12.0", "12.7", "14"],
   // T7.1-1: its wrong-case extension arm the byte-wise, case-sensitive
   // extension test (12.0: no case folding), and `inventory`'s `derived`
