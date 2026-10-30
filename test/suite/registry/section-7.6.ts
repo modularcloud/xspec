@@ -4,7 +4,8 @@
 // runtime's exports and identity and its absence of effects, are
 // section-7.6-ii.ts's — T7.6-4 and T7.6-5 staging the files
 // `placementFiles` composes here, the canonical runs' own beside any N;
-// P-17 and P-18 are not registered yet.
+// P-17, installation names, is section-16-p17.ts's, its draws staging those
+// files beside each drawn N; P-18 is not registered yet.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never
@@ -51,8 +52,8 @@
 // - The body stops at the first setup whose listing deviates, failing
 //   once, diagnosed, with every deviation, the listing whole, and
 //   TypeScript's errors for the program as a diagnostic aid
-//   (`assertDeclaredExports`, which T7.6-4's placements reuse and P-17's
-//   draws may); where every setup holds, it confirms that it judged all
+//   (`assertDeclaredExports`, which T7.6-4's placements and P-17's draws
+//   reuse); where every setup holds, it confirms that it judged all
 //   173.
 //
 // T7.6-2 (SPEC 7.6 Covered files, Type contract: valid configurations): each

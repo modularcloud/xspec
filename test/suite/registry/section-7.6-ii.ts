@@ -2,7 +2,9 @@
 // Reach's open cases, and the runtime: T7.6-4, placements; T7.6-5, Reach's
 // open cases; T7.6-6, runtime exports and identity; and T7.6-7, runtime: no
 // effect. T7.6-1, T7.6-2, and T7.6-3, the type contract, are
-// section-7.6.ts's business; P-17 and P-18 are not registered yet.
+// section-7.6.ts's business; P-17, installation names, which draws its
+// placements over T7.6-4's halves and T7.6-6's routes, is
+// section-16-p17.ts's; P-18 is not registered yet.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never

@@ -1373,6 +1373,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // node compared as a canonical identity and presented under its current
   // identity and presence (10.4).
   "P-16": ["5.6", "6.3", "9.2", "10.4", "10.5"],
+  // P-17: 7.6's installation rules and Reach over drawn names, placement
+  // forms, holding directories, covered setups, releases, and routes,
+  // through runs of T7.6-1, T7.6-2(a) with T7.6-3's unknown-top-level-key
+  // arm, and T7.6-6's exports and identity; its files are 7's declarative
+  // form staged valid under 7 (a premise of the staging, asserted of no
+  // product), so it carries 7.6 alone.
+  "P-17": ["7.6"],
   // P-19 asserts 7's reading of the configuration's import: its specifier
   // any static string literal (2.4), read as spelled and never interpreted,
   // resolved, or loaded, so that every answer and every generated file is
