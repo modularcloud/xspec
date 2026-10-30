@@ -14,8 +14,8 @@
 // Reach verified, nothing else installed but the one `@types` stand-in the
 // `types` detection needs), in each setup whose verdict the setting decides,
 // both sides: rejected where the setting rejects the construct, admitted
-// where it admits it. S-4's detection of T7.6-1's export listing belongs
-// beside that listing, which the driver does not hold yet.
+// where it admits it. T7.6-1's export listing, which the same driver reads,
+// is detected last (below).
 //
 // The detections, each with the setups it is judged in and those that
 // reject it (release 5.9.3's verdicts, wherever it gives a value an effect
@@ -105,6 +105,25 @@
 //   returning an interface the stand-in exports, type-checks in every setup,
 //   so the rejection is declaration emit's alone.
 //
+// Last, T7.6-1's export listing, which the driver reads from each file's
+// own program where a request asks for it (`listExports`): a listing blind
+// to an implicit export or to an export assignment's members would pass a
+// package declaring more than `defineConfig`. Each detection judges a plain
+// import in all 173 setups and pins the listing whole — the declaration
+// file TypeScript resolves, whether it declares an export assignment, and
+// every name with its meanings and where TypeScript lists it:
+// - an interface a declaration module never marks `export`, with no export
+//   list (`export {}`): the `implicit-export` stand-in lists, beside
+//   `defineConfig` (a value), its interface (a type), both among the
+//   module's exports, through the declaration file each setup resolves —
+//   the `import` entry's in 102 setups and the `require` entry's in 71,
+//   each entry's interface named for it, so a listing read from another
+//   file than the one TypeScript resolves fails too;
+// - an export assignment's members: the `export-assignment` stand-in, whose
+//   declaration file assigns a value carrying `defineConfig` and one other
+//   member, `other`, lists both, each a value among the assignment's
+//   members, the module's exports proper empty, in every setup.
+//
 // A rejection is pinned by its effect: TypeScript reports at least one
 // error for the file's program and every one of them lies where the
 // construct begins — in the configuration file, or, for `skipLibCheck` and
@@ -149,10 +168,20 @@
 //   (`@types/s4-ambient`, its `index.d.ts` declaring a global variable),
 //   which the `types` detection installs at `node_modules/@types/s4-ambient`
 //   beside the placement.
+// - `implicit-export`: `dual`'s layout, its declaration files differing:
+//   each declares `defineConfig` and an interface it never marks `export`,
+//   with no `export {}` — `ImportEntryInterface` in `index.d.ts`,
+//   `RequireEntryInterface` in `index.d.cts`.
+// - `export-assignment`: a CommonJS package — no `type`, no `exports` map,
+//   its top-level `types` and `main` alone, so every setup resolves its one
+//   declaration file — whose `index.d.ts` assigns (`export =`) a constant
+//   typed with `defineConfig` and a number `other`, and whose `index.js`
+//   exports such an object.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 import { expect, onTestFinished, test } from "vitest";
 import {
   ModuleStaging,
@@ -163,12 +192,16 @@ import type { Placement, ProjectKind } from "../helpers/module-channel.js";
 import {
   COVERED_SETUPS,
   describeErrors,
+  describeExportListing,
   stageCoveredFiles,
 } from "../helpers/module-channel-ts.js";
 import type {
   CoveredExtension,
   CoveredSetup,
   CoveredVerdict,
+  ExportListing,
+  ExportSource,
+  ListedExport,
   ProgramError,
 } from "../helpers/module-channel-ts.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
@@ -187,6 +220,8 @@ const STAND_INS = {
   implicitAny: fixture("s4-module-channel/implicit-any"),
   unexportedReturn: fixture("s4-module-channel/unexported-return"),
   ambientTypes: fixture("s4-module-channel/ambient-types"),
+  implicitExport: fixture("s4-module-channel/implicit-export"),
+  exportAssignment: fixture("s4-module-channel/export-assignment"),
 } as const;
 
 function fixture(rel: string): string {
@@ -908,6 +943,157 @@ async function expectTypesKeptOut(): Promise<void> {
   ).toStrictEqual({ mismatches: [], judged: 173, included: 168 });
 }
 
+/** The declaration files a listing detection's stand-ins hold. */
+type DeclarationFile = "index.d.ts" | "index.d.cts";
+
+/** One detection of T7.6-1's export listing (module header). */
+interface ListingDetection {
+  /** How every diagnosis names it. */
+  readonly name: string;
+  /** The stand-in package placed canonically for it. */
+  readonly standIn: string;
+  /** The stand-in's declaration file TypeScript resolves in `setup`. */
+  readonly declarationIn: (setup: CoveredSetup) => DeclarationFile;
+  /** The listing expected where TypeScript resolves `declaration`. */
+  readonly listed: (
+    declaration: DeclarationFile,
+  ) => Omit<ExportListing, "module">;
+  /** How many of the 173 setups resolve each declaration file. */
+  readonly resolved: Partial<Readonly<Record<DeclarationFile, number>>>;
+}
+
+/** A listed export written out: one meaning, found in one place. */
+function listedExport(
+  name: string,
+  meaning: "value" | "type",
+  listedIn: ExportSource,
+): ListedExport {
+  return {
+    name,
+    value: meaning === "value",
+    typeOnlyValue: false,
+    type: meaning === "type",
+    namespace: false,
+    listedIn: [listedIn],
+  };
+}
+
+/**
+ * Which of a `dual`-layout stand-in's declaration files TypeScript resolves
+ * in `setup`, written out here apart from the driver: under `node10`, which
+ * reads no `exports`, the top-level `types`; under `bundler`, the `require`
+ * entry's for a `.cts` file alone; under the `node16` and `nodenext` modes
+ * (the initialized set's among them), the `require` entry's for each file
+ * TypeScript compiles as CommonJS there, and the `import` entry's otherwise.
+ */
+function dualDeclaration(setup: CoveredSetup): DeclarationFile {
+  const resolution = setup.optionSet.tsconfig["moduleResolution"];
+  if (resolution === "node10") return "index.d.ts";
+  if (resolution === "bundler") {
+    return setup.extension === ".cts" ? "index.d.cts" : "index.d.ts";
+  }
+  return compiledAsEsModule(setup) ? "index.d.ts" : "index.d.cts";
+}
+
+const IMPLICIT_EXPORT: ListingDetection = {
+  name: "an interface a declaration module never marks export, with no export {}",
+  standIn: STAND_INS.implicitExport,
+  declarationIn: dualDeclaration,
+  listed: (declaration) => ({
+    exportAssignment: false,
+    exports: [
+      listedExport(
+        declaration === "index.d.ts"
+          ? "ImportEntryInterface"
+          : "RequireEntryInterface",
+        "type",
+        "exports",
+      ),
+      listedExport("defineConfig", "value", "exports"),
+    ],
+  }),
+  resolved: { "index.d.ts": 102, "index.d.cts": 71 },
+};
+
+const EXPORT_ASSIGNMENT: ListingDetection = {
+  name: "an export assignment whose value carries defineConfig and one other member",
+  standIn: STAND_INS.exportAssignment,
+  declarationIn: () => "index.d.ts",
+  listed: () => ({
+    exportAssignment: true,
+    exports: [
+      listedExport("defineConfig", "value", "export assignment"),
+      listedExport("other", "value", "export assignment"),
+    ],
+  }),
+  resolved: { "index.d.ts": 173 },
+};
+
+/**
+ * Judge a plain import of `detection`'s stand-in in every covered setup,
+ * project by project, each project a fresh staging, the driver listing the
+ * import's exports, and expect each setup's listing whole (module header),
+ * together with the counts of setups judged and resolving each declaration
+ * file.
+ */
+async function expectListed(detection: ListingDetection): Promise<void> {
+  const mismatches: string[] = [];
+  let judged = 0;
+  const resolved: Partial<Record<DeclarationFile, number>> = {};
+  for (const project of PROJECT_KINDS) {
+    const setups = COVERED_SETUPS.filter((setup) => setup.project === project);
+    const context =
+      `S-4, T7.6-1's export listing: ${detection.name}, in the ${project} ` +
+      `project`;
+    const { staging, placement } = await stagedProject(
+      detection.standIn,
+      project,
+      context,
+    );
+    const files = await stageCoveredFiles({
+      staging,
+      directory: PROJECT_DIR,
+      project,
+      placement,
+      alone: true,
+      listExports: true,
+      files: [{ label: detection.name, text: plainImport(placement.name) }],
+      setups,
+      context,
+    });
+    for (const setup of setups) {
+      const [verdict] = files.judge(setup);
+      if (verdict === undefined) {
+        throw new Error(`${context}: no verdict in ${setup.label}`);
+      }
+      judged += 1;
+      const declaration = detection.declarationIn(setup);
+      resolved[declaration] = (resolved[declaration] ?? 0) + 1;
+      const expected: ExportListing = {
+        module: `${slashed(placement.copy)}/${declaration}`,
+        ...detection.listed(declaration),
+      };
+      if (!isDeepStrictEqual(verdict.exportListing, expected)) {
+        mismatches.push(
+          `${setup.label}: the driver lists ` +
+            `${describeExportListing(verdict.exportListing)}, where ` +
+            `the stand-in's declarations give ${describeExportListing(expected)}`,
+        );
+      }
+    }
+  }
+  expect(
+    { mismatches, judged, resolved },
+    `T7.6-1's export listing, ${detection.name}: each setup's listing as ` +
+      `TypeScript's own resolution gives it, and the setups judged and ` +
+      `resolving each declaration file`,
+  ).toStrictEqual({
+    mismatches: [],
+    judged: 173,
+    resolved: detection.resolved,
+  });
+}
+
 test("moduleResolution: an exports-only stand-in, which node10 alone does not resolve, is rejected in each of the 12 node10 setups — an error at the import's specifier and nowhere else — and type-checks in each of the 156 other strict-default setups (TEST-SPEC S-4; §7.6 Covered setups)", async () => {
   await expectDetected(EXPORTS_ONLY);
 });
@@ -974,4 +1160,12 @@ test("the module format the project and the extension imply: import.meta is reje
 
 test("the verdict's reach into declaration diagnostics: a valid default export of a stand-in's defineConfig, which returns an interface the stand-in does not export, is rejected in each of the 5 initialized-project setups, which turn declaration on — an error at the export and nowhere else — and type-checks in each of the 168 strict-default setups, while its twin, returning an interface the stand-in exports, type-checks in all 173 (TEST-SPEC S-4; §7.6 Verdict)", async () => {
   await expectDetected(DECLARATION_DIAGNOSTICS);
+});
+
+test("T7.6-1's export listing: a stand-in whose declaration files each declare, beside defineConfig, an interface never marked export, with no export {}, lists both — defineConfig a value, the interface a type, each among the module's exports — read through TypeScript's own resolution in each of the 173 covered setups, the import entry's declaration file in 102 and the require entry's in 71 (TEST-SPEC S-4; T7.6-1)", async () => {
+  await expectListed(IMPLICIT_EXPORT);
+});
+
+test("T7.6-1's export listing: a stand-in whose export assignment assigns a value carrying defineConfig and one other member lists both, each a value among the assignment's members, the module's exports proper empty, in each of the 173 covered setups (TEST-SPEC S-4; T7.6-1)", async () => {
+  await expectListed(EXPORT_ASSIGNMENT);
 });

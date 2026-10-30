@@ -22,11 +22,21 @@
 // - the sharing the driver's header argues, against its reference reading
 //   (one root, nothing shared but parsed libraries) on a sample of setups,
 //   a package whose global augmentation puts errors inside a library among
-//   them, and batches the driver must judge file by file instead;
+//   them, each file's export listing read alike, and batches the driver
+//   must judge file by file instead (a file augmenting a module among
+//   them);
 // - the program condition, from TypeScript's include reasons: an `@types`
 //   package included automatically, a library an installed package
 //   replaces, and a module TypeScript imports implicitly are refused where
-//   they enter the program, and admitted where they do not.
+//   they enter the program, and admitted where they do not;
+// - the export listing (TEST-SPEC T7.6-1): each name with its meanings as
+//   TypeScript resolves them, through each entry — a value merged with a
+//   namespace, a declared default, values reached only through `export
+//   type` and `export type *`, an export assignment's members merged with
+//   its value's exports, a member keyed by a symbol left out, a value typed
+//   as a class instance, a stand-in exporting `defineConfig` alone, and
+//   S-7's stub package resolving to no module. S-4's own detections of the
+//   listing are test/self/s4-module-channel.test.ts's.
 //
 // The stand-ins, test/fixtures/module-channel-ts/, documented here since
 // JSON holds no comment: each a package in the dual-entry layout AGENTS.md's
@@ -47,6 +57,18 @@
 // - `global-augmenting`: `conforming` beside a global augmentation giving
 //   `RangeError` a `name` of type `number`, which TypeScript reports inside
 //   its own `lib.es5.d.ts` (`RangeError` incorrectly extends `Error`).
+// Two more serve the export listing alone:
+// - `listing-meanings`: the dual-entry layout, its declaration files
+//   differing. `index.d.ts` declares `defineConfig` merged with a namespace
+//   holding a constant, exports it as itself and, type-only, as
+//   `typeOnlyFunction`, re-exports `star.d.ts`'s constant `starValue`
+//   through `export type *`, and declares a default export; `index.d.cts`
+//   assigns (`export =`) a constant whose type carries `defineConfig` and a
+//   member keyed by a unique symbol, merged with a namespace declaring a
+//   type `defineConfig` and an interface `Options`.
+// - `listing-instance`: a CommonJS package (no `type`, its top-level
+//   `types` and `main` alone) whose `index.d.ts` assigns a constant typed
+//   by a class declaring `defineConfig`.
 // S-7's stub package (test/fixtures/empty-stub-package/, a manifest alone)
 // serves as the stub.
 
@@ -70,6 +92,7 @@ import {
   COVERED_SETUP_COUNT,
   COVERED_SETUPS,
   coveredSetupsOf,
+  describeExportListing,
   INITIALIZED_PROJECT_OPTION_SET,
   stageCoveredFiles,
   STRICT_DEFAULT_OPTION_SETS,
@@ -80,6 +103,8 @@ import type {
   CoveredOptionSet,
   CoveredSetup,
   CoveredVerdict,
+  ExportListing,
+  ListedExport,
 } from "../helpers/module-channel-ts.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
@@ -92,6 +117,8 @@ const STAND_INS = {
   declarationError: fixture("module-channel-ts/declaration-error"),
   permissive: fixture("module-channel-ts/permissive"),
   globalAugmenting: fixture("module-channel-ts/global-augmenting"),
+  listingMeanings: fixture("module-channel-ts/listing-meanings"),
+  listingInstance: fixture("module-channel-ts/listing-instance"),
   stub: fixture("empty-stub-package"),
 } as const;
 
@@ -349,6 +376,7 @@ function reading(verdict: CoveredVerdict): unknown {
     ]),
     programFiles: verdict.programFiles,
     compilerOptions: verdict.compilerOptions,
+    exportListing: verdict.exportListing,
   };
 }
 
@@ -637,7 +665,7 @@ const SAMPLE: readonly CoveredSetup[] = [
   setupOf("no-manifest", ".mts", INITIALIZED_PROJECT_OPTION_SET),
 ];
 
-test("the driver's sharing reads every verdict its reference reading does — one root, nothing shared but parsed libraries — on a sample of setups, a package whose global augmentation puts errors inside a library among them (helpers/module-channel-ts.ts header)", async () => {
+test("the driver's sharing reads every verdict its reference reading does, each file's export listing included — one root, nothing shared but parsed libraries — on a sample of setups, a package whose global augmentation puts errors inside a library among them (helpers/module-channel-ts.ts header)", async () => {
   for (const project of PROJECT_KINDS) {
     const setups = SAMPLE.filter((setup) => setup.project === project);
     for (const packageDir of [
@@ -662,6 +690,7 @@ test("the driver's sharing reads every verdict its reference reading does — on
         project,
         placement,
         alone: true,
+        listExports: true,
         files: staged,
         setups,
         context,
@@ -672,6 +701,13 @@ test("the driver's sharing reads every verdict its reference reading does — on
           verdicts.map((verdict) => verdict.judged),
           setup.label,
         ).toStrictEqual(staged.map(() => "batched"));
+        for (const verdict of verdicts) {
+          expect(
+            verdict.exportListing?.exports.map((entry) => entry.name),
+            `${context}, ${verdict.label}, ${setup.label}: ` +
+              describeExportListing(verdict.exportListing),
+          ).toStrictEqual(["defineConfig"]);
+        }
         for (const verdict of verdicts) {
           const reference = files.judgeUnshared(setup, verdict.label);
           expect(reference.judged).toBe("unshared");
@@ -712,7 +748,7 @@ test("the driver's sharing reads every verdict its reference reading does — on
   }
 });
 
-test("a batch whose files' imports bring in different files, or one of whose files contributes to the global scope, is judged file by file, each verdict its reference reading's (helpers/module-channel-ts.ts header)", async () => {
+test("a batch whose files' imports bring in different files, or one of whose files contributes to the global scope or augments a module, is judged file by file, each verdict its reference reading's, a module augmentation reaching its own file's export listing alone (helpers/module-channel-ts.ts header)", async () => {
   const project: ProjectKind = "es-module";
   const context = "file-by-file batches";
   const { staging, placement } = await stagedProject(
@@ -749,6 +785,18 @@ test("a batch whose files' imports bring in different files, or one of whose fil
       "export default defineConfig({ groups: { product: [] } });",
     ),
   };
+  const moduleAugmenting: CoveredFile = {
+    label: "a file augmenting the package's module",
+    text: lines(
+      `import { defineConfig } from ${JSON.stringify(placement.name)};`,
+      "",
+      `declare module ${JSON.stringify(placement.name)} {`,
+      "  export const augmentedExport: number;",
+      "}",
+      "",
+      "export default defineConfig({ groups: { product: [] } });",
+    ),
+  };
   const setups = [
     setupOf(project, ".ts", strictSet("node10")),
     setupOf(project, ".ts", INITIALIZED_PROJECT_OPTION_SET),
@@ -757,12 +805,14 @@ test("a batch whose files' imports bring in different files, or one of whose fil
     ["imports", importing],
     ["script", script],
     ["augmenting", augmenting],
+    ["augmenting a module", moduleAugmenting],
   ] as const) {
     const files = await stageCoveredFiles({
       staging,
       directory: PROJECT_DIR,
       project,
       placement,
+      listExports: label === "augmenting a module",
       files: [validFile(placement.name), extra],
       setups,
       context: `${context}, ${label}`,
@@ -793,6 +843,18 @@ test("a batch whose files' imports bring in different files, or one of whose fil
       expect(
         other.programFiles.some((file) => insideCopy(placement, file)),
       ).toBe(label !== "script");
+      if (label === "augmenting a module") {
+        expect(
+          [valid, other].map((verdict) =>
+            verdict.exportListing?.exports.map((entry) => entry.name),
+          ),
+          `${label}, ${setup.label}: the augmentation reaches its own ` +
+            `program's listing alone`,
+        ).toStrictEqual([
+          ["defineConfig"],
+          ["augmentedExport", "defineConfig"],
+        ]);
+      }
     }
   }
 });
@@ -918,7 +980,7 @@ test("SPEC 7.6's program condition, read from TypeScript's include reasons: an @
   assertTypeChecks(admitted, "no jsx: nothing imported implicitly");
 });
 
-test("misuses are plain errors: no file, a duplicate label, a setup of another project, and a setup the files were not staged for (helpers/module-channel-ts.ts)", async () => {
+test("misuses are plain errors: no file, a duplicate label, a setup of another project, a setup the files were not staged for, and an export listing asked of a file holding no import declaration (helpers/module-channel-ts.ts)", async () => {
   const project: ProjectKind = "commonjs";
   const context = "misuses";
   const { staging, placement } = await stagedProject(
@@ -969,4 +1031,162 @@ test("misuses are plain errors: no file, a duplicate label, a setup of another p
   expect(() =>
     files.judge(setupOf(project, ".mts", strictSet("node10"))),
   ).toThrow(/not among the setups/);
+  const unlisted = await stageCoveredFiles({
+    ...request,
+    listExports: true,
+    files: [
+      {
+        label: "a file holding no import declaration",
+        text: lines("export default 1;"),
+      },
+    ],
+    setups: [setupOf(project, ".ts", strictSet("node10"))],
+  });
+  let listingMisuse: unknown;
+  try {
+    unlisted.judge(setupOf(project, ".ts", strictSet("node10")));
+  } catch (error) {
+    listingMisuse = error;
+  }
+  expect(listingMisuse).toBeInstanceOf(Error);
+  expect(listingMisuse).not.toBeInstanceOf(HarnessAssertionError);
+  expect(listingMisuse).not.toBeInstanceOf(HarnessStagingError);
+  expect(String(listingMisuse)).toMatch(/one import declaration/);
+});
+
+/** A listed export written out: its meanings, and where it is listed. */
+function listedExport(
+  name: string,
+  meanings: {
+    readonly value?: boolean;
+    readonly typeOnlyValue?: boolean;
+    readonly type?: boolean;
+    readonly namespace?: boolean;
+  },
+  listedIn: ListedExport["listedIn"],
+): ListedExport {
+  return {
+    name,
+    value: meanings.value === true,
+    typeOnlyValue: meanings.typeOnlyValue === true,
+    type: meanings.type === true,
+    namespace: meanings.namespace === true,
+    listedIn,
+  };
+}
+
+/** A listing expected, its module named by its path in the package. */
+type ExpectedListing = Omit<ExportListing, "module"> & {
+  readonly module: string | undefined;
+};
+
+test("the export listing reads each name with its meanings as TypeScript resolves the file's import, through each entry: a value merged with a namespace, a declared default, values reached only through export type and export type *, an export assignment's members merged with its value's exports and a symbol-keyed member left out, a value typed as a class instance, a stand-in exporting defineConfig alone, and S-7's stub package resolving to no module — each listing its reference reading's (helpers/module-channel-ts.ts header; TEST-SPEC T7.6-1)", async () => {
+  const project: ProjectKind = "es-module";
+  const importEntry = setupOf(
+    project,
+    ".mts",
+    strictSet("nodenext", "nodenext"),
+  );
+  const requireEntry = setupOf(
+    project,
+    ".cts",
+    strictSet("nodenext", "nodenext"),
+  );
+  const cases: readonly (readonly [
+    string,
+    (setup: CoveredSetup) => ExpectedListing,
+  ])[] = [
+    [
+      STAND_INS.listingMeanings,
+      (setup) =>
+        setup === importEntry
+          ? {
+              module: "index.d.ts",
+              exportAssignment: false,
+              exports: [
+                listedExport("default", { value: true }, ["exports"]),
+                listedExport("defineConfig", { value: true, namespace: true }, [
+                  "exports",
+                ]),
+                listedExport("starValue", { typeOnlyValue: true }, ["exports"]),
+                listedExport(
+                  "typeOnlyFunction",
+                  { typeOnlyValue: true, namespace: true },
+                  ["exports"],
+                ),
+              ],
+            }
+          : {
+              module: "index.d.cts",
+              exportAssignment: true,
+              exports: [
+                listedExport("Options", { type: true }, ["exports"]),
+                listedExport("defineConfig", { value: true, type: true }, [
+                  "exports",
+                  "export assignment",
+                ]),
+              ],
+            },
+    ],
+    [
+      STAND_INS.listingInstance,
+      () => ({
+        module: "index.d.ts",
+        exportAssignment: true,
+        exports: [
+          listedExport("defineConfig", { value: true }, ["export assignment"]),
+        ],
+      }),
+    ],
+    [
+      STAND_INS.conforming,
+      (setup) => ({
+        module: setup === importEntry ? "index.d.ts" : "index.d.cts",
+        exportAssignment: false,
+        exports: [listedExport("defineConfig", { value: true }, ["exports"])],
+      }),
+    ],
+    [
+      STAND_INS.stub,
+      () => ({ module: undefined, exportAssignment: false, exports: [] }),
+    ],
+  ];
+  for (const [packageDir, expected] of cases) {
+    const context = `the export listing of ${path.basename(packageDir)}`;
+    const { staging, placement } = await stagedProject(
+      packageDir,
+      project,
+      context,
+    );
+    const files = await stageCoveredFiles({
+      staging,
+      directory: PROJECT_DIR,
+      project,
+      placement,
+      alone: true,
+      listExports: true,
+      files: [validFile(placement.name)],
+      setups: [importEntry, requireEntry],
+      context,
+    });
+    const copy = placement.copy.split(path.sep).join("/");
+    for (const setup of [importEntry, requireEntry]) {
+      const [verdict] = files.judge(setup);
+      const want = expected(setup);
+      const listing: ExportListing = {
+        ...want,
+        module:
+          want.module === undefined ? undefined : `${copy}/${want.module}`,
+      };
+      expect(
+        verdict?.exportListing,
+        `${context}, ${setup.label}: the driver lists ` +
+          describeExportListing(verdict?.exportListing),
+      ).toStrictEqual(listing);
+      expect(
+        files.judgeUnshared(setup, "the valid file").exportListing,
+        `${context}, ${setup.label}: the reference reading's listing`,
+      ).toStrictEqual(listing);
+    }
+  }
 });

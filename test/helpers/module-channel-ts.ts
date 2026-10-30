@@ -72,6 +72,48 @@
 // Verdict failures are diagnosed (`HarnessAssertionError`, H-8), naming the
 // setup, the file, and every error.
 //
+// The export listing (TEST-SPEC T7.6-1, S-4), where a request asks for it
+// (`listExports`): each verdict then carries the listing of the module
+// TypeScript resolves the file's one import declaration to, read from that
+// file's own program, so each setup through its own resolution (a package
+// serving different declaration files to `import` and to `require`, or to
+// different modes, read through each), and never probed by names the
+// harness chooses:
+// - the module: `checker.getSymbolAtLocation` on the import's specifier.
+//   Where TypeScript resolves the import to no module it reads declarations
+//   from (a stub package, a JavaScript file without declarations), the
+//   listing names no module and no export.
+// - the compiler's listing of its exports (`checker.getExportsOfModule`): a
+//   declaration module holding neither an export list nor an export
+//   assignment exports each of its top-level declarations, an interface it
+//   never marks `export` among them, which this listing sees; export stars
+//   are followed; TypeScript's synthetic default is never among them, a
+//   declared default export (`default`) is.
+// - where the module declares an export assignment (`export =`), the
+//   members of the assigned value that a named import binds: the
+//   properties of that value's type (`checker.getPropertiesOfType` over
+//   `checker.getTypeOfSymbol` of the assignment), the type TypeScript's
+//   named-import resolution reads each imported name from — a member keyed
+//   by a symbol or a private name aside, which no import name spells. Not
+//   the checker's internal `getExportsAndPropertiesOfModule`, which lists
+//   no member of a value typed as a class instance, a primitive, an array,
+//   or a tuple, though a named import binds them: a value typed by a class
+//   declaring `defineConfig` imports it by name.
+// - each name's meanings, merged where both lists hold it: value, type, and
+//   namespace, as TypeScript's symbol flags give them through aliases (an
+//   alias TypeScript cannot resolve carrying every meaning, as TypeScript
+//   reads it). A value meaning reached only through `export type`, `import
+//   type`, or `export type *`, which no import may use as a value, is no
+//   value meaning (`value` false) and is reported as such
+//   (`typeOnlyValue`): for a module without an export assignment, read as
+//   TypeScript reads the module object's value members (the module type's
+//   `checker.getPropertyOfType` returning that very export); for an export
+//   assignment's members, never; and for the exports of its assigned value,
+//   from the declarations along each alias
+//   (`ts.isTypeOnlyImportOrExportDeclaration`).
+// Each listing is computed once the program's diagnostics are all read, so
+// it changes no verdict.
+//
 // Sharing, and why each kind is sound for what a case checks (TEST-SPEC
 // §7.6 Covered setups: how the harness reaches each verdict is open wherever
 // it drops no pairing and stays sound):
@@ -91,12 +133,16 @@
 //   those shared files, so the batch is sound wherever no root reaches past
 //   its own module — checked on the program, not assumed: every root is an
 //   external module declaring nothing global (no global augmentation, no
-//   UMD export), every root's import brings in the same files (its closure
+//   UMD export) and augmenting no module (a `declare module "…"`, which
+//   changes that module, its exports included, for every file of the
+//   program), every root's import brings in the same files (its closure
 //   over TypeScript's include reasons), and no root's check raises a global
 //   diagnostic, which could belong to any of them. Where a check fails, each
 //   file is judged in a program of its own instead. Within one program
 //   TypeScript's diagnostics for a file do not depend on which other files
 //   were checked first: the language service checks files in any order.
+//   Each root's export listing reads its own import's resolution, which
+//   every root of a batch shares.
 // - The libraries' own diagnostics are read once per option set and library
 //   list, wherever no file of the program but the libraries contributes to
 //   the global scope (every other file an external module declaring nothing
@@ -114,8 +160,9 @@
 // harness step under its own guard (`guardSyncStep`, the default step guard
 // — measured costs in AGENTS.md), each program of its own beside a batch its
 // own step; writing and Reach are asynchronous steps under theirs. A misuse
-// of this module (an unknown setup, an empty file list, a duplicate label)
-// is a plain `Error`.
+// of this module (an unknown setup, an empty file list, a duplicate label,
+// an export listing asked of a file holding other than one import
+// declaration) is a plain `Error`.
 
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -634,6 +681,21 @@ function contributesGlobals(file: ts.SourceFile): boolean {
   return reaches(file.statements);
 }
 
+/**
+ * Whether an external module augments another module (module header): a
+ * `declare module "…"` among its statements, which changes that module for
+ * every file of the program.
+ */
+function augmentsModules(file: ts.SourceFile): boolean {
+  return (
+    ts.isExternalModule(file) &&
+    file.statements.some(
+      (statement) =>
+        ts.isModuleDeclaration(statement) && ts.isStringLiteral(statement.name),
+    )
+  );
+}
+
 /** A program's files, classified (module header). */
 interface ProgramFiles {
   /** The files of TypeScript's library directory, in program order. */
@@ -776,6 +838,7 @@ function classifyProgram(
   if (roots.length > 1) {
     const nonRoots = files.filter((file) => !rootSet.has(file));
     const scriptRoot = roots.find(contributesGlobals);
+    const augmentingRoot = roots.find(augmentsModules);
     const partial = roots.find((root, index) => {
       const own = ownPrograms[index];
       return (
@@ -786,6 +849,8 @@ function classifyProgram(
     });
     if (scriptRoot !== undefined) {
       unbatchable = `${scriptRoot.fileName} contributes to the global scope`;
+    } else if (augmentingRoot !== undefined) {
+      unbatchable = `${augmentingRoot.fileName} augments a module`;
     } else if (partial !== undefined) {
       unbatchable =
         `the roots' imports bring in different files (${partial.fileName}'s ` +
@@ -810,10 +875,212 @@ export interface ProgramError {
   readonly message: string;
 }
 
+/** Where an export listing finds a name (module header). */
+export type ExportSource = "exports" | "export assignment";
+
+/**
+ * One name the module a covered file's import resolves to declares, with
+ * its meanings (module header; TEST-SPEC T7.6-1).
+ */
+export interface ListedExport {
+  /** The name, as an import spells it. */
+  readonly name: string;
+  /** A value meaning an import may use as a value. */
+  readonly value: boolean;
+  /**
+   * A value meaning no import may use as a value, reached only through
+   * `export type`, `import type`, or `export type *` (`value` then false).
+   */
+  readonly typeOnlyValue: boolean;
+  /** A type meaning. */
+  readonly type: boolean;
+  /** A namespace meaning. */
+  readonly namespace: boolean;
+  /**
+   * Where the listing finds it: among the module's exports, among the
+   * members of its export assignment's value, or both, in that order.
+   */
+  readonly listedIn: readonly ExportSource[];
+}
+
+/**
+ * The listing of the module a covered file's one import declaration
+ * resolves to, in that file's program (module header; TEST-SPEC T7.6-1).
+ */
+export interface ExportListing {
+  /**
+   * The file declaring the module, by the name TypeScript read it under;
+   * undefined where TypeScript resolves the import to no module it reads
+   * declarations from.
+   */
+  readonly module: string | undefined;
+  /** Whether that module declares an export assignment (`export =`). */
+  readonly exportAssignment: boolean;
+  /** Every name it declares, in UTF-16 code-unit order. */
+  readonly exports: readonly ListedExport[];
+}
+
+/**
+ * A symbol's meaning flags through its aliases, as TypeScript reads them
+ * (module header): an alias TypeScript cannot resolve carries every meaning.
+ */
+function meaningFlags(checker: ts.TypeChecker, symbol: ts.Symbol): number {
+  if ((symbol.flags & ts.SymbolFlags.Alias) === 0) return symbol.flags;
+  const target = checker.getAliasedSymbol(symbol);
+  return checker.isUnknownSymbol(target)
+    ? ts.SymbolFlags.All
+    : symbol.flags | target.flags;
+}
+
+/** Whether an alias along `symbol`'s chain is declared type-only. */
+function declaredTypeOnly(checker: ts.TypeChecker, symbol: ts.Symbol): boolean {
+  const seen = new Set<ts.Symbol>();
+  let current: ts.Symbol | undefined = symbol;
+  while (
+    current !== undefined &&
+    (current.flags & ts.SymbolFlags.Alias) !== 0 &&
+    !seen.has(current)
+  ) {
+    seen.add(current);
+    if (
+      current.declarations?.some((declaration) =>
+        ts.isTypeOnlyImportOrExportDeclaration(declaration),
+      ) === true
+    ) {
+      return true;
+    }
+    current = checker.getImmediateAliasedSymbol(current);
+  }
+  return false;
+}
+
+/**
+ * Whether an escaped symbol name is TypeScript's own rather than one an
+ * import spells: TypeScript gives every spelled name beginning `__` one more
+ * `_`, so an escaped name beginning `__` and then another character names a
+ * symbol-keyed member, a private name, or an internal entry.
+ */
+function isInternalName(escapedName: string): boolean {
+  return escapedName.startsWith("__") && escapedName.charAt(2) !== "_";
+}
+
+/** A name's meanings as the listing gathers them, before it is frozen. */
+interface GatheredExport {
+  value: boolean;
+  typeOnlyValue: boolean;
+  type: boolean;
+  namespace: boolean;
+  readonly listedIn: Set<ExportSource>;
+}
+
+/**
+ * The export listing of `root`'s one import declaration in `program`
+ * (module header), read once the program's diagnostics are all read; a
+ * root holding no import declaration, or more than one, is a misuse.
+ */
+function listModuleExports(
+  program: ts.Program,
+  root: ts.SourceFile,
+  context: string,
+): ExportListing {
+  const declarations = root.statements.filter(ts.isImportDeclaration);
+  const [declaration] = declarations;
+  if (declarations.length !== 1 || declaration === undefined) {
+    throw new Error(
+      `module channel's TypeScript driver: an export listing reads the ` +
+        `module a covered file's one import declaration resolves to, and ` +
+        `${root.fileName} holds ${String(declarations.length)} import ` +
+        `declarations (${context})`,
+    );
+  }
+  const checker = program.getTypeChecker();
+  const moduleSymbol = checker.getSymbolAtLocation(declaration.moduleSpecifier);
+  if (moduleSymbol === undefined) {
+    return Object.freeze({
+      module: undefined,
+      exportAssignment: false,
+      exports: Object.freeze([]),
+    });
+  }
+  const moduleFile = moduleSymbol.declarations?.[0]?.getSourceFile().fileName;
+  if (moduleFile === undefined) {
+    throw new Error(
+      `module channel's TypeScript driver: TypeScript resolves the import of ` +
+        `${root.fileName} to a module with no declaration (${context})`,
+    );
+  }
+  const assignment = moduleSymbol.exports?.get(
+    ts.InternalSymbolName.ExportEquals,
+  );
+  const moduleType =
+    assignment === undefined
+      ? checker.getTypeOfSymbol(moduleSymbol)
+      : undefined;
+  const gathered = new Map<string, GatheredExport>();
+  const gather = (symbol: ts.Symbol, source: ExportSource): void => {
+    if (isInternalName(symbol.escapedName as string)) return;
+    const name = ts.unescapeLeadingUnderscores(symbol.escapedName);
+    const flags = meaningFlags(checker, symbol);
+    const carriesValue = (flags & ts.SymbolFlags.Value) !== 0;
+    let typeOnly = false;
+    if (carriesValue && source === "exports") {
+      typeOnly =
+        moduleType === undefined
+          ? declaredTypeOnly(checker, symbol)
+          : checker.getPropertyOfType(moduleType, name) !== symbol;
+    }
+    const entry = gathered.get(name) ?? {
+      value: false,
+      typeOnlyValue: false,
+      type: false,
+      namespace: false,
+      listedIn: new Set<ExportSource>(),
+    };
+    if (carriesValue && !typeOnly) entry.value = true;
+    if (carriesValue && typeOnly) entry.typeOnlyValue = true;
+    if ((flags & ts.SymbolFlags.Type) !== 0) entry.type = true;
+    if ((flags & ts.SymbolFlags.Namespace) !== 0) entry.namespace = true;
+    entry.listedIn.add(source);
+    gathered.set(name, entry);
+  };
+  for (const symbol of checker.getExportsOfModule(moduleSymbol)) {
+    gather(symbol, "exports");
+  }
+  if (assignment !== undefined) {
+    for (const member of checker.getPropertiesOfType(
+      checker.getTypeOfSymbol(assignment),
+    )) {
+      gather(member, "export assignment");
+    }
+  }
+  const sources: readonly ExportSource[] = ["exports", "export assignment"];
+  const exports = [...gathered.keys()].sort().map((name): ListedExport => {
+    const entry = gathered.get(name);
+    if (entry === undefined) throw new Error("unreachable: a gathered name");
+    return Object.freeze({
+      name,
+      value: entry.value,
+      typeOnlyValue: entry.typeOnlyValue && !entry.value,
+      type: entry.type,
+      namespace: entry.namespace,
+      listedIn: Object.freeze(
+        sources.filter((source) => entry.listedIn.has(source)),
+      ),
+    });
+  });
+  return Object.freeze({
+    module: moduleFile,
+    exportAssignment: assignment !== undefined,
+    exports: Object.freeze(exports),
+  });
+}
+
 /** A root's share of a program's run: its program's errors and files. */
 interface RootOutcome {
   readonly errors: readonly ProgramError[];
   readonly programFiles: readonly string[];
+  /** Its import's export listing, where the request asked for one. */
+  readonly exportListing: ExportListing | undefined;
 }
 
 /** One program's run over its roots. */
@@ -937,13 +1204,15 @@ function ownProgramFiles(
  * Run one program over `rootPaths` with the sharing the module header
  * argues: the libraries' diagnostics read once per option set and library
  * list where that is sound, then the program's other shared files, then
- * each root; each root's errors read from the shared diagnostics and its own.
+ * each root; each root's errors read from the shared diagnostics and its own,
+ * and then, where `listExports` asks, its import's export listing.
  */
 function runSharedProgram(
   setup: CoveredSetup,
   rootPaths: readonly string[],
   currentDirectory: string,
   context: string,
+  listExports: boolean,
 ): ProgramOutcome {
   const { program, roots } = createProgram(
     setup,
@@ -994,18 +1263,29 @@ function runSharedProgram(
   }
   const finalGlobal = roots.length === 1 ? program.getGlobalDiagnostics() : [];
   const options = new Set(optionDiagnostics);
+  const perRoot = roots.map((root, index) => ({
+    errors: programErrors(
+      [...shared, ...(own[index] ?? []), ...finalGlobal],
+      root,
+      options,
+    ),
+    programFiles: ownProgramFiles(
+      program,
+      files.ownPrograms[index] ?? new Set(),
+    ),
+  }));
   return {
-    perRoot: roots.map((root, index) => ({
-      errors: programErrors(
-        [...shared, ...(own[index] ?? []), ...finalGlobal],
-        root,
-        options,
-      ),
-      programFiles: ownProgramFiles(
-        program,
-        files.ownPrograms[index] ?? new Set(),
-      ),
-    })),
+    perRoot: perRoot.map((outcome, index) => {
+      const root = roots[index];
+      if (root === undefined)
+        throw new Error("unreachable: a root per outcome");
+      return {
+        ...outcome,
+        exportListing: listExports
+          ? listModuleExports(program, root, context)
+          : undefined,
+      };
+    }),
     compilerOptions: readBackOptions(program),
     unbatchable,
   };
@@ -1014,13 +1294,15 @@ function runSharedProgram(
 /**
  * The reference reading (module header): one root, nothing shared but
  * parsed libraries, every diagnostic read as `ts.getPreEmitDiagnostics`
- * reads it, and the global diagnostics again once everything is checked.
+ * reads it, and the global diagnostics again once everything is checked;
+ * then, where `listExports` asks, the root's export listing.
  */
 function runUnsharedProgram(
   setup: CoveredSetup,
   rootPath: string,
   currentDirectory: string,
   context: string,
+  listExports: boolean,
 ): ProgramOutcome {
   const { program, roots } = createProgram(
     setup,
@@ -1035,18 +1317,22 @@ function runUnsharedProgram(
     ...ts.getPreEmitDiagnostics(program),
     ...program.getGlobalDiagnostics(),
   ];
+  const errors = programErrors(
+    diagnostics,
+    root,
+    new Set(program.getOptionsDiagnostics()),
+  );
   return {
     perRoot: [
       {
-        errors: programErrors(
-          diagnostics,
-          root,
-          new Set(program.getOptionsDiagnostics()),
-        ),
+        errors,
         programFiles: ownProgramFiles(
           program,
           files.ownPrograms[0] ?? new Set(),
         ),
+        exportListing: listExports
+          ? listModuleExports(program, root, context)
+          : undefined,
       },
     ],
     compilerOptions: readBackOptions(program),
@@ -1091,6 +1377,12 @@ export interface CoveredFilesRequest {
    * given, inside the staging either way.
    */
   readonly currentDirectory?: string;
+  /**
+   * Whether each verdict carries the export listing of the module its
+   * file's one import declaration resolves to (module header), every file
+   * then holding exactly one import declaration.
+   */
+  readonly listExports?: boolean;
   /** Leads every diagnosis: the arm the files serve. */
   readonly context: string;
 }
@@ -1114,6 +1406,11 @@ export interface CoveredVerdict {
   readonly programFiles: readonly string[];
   /** The program's options, read back from it. */
   readonly compilerOptions: Readonly<ts.CompilerOptions>;
+  /**
+   * The export listing of the module the file's import resolves to, where
+   * the request asked for it (`listExports`); undefined otherwise.
+   */
+  readonly exportListing: ExportListing | undefined;
   /** How it was reached: in a batch, in a program of its own, or unshared. */
   readonly judged: "batched" | "own program" | "unshared";
 }
@@ -1255,6 +1552,7 @@ export class CoveredFiles {
   readonly #placement: string | undefined;
   readonly #written: ReadonlyMap<CoveredExtension, readonly string[]>;
   readonly #currentDirectory: string;
+  readonly #listExports: boolean;
 
   constructor(
     request: CoveredFilesRequest,
@@ -1268,6 +1566,12 @@ export class CoveredFiles {
     this.#placement = request.placement?.path;
     this.#written = written;
     this.#currentDirectory = currentDirectory;
+    this.#listExports = request.listExports === true;
+  }
+
+  /** What a step's description adds where each program lists exports too. */
+  get #listing(): string {
+    return this.#listExports ? ", listing each import's exports" : "";
   }
 
   /** The written files of `setup`'s extension, by physical path. */
@@ -1310,6 +1614,7 @@ export class CoveredFiles {
       ),
       programFiles: root.programFiles,
       compilerOptions: outcome.compilerOptions,
+      exportListing: root.exportListing,
       judged,
     });
   }
@@ -1323,9 +1628,15 @@ export class CoveredFiles {
     const files = this.#files(setup);
     const batch = guardSyncStep(
       `type-checking ${String(files.length)} configuration file(s) in one ` +
-        `program, ${setup.label} (${this.context})`,
+        `program${this.#listing}, ${setup.label} (${this.context})`,
       () =>
-        runSharedProgram(setup, files, this.#currentDirectory, this.context),
+        runSharedProgram(
+          setup,
+          files,
+          this.#currentDirectory,
+          this.context,
+          this.#listExports,
+        ),
     );
     if (files.length === 1 || batch.unbatchable === undefined) {
       return Object.freeze(
@@ -1343,15 +1654,16 @@ export class CoveredFiles {
     return Object.freeze(
       files.map((file, index) => {
         const own = guardSyncStep(
-          `type-checking ${file} in a program of its own, ${setup.label}, ` +
-            `since ${batch.unbatchable ?? "the batch is unsound"} ` +
-            `(${this.context})`,
+          `type-checking ${file} in a program of its own${this.#listing}, ` +
+            `${setup.label}, since ` +
+            `${batch.unbatchable ?? "the batch is unsound"} (${this.context})`,
           () =>
             runSharedProgram(
               setup,
               [file],
               this.#currentDirectory,
               this.context,
+              this.#listExports,
             ),
         );
         return this.#verdict(setup, index, own, 0, "own program");
@@ -1373,9 +1685,16 @@ export class CoveredFiles {
       );
     }
     const outcome = guardSyncStep(
-      `type-checking ${file} unshared, ${setup.label} (${this.context})`,
+      `type-checking ${file} unshared${this.#listing}, ${setup.label} ` +
+        `(${this.context})`,
       () =>
-        runUnsharedProgram(setup, file, this.#currentDirectory, this.context),
+        runUnsharedProgram(
+          setup,
+          file,
+          this.#currentDirectory,
+          this.context,
+          this.#listExports,
+        ),
     );
     return this.#verdict(setup, index, outcome, 0, "unshared");
   }
@@ -1398,6 +1717,49 @@ export function describeErrors(errors: readonly ProgramError[]): string {
 /** `n` and `word`, pluralized. */
 function count(n: number, word: string): string {
   return `${String(n)} ${word}${n === 1 ? "" : "s"}`;
+}
+
+/** How a diagnosis states one listed export: its name and its meanings. */
+export function describeListedExport(entry: ListedExport): string {
+  const meanings = [
+    ...(entry.value ? ["value"] : []),
+    ...(entry.typeOnlyValue ? ["value reached only type-only"] : []),
+    ...(entry.type ? ["type"] : []),
+    ...(entry.namespace ? ["namespace"] : []),
+  ];
+  return (
+    `${JSON.stringify(entry.name)} (${meanings.join(", ") || "no meaning"}; ` +
+    `listed among ${entry.listedIn
+      .map((source) =>
+        source === "exports"
+          ? "the module's exports"
+          : "the export assignment's members",
+      )
+      .join(" and ")})`
+  );
+}
+
+/**
+ * How a diagnosis states an export listing (module header): the module
+ * TypeScript resolves the import to and every name it declares.
+ */
+export function describeExportListing(
+  listing: ExportListing | undefined,
+): string {
+  if (listing === undefined) return "no export listing (none was asked for)";
+  if (listing.module === undefined) {
+    return (
+      "no module: TypeScript resolves the import to no module it reads " +
+      "declarations from, so it declares no export"
+    );
+  }
+  const names = listing.exports.map(describeListedExport);
+  return (
+    `the module ${listing.module}` +
+    (listing.exportAssignment ? ", which declares an export assignment," : "") +
+    ` declaring ${count(listing.exports.length, "export")}` +
+    (names.length === 0 ? "" : `: ${names.join(", ")}`)
+  );
 }
 
 /**
