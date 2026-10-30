@@ -631,6 +631,20 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
     "13.4",
     "14",
   ],
+  // T7-11: the members of TypeScript's global `Object` interface and
+  // `__proto__` as configured names (7: a name is barred only when empty or
+  // containing U+FFFD) — (a)'s groups, each loading and reported by
+  // `inventory` under its name with its glob and its source (11.6, 12.7's
+  // view forms); (b)'s profile and rule named `toString`, reported with
+  // their complete definitions (11.6, 12.7: every default and inferred kind
+  // explicit), the profile run by `coverage <name>` (8.2), the rule's
+  // violation reported by `check` under its name (7.5, 14.12, its `path`
+  // null, 12.7); (c)'s profile target and boundary and rule selector group
+  // naming them, resolving where such a group is configured (7.4, 7.5) and
+  // otherwise an unknown group (14.14, its error document's code and path,
+  // 12.7); (d)'s unknown profile names at `coverage <name>`, the plain
+  // usage error (12.0, its error document's code and path null, 12.7).
+  "T7-11": ["7", "7.4", "7.5", "8.2", "11.6", "12.0", "12.7", "14"],
   // T7.1-1: its wrong-case extension arm the byte-wise, case-sensitive
   // extension test (12.0: no case folding), and `inventory`'s `derived`
   // entry for the file without `.mdx` (11.6), `module` and `markdown` null
