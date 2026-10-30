@@ -2,8 +2,8 @@
 // preamble: internal self-tests cover harness machinery certification does
 // not exercise; H-2, T7.6-6's run conditions, T7.6-7, §7.6 Pairing, H-1,
 // S-3, E-1; helpers/module-channel-node.ts and its bootstrap,
-// helpers/module-channel-bootstrap.cjs). T7.6-6, the one runtime test of
-// 7.6 registered so far (test/suite/registry/section-7.6-ii.ts), and S-10's
+// helpers/module-channel-bootstrap.cjs). T7.6-6 and T7.6-7, 7.6's runtime
+// tests registered so far (test/suite/registry/section-7.6-ii.ts), and S-10's
 // checks of the driver — each release's identity, each route's entry, each
 // observation's catch — build on these; here the driver's own plumbing is
 // pinned before any product exists, on each of E-1's releases, so

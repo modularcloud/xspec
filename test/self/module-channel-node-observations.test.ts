@@ -3,15 +3,15 @@
 // not exercise; T7.6-6, T7.6-7(a), §7.6 Pairing, H-2, H-3, S-3, E-1;
 // helpers/module-channel-node.ts, its bootstrap
 // helpers/module-channel-bootstrap.cjs, and its warning calibration
-// helpers/module-channel-warning-calibration.cjs). T7.6-6, the one runtime
-// test of 7.6 registered so far (test/suite/registry/section-7.6-ii.ts),
-// reads T7.6-6's observations, and it and S-10's checks — each observation
-// catching the effect it exists for on each release and route — build on
-// these; here the observations' plumbing is pinned before any product
-// exists, on each of E-1's releases, so XSPEC_NODE_RELEASES_DIR must name
-// them, as CI's harness-self job and AGENTS.md's recipe do (unset, every
-// test here that runs a release fails as the harness error
-// NodeReleaseError, never a skip):
+// helpers/module-channel-warning-calibration.cjs). T7.6-6 and T7.6-7, 7.6's
+// runtime tests registered so far (test/suite/registry/section-7.6-ii.ts),
+// read these observations — T7.6-6 its own, T7.6-7 the output oracle — and
+// they and S-10's checks — each observation catching the effect it exists
+// for on each release and route — build on these; here the observations'
+// plumbing is pinned before any product exists, on each of E-1's releases,
+// so XSPEC_NODE_RELEASES_DIR must name them, as CI's harness-self job and
+// AGENTS.md's recipe do (unset, every test here that runs a release fails
+// as the harness error NodeReleaseError, never a skip):
 // - a conforming dual stand-in, along each route on each release: the
 //   route's own-key listing exactly defineConfig, every one of T7.6-6's
 //   calls returning its argument by SameValue, no trap of either Proxy

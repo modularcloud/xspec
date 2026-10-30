@@ -1,8 +1,8 @@
 // TEST-SPEC §7.6 (the `defineConfig` module): T7.6-1, declared exports;
-// T7.6-2, valid configurations; and T7.6-3, shape violations. T7.6-6, the
-// runtime's exports and identity, is section-7.6-ii.ts's; the rest of
-// §7.6 — T7.6-4, T7.6-5, and T7.6-7 — and P-17 and P-18 are not registered
-// yet.
+// T7.6-2, valid configurations; and T7.6-3, shape violations. T7.6-6 and
+// T7.6-7, the runtime's exports and identity and its absence of effects,
+// are section-7.6-ii.ts's; the rest of §7.6 — T7.6-4 and T7.6-5 — and P-17
+// and P-18 are not registered yet.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never

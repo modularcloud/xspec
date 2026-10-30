@@ -1,4 +1,5 @@
-// TEST-SPEC §7.6 T7.6-6 (the defineConfig module's runtime, through H-2's
+// TEST-SPEC §7.6 T7.6-6 and T7.6-7 (the defineConfig module's runtime —
+// its exports and identity, and the absence of any effect — through H-2's
 // module channel on the Node.js releases E-1 provisions): thin Vitest
 // wrapper over the registered bodies — the identical bodies the
 // certification runner executes against fixture products (C-2 "one code

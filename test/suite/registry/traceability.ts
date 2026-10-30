@@ -592,6 +592,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // provisions along each of Node.js's routes; it stages no configuration
   // and asserts no other passage, so it carries 7.6 alone.
   "T7.6-6": ["7.6"],
+  // T7.6-7: 7.6's runtime contract's effect clause (Runtime), in runs of
+  // T7.6-6's shape on every release E-1 provisions along each of Node.js's
+  // routes: the runs' output, writes, process state, and FIFOs, each
+  // absence paired with defineConfig returning its argument, its network
+  // clause the environment's (E-1); it stages no configuration and asserts
+  // no other passage, so it carries 7.6 alone.
+  "T7.6-7": ["7.6"],
   "T8-1": ["8"],
   "T8-2": ["8"],
   "T8-3": ["8"],
