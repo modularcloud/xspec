@@ -1,0 +1,19 @@
+{
+  "name": "s4-module-channel-implicit-any",
+  "version": "1.0.0",
+  "type": "module",
+  "types": "./index.d.ts",
+  "main": "./index.cjs",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      },
+      "require": {
+        "types": "./index.d.cts",
+        "default": "./index.cjs"
+      }
+    }
+  }
+}
