@@ -576,6 +576,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // under 7, 7.3, 7.4, and 7.5 (a premise of the staging, asserted of no
   // product), so it carries 7.6 alone.
   "T7.6-2": ["7.6"],
+  // T7.6-3: 7.6's type contract for shape violations, in every covered
+  // setup, each arm paired with T7.6-2(a)'s file type-checking; the arms
+  // are (a) with violations of 7.6's type-error class applied (breaches of
+  // 7's, 7.4's, and 7.5's rules, a premise of the staging, asserted of no
+  // product), so it carries 7.6 alone.
+  "T7.6-3": ["7.6"],
   "T8-1": ["8"],
   "T8-2": ["8"],
   "T8-3": ["8"],

@@ -1,6 +1,6 @@
-// TEST-SPEC §7.6 (the `defineConfig` module): T7.6-2, valid configurations.
-// The rest of §7.6 — T7.6-1, T7.6-3 through T7.6-7 — and P-17 and P-18 are
-// not registered yet.
+// TEST-SPEC §7.6 (the `defineConfig` module): T7.6-2, valid configurations,
+// and T7.6-3, shape violations. The rest of §7.6 — T7.6-1 and T7.6-4
+// through T7.6-7 — and P-17 and P-18 are not registered yet.
 //
 // 7.6 is tested through H-2's module channel alone (TEST-SPEC §7.6's four
 // rules: Placement, Covered setups, Verdict, Pairing). A body here never
@@ -86,6 +86,74 @@
 //   S-7's stub package — the body ends at its first setup, keeping the
 //   sweep short. A harness error propagates at once. Where every setup
 //   passes, the body confirms that it judged all 173.
+//
+// T7.6-3 (SPEC 7.6 Type contract: shape violations; TEST-SPEC §7.6
+// Pairing): in every covered setup, each of these files — T7.6-2(a)'s file
+// with violations of 7.6's type-error class applied, that file its valid
+// twin — fails to type-check, paired with the twin type-checking in the
+// same setup and placement. The arms are edits of (a)'s data, at every
+// position of (a)'s file, each a file of its own holding one violation:
+// - an unknown key (`extra`) appended to each fixed-key object: the top
+//   level, `markdown`, each profile, each rule, and each selector;
+// - each required key removed from each object requiring it: `specs`,
+//   `markdown`'s `emit`, each profile's `name`, `target`, `boundary`, and
+//   `mode`, and each rule's `name`, `type`, `from`, and `to`;
+// - at every value of (a)'s file, each kind among a boolean, a string, a
+//   list, and an object that 7 does not admit there, from the kind table
+//   (`T763_KIND_TABLE`: one row per position as T7.6-3 lists it, its values
+//   spelled out, TEST-SPEC's `specs: ["a/*.mdx"]`, `emit: "true"`,
+//   `targetTags: "a"`, and `from: "src/*.ts"` among them, the boolean both
+//   `true` and `false` where 7 admits a list or an object), and TEST-SPEC's
+//   `kinds: [true]` beside them;
+// - at every enumerated value, two near misses of it — capitalized, and cut
+//   by its last letter, so `"Direct"` and `"depend"` among them — and, at
+//   each element of an `edgeKinds` and of a rule's `kinds`, `"contains"`;
+// - at each selector, each selector-form violation — each two of `group`,
+//   `files`, and `tags`, all three, none (`{}`), and `kind` beside `files`,
+//   beside `tags`, and alone — the selector replaced whole, its names
+//   resolving;
+// - each list 7.4 and 7.5 forbid empty, emptied;
+// - and one file holding seven of these at once, a violation of each member
+//   of the class among them.
+// No arm stages a configuration error outside the class for a verdict: each
+// arm is (a) with its edits alone, and the errors outside the class an edit
+// entails (the profiles' `target` naming no spec group once `specs` is gone)
+// carry no type-level requirement either way (SPEC 7.6).
+//
+// Conservative operationalizations (noted per H-4):
+// - "Every position" is read over (a)'s file: every value it holds — each
+//   group, glob, profile, rule, selector, field, and list element — rather
+//   than one value per kind of position; the categories TEST-SPEC names in
+//   the singular (an unknown key "in a profile", a profile's missing `name`,
+//   "a selector's `kind`") are staged at each instance alike. 430 arms.
+// - Module-load self-checks (`checkT763Arms`) hold the tables to T7.6-3's
+//   list — 7's shape (`CONFIG_SHAPE`) names exactly its positions, each
+//   instantiated in (a)'s file; each row of the kind table holds one value
+//   of each kind 7 does not admit there; the enumerated positions, the
+//   required keys, the fixed-key objects, the forbidden empty lists, and
+//   the eight selector-form violations are those it lists; TEST-SPEC's own
+//   spellings are staged — and each arm to its edits: the harness's own
+//   reading of the type-error class over the data (`classViolations`) finds
+//   in each arm exactly the violations its edits make, and none in the
+//   twin. Each rendering reads back with the harness's TypeScript as its
+//   data, with no backslash and no comment, its keys identifiers as the
+//   twin's are, so no arm carries beside its violation an error every
+//   `defineConfig` type meets (a repeated key, a syntax error): the
+//   composition residual CERTIFICATIONS.md's exclusions name.
+// - S-9: each arm's rendering is a staged-source record per candidate N,
+//   as plain TypeScript and as TSX, as T7.6-2's are; the twin's records are
+//   T7.6-2(a)'s, named for both tests.
+// - The body stages, per project kind, the twin alone beside the canonical
+//   placement, and judges it first in each setup: where it does not
+//   type-check, no arm counts there (Pairing), and the body fails at once,
+//   diagnosed — in the project's first setup before the arms are staged,
+//   so S-7's stub package costs the sweep one program. Once the twin has
+//   type-checked, the arms are staged in the same directory and judged in
+//   one program per setup where that batch is sound (the driver's header),
+//   each paired with the twin through `assertShapeViolation`. The body
+//   stops at the first setup where any arm does not fail to type-check,
+//   failing once, naming every such arm and spelling out the first three;
+//   where every setup holds, it confirms that it judged all 173.
 
 import ts from "typescript-5.9.3";
 import { fail, HarnessAssertionError } from "../../helpers/assertions.js";
@@ -96,11 +164,15 @@ import {
   TYPE_CHECKING_ARM,
 } from "../../helpers/module-channel.js";
 import {
+  assertShapeViolation,
   assertTypeChecks,
   COVERED_SETUP_COUNT,
   stageCoveredFiles,
 } from "../../helpers/module-channel-ts.js";
-import type { CoveredVerdict } from "../../helpers/module-channel-ts.js";
+import type {
+  CoveredFiles,
+  CoveredVerdict,
+} from "../../helpers/module-channel-ts.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
@@ -146,9 +218,10 @@ export function configObject(
   for (const [key, value] of entries) {
     if (object.has(key)) {
       throw new Error(
-        `T7.6-2: the key ${JSON.stringify(key)} is repeated in one object ` +
-          "of a staged configuration (SPEC 7: a key repeated within one " +
-          "object literal is a configuration error)",
+        `TEST-SPEC §7.6: the key ${JSON.stringify(key)} is repeated in one ` +
+          "object of a staged configuration (SPEC 7: a key repeated within " +
+          "one object literal is a configuration error, outside 7.6's " +
+          "type-error class): a harness defect",
       );
     }
     object.set(key, value);
@@ -209,8 +282,8 @@ function spellKey(
   if (stringLiteral) return JSON.stringify(key);
   if (!IDENTIFIER_KEY.test(key)) {
     throw new Error(
-      `T7.6-2: the key ${JSON.stringify(key)} cannot be spelled as an ` +
-        "identifier with ASCII characters alone",
+      `TEST-SPEC §7.6: the key ${JSON.stringify(key)} cannot be spelled as ` +
+        "an identifier with ASCII characters alone: a harness defect",
     );
   }
   return key;
@@ -378,13 +451,21 @@ interface ReadBack {
   readonly source: ts.SourceFile;
 }
 
-/** A thrower naming the file and the rules a deviation breaks. */
-function deviation(what: string): (detail: string) => never {
+/** T7.6-2's premise for each of its files, which a deviation breaks. */
+const T762_PREMISE =
+  "each of T7.6-2's files is valid under 7 and a covered file (TEST-SPEC " +
+  "T7.6-2; SPEC 7, 7.6 Covered files)";
+
+/** A thrower naming the test, the file, and the premise a deviation breaks. */
+function deviation(
+  test: string,
+  what: string,
+  premise: string,
+): (detail: string) => never {
   return (detail) => {
     throw new Error(
-      `T7.6-2: the staged covered file ${what} ${detail} — each of ` +
-        "T7.6-2's files is valid under 7 and a covered file (TEST-SPEC " +
-        "T7.6-2; SPEC 7, 7.6 Covered files): a harness defect",
+      `${test}: the staged covered file ${what} ${detail} — ${premise}: a ` +
+        "harness defect",
     );
   };
 }
@@ -440,12 +521,12 @@ function readValue(
  * `defineConfig` by that identifier — no `type` or `defer` modifier, no
  * attributes, one named binding, never `require`, `exports`, or a reserved
  * word — from a string-literal specifier, then a default export of one call
- * to that binding whose one argument is an object literal of 7's form.
+ * to that binding whose one argument is an object literal of 7's form; a
+ * deviation goes to `problem`.
  */
-function readBack(text: string, what: string): ReadBack {
-  const problem = deviation(what);
+function readBack(text: string, problem: (detail: string) => never): ReadBack {
   const source = ts.createSourceFile(
-    "t7.6-2-covered-file.ts",
+    "covered-file.ts",
     text,
     ts.ScriptTarget.ESNext,
     true,
@@ -1612,7 +1693,7 @@ function sameValue(a: ConfigValue, b: ConfigValue): boolean {
  */
 function composeFile(arm: T762Arm, name: string): string {
   const what = `T7.6-2${arm.arm} (${arm.what}, importing ${JSON.stringify(name)})`;
-  const problem = deviation(what);
+  const problem = deviation("T7.6-2", what, T762_PREMISE);
   const rendering: ConfigRendering = {
     specifier: name,
     binding: arm.binding,
@@ -1636,7 +1717,7 @@ function composeFile(arm: T762Arm, name: string): string {
       );
     }
   }
-  const read = readBack(text, what);
+  const read = readBack(text, problem);
   if (
     read.specifier !== name ||
     read.specifierSpelling !== JSON.stringify(name)
@@ -1678,6 +1759,8 @@ interface T762Records {
 
 /** One of T7.6-2's files, with its records for each candidate N. */
 interface T762File {
+  /** The arm as TEST-SPEC letters it. */
+  readonly arm: string;
   /** Names the file in every diagnosis. */
   readonly label: string;
   readonly records: ReadonlyMap<string, T762Records>;
@@ -1686,19 +1769,21 @@ interface T762File {
 /**
  * T7.6-2's files, each rendered and checked for each canonical-name
  * candidate at module load, each rendering a staged-source record (S-9),
- * judged as plain TypeScript and, for the `.tsx` name, as TSX.
+ * judged as plain TypeScript and, for the `.tsx` name, as TSX. (a)'s records
+ * are T7.6-3's twin too, so their names lead with both IDs.
  */
 const T762_FILES: readonly T762File[] = T762_ARMS.map((arm) => {
   const records = new Map<string, T762Records>();
+  const ids = arm.arm === "(a)" ? "T7.6-2/T7.6-3" : "T7.6-2";
   for (const name of CANONICAL_MODULE_NAMES) {
     const text = composeFile(arm, name);
-    const record = `T7.6-2 ${arm.arm} ${arm.what}, importing ${JSON.stringify(name)}`;
+    const record = `${ids} ${arm.arm} ${arm.what}, importing ${JSON.stringify(name)}`;
     records.set(name, {
       ts: stagedTs(record, text),
       tsx: stagedTs(`${record}, as TSX`, text, "well-formed", "tsx"),
     });
   }
-  return { label: `T7.6-2${arm.arm} (${arm.what})`, records };
+  return { arm: arm.arm, label: `T7.6-2${arm.arm} (${arm.what})`, records };
 });
 
 // ---------------------------------------------------------------------------
@@ -1811,4 +1896,1330 @@ const T7_6_2 = defineProductTest({
   run: runValidConfigurations,
 });
 
-export const section76Tests: readonly ProductTestEntry[] = [T7_6_2];
+// ---------------------------------------------------------------------------
+// T7.6-3: 7's shape as the type-error class reads it (module header)
+// ---------------------------------------------------------------------------
+
+/** A kind SPEC 7.6's type-error class names: what 7 admits at a position. */
+type ConfigKind = "boolean" | "string" | "list" | "object";
+
+/** The four kinds, in T7.6-3's order. */
+const CONFIG_KINDS: readonly ConfigKind[] = [
+  "boolean",
+  "string",
+  "list",
+  "object",
+];
+
+/** A value's kind. */
+function kindOf(value: ConfigValue): ConfigKind {
+  if (typeof value === "boolean") return "boolean";
+  if (typeof value === "string") return "string";
+  return isConfigList(value) ? "list" : "object";
+}
+
+/** Where a value stands: object keys and list indices, from the argument. */
+export type ConfigPath = readonly (string | number)[];
+
+/**
+ * 7's shape as SPEC 7.6's type-error class reads it (module header): each
+ * position's kind, its enumeration, a fixed-key object's fields and required
+ * keys, a group map's entries, a list's elements, and whether 7.4 or 7.5
+ * forbids the list empty or holds the object to a selector's forms.
+ */
+interface ShapeSchema {
+  /** T7.6-3's name for the position: its row of the kind table. */
+  readonly position: string;
+  /** The kind 7 admits there. */
+  readonly kind: ConfigKind;
+  /** The values 7 enumerates there, where it enumerates them. */
+  readonly values?: readonly string[];
+  /** A fixed-key object's fields, in 7's order. */
+  readonly fields?: ReadonlyMap<string, ShapeSchema>;
+  /** A fixed-key object's required keys. */
+  readonly required?: readonly string[];
+  /** A group map's entries: each group, under any name. */
+  readonly entries?: ShapeSchema;
+  /** A list's elements. */
+  readonly elements?: ShapeSchema;
+  /** A list 7.4 or 7.5 forbids empty. */
+  readonly nonEmpty?: boolean;
+  /** A selector, held to 7.5's forms. */
+  readonly selector?: boolean;
+}
+
+/** A string position, enumerated where `values` is given. */
+function stringAt(position: string, values?: readonly string[]): ShapeSchema {
+  return values === undefined
+    ? { position, kind: "string" }
+    : { position, kind: "string", values };
+}
+
+/** A group: a list of globs. */
+const GROUP_SHAPE: ShapeSchema = {
+  position: "a group",
+  kind: "list",
+  elements: stringAt("a group's glob element"),
+};
+
+/** A selector (7.5): a rule's `from` or `to`. */
+const SELECTOR_SHAPE: ShapeSchema = {
+  position: "a selector (a rule's from or to)",
+  kind: "object",
+  selector: true,
+  required: [],
+  fields: new Map<string, ShapeSchema>([
+    ["group", stringAt("a selector's group")],
+    ["kind", stringAt("a selector's kind", GROUP_KINDS)],
+    ["files", stringAt("a selector's files")],
+    [
+      "tags",
+      {
+        position: "a selector's tags",
+        kind: "list",
+        nonEmpty: true,
+        elements: stringAt("an element of a selector's tags"),
+      },
+    ],
+  ]),
+};
+
+/** A coverage profile (7.4). */
+const PROFILE_SHAPE: ShapeSchema = {
+  position: "a profile",
+  kind: "object",
+  required: ["name", "target", "boundary", "mode"],
+  fields: new Map<string, ShapeSchema>([
+    ["name", stringAt("a profile's name")],
+    ["target", stringAt("a profile's target")],
+    [
+      "targetTags",
+      {
+        position: "a profile's targetTags",
+        kind: "list",
+        nonEmpty: true,
+        elements: stringAt("an element of a profile's targetTags"),
+      },
+    ],
+    ["targets", stringAt("a profile's targets", TARGETS)],
+    ["boundary", stringAt("a profile's boundary")],
+    ["boundaryKind", stringAt("a profile's boundaryKind", GROUP_KINDS)],
+    ["mode", stringAt("a profile's mode", MODES)],
+    [
+      "edgeKinds",
+      {
+        position: "a profile's edgeKinds",
+        kind: "list",
+        nonEmpty: true,
+        elements: stringAt("an element of a profile's edgeKinds", EDGE_KINDS),
+      },
+    ],
+  ]),
+};
+
+/** A policy rule (7.5). */
+const RULE_SHAPE: ShapeSchema = {
+  position: "a rule",
+  kind: "object",
+  required: ["name", "type", "from", "to"],
+  fields: new Map<string, ShapeSchema>([
+    ["name", stringAt("a rule's name")],
+    ["type", stringAt("a rule's type", RULE_TYPES)],
+    ["from", SELECTOR_SHAPE],
+    ["to", SELECTOR_SHAPE],
+    [
+      "kinds",
+      {
+        position: "a rule's kinds",
+        kind: "list",
+        nonEmpty: true,
+        elements: stringAt("an element of a rule's kinds", EDGE_KINDS),
+      },
+    ],
+  ]),
+};
+
+/** The `defineConfig` argument (7, 7.1–7.5): the top level. */
+const CONFIG_SHAPE: ShapeSchema = {
+  position: "the top level",
+  kind: "object",
+  required: ["specs"],
+  fields: new Map<string, ShapeSchema>([
+    ["specs", { position: "specs", kind: "object", entries: GROUP_SHAPE }],
+    ["code", { position: "code", kind: "object", entries: GROUP_SHAPE }],
+    [
+      "markdown",
+      {
+        position: "markdown",
+        kind: "object",
+        required: ["emit"],
+        fields: new Map<string, ShapeSchema>([
+          ["emit", { position: "emit", kind: "boolean" }],
+          ["outDir", stringAt("outDir")],
+        ]),
+      },
+    ],
+    [
+      "coverage",
+      { position: "coverage", kind: "list", elements: PROFILE_SHAPE },
+    ],
+    ["policy", { position: "policy", kind: "list", elements: RULE_SHAPE }],
+  ]),
+};
+
+/** Every shape below `shape`, `shape` first, each once. */
+function shapesWithin(shape: ShapeSchema): readonly ShapeSchema[] {
+  const seen = new Set<ShapeSchema>();
+  const visit = (at: ShapeSchema): void => {
+    if (seen.has(at)) return;
+    seen.add(at);
+    for (const inner of [
+      ...(at.fields?.values() ?? []),
+      ...(at.entries === undefined ? [] : [at.entries]),
+      ...(at.elements === undefined ? [] : [at.elements]),
+    ]) {
+      visit(inner);
+    }
+  };
+  visit(shape);
+  return [...seen];
+}
+
+/** One value of a configuration, where it stands, and its shape there. */
+interface ShapeNode {
+  readonly path: ConfigPath;
+  readonly value: ConfigValue;
+  readonly shape: ShapeSchema;
+}
+
+/**
+ * Every value of `config` at a position 7 gives a kind, the argument first
+ * (module header): the walk descends only into a value of the kind 7 admits
+ * at its position, so a misplaced value's insides stand at no position, and
+ * never into an unknown key, which 7 gives no kind.
+ */
+function shapeNodes(config: ConfigObject): readonly ShapeNode[] {
+  const nodes: ShapeNode[] = [];
+  const visit = (
+    value: ConfigValue,
+    shape: ShapeSchema,
+    path: ConfigPath,
+  ): void => {
+    nodes.push({ path, value, shape });
+    if (kindOf(value) !== shape.kind) return;
+    if (isConfigList(value)) {
+      const elements = shape.elements;
+      if (elements === undefined) return;
+      value.forEach((element, index) =>
+        visit(element, elements, [...path, index]),
+      );
+    } else if (isConfigObject(value)) {
+      for (const [key, member] of value) {
+        const inner = shape.entries ?? shape.fields?.get(key);
+        if (inner !== undefined) visit(member, inner, [...path, key]);
+      }
+    }
+  };
+  visit(config, CONFIG_SHAPE, []);
+  return nodes;
+}
+
+/** The six members of SPEC 7.6's type-error class. */
+export type ViolationCategory =
+  | "unknown key"
+  | "missing required key"
+  | "kind"
+  | "enumeration"
+  | "selector form"
+  | "empty list";
+
+/**
+ * One violation of the type-error class: its member, and where it lies — an
+ * unknown or missing key at that key's path, any other at its value's.
+ */
+export interface ClassViolation {
+  readonly category: ViolationCategory;
+  readonly path: ConfigPath;
+}
+
+/**
+ * Every violation of SPEC 7.6's type-error class in `config`, as the harness
+ * reads the class over the data (module header): an unknown key in a
+ * fixed-key object; a required key missing; a value of a kind 7 does not
+ * admit at its position; a string outside the values 7 enumerates there; a
+ * selector not in exactly one of its forms; an empty list 7.4 or 7.5
+ * forbids. Errors outside the class are not read.
+ */
+export function classViolations(
+  config: ConfigObject,
+): readonly ClassViolation[] {
+  const found: ClassViolation[] = [];
+  for (const { path, value, shape } of shapeNodes(config)) {
+    if (kindOf(value) !== shape.kind) {
+      found.push({ category: "kind", path });
+      continue;
+    }
+    if (
+      shape.values !== undefined &&
+      typeof value === "string" &&
+      !shape.values.includes(value)
+    ) {
+      found.push({ category: "enumeration", path });
+    }
+    if (isConfigList(value) && shape.nonEmpty === true && value.length === 0) {
+      found.push({ category: "empty list", path });
+    }
+    if (isConfigObject(value) && shape.fields !== undefined) {
+      for (const key of value.keys()) {
+        if (!shape.fields.has(key)) {
+          found.push({ category: "unknown key", path: [...path, key] });
+        }
+      }
+      for (const key of shape.required ?? []) {
+        if (!value.has(key)) {
+          found.push({
+            category: "missing required key",
+            path: [...path, key],
+          });
+        }
+      }
+      if (shape.selector === true) {
+        const forms = SELECTOR_FORMS.filter((form) => value.has(form));
+        if (forms.length !== 1 || (value.has("kind") && !value.has("group"))) {
+          found.push({ category: "selector form", path });
+        }
+      }
+    }
+  }
+  return found;
+}
+
+// ---------------------------------------------------------------------------
+// T7.6-3's violations, as tables (module header)
+// ---------------------------------------------------------------------------
+
+/**
+ * T7.6-3's positions to which 7 gives a kind, as its list names them, in
+ * its order: `specs`, `code`, and each group; a group's glob elements;
+ * `markdown`, `emit`, and `outDir`; `coverage`, each profile, each profile
+ * field, and each element of its lists; `policy`, each rule, each rule field
+ * (`from` and `to` being selectors), and each element of `kinds`; and each
+ * selector, each selector field, and each element of its `tags`.
+ */
+const T763_KIND_POSITIONS: readonly string[] = [
+  "specs",
+  "code",
+  "a group",
+  "a group's glob element",
+  "markdown",
+  "emit",
+  "outDir",
+  "coverage",
+  "a profile",
+  "a profile's name",
+  "a profile's target",
+  "a profile's targetTags",
+  "a profile's targets",
+  "a profile's boundary",
+  "a profile's boundaryKind",
+  "a profile's mode",
+  "a profile's edgeKinds",
+  "an element of a profile's targetTags",
+  "an element of a profile's edgeKinds",
+  "policy",
+  "a rule",
+  "a rule's name",
+  "a rule's type",
+  "a rule's kinds",
+  "an element of a rule's kinds",
+  "a selector (a rule's from or to)",
+  "a selector's group",
+  "a selector's kind",
+  "a selector's files",
+  "a selector's tags",
+  "an element of a selector's tags",
+];
+
+/** T7.6-3's enumerated positions, as its list names them. */
+const T763_ENUMERATED_POSITIONS: readonly string[] = [
+  "a profile's targets",
+  "a profile's boundaryKind",
+  "a profile's mode",
+  "a rule's type",
+  "a selector's kind",
+  "an element of a profile's edgeKinds",
+  "an element of a rule's kinds",
+];
+
+/** T7.6-3's objects an unknown key is staged in, as its list names them. */
+const T763_UNKNOWN_KEY_POSITIONS: readonly string[] = [
+  "the top level",
+  "markdown",
+  "a profile",
+  "a rule",
+  "a selector (a rule's from or to)",
+];
+
+/** T7.6-3's required keys, by the object holding them, as it lists them. */
+const T763_REQUIRED_KEYS: readonly (readonly [string, readonly string[]])[] = [
+  ["the top level", ["specs"]],
+  ["markdown", ["emit"]],
+  ["a profile", ["name", "target", "boundary", "mode"]],
+  ["a rule", ["name", "type", "from", "to"]],
+];
+
+/** T7.6-3's forbidden empty lists, as its list names them. */
+const T763_NON_EMPTY_POSITIONS: readonly string[] = [
+  "a profile's targetTags",
+  "a profile's edgeKinds",
+  "a rule's kinds",
+  "a selector's tags",
+];
+
+/**
+ * The kind table (module header): for each position T7.6-3 lists, the
+ * values staged there, one of each kind 7 does not admit at it — the
+ * boolean both `true` and `false` where 7 admits a list or an object —
+ * TEST-SPEC's own spellings among them (`specs: ["a/*.mdx"]`,
+ * `emit: "true"`, `targetTags: "a"`, `from: "src/*.ts"`). Each value is
+ * staged at every value of (a)'s file standing at that position.
+ */
+const T763_KIND_TABLE: ReadonlyMap<string, readonly ConfigValue[]> = new Map<
+  string,
+  readonly ConfigValue[]
+>([
+  ["specs", [true, false, "specs/**/*.mdx", ["a/*.mdx"]]],
+  ["code", [true, false, "src/**/*.ts", ["src/**/*.ts"]]],
+  [
+    "a group",
+    [true, false, "src/**/*.ts", configObject(["globs", ["src/**/*.ts"]])],
+  ],
+  [
+    "a group's glob element",
+    [true, ["src/**/*.ts"], configObject(["glob", "src/**/*.ts"])],
+  ],
+  ["markdown", [true, false, "docs", ["docs"]]],
+  ["emit", ["true", [true], configObject(["enabled", true])]],
+  ["outDir", [true, ["docs"], configObject(["path", "docs"])]],
+  [
+    "coverage",
+    [
+      true,
+      false,
+      "product-tested",
+      configObject(
+        ["name", "product-tested"],
+        ["target", "product"],
+        ["boundary", "tests"],
+        ["boundaryKind", "code"],
+        ["mode", "direct"],
+      ),
+    ],
+  ],
+  ["a profile", [true, false, "product-tested", ["product-tested"]]],
+  [
+    "a profile's name",
+    [true, ["product-tested"], configObject(["name", "product-tested"])],
+  ],
+  [
+    "a profile's target",
+    [true, ["product"], configObject(["group", "product"])],
+  ],
+  [
+    "a profile's targetTags",
+    [true, false, "a", configObject(["tags", ["core"]])],
+  ],
+  [
+    "a profile's targets",
+    [true, ["leaves"], configObject(["targets", "leaves"])],
+  ],
+  [
+    "a profile's boundary",
+    [true, ["tests"], configObject(["group", "tests"], ["kind", "code"])],
+  ],
+  [
+    "a profile's boundaryKind",
+    [true, ["code"], configObject(["kind", "code"])],
+  ],
+  ["a profile's mode", [true, ["direct"], configObject(["mode", "direct"])]],
+  [
+    "a profile's edgeKinds",
+    [true, false, "depends", configObject(["depends", true])],
+  ],
+  [
+    "an element of a profile's targetTags",
+    [true, ["core"], configObject(["tag", "core"])],
+  ],
+  [
+    "an element of a profile's edgeKinds",
+    [true, ["depends"], configObject(["kind", "depends"])],
+  ],
+  [
+    "policy",
+    [
+      true,
+      false,
+      "app-avoids-test-code",
+      configObject(
+        ["name", "app-avoids-test-code"],
+        ["type", "forbidden"],
+        ["from", configObject(["group", "app"])],
+        ["to", configObject(["group", "tests"], ["kind", "code"])],
+      ),
+    ],
+  ],
+  ["a rule", [true, false, "app-avoids-test-code", ["app-avoids-test-code"]]],
+  [
+    "a rule's name",
+    [
+      true,
+      ["app-avoids-test-code"],
+      configObject(["name", "app-avoids-test-code"]),
+    ],
+  ],
+  ["a rule's type", [true, ["forbidden"], configObject(["type", "forbidden"])]],
+  ["a rule's kinds", [true, false, "depends", configObject(["depends", true])]],
+  [
+    "an element of a rule's kinds",
+    [true, ["depends"], configObject(["kind", "depends"])],
+  ],
+  [
+    "a selector (a rule's from or to)",
+    [true, false, "src/*.ts", [configObject(["group", "app"])]],
+  ],
+  ["a selector's group", [true, ["app"], configObject(["name", "app"])]],
+  ["a selector's kind", [true, ["code"], configObject(["kind", "code"])]],
+  [
+    "a selector's files",
+    [true, ["src/*.ts"], configObject(["glob", "src/*.ts"])],
+  ],
+  ["a selector's tags", [true, false, "core", configObject(["tag", "core"])]],
+  [
+    "an element of a selector's tags",
+    [true, ["core"], configObject(["tag", "core"])],
+  ],
+]);
+
+/**
+ * T7.6-3's selector-form violations (module header): each two of `group`,
+ * `files`, and `tags`, all three, none, and `kind` without `group` beside
+ * `files`, beside `tags`, and alone — each replacing a selector whole, its
+ * names resolving.
+ */
+const T763_SELECTOR_FORM_VIOLATIONS: readonly (readonly [
+  string,
+  ConfigObject,
+])[] = [
+  ["group and files", configObject(["group", "app"], ["files", "src/*.ts"])],
+  ["group and tags", configObject(["group", "app"], ["tags", ["core"]])],
+  ["files and tags", configObject(["files", "src/*.ts"], ["tags", ["core"]])],
+  [
+    "group, files, and tags",
+    configObject(["group", "app"], ["files", "src/*.ts"], ["tags", ["core"]]),
+  ],
+  ["none of group, files, and tags", configObject()],
+  ["kind beside files", configObject(["files", "src/*.ts"], ["kind", "code"])],
+  ["kind beside tags", configObject(["tags", ["core"]], ["kind", "spec"])],
+  ["kind alone", configObject(["kind", "spec"])],
+];
+
+/** The unknown key staged in each fixed-key object: no key of 7's anywhere. */
+const T763_UNKNOWN_KEY = "extra";
+
+/** The edge kind 5.2 defines and 7.4 and 7.5 leave out (T7.6-3). */
+const CONTAINS = "contains";
+
+/**
+ * Two near misses of an enumerated value (module header): capitalized, and
+ * cut by its last letter — `"Direct"` and `"depend"` among them.
+ */
+function nearMisses(value: string): readonly string[] {
+  return [value.charAt(0).toUpperCase() + value.slice(1), value.slice(0, -1)];
+}
+
+// ---------------------------------------------------------------------------
+// Edits of (a)'s data, and how a label names them
+// ---------------------------------------------------------------------------
+
+/** How a label names a position of (a)'s file. */
+function describePath(path: ConfigPath): string {
+  const [top, second] = path;
+  if (top === undefined) return "the top level";
+  let text = String(top);
+  let named = 1;
+  if ((top === "specs" || top === "code") && typeof second === "string") {
+    text = `the ${top === "specs" ? "spec" : "code"} group ${second}`;
+    named = 2;
+    const glob = path[2];
+    if (typeof glob === "number") {
+      text += `'s glob ${String(glob + 1)}`;
+      named = 3;
+    }
+  } else if (
+    (top === "coverage" || top === "policy") &&
+    typeof second === "number"
+  ) {
+    text = `${top === "coverage" ? "profile" : "rule"} ${String(second + 1)}`;
+    named = 2;
+  }
+  for (const segment of path.slice(named)) {
+    text +=
+      typeof segment === "number"
+        ? ` element ${String(segment + 1)}`
+        : `'s ${segment}`;
+  }
+  return text;
+}
+
+/** How a label spells a value: as the file does, on one line. */
+function describeValue(value: ConfigValue): string {
+  if (typeof value === "string") return JSON.stringify(value);
+  if (typeof value === "boolean") return String(value);
+  if (isConfigList(value)) return `[${value.map(describeValue).join(", ")}]`;
+  if (value.size === 0) return "{}";
+  return `{ ${[...value]
+    .map(([key, member]) => `${key}: ${describeValue(member)}`)
+    .join(", ")} }`;
+}
+
+/** A kind with its article. */
+function aKind(kind: ConfigKind): string {
+  return kind === "object" ? "an object" : `a ${kind}`;
+}
+
+/** `config` with the value at `path` replaced by `edit`'s result. */
+function editAt(
+  config: ConfigValue,
+  path: ConfigPath,
+  edit: (at: ConfigValue) => ConfigValue,
+): ConfigValue {
+  const [head, ...rest] = path;
+  if (head === undefined) return edit(config);
+  if (typeof head === "number") {
+    if (!isConfigList(config) || head >= config.length) {
+      throw new Error(
+        `T7.6-3: no list element ${String(head)} to edit: a harness defect`,
+      );
+    }
+    return config.map((element, index) =>
+      index === head ? editAt(element, rest, edit) : element,
+    );
+  }
+  if (!isConfigObject(config) || !config.has(head)) {
+    throw new Error(
+      `T7.6-3: no key ${JSON.stringify(head)} to edit: a harness defect`,
+    );
+  }
+  return configObject(
+    ...[...config].map(
+      ([key, member]) =>
+        [key, key === head ? editAt(member, rest, edit) : member] as const,
+    ),
+  );
+}
+
+/** An object, or a harness defect. */
+function asObject(value: ConfigValue, what: string): ConfigObject {
+  if (!isConfigObject(value)) {
+    throw new Error(`T7.6-3: ${what} is no object: a harness defect`);
+  }
+  return value;
+}
+
+/**
+ * One edit of a configuration (module header): what it does to the data,
+ * the violation of the class it makes, and how a label names it. A replacing
+ * edit also records where it replaces and with what, so the module-load
+ * checks find TEST-SPEC's own spellings among them.
+ */
+export interface T763Edit {
+  readonly apply: (config: ConfigObject) => ConfigObject;
+  readonly violation: ClassViolation;
+  readonly label: string;
+  readonly replaced?: {
+    readonly path: ConfigPath;
+    readonly value: ConfigValue;
+  };
+}
+
+/** Replace the value at `path` with `value`, making `violation`. */
+function replaceEdit(
+  path: ConfigPath,
+  value: ConfigValue,
+  violation: ClassViolation,
+  label: string,
+): T763Edit {
+  return {
+    apply: (config) =>
+      asObject(
+        editAt(config, path, () => value),
+        "an edited configuration",
+      ),
+    violation,
+    label,
+    replaced: { path, value },
+  };
+}
+
+/** Remove the required key `key` from the object at `path`. */
+function removeKeyEdit(path: ConfigPath, key: string): T763Edit {
+  return {
+    apply: (config) =>
+      asObject(
+        editAt(config, path, (object) =>
+          configObject(
+            ...[...asObject(object, describePath(path))].filter(
+              ([member]) => member !== key,
+            ),
+          ),
+        ),
+        "an edited configuration",
+      ),
+    violation: { category: "missing required key", path: [...path, key] },
+    label: `the required key ${key} missing from ${describePath(path)}`,
+  };
+}
+
+/** Append the unknown key to the object at `path`. */
+function unknownKeyEdit(path: ConfigPath): T763Edit {
+  return {
+    apply: (config) =>
+      asObject(
+        editAt(config, path, (object) =>
+          configObject(...asObject(object, describePath(path)), [
+            T763_UNKNOWN_KEY,
+            true,
+          ]),
+        ),
+        "an edited configuration",
+      ),
+    violation: { category: "unknown key", path: [...path, T763_UNKNOWN_KEY] },
+    label:
+      path.length === 0
+        ? "an unknown key at the top level"
+        : `an unknown key in ${describePath(path)}`,
+  };
+}
+
+/** Stage a value of a kind 7 does not admit at `path`. */
+function kindEdit(path: ConfigPath, value: ConfigValue): T763Edit {
+  return replaceEdit(
+    path,
+    value,
+    { category: "kind", path },
+    `${aKind(kindOf(value))} at ${describePath(path)}: ${describeValue(value)}`,
+  );
+}
+
+/** Stage a string outside the values 7 enumerates at `path`. */
+function enumerationEdit(path: ConfigPath, value: string): T763Edit {
+  return replaceEdit(
+    path,
+    value,
+    { category: "enumeration", path },
+    `a string outside the values 7 enumerates at ${describePath(path)}: ` +
+      JSON.stringify(value),
+  );
+}
+
+/** Replace the selector at `path` with a selector-form violation. */
+function selectorFormEdit(
+  path: ConfigPath,
+  form: string,
+  selector: ConfigObject,
+): T763Edit {
+  return replaceEdit(
+    path,
+    selector,
+    { category: "selector form", path },
+    `the selector form ${form} at ${describePath(path)}: ${describeValue(selector)}`,
+  );
+}
+
+/** Empty the list at `path`, one 7.4 or 7.5 forbids empty. */
+function emptyListEdit(path: ConfigPath): T763Edit {
+  return replaceEdit(
+    path,
+    [],
+    { category: "empty list", path },
+    `an empty list at ${describePath(path)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T7.6-3's arms: (a)'s file with its edits applied (module header)
+// ---------------------------------------------------------------------------
+
+/** One of T7.6-3's files: (a)'s data with its edits applied. */
+export interface T763Arm {
+  /** Names the file in every diagnosis and in its records. */
+  readonly label: string;
+  readonly edits: readonly T763Edit[];
+  readonly config: ConfigObject;
+}
+
+/**
+ * The single-violation edits (module header), from a walk of (a)'s data, in
+ * T7.6-3's order of the class: unknown keys, missing required keys, kinds,
+ * enumerations, selector forms, empty lists — then TEST-SPEC's
+ * `kinds: [true]`.
+ */
+export function singleViolationEdits(twin: ConfigObject): readonly T763Edit[] {
+  const nodes = shapeNodes(twin);
+  const edits: T763Edit[] = [];
+  for (const { path, value, shape } of nodes) {
+    if (shape.fields !== undefined && isConfigObject(value)) {
+      edits.push(unknownKeyEdit(path));
+    }
+  }
+  for (const { path, value, shape } of nodes) {
+    if (shape.fields === undefined || !isConfigObject(value)) continue;
+    for (const key of shape.required ?? []) {
+      if (value.has(key)) edits.push(removeKeyEdit(path, key));
+    }
+  }
+  for (const { path, shape } of nodes) {
+    if (path.length === 0) continue;
+    for (const replacement of T763_KIND_TABLE.get(shape.position) ?? []) {
+      edits.push(kindEdit(path, replacement));
+    }
+  }
+  for (const { path, value, shape } of nodes) {
+    if (shape.values === undefined || typeof value !== "string") continue;
+    for (const outside of [
+      ...nearMisses(value),
+      ...(shape.values === EDGE_KINDS ? [CONTAINS] : []),
+    ]) {
+      edits.push(enumerationEdit(path, outside));
+    }
+  }
+  for (const { path, shape } of nodes) {
+    if (shape.selector !== true) continue;
+    for (const [form, selector] of T763_SELECTOR_FORM_VIOLATIONS) {
+      edits.push(selectorFormEdit(path, form, selector));
+    }
+  }
+  for (const { path, shape } of nodes) {
+    if (shape.nonEmpty === true) edits.push(emptyListEdit(path));
+  }
+  edits.push(
+    replaceEdit(
+      ["policy", 0, "kinds"],
+      [true],
+      { category: "kind", path: ["policy", 0, "kinds", 0] },
+      "a boolean at rule 1's kinds element 1, the list [true] alone",
+    ),
+  );
+  return edits;
+}
+
+/** The violations the several-violations file holds at once (module header). */
+const T763_SEVERAL_EDITS: readonly T763Edit[] = [
+  unknownKeyEdit([]),
+  kindEdit(["markdown", "emit"], "true"),
+  removeKeyEdit(["coverage", 0], "mode"),
+  enumerationEdit(["coverage", 1, "mode"], "Transitive"),
+  enumerationEdit(["policy", 0, "kinds", 0], CONTAINS),
+  selectorFormEdit(
+    ["policy", 1, "from"],
+    "group and files",
+    configObject(["group", "app"], ["files", "src/*.ts"]),
+  ),
+  emptyListEdit(["coverage", 0, "targetTags"]),
+];
+
+/** (a)'s data with `edits` applied in order. */
+function applyEdits(
+  twin: ConfigObject,
+  edits: readonly T763Edit[],
+): ConfigObject {
+  return edits.reduce((config, edit) => edit.apply(config), twin);
+}
+
+/** T7.6-3's arms: one per single-violation edit, then the several. */
+export const T763_ARMS: readonly T763Arm[] = [
+  ...singleViolationEdits(T762_EVERY_KEY_AND_VALUE).map((edit) => ({
+    label: edit.label,
+    edits: [edit],
+    config: edit.apply(T762_EVERY_KEY_AND_VALUE),
+  })),
+  {
+    label: `several violations at once: ${T763_SEVERAL_EDITS.map(
+      (edit) => edit.label,
+    ).join("; ")}`,
+    edits: T763_SEVERAL_EDITS,
+    config: applyEdits(T762_EVERY_KEY_AND_VALUE, T763_SEVERAL_EDITS),
+  },
+];
+
+/** How a check compares violations: member and path. */
+function violationKey(violation: ClassViolation): string {
+  return `${violation.category} at ${JSON.stringify(violation.path)}`;
+}
+
+/** Whether two lists of strings hold the same members, each once. */
+function sameMembers(a: readonly string[], b: readonly string[]): boolean {
+  const left = [...a].sort();
+  const right = [...b].sort();
+  return (
+    new Set(left).size === left.length &&
+    left.length === right.length &&
+    left.every((member, index) => member === right[index])
+  );
+}
+
+/**
+ * Hold T7.6-3's tables to its list and each arm to its edits (module
+ * header); a deviation is a harness defect, thrown at module load.
+ */
+function checkT763Arms(twin: ConfigObject, arms: readonly T763Arm[]): void {
+  const problems: string[] = [];
+  const need = (held: boolean, problem: string): void => {
+    if (!held) problems.push(problem);
+  };
+  const shapes = shapesWithin(CONFIG_SHAPE).filter(
+    (shape) => shape !== CONFIG_SHAPE,
+  );
+  const byPosition = new Map(shapes.map((shape) => [shape.position, shape]));
+  need(byPosition.size === shapes.length, "two shapes share a position's name");
+  need(
+    sameMembers([...byPosition.keys()], T763_KIND_POSITIONS),
+    "7's shape names other positions than T7.6-3 lists",
+  );
+  const nodes = shapeNodes(twin);
+  need(
+    sameMembers(
+      [
+        ...new Set(
+          nodes
+            .filter((node) => node.path.length > 0)
+            .map((node) => node.shape.position),
+        ),
+      ],
+      T763_KIND_POSITIONS,
+    ),
+    "T7.6-2(a)'s file does not hold a value at every position T7.6-3 lists",
+  );
+  need(
+    sameMembers([...T763_KIND_TABLE.keys()], T763_KIND_POSITIONS),
+    "the kind table's rows are not T7.6-3's positions",
+  );
+  for (const [position, values] of T763_KIND_TABLE) {
+    const admitted = byPosition.get(position)?.kind;
+    const kinds = values.map(kindOf);
+    const booleans = values.filter((value) => typeof value === "boolean");
+    const expectedBooleans =
+      admitted === "boolean"
+        ? []
+        : admitted === "list" || admitted === "object"
+          ? [true, false]
+          : [true];
+    need(
+      admitted !== undefined &&
+        sameMembers(
+          [...new Set(kinds)],
+          CONFIG_KINDS.filter((kind) => kind !== admitted),
+        ) &&
+        sameMembers(booleans.map(String), expectedBooleans.map(String)) &&
+        kinds.filter((kind) => kind !== "boolean").length ===
+          CONFIG_KINDS.filter((kind) => kind !== admitted && kind !== "boolean")
+            .length &&
+        new Set(values.map(describeValue)).size === values.length,
+      `the kind table's row for ${position} is not one value of each kind ` +
+        "7 does not admit there (the boolean both ways where 7 admits a " +
+        "list or an object)",
+    );
+  }
+  const positionsWhere = (held: (shape: ShapeSchema) => boolean): string[] =>
+    shapes.filter(held).map((shape) => shape.position);
+  need(
+    sameMembers(
+      positionsWhere((shape) => shape.values !== undefined),
+      T763_ENUMERATED_POSITIONS,
+    ),
+    "7's shape enumerates at other positions than T7.6-3 lists",
+  );
+  need(
+    sameMembers(
+      shapesWithin(CONFIG_SHAPE)
+        .filter((shape) => shape.fields !== undefined)
+        .map((shape) => shape.position),
+      T763_UNKNOWN_KEY_POSITIONS,
+    ),
+    "7's fixed-key objects are not the objects T7.6-3 stages an unknown key in",
+  );
+  for (const shape of shapesWithin(CONFIG_SHAPE)) {
+    if (shape.fields === undefined) continue;
+    const listed =
+      T763_REQUIRED_KEYS.find(
+        ([position]) => position === shape.position,
+      )?.[1] ?? [];
+    need(
+      sameMembers([...(shape.required ?? [])], listed),
+      `${shape.position}'s required keys are not those T7.6-3 lists`,
+    );
+    need(
+      !shape.fields.has(T763_UNKNOWN_KEY),
+      `${T763_UNKNOWN_KEY} is a key 7 defines in ${shape.position}`,
+    );
+  }
+  need(
+    sameMembers(
+      positionsWhere((shape) => shape.nonEmpty === true),
+      T763_NON_EMPTY_POSITIONS,
+    ),
+    "7's shape forbids other lists empty than T7.6-3 lists",
+  );
+  const keysOf = (shape: ShapeSchema): string =>
+    [...(shape.fields?.keys() ?? [])].join(",");
+  need(
+    keysOf(CONFIG_SHAPE) === TOP_LEVEL_KEYS.join(",") &&
+      keysOf(PROFILE_SHAPE) === PROFILE_KEYS.join(",") &&
+      keysOf(RULE_SHAPE) === RULE_KEYS.join(",") &&
+      keysOf(SELECTOR_SHAPE) === SELECTOR_KEYS.join(",") &&
+      byPosition.get("markdown") !== undefined &&
+      keysOf(byPosition.get("markdown")!) === MARKDOWN_KEYS.join(","),
+    "7's shape names other keys than 7 defines",
+  );
+  need(
+    sameMembers(
+      T763_SELECTOR_FORM_VIOLATIONS.map(([, selector]) =>
+        [...selector.keys()].sort().join(","),
+      ),
+      [
+        "files,group",
+        "group,tags",
+        "files,tags",
+        "files,group,tags",
+        "",
+        "files,kind",
+        "kind,tags",
+        "kind",
+      ],
+    ),
+    "the selector-form violations are not T7.6-3's eight",
+  );
+  need(
+    classViolations(twin).length === 0,
+    "T7.6-2(a)'s file holds a violation of the type-error class",
+  );
+  for (const arm of arms) {
+    const found = classViolations(arm.config).map(violationKey);
+    const made = arm.edits.map((edit) => violationKey(edit.violation));
+    need(
+      sameMembers(found, made),
+      `the arm ${JSON.stringify(arm.label)} holds the violations ` +
+        `${JSON.stringify(found)}, not exactly those its edits make ` +
+        `${JSON.stringify(made)}`,
+    );
+  }
+  const several = arms.filter((arm) => arm.edits.length > 1);
+  need(
+    several.length === 1 &&
+      sameMembers(
+        [...new Set(several[0]!.edits.map((edit) => edit.violation.category))],
+        [
+          "unknown key",
+          "missing required key",
+          "kind",
+          "enumeration",
+          "selector form",
+          "empty list",
+        ],
+      ),
+    "no one file holds a violation of each member of the class at once",
+  );
+  need(
+    new Set(arms.map((arm) => arm.label)).size === arms.length,
+    "two arms share a label",
+  );
+  const positionOf = new Map(
+    nodes.map((node) => [JSON.stringify(node.path), node.shape.position]),
+  );
+  const staged = (
+    position: string,
+    value: ConfigValue,
+    key: string | undefined,
+  ): boolean =>
+    arms.some((arm) =>
+      arm.edits.some(
+        (edit) =>
+          edit.replaced !== undefined &&
+          positionOf.get(JSON.stringify(edit.replaced.path)) === position &&
+          (key === undefined || edit.replaced.path.at(-1) === key) &&
+          describeValue(edit.replaced.value) === describeValue(value),
+      ),
+    );
+  const spellings: readonly (readonly [string, ConfigValue, string?])[] = [
+    ["specs", ["a/*.mdx"]],
+    ["emit", "true"],
+    ["a profile's targetTags", "a"],
+    ["a rule's kinds", [true]],
+    ["a selector (a rule's from or to)", "src/*.ts", "from"],
+    ["a profile's mode", "Direct"],
+    ["an element of a profile's edgeKinds", "depend"],
+    ["an element of a rule's kinds", "depend"],
+    ["an element of a profile's edgeKinds", CONTAINS],
+    ["an element of a rule's kinds", CONTAINS],
+  ];
+  for (const [position, value, key] of spellings) {
+    need(
+      staged(position, value, key),
+      `no arm stages TEST-SPEC's ${describeValue(value)} at ${position}` +
+        (key === undefined ? "" : ` (${key})`),
+    );
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `T7.6-3: the shape-violation arms drift from TEST-SPEC T7.6-3 — ` +
+        `${problems.join("; ")} (TEST-SPEC T7.6-3; SPEC 7.6 Type contract, ` +
+        "the type-error class): a harness defect",
+    );
+  }
+}
+
+checkT763Arms(T762_EVERY_KEY_AND_VALUE, T763_ARMS);
+
+// ---------------------------------------------------------------------------
+// T7.6-3's files, their module-load checks, and their S-9 records
+// ---------------------------------------------------------------------------
+
+/** T7.6-3's premise for each of its files, which a deviation breaks. */
+const T763_PREMISE =
+  "each of T7.6-3's files is T7.6-2(a)'s file with exactly the violations " +
+  "of 7.6's type-error class its arm names applied, and a covered file " +
+  "(TEST-SPEC T7.6-3; SPEC 7.6 Covered files, Type contract)";
+
+/** How T7.6-3's files are rendered: as T7.6-2(a)'s, the specifier aside. */
+function t763Rendering(name: string): ConfigRendering {
+  return {
+    specifier: name,
+    binding: "defineConfig",
+    keys: "identifiers",
+    comments: false,
+  };
+}
+
+/**
+ * The file `arm` stages beside the placement `name` — rendered as its twin
+ * is, then read back at module load (module header); a deviation throws.
+ */
+function composeT763File(arm: T763Arm, name: string): string {
+  const what = `T7.6-3 (${arm.label}, importing ${JSON.stringify(name)})`;
+  const problem = deviation("T7.6-3", what, T763_PREMISE);
+  const text = renderConfiguration(arm.config, t763Rendering(name));
+  if (text.includes(BACKSLASH)) problem("spells a backslash");
+  if (scanComments(text).length > 0) problem("carries a comment");
+  const read = readBack(text, problem);
+  if (
+    read.specifier !== name ||
+    read.specifierSpelling !== JSON.stringify(name)
+  ) {
+    problem(`spells its specifier ${read.specifierSpelling}, not exactly N`);
+  }
+  if (read.binding !== "defineConfig") {
+    problem(`binds defineConfig to ${read.binding}`);
+  }
+  if (!sameValue(read.argument, arm.config)) {
+    problem("reads back as another configuration than the one rendered");
+  }
+  if (read.keys.some((key) => key.stringLiteral)) {
+    problem("spells a key as a string literal, which its twin does not");
+  }
+  return text;
+}
+
+/** T7.6-2(a)'s file: T7.6-3's twin, its records shared with T7.6-2. */
+const T763_TWIN: T762File = (() => {
+  const twin = T762_FILES.find((file) => file.arm === "(a)");
+  if (twin === undefined) {
+    throw new Error("T7.6-3: T7.6-2 holds no (a) file: a harness defect");
+  }
+  for (const name of CANONICAL_MODULE_NAMES) {
+    const text = renderConfiguration(
+      T762_EVERY_KEY_AND_VALUE,
+      t763Rendering(name),
+    );
+    if (twin.records.get(name)?.ts.source !== text) {
+      throw new Error(
+        `T7.6-3: T7.6-2(a)'s record importing ${JSON.stringify(name)} holds ` +
+          "other bytes than T7.6-3's arms are rendered beside: the twin is " +
+          "the same file without the violation (TEST-SPEC T7.6-3): a " +
+          "harness defect",
+      );
+    }
+  }
+  return twin;
+})();
+
+/** One of T7.6-3's files, with its records for each candidate N. */
+interface T763File {
+  /** Names the file in every diagnosis. */
+  readonly label: string;
+  readonly records: ReadonlyMap<string, T762Records>;
+}
+
+/**
+ * T7.6-3's files, each rendered and read back for each canonical-name
+ * candidate at module load, each rendering a staged-source record (S-9),
+ * judged as plain TypeScript and, for the `.tsx` name, as TSX; no two alike,
+ * and none its twin.
+ */
+const T763_FILES: readonly T763File[] = (() => {
+  const files = T763_ARMS.map((arm) => {
+    const records = new Map<string, T762Records>();
+    for (const name of CANONICAL_MODULE_NAMES) {
+      const text = composeT763File(arm, name);
+      const record = `T7.6-3 ${arm.label}, importing ${JSON.stringify(name)}`;
+      records.set(name, {
+        ts: stagedTs(record, text),
+        tsx: stagedTs(`${record}, as TSX`, text, "well-formed", "tsx"),
+      });
+    }
+    return { label: arm.label, records };
+  });
+  for (const name of CANONICAL_MODULE_NAMES) {
+    const texts = new Set([
+      T763_TWIN.records.get(name)?.ts.source,
+      ...files.map((file) => file.records.get(name)?.ts.source),
+    ]);
+    if (texts.size !== files.length + 1) {
+      throw new Error(
+        `T7.6-3: two of its files importing ${JSON.stringify(name)}, or one ` +
+          "and its twin, hold the same bytes: a harness defect",
+      );
+    }
+  }
+  return files;
+})();
+
+// ---------------------------------------------------------------------------
+// T7.6-3's body
+// ---------------------------------------------------------------------------
+
+/** The bytes of `file`'s record for the placement's N. */
+function textFor(file: T762File | T763File, name: string): string {
+  const records = file.records.get(name);
+  if (records === undefined || typeof records.ts.source !== "string") {
+    throw new Error(
+      `T7.6-3: no record holds ${file.label} beside N ` +
+        `${JSON.stringify(name)}; the canonical N is one of ` +
+        `${CANONICAL_MODULE_NAMES.join(", ")} (helpers/module-channel.ts ` +
+        "canonicalModuleName): a harness defect",
+    );
+  }
+  return records.ts.source;
+}
+
+/** How many failed arms a diagnosis spells out in full. */
+const FAILURES_IN_FULL = 3;
+
+/** T7.6-3's body (module header). */
+async function runShapeViolations(product: ProductBinding): Promise<void> {
+  let judged = 0;
+  for (const project of PROJECT_KINDS) {
+    const context = `T7.6-3 (shape violations), the ${project} project`;
+    const staging = await ModuleStaging.create(product, context);
+    try {
+      await staging.stageProject(PROJECT_DIR, project);
+      const placement = await staging.placeCanonical(
+        PROJECT_DIR,
+        TYPE_CHECKING_ARM,
+      );
+      const request = {
+        staging,
+        directory: PROJECT_DIR,
+        project,
+        placement,
+        alone: true,
+        context,
+      };
+      const twinLabel = T763_TWIN.label;
+      const twins = await stageCoveredFiles({
+        ...request,
+        files: [{ label: twinLabel, text: textFor(T763_TWIN, placement.name) }],
+      });
+      let arms: CoveredFiles | undefined;
+      for (const setup of twins.setups) {
+        const [twin] = twins.judge(setup);
+        if (twin === undefined) throw new Error("unreachable: one verdict");
+        assertTypeChecks(
+          twin,
+          `${context}: no shape-violation arm counts in ${setup.label}, ` +
+            `beside the canonical placement ${placement.path}, unless its ` +
+            "valid twin type-checks there (TEST-SPEC §7.6 Pairing), so the " +
+            "body stops at the first setup where the twin does not, after " +
+            `${count(judged, "setup")} where every arm failed to type-check`,
+        );
+        arms ??= await stageCoveredFiles({
+          ...request,
+          files: T763_FILES.map((file) => ({
+            label: file.label,
+            text: textFor(file, placement.name),
+          })),
+        });
+        const verdicts = arms.judge(setup);
+        const failed: string[] = [];
+        const inFull: string[] = [];
+        for (const verdict of verdicts) {
+          try {
+            assertShapeViolation(twin, verdict, context);
+          } catch (error) {
+            if (!(error instanceof HarnessAssertionError)) throw error;
+            failed.push(verdict.label);
+            if (inFull.length < FAILURES_IN_FULL) inFull.push(error.message);
+          }
+        }
+        if (failed.length > 0) {
+          fail(
+            `${context}: ${count(failed.length, "shape-violation arm")} of ` +
+              `${String(verdicts.length)} do not fail to type-check in ` +
+              `${setup.label}, beside the canonical placement ` +
+              `${placement.path}, while their valid twin, ${twinLabel}, ` +
+              "type-checks there — the first covered setup where any arm " +
+              "does not fail to type-check, after " +
+              `${count(judged, "setup")} where every arm did; the body stops ` +
+              "here (TEST-SPEC T7.6-3: each " +
+              "file holding a violation of 7.6's type-error class fails to " +
+              "type-check in every covered setup, paired with its valid twin; " +
+              "SPEC 7.6 Type contract, shape violations). The arms: " +
+              `${failed.join(" | ")}. The first ` +
+              `${count(inFull.length, "failure")} in full: ${inFull.join(" || ")}`,
+          );
+        }
+        judged += 1;
+      }
+    } finally {
+      await staging.dispose();
+    }
+  }
+  if (judged !== COVERED_SETUP_COUNT) {
+    throw new Error(
+      `T7.6-3: ${String(judged)} covered setups judged, not TEST-SPEC ` +
+        `§7.6's ${String(COVERED_SETUP_COUNT)}; no setup is sampled away: ` +
+        "a harness defect",
+    );
+  }
+}
+
+const T7_6_3 = defineProductTest({
+  id: "T7.6-3",
+  title:
+    "each arm, T7.6-2(a)'s file with one violation of 7.6's type-error " +
+    "class applied, fails to type-check in all 173 covered setups beside " +
+    "the canonical placement, paired with (a) type-checking in the same " +
+    "setup: an unknown key in each fixed-key object (the top level, " +
+    "markdown, each profile, each rule, and each selector); each required " +
+    "key missing from each object requiring it; at every value of (a)'s " +
+    "file, each kind among a boolean (both values where a list or an object " +
+    "belongs), a string, a list, and an object that 7 does not admit there, " +
+    "and kinds: [true]; at every enumerated value, two near misses of it " +
+    "(Direct and depend among them), and contains at each element of an " +
+    "edgeKinds and of a rule's kinds; each selector-form violation at each " +
+    "selector; each list 7.4 and 7.5 forbid empty, emptied; and one file " +
+    "holding a violation of each member of the class at once (SPEC 7.6 " +
+    "Type contract, shape violations; TEST-SPEC §7.6 Pairing)",
+  run: runShapeViolations,
+});
+
+export const section76Tests: readonly ProductTestEntry[] = [T7_6_2, T7_6_3];
