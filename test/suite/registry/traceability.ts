@@ -530,8 +530,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.7-1": ["6.7", "14"],
   // T7-1: its name-casing probe the byte-wise, case-sensitive comparison of
   // the configuration entry's name (12.0: paths compare byte-wise and
-  // case-sensitively, no case folding).
-  "T7-1": ["7", "14", "12.6", "12.0"],
+  // case-sensitively, no case folding); its configuration-name arms
+  // `inventory`'s resolved `configuration` view under each name compared
+  // byte-identical to its twin's (11.6), as T7-2's twins are.
+  "T7-1": ["7", "11.6", "12.0", "12.6", "14"],
   "T7-2": ["7", "2.4", "7.4", "11.6", "14"],
   "T7-3": ["7", "7.1", "7.2", "14"],
   "T7-4": ["7", "2.4", "11.6", "14"],

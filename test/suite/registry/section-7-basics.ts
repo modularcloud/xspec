@@ -98,6 +98,27 @@
 //   the Windows leg reruns it (E-6, test/windows/e6-subset.test.ts), where
 //   no case-sensitive filesystem masks a product resolving the name through
 //   filesystem lookups.
+// - T7-1 configuration file names (SPEC 7: `--config` names any path, the
+//   file judged by the grammar its name selects, 14.20 — a name ending
+//   `.tsx` parses as TSX, any other as plain TypeScript): three arms in
+//   TEST-SPEC's order, `--config xspec.config.mts`, `--config
+//   xspec.config.cts`, and `--config xspec.config.tsx`, each run from the
+//   root of a fresh workspace holding that plain file — the canonical
+//   configuration's bytes — beside `specs/A.mdx` and no `xspec.config.ts`:
+//   `build` and then `check` exit 0, and `inventory`'s `configuration` is
+//   byte-identical to its twin's (compared as T7-2's comments arm
+//   compares, below), the twin the same bytes named `xspec.config.ts` in a
+//   workspace of its own, driven by the same three commands given
+//   `--config xspec.config.ts` — so each arm differs from the twin in the
+//   configuration file's name alone (`configurationViewOf`'s
+//   `configPath`). The `.mts` and `.cts` files stage `SPECS_ONLY_CONFIG`
+//   itself, plain TypeScript being the grammar their names select; the
+//   `.tsx` file stages its text as a TSX record (S-9 judges it under TSX),
+//   and a module-load self-check pins every arm's bytes to the twin's under
+//   the grammar its name selects. A product admitting a `.ts` name alone
+//   refuses an arm (exit 2 at `build`); one reading a name's file otherwise
+//   than its twin's fails the comparison. The arms run after the occupancy
+//   arms and before the name-casing probe, which stays last.
 // - T7-2 single-deviation staging: every invalid fixture is the valid
 //   canonical configuration with exactly one deviation, so the refusal is
 //   attributable to the arm's malformation and nothing else.
@@ -409,13 +430,17 @@
 //   product invocation — `expectConfigRefused`'s one staging site (serving
 //   every arm of every refused-configuration table, the first included:
 //   `refusedConfigArms` makes one record per row at module load), T7-1's
-//   occupancy and name-casing workspaces, T7-2's and T7-3's later arms,
-//   T7-7's arm workspaces and arm (a)'s inside link target — is a ledger
-//   record carrying its S-9 declaration (T7-2's syntax-error and encoding
-//   arms and T7-1's `XSPEC.config.ts` holding `)` unparseable, 14.20;
-//   every other well-formed), judged by test/self/s9-staged-sources.test.ts
-//   before any product exists. The canonical `SPECS_ONLY_CONFIG` is one
-//   record wherever it is staged, `LOCATION_FILES` included; so is T7-7's
+//   occupancy, name-casing, and configuration-name workspaces (the last
+//   staging the canonical record at `xspec.config.mts`, `xspec.config.cts`,
+//   and the twin's `xspec.config.ts`, and its text at `xspec.config.tsx` as
+//   a TSX record, the grammar that name selects, 14.20), T7-2's and T7-3's
+//   later arms, T7-7's arm workspaces and arm (a)'s inside link target — is
+//   a ledger record carrying its S-9 declaration (T7-2's syntax-error and
+//   encoding arms and T7-1's `XSPEC.config.ts` holding `)` unparseable,
+//   14.20; every other well-formed), judged by
+//   test/self/s9-staged-sources.test.ts before any product exists. The
+//   canonical `SPECS_ONLY_CONFIG` is one record wherever it is staged,
+//   `LOCATION_FILES` and T7-1's `.mts` and `.cts` names included; so is T7-7's
 //   configuration (`T7_7_CONFIG`), at `xspec.config.ts` and at the inside
 //   link target, its text the bytes the outside target is written with
 //   beyond the root.
@@ -448,7 +473,11 @@ import {
 } from "../../helpers/snapshot.js";
 import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
-import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
+import {
+  type StagedTs,
+  stagedTs,
+  tsGrammarOf,
+} from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -503,12 +532,15 @@ export const SECTION_B_SOURCE = stagedMdx(
 // The canonical valid configuration (SPEC 7): exactly one spec group, no
 // optional keys. Every T7-2 violation below is this file with one deviation.
 // A staged-source record (module header): T7-1's occupancy and name-casing
-// workspaces, T7-2's statement-order arm (the import-first twin), and T7-3's
-// omission arms stage it in workspaces created after a product invocation;
-// T7-1's first workspace passes the record too, and T7-2's encoding arms
-// compose their bytes from its text.
+// workspaces, T7-1's configuration-name workspaces (at `xspec.config.mts`
+// and `xspec.config.cts`, and the twin's `xspec.config.ts`), T7-2's
+// statement-order arm (the import-first twin), and T7-3's omission arms
+// stage it in workspaces created after a product invocation; T7-1's first
+// workspace passes the record too, T7-1's `xspec.config.tsx` stages its
+// text as a TSX record of its own (14.20), and T7-2's encoding arms compose
+// their bytes from its text.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T7-1/T7-2/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys)",
+  "T7-1/T7-2/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys; T7-1's xspec.config.mts and xspec.config.cts)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1027,6 +1059,112 @@ export async function runT71ConfigNameCasingProbe(
   });
 }
 
+// --- T7-1 configuration file names (SPEC 7, 14.20) --------------------------
+
+// `--config` names any path, the file judged by the grammar its name selects
+// (SPEC 7, 14.20: a name ending `.tsx` parses as TSX, any other as plain
+// TypeScript; module header). The twin names the same bytes
+// `xspec.config.ts`; each arm's file is a plain file at the root holding
+// the canonical configuration's bytes, no `xspec.config.ts` beside it.
+const CONFIG_NAME_TWIN = "xspec.config.ts";
+// The canonical configuration's text as a TSX record: the `.tsx` name
+// selects TSX, so its record is judged under that grammar (S-9) — the
+// builder refuses to stage a plain-TypeScript record there. Staged after a
+// product invocation (S-9's timing clause).
+const TSX_SPECS_ONLY_CONFIG = stagedTs(
+  "T7-1 xspec.config.tsx (the canonical configuration's bytes, judged under TSX, the grammar the .tsx name selects)",
+  configText(SPECS_ONLY_CONFIG),
+  "well-formed",
+  "tsx",
+);
+// The three names, in TEST-SPEC's order: `.mts` and `.cts` select plain
+// TypeScript and stage the canonical record itself.
+const CONFIG_NAME_ARMS: readonly {
+  readonly name: string;
+  readonly config: StagedTs;
+}[] = [
+  { name: "xspec.config.mts", config: SPECS_ONLY_CONFIG },
+  { name: "xspec.config.cts", config: SPECS_ONLY_CONFIG },
+  { name: "xspec.config.tsx", config: TSX_SPECS_ONLY_CONFIG },
+];
+
+// The module-load self-check of the configuration-name arms: each file
+// holds the twin's bytes exactly, under the grammar its name selects — so
+// an arm differs from its twin in the file's name alone. A mismatch is a
+// harness error thrown at load, never a product verdict.
+for (const arm of CONFIG_NAME_ARMS) {
+  if (
+    configText(arm.config) !== configText(SPECS_ONLY_CONFIG) ||
+    arm.config.grammar !== tsGrammarOf(arm.name)
+  ) {
+    throw new Error(
+      `T7-1 fixture self-check: ${arm.name} must hold the bytes of its ` +
+        `twin ${CONFIG_NAME_TWIN} (the canonical configuration), judged ` +
+        `under the grammar its name selects (${tsGrammarOf(arm.name)}; ` +
+        `SPEC 14.20); its record ${JSON.stringify(arm.config.name)} is ` +
+        `judged under ${arm.config.grammar} and holds ` +
+        JSON.stringify(configText(arm.config)),
+    );
+  }
+}
+
+/**
+ * T7-1's configuration file names (SPEC 7: `--config` names any path, the
+ * file judged by the grammar its name selects, 14.20): `--config
+ * xspec.config.mts`, `--config xspec.config.cts`, and `--config
+ * xspec.config.tsx`, each run from the root of a fresh workspace holding
+ * that plain file — the canonical configuration's bytes — beside the
+ * minimal source and no `xspec.config.ts`, each load: `build` and then
+ * `check` exit 0, and `inventory`'s `configuration` is byte-identical to
+ * its twin's, the same bytes named `xspec.config.ts` in a workspace of its
+ * own, driven by the same commands given `--config xspec.config.ts`
+ * (module header). A product admitting a `.ts` name alone refuses an arm
+ * and fails `build`'s exit code; one reading a name's file otherwise than
+ * its twin's fails the comparison.
+ */
+async function runConfigurationNameArms(
+  product: ProductBinding,
+): Promise<void> {
+  const views: { readonly name: string; readonly view: unknown }[] = [];
+  for (const arm of CONFIG_NAME_ARMS) {
+    const grammar =
+      tsGrammarOf(arm.name) === "tsx" ? "TSX" : "plain TypeScript";
+    views.push({
+      name: arm.name,
+      view: await configurationViewOf(
+        product,
+        arm.config,
+        `T7-1 (configuration file names: --config ${arm.name}, a plain ` +
+          `file at the root holding a valid configuration's bytes, no ` +
+          `${CONFIG_NAME_TWIN} existing — --config names any path, the ` +
+          `file judged by the grammar its name selects, ${grammar} here ` +
+          `(SPEC 7, 14.20); a product admitting a .ts name alone refuses ` +
+          `it)`,
+        { check: true, configPath: arm.name },
+      ),
+    });
+  }
+  const twinView = await configurationViewOf(
+    product,
+    SPECS_ONLY_CONFIG,
+    `T7-1 (configuration file names: the twin, the same bytes named ` +
+      `${CONFIG_NAME_TWIN}, given by --config ${CONFIG_NAME_TWIN})`,
+    { check: true, configPath: CONFIG_NAME_TWIN },
+  );
+  for (const { name, view } of views) {
+    assertConfigurationViewsIdentical(
+      view,
+      twinView,
+      "T7-1 (configuration file names): `inventory`'s `configuration` " +
+        `member under --config ${name} is byte-identical to its twin's, ` +
+        `the same bytes named ${CONFIG_NAME_TWIN} and given by --config ` +
+        `${CONFIG_NAME_TWIN} — the file's name selects only the grammar it ` +
+        `is judged by, a choice no file in 7's declarative form observes ` +
+        `(SPEC 7, 14.20, 11.6)`,
+    );
+  }
+}
+
 const T7_1 = defineProductTest({
   id: "T7-1",
   title:
@@ -1043,7 +1181,13 @@ const T7_1 = defineProductTest({
     "working directory beneath the valid root configuration is passed by " +
     "the search, which loads the root's configuration, `build` and then " +
     "`check` run from there exiting 0 (a single-casing probe, rerun on the " +
-    "Windows leg, E-6) (SPEC 7, 12.0, 12.6, 12.7, 14.14)",
+    "Windows leg, E-6); configuration file names — --config naming " +
+    "xspec.config.mts, xspec.config.cts, or xspec.config.tsx, a plain " +
+    "file at the root holding a valid configuration's bytes with no " +
+    "xspec.config.ts existing, loads, the file judged by the grammar its " +
+    "name selects: `build` and `check` exit 0, and inventory's " +
+    "configuration is byte-identical to its twin's, the same bytes named " +
+    "xspec.config.ts (SPEC 7, 11.6, 12.0, 12.6, 12.7, 14.14, 14.20)",
   run: async (product) => {
     await withWorkspace(
       { files: LOCATION_FILES, dirs: [SEARCH_CWD] },
@@ -1188,6 +1332,13 @@ const T7_1 = defineProductTest({
     // Occupancy: a found or named xspec.config.ts that is a directory or a
     // symbolic link (SPEC 7, 14.14; helpers above).
     await runOccupancyArms(product);
+
+    // Configuration file names: --config naming xspec.config.mts,
+    // xspec.config.cts, or xspec.config.tsx loads, its resolved view
+    // byte-identical to its twin's, the same bytes named xspec.config.ts
+    // (SPEC 7, 14.20; helpers above). Run before the name-casing probe,
+    // which stays last.
+    await runConfigurationNameArms(product);
 
     // Name casing: a plain file XSPEC.config.ts beneath the valid root
     // configuration is no entry named xspec.config.ts (SPEC 7, 12.0) — the
@@ -2502,49 +2653,58 @@ export default defineConfig({
 );
 
 /**
- * The resolved configuration view under `config` (T7-2's comments,
- * string-literal import name, and statement-order arms; module header):
- * `config` staged as `xspec.config.ts` beside the minimal source in a fresh
- * workspace, `build` required to load it (exit 0) — then, where `check` is
- * asked for (the statement-order arm), `check` required to exit 0 too — and
- * the `configuration` member of `inventory --json` returned as reported,
- * the document form-decoded first.
+ * The resolved configuration view under `config` (T7-1's configuration
+ * file names; T7-2's comments, string-literal import name, and
+ * statement-order arms; module header): `config` staged beside the minimal
+ * source in a fresh workspace — as `xspec.config.ts`, found by the upward
+ * search, or, where `configPath` is given (T7-1), at that path under the
+ * root and nowhere else, every command naming it through `--config` —
+ * `build` required to load it (exit 0) — then, where `check` is asked for
+ * (T7-1's arms and twin, T7-2's statement-order arm), `check` required to
+ * exit 0 too — and the `configuration` member of `inventory --json`
+ * returned as reported, the document form-decoded first.
  */
 async function configurationViewOf(
   product: ProductBinding,
   config: StagedTs,
   label: string,
-  options: { readonly check?: true } = {},
+  options: { readonly check?: true; readonly configPath?: string } = {},
 ): Promise<unknown> {
+  const configArgv: readonly string[] =
+    options.configPath === undefined ? [] : ["--config", options.configPath];
+  const spelled = (...argv: readonly string[]): string =>
+    "`" + [...argv, ...configArgv].join(" ") + "`";
   return await withWorkspace(
     {
       files: {
-        "xspec.config.ts": config,
+        [options.configPath ?? "xspec.config.ts"]: config,
         "specs/A.mdx": SECTION_A_SOURCE,
       },
     },
     async (workspace) => {
-      await buildOk(
+      await expectExit(
         product,
         workspace,
-        `${label}: ` + "`build` — the configuration loads (SPEC 7)",
+        ["build", ...configArgv],
+        0,
+        `${label}: ${spelled("build")} — the configuration loads (SPEC 7)`,
       );
       if (options.check === true) {
         await expectExit(
           product,
           workspace,
-          ["check"],
+          ["check", ...configArgv],
           0,
-          `${label}: ` +
-            "`check` after the build — the configuration loads, and the " +
-            "freshly built workspace yields no finding (SPEC 7, 12.0)",
+          `${label}: ${spelled("check")} after the build — the ` +
+            "configuration loads, and the freshly built workspace yields " +
+            "no finding (SPEC 7, 12.0)",
         );
       }
-      const inventoryLabel = `${label} ` + "`inventory --json`";
+      const inventoryLabel = `${label} ${spelled("inventory", "--json")}`;
       const raw = await runJson(
         product,
         workspace,
-        ["inventory", "--json"],
+        ["inventory", "--json", ...configArgv],
         inventoryLabel,
       );
       decodeInventoryDocument(raw, inventoryLabel);
