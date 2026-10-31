@@ -98,8 +98,8 @@ jobs:
     runs-on: ubuntu-24.04
     # A limit of the CI service, not a harness guard (TEST-SPEC S-3). The job
     # took 6.5 minutes at 3d8e7ad, before S-10's checks on E-1's six Node.js
-    # releases and S-4's checks of 7.6's covered setups are implemented, and
-    # its setup now provisions those releases.
+    # releases and S-4's checks of 7.6's covered setups, and 9.4 at d0ccc8f
+    # with them, its setup provisioning those releases: 31% of this limit.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -133,14 +133,17 @@ jobs:
     # A limit of the CI service, not a harness guard (TEST-SPEC S-3): the job
     # is held to GitHub's own per-job limit for hosted runners, 6 hours, and
     # to nothing shorter. It took up to 34 minutes at f22cc77 and 46.5 at
-    # 3d8e7ad, before IP 0002's tests of SPEC 7.6 are implemented. Those
-    # type-check every arm in all 173 of 7.6's covered setups, a fresh
-    # TypeScript 5.9.3 program over a covered file taking about 1 s where the
-    # scaffold measured it, and load the module on each of E-1's six Node.js
-    # releases, so a shorter limit could stop a conforming run. Where the
-    # suite outgrows the service's limit, E-1 splits it across parallel jobs
-    # whose union is the whole suite, every verdict reported, never trimming
-    # it.
+    # 3d8e7ad, before IP 0002's tests of SPEC 7.6, and 51.4 at d0ccc8f with
+    # them (14% of this limit), against a product not yet meeting 7.6, each
+    # of those tests stopping at its first failing setup or run. Against a
+    # conforming product they type-check every arm in all 173 of 7.6's
+    # covered setups, a fresh TypeScript 5.9.3 program over a covered file
+    # taking about 1 s where the scaffold measured it, and load the module on
+    # each of E-1's six Node.js releases: about 9 minutes more of test time,
+    # measured locally against a conforming stand-in package. A shorter limit
+    # could stop a conforming run. Where the suite outgrows the service's
+    # limit, E-1 splits it across parallel jobs whose union is the whole
+    # suite, every verdict reported, never trimming it.
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
