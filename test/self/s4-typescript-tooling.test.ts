@@ -8,12 +8,14 @@
 // driver, in each configuration, against a hand-written, non-xspec fixture
 // project (test/fixtures/s4-tooling/) compiled and served in that
 // configuration from a copy in a fresh workspace under the OS temporary
-// directory, as a consumer workspace is compiled — no `node_modules` above
-// it, so the release's default `types` brings no `@types` package of this
-// repository into the program (H-2: every option H-2 does not name at the
-// release's default), and H-2's isolation holds: a known type error, a known
-// definition location, and a known hover text must all be detected, so
-// section 4's consumer assertions cannot pass vacuously — among the type
+// directory, as a consumer workspace is compiled — no `package.json` or
+// `node_modules` above it, so the release's default `types` brings no
+// `@types` package of this repository into the program (H-2: every option
+// H-2 does not name at the release's default) and no manifest of this
+// repository decides its module kind, and H-1's isolation of a consumer
+// program holds: a known type error, a known definition location, and a
+// known hover text must all be detected, so section 4's consumer
+// assertions cannot pass vacuously — among the type
 // errors one located in a declaration module the consumer imports, outside
 // the consumer file (`companion-error.d.ts`, in a product companion's
 // shape), which only a clean verdict covering the whole program reports and
@@ -48,10 +50,14 @@
 // and never the ES-module configuration's; an import nothing makes
 // resolvable is a diagnosed compile error (the red path for section 4 tests
 // against the stub product, H-8); marker addressing and project loading
-// fail loudly rather than vacuously green; H-2's isolation is a staging
-// error, never a verdict; and a project is loaded under one of H-2's two
-// configurations exactly, with no compiler option of its own, any other
-// load a harness misuse — so no other configuration is reachable. The
+// fail loudly rather than vacuously green; H-1's isolation of a consumer
+// program — nothing installed in its project root or above it or its
+// runtime output, nothing in Node.js's global module folders under a run's
+// environment, and each run under a fresh, empty `HOME` with no `NODE_PATH`
+// — is verified before TypeScript or Node.js reads it, an unmet isolation a
+// staging error, never a verdict; and a project is loaded under one of
+// H-2's two configurations exactly, with no compiler option of its own, any
+// other load a harness misuse — so no other configuration is reachable. The
 // skeleton reader T1.1-2 compares two generated modules through
 // (`moduleSkeleton`, `skeletonChains`, `diffModuleSkeletons`) is pinned, in
 // each configuration, against a hand-written module in the generated
@@ -67,6 +73,7 @@ import ts from "typescript-5.9.3";
 import { describe, expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
+import { verifyStagingIsolation } from "../helpers/staging-isolation.js";
 import {
   assertTypeChecksClean,
   assertTypeErrorsAt,
@@ -101,7 +108,7 @@ async function makeWorkspace(decl?: WorkspaceDecl): Promise<TestWorkspace> {
 /**
  * The S-4 fixture project, copied byte for byte into a fresh workspace under
  * the OS temporary directory, where it is compiled as a consumer workspace
- * is (module header): no `node_modules` above it.
+ * is (module header): no `package.json` or `node_modules` above it.
  */
 async function stageFixtureProject(): Promise<TestWorkspace> {
   const files: Record<string, Uint8Array> = {};
@@ -1171,35 +1178,119 @@ test("H-2's runtime refuses the ES-module configuration and an output directory 
   expect(await workspace.readdirNames()).not.toContain("out");
 });
 
-test("H-2's isolation: a project whose root has a node_modules entry above it is refused as a staging error — the fixture directory in this repository among them", async () => {
-  for (const [kind, decl] of [
-    ["a directory", { dirs: ["node_modules"] }],
-    ["a plain file", { files: { node_modules: "" } }],
-    ["a symbolic link", { symlinks: { node_modules: "nowhere" } }],
+// H-1's isolation of a consumer program (TEST-SPEC H-1, H-2, T13.1-2;
+// helpers/staging-isolation.ts through helpers/tooling.ts). Every staging
+// lies in a fresh temporary directory, never under this repository, whose
+// own package.json and node_modules lie above it; every symbolic link points
+// inside its own workspace.
+
+/** A text of `lines`, each ended by a line feed (U+000A). */
+function textOf(...lines: readonly string[]): string {
+  const lineFeed = String.fromCodePoint(0x0a);
+  return lines.map((line) => line + lineFeed).join("");
+}
+
+/**
+ * An entry named `name`, in the workspace directory `at` ("" for the root),
+ * of each kind H-1's examination judges by `lstat`: a directory, a plain
+ * file, and a dangling symbolic link pointing inside the workspace.
+ */
+function entryOfEachKind(
+  name: string,
+  at: string,
+): readonly (readonly [string, WorkspaceDecl])[] {
+  const rel = at === "" ? name : `${at}/${name}`;
+  return [
+    ["a directory", { dirs: [rel] }],
+    ["a plain file", { files: { [rel]: "" } }],
+    ["a symbolic link", { symlinks: { [rel]: "nowhere" } }],
+  ];
+}
+
+/**
+ * A consumer that writes the marker file its first argument names, if any,
+ * and prints `ran` — so a run refused before the consumer starts leaves no
+ * marker. H-2 supplies no `@types/node`: it declares what it reads.
+ */
+const MARKING_CONSUMER = textOf(
+  "declare const process: { readonly argv: readonly string[] };",
+  "declare const module: {",
+  '  require(id: "node:fs"): {',
+  "    writeFileSync(path: string, data: string): void;",
+  "  };",
+  "};",
+  "",
+  "const marker = process.argv[2];",
+  "if (marker !== undefined) {",
+  '  module.require("node:fs").writeFileSync(marker, "ran");',
+  "}",
+  'console.log("ran");',
+  "",
+  "export {};",
+);
+
+/**
+ * A consumer reporting, as one JSON line, the `HOME` and `NODE_PATH` it
+ * runs under and the entries of that `HOME`.
+ */
+const HOME_REPORTING_CONSUMER = textOf(
+  "declare const process: {",
+  "  readonly env: Readonly<Record<string, string | undefined>>;",
+  "};",
+  "declare const module: {",
+  '  require(id: "node:fs"): { readdirSync(path: string): string[] };',
+  "};",
+  "",
+  "const home = process.env.HOME;",
+  "console.log(",
+  "  JSON.stringify({",
+  "    home: home ?? null,",
+  "    entries:",
+  "      home === undefined",
+  "        ? null",
+  '        : module.require("node:fs").readdirSync(home),',
+  "    nodePath: process.env.NODE_PATH ?? null,",
+  "  }),",
+  ");",
+  "",
+  "export {};",
+);
+
+test("H-1's isolation of a consumer program: a project whose root has a package.json or node_modules entry above it, or a node_modules entry in it, is refused as a staging error — the fixture directory in this repository among them (TEST-SPEC H-1, T13.1-2)", async () => {
+  for (const [name, at] of [
+    ["package.json", ""],
+    ["node_modules", ""],
+    ["node_modules", "project"],
   ] as const) {
-    const workspace = await makeWorkspace({
-      ...decl,
-      files: {
-        ...("files" in decl ? decl.files : {}),
-        "project/main.ts": "export const value = 1;\n",
-      },
-    });
-    for (const configuration of CONSUMER_CONFIGURATIONS) {
-      const error: unknown = await ConsumerProject.load({
-        rootDir: workspace.path("project"),
-        rootFiles: ["main.ts"],
-        configuration,
-      }).catch((caught: unknown) => caught);
-      expect(error).toBeInstanceOf(HarnessStagingError);
-      expect((error as HarnessStagingError).mode).toBe("consumer-isolation");
-      expect((error as Error).message).toContain(
-        `holds an entry named node_modules (${kind}, ` +
-          `${path.join(workspace.root, "node_modules")})`,
-      );
+    for (const [kind, decl] of entryOfEachKind(name, at)) {
+      const workspace = await makeWorkspace({
+        ...decl,
+        files: {
+          ...(decl.files ?? {}),
+          "project/main.ts": textOf("export const value = 1;"),
+        },
+      });
+      const entry = path.join(workspace.root, at, name);
+      const expected =
+        at === ""
+          ? `the ancestor directory ${workspace.root} holds an entry named ` +
+            `${name} (${kind}, ${entry})`
+          : `the consumer project root ${workspace.path("project")} itself ` +
+            `holds an entry named ${name} (${kind}, ${entry})`;
+      for (const configuration of CONSUMER_CONFIGURATIONS) {
+        const error: unknown = await ConsumerProject.load({
+          rootDir: workspace.path("project"),
+          rootFiles: ["main.ts"],
+          configuration,
+        }).catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(HarnessStagingError);
+        expect((error as HarnessStagingError).mode).toBe("consumer-isolation");
+        expect((error as Error).message).toContain(expected);
+      }
     }
   }
   // The fixture directory in place lies below this repository's own
-  // node_modules — hence S-4's copies.
+  // package.json and node_modules — hence S-4's copies.
   const inPlace: unknown = await ConsumerProject.load({
     rootDir: fixtureRoot,
     rootFiles: ["greeting.ts", "main.ts"],
@@ -1209,86 +1300,253 @@ test("H-2's isolation: a project whose root has a node_modules entry above it is
   expect((inPlace as HarnessStagingError).mode).toBe("consumer-isolation");
 });
 
-test("H-2's isolation: a runtime output directory with a node_modules entry above it is refused before anything is compiled into it, and removed", async () => {
+test("H-1's isolation of a consumer program: a runtime output directory with a package.json or node_modules entry above it is refused before anything is compiled into it, and removed (TEST-SPEC H-1)", async () => {
   const workspace = await makeWorkspace({
-    files: { "main.ts": 'console.log("never run");\n\nexport {};\n' },
+    files: {
+      "main.ts": textOf('console.log("never run");', "", "export {};"),
+    },
   });
   const project = await ConsumerProject.load({
     rootDir: workspace.root,
     rootFiles: ["main.ts"],
     configuration: COMMONJS_CONFIGURATION,
   });
-  // The OS temporary directory, as `os.tmpdir()` reads it at each call, moved
-  // below a node_modules-holding directory for this one call.
-  const decoy = await makeWorkspace({ dirs: ["node_modules", "tmp"] });
-  const ambient = process.env["TMPDIR"];
-  process.env["TMPDIR"] = decoy.path("tmp");
-  let entered = false;
-  let refused: unknown;
-  try {
-    refused = await withCompiledConsumer(
-      project,
-      "S-4 isolation probe",
-      async () => {
-        entered = true;
-      },
-    ).catch((error: unknown) => error);
-  } finally {
-    if (ambient === undefined) {
-      delete process.env["TMPDIR"];
-    } else {
-      process.env["TMPDIR"] = ambient;
+  for (const [name, kind, decl] of [
+    ["node_modules", "a directory", { dirs: ["node_modules", "tmp"] }],
+    [
+      "package.json",
+      "a plain file",
+      { dirs: ["tmp"], files: { "package.json": textOf("{}") } },
+    ],
+  ] as const) {
+    // The OS temporary directory, as `os.tmpdir()` reads it at each call,
+    // moved below a directory holding the entry for this one call.
+    const decoy = await makeWorkspace(decl);
+    const ambient = process.env["TMPDIR"];
+    process.env["TMPDIR"] = decoy.path("tmp");
+    let entered = false;
+    let refused: unknown;
+    try {
+      refused = await withCompiledConsumer(
+        project,
+        "S-4 isolation probe",
+        async () => {
+          entered = true;
+        },
+      ).catch((error: unknown) => error);
+    } finally {
+      if (ambient === undefined) {
+        delete process.env["TMPDIR"];
+      } else {
+        process.env["TMPDIR"] = ambient;
+      }
     }
+    expect(entered).toBe(false);
+    expect(refused).toBeInstanceOf(HarnessStagingError);
+    expect((refused as HarnessStagingError).mode).toBe("consumer-isolation");
+    expect((refused as Error).message).toContain(
+      `the ancestor directory ${decoy.root} holds an entry named ${name} ` +
+        `(${kind}, ${path.join(decoy.root, name)})`,
+    );
+    expect(await decoy.readdirNames("tmp")).toEqual([]);
   }
-  expect(entered).toBe(false);
-  expect(refused).toBeInstanceOf(HarnessStagingError);
-  expect((refused as HarnessStagingError).mode).toBe("consumer-isolation");
-  expect((refused as Error).message).toContain(
-    `holds an entry named node_modules (a directory, ` +
-      `${path.join(decoy.root, "node_modules")})`,
-  );
-  expect(await decoy.readdirNames("tmp")).toEqual([]);
 });
 
-test("H-2's isolation: a run whose environment lets Node.js's resolver find a package named xspec in a global folder is refused before the consumer runs", async () => {
-  const home = await makeWorkspace({
-    dirs: [".node_modules/xspec", "path/xspec"],
+test("H-1's isolation of a consumer program: a run whose environment gives Node.js's resolver a global folder holding a package — under any name, xspec's or another — is refused before the consumer runs, and an empty global folder holds none (TEST-SPEC H-1, H-2)", async () => {
+  const folders = await makeWorkspace({
+    dirs: [
+      "other/.node_modules/left-pad",
+      "named/.node_modules/xspec",
+      "path/@acme/config-kit",
+      "empty/.node_modules",
+      "empty/.node_libraries",
+    ],
+    files: { "module/.node_libraries/helper.js": textOf("exports.x = 1;") },
   });
+  const markers = await makeWorkspace();
   const workspace = await makeWorkspace({
-    files: { "main.ts": 'console.log("ran");\n\nexport {};\n' },
+    files: { "main.ts": MARKING_CONSUMER },
   });
+  const sources = { rootDir: workspace.root, rootFiles: ["main.ts"] };
+  await forEachConsumerProject(sources, (project) =>
+    assertTypeChecksClean(project, "marking consumer"),
+  );
   const project = await ConsumerProject.load({
-    rootDir: workspace.root,
-    rootFiles: ["main.ts"],
+    ...sources,
     configuration: COMMONJS_CONFIGURATION,
   });
+  const refusals = [
+    // `$HOME/.node_modules`, holding a package under another name.
+    {
+      marker: "other",
+      env: { HOME: folders.path("other") },
+      folder: folders.path("other/.node_modules"),
+      holds: 'the entry "left-pad"',
+    },
+    // `$HOME/.node_libraries`, holding a plain-file module.
+    {
+      marker: "module",
+      env: { HOME: folders.path("module") },
+      folder: folders.path("module/.node_libraries"),
+      holds: 'the entry "helper.js"',
+    },
+    // `$HOME/.node_modules`, holding a package named xspec.
+    {
+      marker: "named",
+      env: { HOME: folders.path("named") },
+      folder: folders.path("named/.node_modules"),
+      holds: 'the entry "xspec"',
+    },
+    // A NODE_PATH entry, which a run drops unless its environment sets it,
+    // holding a scope.
+    {
+      marker: "path",
+      env: { NODE_PATH: folders.path("path") },
+      folder: folders.path("path"),
+      holds: 'the entry "@acme"',
+    },
+  ];
   await withCompiledConsumer(
     project,
     "S-4 global-folder probe",
     async (compiled) => {
-      // `$HOME/.node_modules`, which Node.js's resolver searches.
-      const viaHome: unknown = await compiled
-        .run("main.ts", { env: { HOME: home.root } })
-        .catch((error: unknown) => error);
-      expect(viaHome).toBeInstanceOf(HarnessStagingError);
-      expect((viaHome as HarnessStagingError).mode).toBe("consumer-isolation");
-      expect((viaHome as Error).message).toContain(
-        `holds an entry named xspec (a directory, ` +
-          `${path.join(home.root, ".node_modules", "xspec")})`,
-      );
-      // A NODE_PATH entry, which a run drops unless its environment sets it.
-      const viaNodePath: unknown = await compiled
-        .run("main.ts", { env: { NODE_PATH: home.path("path") } })
-        .catch((error: unknown) => error);
-      expect(viaNodePath).toBeInstanceOf(HarnessStagingError);
-      expect((viaNodePath as Error).message).toContain(
-        `${path.join(home.root, "path", "xspec")}`,
-      );
-      // Under the ambient environment the run proceeds.
-      const ran = await compiled.run("main.ts");
-      expect(ran.exitCode).toBe(0);
-      expect(ran.stdout).toBe("ran\n");
+      for (const refusal of refusals) {
+        const marker = markers.path(`${refusal.marker}.ran`);
+        const refused: unknown = await compiled
+          .run("main.ts", { argv: [marker], env: refusal.env })
+          .catch((error: unknown) => error);
+        expect(refused).toBeInstanceOf(HarnessStagingError);
+        expect((refused as HarnessStagingError).mode).toBe(
+          "consumer-isolation",
+        );
+        expect((refused as Error).message).toContain(
+          `the global folder ${refusal.folder}, which Node.js's resolver ` +
+            `searches for a bare specifier under the run's environment, ` +
+            `holds ${refusal.holds}`,
+        );
+      }
+      // Refused before the consumer ran: no marker written.
+      expect(await markers.readdirNames()).toEqual([]);
+      // Global folders that exist but hold nothing hold no package, and
+      // under the ambient environment, with the run's own fresh HOME, the
+      // run proceeds too.
+      for (const [name, env] of [
+        ["empty", { HOME: folders.path("empty") }],
+        ["ambient", undefined],
+      ] as const) {
+        const ran = await compiled.run("main.ts", {
+          argv: [markers.path(`${name}.ran`)],
+          env,
+        });
+        expect(ran.exitCode).toBe(0);
+        expect(ran.stdout).toBe(textOf("ran"));
+        expect(ran.stderr).toBe("");
+      }
+      expect((await markers.readdirNames()).sort()).toEqual([
+        "ambient.ran",
+        "empty.ran",
+      ]);
     },
+  );
+});
+
+test("H-1's isolation of a consumer program: each run gets a fresh, empty HOME of its own — never the ambient one — under the OS temporary directory, outside the workspace and the output directory, with no NODE_PATH, removed once the run ends (TEST-SPEC H-1)", async () => {
+  const workspace = await makeWorkspace({
+    files: { "main.ts": HOME_REPORTING_CONSUMER },
+  });
+  const sources = { rootDir: workspace.root, rootFiles: ["main.ts"] };
+  await forEachConsumerProject(sources, (project) =>
+    assertTypeChecksClean(project, "HOME-reporting consumer"),
+  );
+  const project = await ConsumerProject.load({
+    ...sources,
+    configuration: COMMONJS_CONFIGURATION,
+  });
+  const ambientHome = process.env["HOME"];
+  const homes: string[] = [];
+  await withCompiledConsumer(
+    project,
+    "S-4 fresh-HOME probe",
+    async (compiled) => {
+      for (let index = 0; index < 2; index += 1) {
+        const result = await compiled.run("main.ts");
+        expect(result.exitCode).toBe(0);
+        expect(result.stderr).toBe("");
+        const report = JSON.parse(result.stdout) as {
+          readonly home: unknown;
+          readonly entries: unknown;
+          readonly nodePath: unknown;
+        };
+        expect(typeof report.home).toBe("string");
+        const home = report.home as string;
+        expect(path.isAbsolute(home)).toBe(true);
+        expect(home).not.toBe(ambientHome);
+        expect(liesInside(home, os.tmpdir())).toBe(true);
+        for (const other of [workspace.root, compiled.dir]) {
+          expect(home).not.toBe(other);
+          expect(liesInside(home, other)).toBe(false);
+          expect(liesInside(other, home)).toBe(false);
+        }
+        expect(report.entries).toEqual([]);
+        expect(report.nodePath).toBeNull();
+        // Removed once the run ends.
+        await expect(fsp.lstat(home)).rejects.toThrowError(/ENOENT/);
+        homes.push(home);
+      }
+    },
+  );
+  // Each run its own.
+  expect(new Set(homes).size).toBe(2);
+});
+
+test("H-1's isolation: lib/node under the prefix of each Node.js executable that will run — as spelled and along its physical path — is a global module folder too, a folder that is no directory holding none, and an executable whose physical path cannot be read leaving the isolation unverified (helpers/staging-isolation.ts)", async () => {
+  const staging = await makeWorkspace({
+    dirs: ["root", "real/lib/node/some-package", "linked/bin", "plain/lib"],
+    files: { "real/bin/node": "", "plain/bin/node": "", "plain/lib/node": "" },
+    symlinks: { "linked/bin/node": "../../real/bin/node" },
+  });
+  const isolation = (executable: string): Promise<void> =>
+    verifyStagingIsolation({
+      root: staging.path("root"),
+      role: "the S-4 probe's staging root",
+      context: "S-4 executable-prefix probe",
+      mode: "consumer-isolation",
+      run: {
+        environment: {},
+        cwd: staging.path("root"),
+        executables: [executable],
+      },
+    });
+  const realFolder = path.join(
+    await fsp.realpath(staging.path("real")),
+    "lib",
+    "node",
+  );
+  for (const [executable, folder] of [
+    [staging.path("real/bin/node"), staging.path("real/lib/node")],
+    [staging.path("linked/bin/node"), realFolder],
+  ] as const) {
+    const refused: unknown = await isolation(executable).catch(
+      (error: unknown) => error,
+    );
+    expect(refused).toBeInstanceOf(HarnessStagingError);
+    expect((refused as HarnessStagingError).mode).toBe("consumer-isolation");
+    expect((refused as Error).message).toContain(
+      `the global folder ${folder}, which Node.js's resolver searches for ` +
+        `a bare specifier under the run's environment, holds the entry ` +
+        `"some-package"`,
+    );
+  }
+  await expect(isolation(staging.path("plain/bin/node"))).resolves.toBe(
+    undefined,
+  );
+  const unverified: unknown = await isolation(
+    staging.path("missing/bin/node"),
+  ).catch((error: unknown) => error);
+  expect(unverified).toBeInstanceOf(HarnessStagingError);
+  expect((unverified as Error).message).toContain(
+    `the physical path of the Node.js executable ` +
+      `${staging.path("missing/bin/node")} cannot be read`,
   );
 });
 

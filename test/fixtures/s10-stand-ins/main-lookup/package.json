@@ -1,0 +1,6 @@
+{
+  "name": "s10-main-lookup-standin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./lib"
+}

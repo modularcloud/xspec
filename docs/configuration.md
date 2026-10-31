@@ -8,7 +8,7 @@ Commands find the file by searching upward from the working directory. The searc
 
 xspec **parses the configuration statically and never executes or imports it**. The file must consist of exactly:
 
-1. an import of `defineConfig` from the module specifier `"xspec"` (aliasing allowed; no `type` or `defer` modifier, no import attributes), and
+1. an import of `defineConfig` whose module specifier is any plain single- or double-quoted string (aliasing allowed; no `type` or `defer` modifier, no import attributes), and
 2. a default export of one call to that binding, whose argument is built only from object literals (plain identifier or string keys), array literals, plain quoted strings, and `true`/`false`.
 
 No spreads, no computed values, and no other statements are allowed; comments are fine anywhere. String values are read exactly as written, with no escape sequences interpreted. The file must be valid UTF-8 without a byte-order mark.
@@ -19,16 +19,60 @@ This makes configuration incapable of side effects or environment-dependent beha
 - an unknown key anywhere in the argument, or a key repeated within one object;
 - an empty group, profile, or rule name, or one containing U+FFFD.
 
-`defineConfig` is an identity function whose only job is editor type support while you write the file. Because xspec never resolves the import, the CLI works even when the package isn't installed in your project. For type support (or to keep your own `tsc` happy if it includes the config file), the specifier `"xspec"` must resolve. The package is published as `@modularcloud/xspec`, so install it under that name with an alias, or exclude the config file from your tsconfig:
+xspec never resolves, loads, or interprets the import's specifier, and reads nothing on its account. Whatever the specifier names (your installed package, a path, a URL, or nothing at all), the configuration means the same, so the CLI works whether or not the import resolves. The specifier's spelling only has to leave the file well-formed TypeScript: an escape sequence that TypeScript rejects makes the file a configuration error.
+
+## Type checking the configuration
+
+Import `defineConfig` from the package your project installed. With the plain install from [Getting started](getting-started.md#install), that's `"@modularcloud/xspec"`:
 
 ```sh
-npm install --save-dev xspec@npm:@modularcloud/xspec
+npm install --save-dev @modularcloud/xspec
 ```
+
+```ts
+import { defineConfig } from "@modularcloud/xspec"
+```
+
+The package's root module exports `defineConfig` and nothing else (no other value and no types), and it needs no `@types` package. Your editor and `tsc` then check the file against the configuration's shape:
+
+- A valid configuration type-checks with no errors, whatever its group names and whether or not you alias the import.
+- Mistakes in the shape are type errors:
+  - an unknown key at any level;
+  - a missing required key: `specs`, `markdown`'s `emit`, and the profile and rule fields marked required below;
+  - a value of the wrong kind, such as a string where a list belongs;
+  - a string outside a field's allowed values: `targets`, `boundaryKind`, `mode`, `type`, a selector's `kind`, an entry of `edgeKinds` or `kinds`;
+  - a selector that doesn't use exactly one of `group`, `files`, and `tags`, or that has `kind` without `group`;
+  - an empty `targetTags`, `edgeKinds`, `kinds`, or selector `tags` list.
+- Every other configuration error may or may not be a type error. These include a profile or selector naming a group that doesn't exist, or an ambiguous group name without its kind; empty, duplicate, or U+FFFD-bearing names; a malformed `outDir`; a glob outside the root; a key repeated within one object; a capture error; and a file matched by both a spec and a code group. xspec's own checks are the authority: every command reports these as configuration errors.
+
+`defineConfig` returns the very value you pass it and does nothing else. On Node.js 22 or later, run with no loader or module-resolution options, the package loads through both `import` and `require`, and neither loading it nor calling `defineConfig` has any other effect. xspec never runs the file, but your own tooling may.
+
+**What's covered.** This type checking is specified for TypeScript 5.9.3 checking the configuration file on its own, as the program's one root file, in either of two setups:
+
+- `strict` on, `moduleResolution` set to `node10`, `node16`, `nodenext`, or `bundler` (with `module` at its default under `node10`, or at a value the mode requires), and every other option at its default;
+- exactly the options `tsc --init` writes, for a file TypeScript compiles as an ES module.
+
+Other TypeScript releases and option sets aren't covered. Within those setups, keep the file plain:
+
+- No backslashes outside comments: no escape sequences or line continuations in keys, values, names, or the specifier. xspec reads every string as spelled, while TypeScript decodes escapes, so the two could disagree.
+- No comment that TypeScript reads as a directive (`@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `@jsxImportSource`, or a triple-slash directive), since such comments change what TypeScript reports.
+- Import `defineConfig` by its name, as in `import { defineConfig }` or `import { defineConfig as config }`, and don't alias it to `require`, `exports`, or a reserved word.
+
+The import reaches the installed package only when nothing else claims its name first, such as a `package.json` of your own named `@modularcloud/xspec` in the configuration file's directory or above it. SPEC 7.6 lists the exact conditions.
+
+**CommonJS projects.** Without `"type": "module"` in your `package.json`, TypeScript compiles `xspec.config.ts` as CommonJS, and under the options `tsc --init` writes (they turn on `verbatimModuleSyntax`) it rejects the file's `import` declaration. Either:
+
+- name the file `xspec.config.mts`, which TypeScript always compiles as an ES module, and pass it to every command with `--config xspec.config.mts`, since the upward search looks only for `xspec.config.ts`; or
+- declare `"type": "module"` in your `package.json`.
+
+Under the strict setup above, a CommonJS project's `xspec.config.ts` type-checks as it is.
+
+> **Upgrading from 0.2.x:** guides for earlier releases installed the package under an alias so that the import could name `"xspec"`. You no longer need that: install `@modularcloud/xspec` as above, change the import to `"@modularcloud/xspec"`, and remove the aliased entry from your `package.json`. Until you do, the old setup keeps working, since the import may name the package by whatever name it's installed under.
 
 ## Full example
 
 ```ts
-import { defineConfig } from "xspec"
+import { defineConfig } from "@modularcloud/xspec"
 
 export default defineConfig({
   specs: {
@@ -88,6 +132,13 @@ A file matched by both a spec group and a code group is a configuration error. T
 - files whose names carry `.xspec.` (generated modules);
 - files under `.xspec/`;
 - configured Markdown output destinations.
+
+The configuration file itself isn't excluded. A code group whose globs match it (a root-level `*.ts`, for example) makes `xspec.config.ts` a code source like any other, and its import is then checked as any code file's import is. The configuration stays valid either way, but as a source:
+
+- a specifier ending in `.xspec`, or a relative one naming a derived file (a name carrying `.xspec.`, a path under `.xspec/`, or a Markdown output destination), is an `invalid-import` finding, so `build` and `check` fail;
+- with Markdown emission on, a `move` whose destination would emit Markdown to the path that a relative specifier names is refused (`refused-invalid-destination`).
+
+A package-name specifier such as `"@modularcloud/xspec"` triggers neither.
 
 ## `markdown` — pure-Markdown emission
 

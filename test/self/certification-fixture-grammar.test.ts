@@ -107,6 +107,17 @@ import { TestWorkspace } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
 import { T13_5_8_BOM } from "../suite/registry/section-13.5.js";
 import { CERTIFICATION_FIXTURES } from "./certification-fixtures.js";
+import {
+  AVAIL_STAGING,
+  CORE_STAGING,
+  DISC_STAGING,
+  IMPORT_STAGING,
+  MD_SOURCE,
+  MD_STAGING,
+  ORPHAN_STAGING,
+  SPEC_GROUP_CONFIG,
+  VALID_STAGING,
+} from "./certification-fixture-stagings.js";
 
 /** A decoder of a surface's document (H-3): fails diagnosed, never defaults. */
 type DocumentCheck = (doc: unknown, context: string) => void;
@@ -661,36 +672,11 @@ const FILE_OUTSIDE_ROOT =
   'of the syntax class; 12.3: `ids --file <glob>` follows "the rules of ' +
   '7, as in 11"';
 
-// --- stagings shared by the tables --------------------------------------------
-
-/** One spec group of `.mdx` sources (SPEC 7.1), no other configuration. */
-const SPEC_GROUP_CONFIG = `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/*.mdx"]
-  }
-})
-`;
-
 // --- CONF-DISC (CERTIFICATIONS.md §CONF-DISC: `build`, `check`, `ids`,
 // `inventory`, and `query edges`) ----------------------------------------------
-
-/**
- * One trivial single-section `.mdx` source in one spec group, as
- * §CONF-DISC's scope admits: no code group (so the conformer never loads
- * TypeScript), Markdown emission absent — a valid workspace `build`
- * regenerates and `ids` lists.
- */
-const DISC_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
-`,
-  },
-};
+//
+// The table's declaration is DISC_STAGING (certification-fixture-stagings.ts,
+// shared with the configuration-import guard), as each table's below is.
 
 const DISC_FILE = "specs/A.mdx";
 /** The workspace's one `contains` edge: the root to its section (5.2). */
@@ -1071,26 +1057,377 @@ const DISC_TABLE: GrammarTable = {
   ],
 };
 
-// --- CONF-AVAIL (CERTIFICATIONS.md §CONF-AVAIL: `view` and `occurrences`) -----
+// --- CONF-IMPORT (CERTIFICATIONS.md §CONF-IMPORT: `build`, `check`, `ids`,
+// and `inventory`) --------------------------------------------------------------
+//
+// The table's declaration is IMPORT_STAGING, T7-9's workspace outside its
+// install stagings: two trivial single-section spec sources, Markdown
+// emitted next to them. None of the four commands is mutating (13.5), so
+// `--test-hold` is an unknown flag of each. A `check` row that answers runs
+// on the built workspace alone (`IMPORT_BUILT`): on one never built, a
+// conforming `check` reports the missing derived files and graph data
+// (12.2, 14.10), and nothing in §CONF-IMPORT's scope presents a finding.
 
 /**
- * One finding-free spec source as §CONF-AVAIL's scope admits: a section `a`,
- * and a section `b` whose `d` prop and embedding each reference `a` locally
- * — two resolving occurrences (5.7), so the answers compared hold records.
+ * A backtick, for the code spans of this section's clauses, which spell
+ * no escape sequence.
  */
-const AVAIL_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
+const TICK = "`";
 
-<S id="b" d={"a"}>
-Beta: {text("a")}
-</S>
-`,
-  },
+const IMPORT_IDS = idsOf([
+  { file: "specs/A.mdx", ids: ["a"] },
+  { file: "specs/B.mdx", ids: ["b"] },
+]);
+const IMPORT_INVENTORY = inventoryOf(["specs/A.mdx", "specs/B.mdx"]);
+const IMPORT_INVENTORY_FORM = `${INVENTORY_JSON_ONLY}; §CONF-IMPORT's Scope: "${TICK}inventory${TICK} (11.6) in its full 12.7 document form"`;
+const IMPORT_CHECK_BUILT =
+  "§CONF-IMPORT's Scope: `check` (12.2) over a workspace `build` has just " +
+  "regenerated, behaving per 12.0 — finding-free, exit 0";
+
+/** The workspace built before a `check` row, and its twin's alike. */
+const IMPORT_BUILT: RowPreparation = async (binding, workspace, context) => {
+  await prepareStep(binding, workspace, ["build"], context);
 };
+
+const IMPORT_TABLE: GrammarTable = {
+  conformer: "CONF-IMPORT",
+  staging: IMPORT_STAGING,
+  rows: [
+    // Flag tokens anywhere (12.0).
+    {
+      argv: ["--json", "build"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["--json", "check"],
+      clause: `${FLAGS_ANYWHERE}; ${IMPORT_CHECK_BUILT}`,
+      exit: 0,
+      stdout: like(["check", "--json"], findingFreeReport),
+      prepare: IMPORT_BUILT,
+    },
+    {
+      argv: ["--json", "ids"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["ids", "--json"], IMPORT_IDS),
+    },
+    {
+      argv: ["--json", "inventory"],
+      clause: FLAGS_ANYWHERE,
+      exit: 0,
+      stdout: like(["inventory", "--json"], IMPORT_INVENTORY),
+    },
+    {
+      argv: ["--config", "xspec.config.ts", "ids", "--json"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}`,
+      exit: 0,
+      stdout: like(
+        ["ids", "--json", "--config", "xspec.config.ts"],
+        IMPORT_IDS,
+      ),
+    },
+    {
+      argv: ["check", "--config", "xspec.config.ts", "--json"],
+      clause: `${FLAGS_ANYWHERE}; ${ARITY_BY_NAME}; ${IMPORT_CHECK_BUILT}`,
+      exit: 0,
+      stdout: like(
+        ["check", "--json", "--config", "xspec.config.ts"],
+        findingFreeReport,
+      ),
+      prepare: IMPORT_BUILT,
+    },
+    // The JSON-only surface answers in JSON without `--json` (12.0, 11).
+    {
+      argv: ["inventory"],
+      clause: IMPORT_INVENTORY_FORM,
+      exit: 0,
+      stdout: like(["inventory", "--json"], IMPORT_INVENTORY),
+    },
+    // `--` ends flag reading (12.0).
+    {
+      argv: ["ids", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["ids", "--json"], IMPORT_IDS),
+    },
+    {
+      argv: ["build", "--json", "--"],
+      clause: DASH_DASH,
+      exit: 0,
+      stdout: like(["build", "--json"], findingFreeReport),
+    },
+    {
+      argv: ["check", "--json", "--"],
+      clause: `${DASH_DASH}; ${IMPORT_CHECK_BUILT}`,
+      exit: 0,
+      stdout: like(["check", "--json"], findingFreeReport),
+      prepare: IMPORT_BUILT,
+    },
+    {
+      argv: ["--", "build"],
+      clause: `${DASH_DASH}: the command word included`,
+      exit: 0,
+      stdout: like(["build"]),
+    },
+    {
+      argv: ["ids", "--", "--json"],
+      clause: `${DASH_DASH}, so ${TICK}--json${TICK} is no flag but ${TICK}ids${TICK}'s surplus operand (${SURPLUS}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["inventory", "--", "--json"],
+      clause: `${DASH_DASH}, so ${TICK}--json${TICK} is no flag but ${TICK}inventory${TICK}'s surplus operand (${SURPLUS}; 11.6: ${TICK}inventory${TICK} takes no operand); ${INVENTORY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Arity fixed by name: a value-taking flag takes the whole next token.
+    {
+      argv: ["build", "--test-hold", "--json"],
+      clause: `${ARITY_BY_NAME}: ${TICK}--test-hold${TICK} takes ${TICK}--json${TICK} as its value (CERTIFICATIONS.md preamble: "so ${TICK}build --test-hold --json${TICK} consumes ${TICK}--json${TICK} as its value and leaves JSON out of effect"), and is ${TICK}build${TICK}'s unknown flag (${NOT_MUTATING}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "--json", created: false },
+    },
+    {
+      argv: ["build", "--base", "--json"],
+      clause: `${ARITY_BY_NAME}: ${TICK}--base${TICK} (9, 10.7) takes ${TICK}--json${TICK} as its value and is ${TICK}build${TICK}'s unknown flag (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["ids", "--name", "--json"],
+      clause: `${ARITY_BY_NAME}: ${TICK}--name${TICK} (10.7) takes ${TICK}--json${TICK} as its value and is ${TICK}ids${TICK}'s unknown flag (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["nosuch", "--config", "--json"],
+      clause: `${ARITY_BY_NAME}: ${TICK}--config${TICK} takes ${TICK}--json${TICK} as its value, so JSON output is out of effect for the unknown command (${NO_COMMAND}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["nosuch", "--bogus", "--json"],
+      clause: `${NO_VALUE_UNLESS_KNOWN}, so ${TICK}--json${TICK} is read as a flag; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--config", "--json"],
+      clause: `${WHOLE_NEXT_TOKEN}, so ${TICK}--config${TICK} names the path ${TICK}--json${TICK}; ${CONFIG_AS_GIVEN}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "--json",
+      },
+    },
+    // `--test-hold` beside commands that are not mutating (13.5).
+    {
+      argv: ["check", "--test-hold", "h", "--json"],
+      clause: `${UNKNOWN_FLAG}, ${TICK}check${TICK} not mutating (${NOT_MUTATING}); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["ids", "--test-hold", "h", "--json"],
+      clause: `${UNKNOWN_FLAG}, ${TICK}ids${TICK} not mutating (${NOT_MUTATING}); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["inventory", "--test-hold", "h"],
+      clause: `${UNKNOWN_FLAG}, ${TICK}inventory${TICK} not mutating (${NOT_MUTATING}); ${INVENTORY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+      hold: { path: "h", created: false },
+    },
+    {
+      argv: ["--test-hold", "h", "build"],
+      clause: `${ARITY_BY_NAME}: before the command word ${TICK}--test-hold${TICK} takes ${TICK}h${TICK}, and ${TICK}build${TICK} is the command, whose unknown flag it is (${UNKNOWN_FLAG}); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+      hold: { path: "h", created: false },
+    },
+    // Usage errors of the syntax class (12.0), each in the error document
+    // whenever JSON output is in effect — decided before any of the
+    // fixture's scope refusals, which the remaining rows reach no further.
+    {
+      argv: ["--json", "nosuch"],
+      clause: `${NO_COMMAND}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: [],
+      clause: `${NO_COMMAND}: no command word; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["query"],
+      clause: `${SUBCOMMAND_ORDER}, and they "MUST match the command's synopsis exactly" — ${TICK}query${TICK} names a subcommand (11.1); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "nosuch"],
+      clause: `${NO_COMMAND}: an unknown subcommand; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "extra"],
+      clause: `${SURPLUS} (11.1: ${TICK}query edges${TICK} takes no operand); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "node"],
+      clause: `${NO_COMMAND}: a missing operand (11.1: ${TICK}query node <node>${TICK}); ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "reachable", "--from", "specs/A.mdx"],
+      clause: `${MISSING_REQUIRED}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--from", "specs/A.mdx#a#b"],
+      clause: `${MALFORMED_IDENTITY}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["query", "edges", "--kinds", "contains,,embeds"],
+      clause: `${INVALID_KINDS}; ${QUERY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["inventory", "extra"],
+      clause: `${SURPLUS} (11.6: ${TICK}inventory${TICK} takes no operand); ${INVENTORY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "extra", "--json"],
+      clause: `${SURPLUS} — 12.0's own example, ${TICK}xspec ids extra${TICK}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--tree", "extra", "--json"],
+      clause: `${SURPLUS} — ${TICK}--tree${TICK} is ${TICK}ids${TICK}'s own flag (12.3); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "extra", "--json"],
+      clause: `${SURPLUS} (12.1: ${TICK}build${TICK} takes no operand); ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["check", "extra"],
+      clause: `${SURPLUS} (12.2: ${TICK}check${TICK} takes no operand); ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["ids", "--json", "--json"],
+      clause: `${REPEATED}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["inventory", "--json", "--json"],
+      clause: `${REPEATED}; ${INVENTORY_JSON_ONLY}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["build", "--json", "--config"],
+      clause: `${MISSING_VALUE}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["check", "--config=x", "--json"],
+      clause:
+        'SPEC 12.0: "`--name=value` is not a spelling of any flag" — an ' +
+        'unknown flag — and "a `--` token naming no flag of any command ' +
+        'takes no value", so the `--json` after it is read as a flag; ' +
+        PLAIN_DOCUMENT,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["view", "--bogus"],
+      clause: `${UNKNOWN_FLAG}; ${jsonOnly("`view`")}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--config", MALFORMED_CONFIG],
+      clause: `${MALFORMED} — a malformed ${TICK}--config${TICK} path is no configuration error but a plain usage error; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    {
+      argv: ["ids", "--json", "--file", "../A.mdx"],
+      clause: `${FILE_OUTSIDE_ROOT}; ${JSON_IN_EFFECT}; ${PLAIN_DOCUMENT}`,
+      exit: 2,
+      stdout: PLAIN_USAGE_ERROR,
+    },
+    // Configuration located at the path `--config` names (12.0, 14).
+    {
+      argv: ["build", "--json", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+    {
+      argv: ["check", "--json", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${JSON_IN_EFFECT}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+    {
+      argv: ["ids", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${NO_JSON_EMPTY}`,
+      exit: 2,
+      stdout: EMPTY,
+    },
+    {
+      argv: ["inventory", "--config", "./nosuch.ts"],
+      clause: `${CONFIG_AS_GIVEN}; ${INVENTORY_JSON_ONLY}`,
+      exit: 2,
+      stdout: {
+        form: "error-document",
+        code: "configuration-error",
+        path: "./nosuch.ts",
+      },
+    },
+  ],
+};
+
+// --- CONF-AVAIL (CERTIFICATIONS.md §CONF-AVAIL: `view` and `occurrences`) -----
 
 const AVAIL_FILE = "specs/A.mdx";
 const AVAIL_TARGET = "specs/A.mdx#a";
@@ -1308,21 +1645,6 @@ const AVAIL_TABLE: GrammarTable = {
 };
 
 // --- CONF-ORPHAN (CERTIFICATIONS.md §CONF-ORPHAN: `build` and `check`) --------
-
-/**
- * One spec group of one trivial single-section source, as §CONF-ORPHAN's
- * scope admits (its staging constraint: the spec glob matches `.mdx` names
- * alone), Markdown emission absent: a valid workspace `build` regenerates.
- */
-const ORPHAN_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
-`,
-  },
-};
 
 /**
  * The preamble's universality, for the JSON-only surfaces (12.0) — none of
@@ -1633,29 +1955,10 @@ const ORPHAN_TABLE: GrammarTable = {
 // `query nodes`) --------------------------------------------------------------
 
 /**
- * One finding-free spec source as §CONF-VALID's scope admits — sections
- * carrying `id` and `tags` props, `a` tagged `x` and `y` and `b` untagged —
- * so a `--tag` filter selects a proper subset (11.1).
- */
-const VALID_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a" tags="x y">
-Alpha text.
-</S>
-
-<S id="b">
-Beta text.
-</S>
-`,
-  },
-};
-
-/**
- * The same shape failing `build`'s validations with one condition 4 (14.4),
- * as T1.4-1's whitespace arms stage one: the second section's `id` spells a
- * segment containing U+0020 (1.4). `a` keeps its defined identity, and `b c`
- * is a spelled identity (11.2), malformed.
+ * VALID_STAGING's shape failing `build`'s validations with one condition 4
+ * (14.4), as T1.4-1's whitespace arms stage one: the second section's `id`
+ * spells a segment containing U+0020 (1.4). `a` keeps its defined identity,
+ * and `b c` is a spelled identity (11.2), malformed.
  */
 const VALID_FAILING_STAGING: WorkspaceDecl = {
   files: {
@@ -2184,44 +2487,8 @@ const VALID_TABLE: GrammarTable = {
 // --- CONF-MD (CERTIFICATIONS.md §CONF-MD: `build`, `check`, and `query
 // node`, `query nodes`, and `query edges` as its scope serves them) ---------
 
-/** SPEC 1.3's own nested shape: `a` containing `a.b`, finding-free. */
-const MD_SOURCE = `<S id="a">
-Alpha text.
-
-<S id="a.b">
-Beta text.
-</S>
-</S>
-`;
-
 /**
- * One spec group with Markdown emission next to each source (7.3, 13.2) —
- * so a `build` that runs writes `specs/A.md`, and an exit-2 row's unchanged
- * workspace shows that none ran — and MD_SOURCE, a valid workspace as
- * §CONF-MD's scope admits ("every file well-formed MDX (14.20) and
- * valid"). No row runs `check` to exit 0: on a workspace never built, a
- * conforming `check` reports the missing derived files and graph data
- * (12.2, 14.10), which §CONF-MD's scope leaves out ("for T3-1's
- * grammar-boundary arm, `check` exiting 0", after its `build`), so `check`
- * appears in exit-2 rows alone.
- */
-const MD_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/*.mdx"]
-  },
-  markdown: { emit: true }
-})
-`,
-    "specs/A.mdx": MD_SOURCE,
-  },
-};
-
-/**
- * The same source under a configuration lacking the required `specs` key
+ * MD_STAGING's source under a configuration lacking the required `specs` key
  * (SPEC 7: "`specs` is required"), a configuration error (14.14).
  */
 const MD_NO_SPECS_STAGING: WorkspaceDecl = {
@@ -2797,22 +3064,6 @@ const MD_TABLE: GrammarTable = {
 // `ids`, `show`, `query`, `coverage`, the `review` reads, and `impact
 // --base`; `rename`, file-form `move`, and the mutating `review`
 // subcommands, `--test-hold` included) ------------------------------------------
-
-/**
- * One spec group of one single-section source, as §CONF-CORE's scope admits
- * (no imports, embeddings, `d` props, or tags; no `code`, `markdown`,
- * `coverage`, or `policy` keys; no git): a valid workspace every served read
- * answers and every served mutating command performs on.
- */
-const CORE_STAGING: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": SPEC_GROUP_CONFIG,
-    "specs/A.mdx": `<S id="a">
-Alpha text.
-</S>
-`,
-  },
-};
 
 const CORE_FILE = "specs/A.mdx";
 const CORE_TARGET = `${CORE_FILE}#a`;
@@ -3560,6 +3811,7 @@ const CORE_TABLE: GrammarTable = {
 
 const GRAMMAR_TABLES: readonly GrammarTable[] = [
   DISC_TABLE,
+  IMPORT_TABLE,
   AVAIL_TABLE,
   ORPHAN_TABLE,
   VALID_TABLE,

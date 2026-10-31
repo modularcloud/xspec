@@ -6,12 +6,12 @@ Technical choices for building xspec and its test harness. This document adds no
 
 ### Language and runtime
 
-- TypeScript (current 5.x, `strict`), ES modules throughout, compiled with `tsc`.
+- TypeScript (current 5.x, `strict`), compiled with `tsc`. ES modules throughout, except that the `defineConfig` module also has a CommonJS entry (`src/index.cts`, built to `dist/index.cjs`) beside its ES entry (`src/index.mts`, built to `dist/index.mjs`), because SPEC 7.6 requires it to load through `require`, with no option, on every Node.js 22 release.
 - Runs on Node.js, active LTS lines (currently 22/24); no APIs beyond the oldest supported LTS, no platform-specific code paths.
 
 ### Distribution
 
-- One npm package, `xspec`, providing the `xspec` bin and the `defineConfig` export that `xspec.config.ts` imports.
+- One npm package, `@modularcloud/xspec`, providing the `xspec` bin and the `defineConfig` export that `xspec.config.ts` imports.
 - The package is a build-time tool: generated modules and their companions are self-contained (SPEC 13.1) and consumer code never depends on `xspec` at runtime.
 
 ### Key libraries

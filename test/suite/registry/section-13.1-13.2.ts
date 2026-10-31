@@ -60,8 +60,9 @@
 //   absent). The consumer files are matched by no configured group (the §4
 //   preamble arrangement), and the compiled program — the compiler's output
 //   alone, written outside the workspace — runs under plain Node with
-//   NODE_PATH dropped and no package named `xspec` resolvable
-//   (helpers/tooling.ts): "no xspec runtime dependency", observed
+//   NODE_PATH dropped, a fresh HOME, and nothing resolvable by package
+//   name, nothing installed in or above the consumer project
+//   (helpers/tooling.ts, H-1): "no xspec runtime dependency", observed
 //   structurally. Per-contract negative matrices and edge cases remain with
 //   T4-1…T4.6-4.
 // - T13.2-1 asserts placement and exact bytes together ("content per section
@@ -553,8 +554,9 @@ const T13_1_2 = defineProductTest({
         // (d) 4.3–4.5 runtime, under H-2's CommonJS configuration alone: the
         // consumer program, compiled to CommonJS JavaScript written into a
         // fresh directory outside the workspace — the compiler's output
-        // alone — runs there under plain Node (NODE_PATH dropped, no package
-        // named `xspec` resolvable: no xspec runtime dependency), and the
+        // alone — runs there under plain Node (NODE_PATH dropped, a fresh
+        // HOME, nothing resolvable by package name: no xspec runtime
+        // dependency, its defineConfig module included), and the
         // program's whole stdout is byte-compared: `text` returns the
         // subtree texts through both modules (the second via its alias) and
         // the marker line contributes nothing. The ES-module configuration's

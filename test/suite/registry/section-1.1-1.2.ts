@@ -739,7 +739,7 @@ const T1_2_2 = defineProductTest({
       // program, the generated module and its companions included — then
       // run under the CommonJS configuration alone: compiled to CommonJS
       // JavaScript written outside the workspace and run there under plain
-      // Node, no package named `xspec` resolvable (H-2, SPEC 13.1).
+      // Node, nothing resolvable by package name (H-2, H-1, SPEC 13.1).
       await forEachConsumerProject(sources, (project) =>
         assertTypeChecksClean(project, context),
       );

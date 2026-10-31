@@ -1,0 +1,6 @@
+{
+  "name": "s10-prints-after-dep0151-standin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./lib"
+}

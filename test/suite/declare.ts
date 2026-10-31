@@ -1,9 +1,11 @@
 // Thin Vitest wrapper over the product-test registry (C-2 "one code path"):
 // each suite file declares its section's registered entries with
 // `declareProductTests`, and every body runs here against the default
-// binding — the built product (helpers/subprocess.ts, builtProductBinding) —
-// byte-for-byte the same body the certification runner executes against
-// CERTIFICATIONS.md fixture products. No test hard-codes the product path.
+// binding — the built product (helpers/subprocess.ts, builtProductBinding),
+// with the package directory `XSPEC_PACKAGE_DIR` names where it is set, the
+// binding made as the body starts and handed to it unchanged — byte-for-byte
+// the same body the certification runner executes against CERTIFICATIONS.md
+// fixture products. No test hard-codes the product path.
 //
 // Membership guard: an entry declared to Vitest but absent from the manifest
 // (test/suite/registry/index.ts) would run in the suite yet be invisible to

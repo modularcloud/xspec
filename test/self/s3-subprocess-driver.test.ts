@@ -104,6 +104,7 @@ import {
   VoidedTrialsExhaustedError,
 } from "../helpers/kill-discipline.js";
 import type * as MdxDerivabilityModule from "../helpers/mdx-derivability.js";
+import { NodeReleaseError } from "../helpers/node-releases.js";
 import {
   HarnessStagingError,
   stageDirectoryMode,
@@ -113,6 +114,7 @@ import {
   builtProductBindingAt,
   createHoldFile,
   HarnessEvaluationError,
+  PACKAGE_DIR_VARIABLE,
   pathExists,
   productEnvironment,
   ProductRunOutputOverflowError,
@@ -648,8 +650,13 @@ test("the built product's missing artifact fails every run diagnosed — a `Harn
   expect(await fsp.readdir(absentRoot)).toEqual([]);
 });
 
-test("builtProductBinding names the built executable absolutely, independent of the process cwd, its missing artifact marked the missing product; builtProductBindingAt is that shape at another path (C-2 default binding; H-8)", () => {
-  const binding = builtProductBinding();
+test("builtProductBinding names the built executable absolutely, independent of the process cwd, its missing artifact marked the missing product; builtProductBindingAt is that shape at another path, with no package directory (C-2 default binding; H-8)", () => {
+  // An environment naming no package directory, so this pins the shape
+  // alike where the ambient one names one (CI's full-suite job sets
+  // XSPEC_PACKAGE_DIR) and where it does not; the variable's reading is
+  // the next test's.
+  const binding = builtProductBinding({});
+  expect("packageDir" in binding).toBe(false);
   expect(binding.label).toBe("built xspec product");
   expect(binding.command).toBe(process.execPath);
   expect(binding.prefixArgs).toHaveLength(1);
@@ -674,6 +681,66 @@ test("builtProductBinding names the built executable absolutely, independent of 
     requiredFiles: [elsewhere],
   });
   expect(builtProductBindingAt(binJs)).toStrictEqual(binding);
+});
+
+test("builtProductBinding carries, as its packageDir, the package directory XSPEC_PACKAGE_DIR names — exactly as spelled, read from the process environment when the binding is made — and none where the variable is unset or empty; builtProductBindingAt carries none, whatever the environment names (C-2, H-2's module channel; H-8)", () => {
+  onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
+  expect(PACKAGE_DIR_VARIABLE).toBe("XSPEC_PACKAGE_DIR");
+  const bare = builtProductBinding({});
+  expect("packageDir" in bare).toBe(false);
+  // Exactly as spelled: never normalized, and never resolved against the
+  // working directory — whether the path is usable is for the module
+  // channel to check where a test of 7.6 reaches for the module.
+  // (The last two are joined by hand: `path.join` would normalize the `..`
+  // and `.` segments and the trailing separator away.)
+  for (const spelled of [
+    path.join(os.tmpdir(), "xspec-package", "package"),
+    [os.tmpdir(), "a", "..", "b", ".", "package", ""].join(path.sep),
+    ["relative", "package"].join(path.sep),
+  ]) {
+    expect(
+      builtProductBinding({ [PACKAGE_DIR_VARIABLE]: spelled }),
+      spelled,
+    ).toStrictEqual({ ...bare, packageDir: spelled });
+  }
+  // Unset or empty, none; nor does another variable stand in for it, the
+  // module channel's other input included.
+  for (const environment of [
+    {},
+    { [PACKAGE_DIR_VARIABLE]: undefined },
+    { [PACKAGE_DIR_VARIABLE]: "" },
+    { XSPEC_NODE_RELEASES_DIR: path.join(os.tmpdir(), "releases") },
+  ]) {
+    expect(builtProductBinding(environment)).toStrictEqual(bare);
+  }
+
+  // The default environment is the process's, read by the call making the
+  // binding — never when the driver was imported.
+  const ambient = path.join(os.tmpdir(), "xspec-ambient-package", "package");
+  vi.stubEnv(PACKAGE_DIR_VARIABLE, ambient);
+  expect(builtProductBinding()).toStrictEqual({ ...bare, packageDir: ambient });
+  vi.stubEnv(PACKAGE_DIR_VARIABLE, "");
+  expect(builtProductBinding()).toStrictEqual(bare);
+  vi.stubEnv(PACKAGE_DIR_VARIABLE, undefined);
+  expect(builtProductBinding()).toStrictEqual(bare);
+
+  // The no-product shape gives the module channel nothing, whatever the
+  // environment names (H-8: the module channel counts as part of the
+  // product).
+  vi.stubEnv(PACKAGE_DIR_VARIABLE, ambient);
+  const elsewhere = path.join(
+    os.tmpdir(),
+    "xspec-s3-elsewhere",
+    "dist",
+    "cli",
+    "bin.js",
+  );
+  expect("packageDir" in builtProductBindingAt(elsewhere)).toBe(false);
+  expect("packageDir" in builtProductBindingAt(bare.prefixArgs![0]!)).toBe(
+    false,
+  );
 });
 
 test("background start with hold-file choreography: await creation, hold, release, completion (13.5 seam support)", async () => {
@@ -982,7 +1049,7 @@ test("waitForFile surfaces a capture-limit kill as the driver's ProductRunOutput
   expect(settled).toBe(error);
 });
 
-test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, an exhausted voidable trial, and a harness step's tripped guard — unchanged, and returns for every other rejection a helper converts (H-11; TEST-SPEC S-3)", () => {
+test("rethrowHarnessError rethrows exactly the harness errors — the capture-limit error, a failed in-run evaluation, a group kill that could not confirm its group gone, an exhausted voidable trial, a harness step's tripped guard, and a Node.js release E-1 lists left unprovisioned — unchanged, and returns for every other rejection a helper converts (H-11; TEST-SPEC S-3, E-1)", () => {
   for (const harnessError of [
     new ProductRunOutputOverflowError("capture limit"),
     new ProcessGroupLingerError("stand-in", 4242, "listed", 30_000, [], [4243]),
@@ -997,6 +1064,15 @@ test("rethrowHarnessError rethrows exactly the harness errors — the capture-li
       "stand-in move",
       "prepare",
       new RangeError("parser limit"),
+    ),
+    new NodeReleaseError(
+      "release",
+      "the Node.js release 22.12.0 is not provisioned under a stand-in",
+      ["22.12.0"],
+    ),
+    new NodeReleaseError(
+      "directory",
+      "XSPEC_NODE_RELEASES_DIR is unset in a stand-in",
     ),
   ]) {
     let rethrown: unknown = null;

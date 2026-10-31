@@ -10,7 +10,10 @@
 // executed certification. A fixture or ID-set change in the document that the
 // harness does not mirror fails loudly here instead of letting certification
 // pass while silently covering less — the document-level analogue of the
-// registry's unknown-ID hard errors (C-1 vacuity guard).
+// registry's unknown-ID hard errors (C-1 vacuity guard). The manifest's
+// bindings follow the document's preamble too: each fixture bound with its
+// executable and no package directory (C-2), no scope including the
+// `defineConfig` module.
 //
 // The parser is deliberately strict: fixture-shaped lines in unexpected
 // positions, malformed headings or ID tokens, and duplicate or dangling
@@ -31,8 +34,8 @@ const CERTIFICATIONS_PATH = fileURLToPath(
 // equality below carries the detail; these pins force a deliberate visit to
 // this gate when the document's fixture set changes, and guard against a
 // parser regression losing entries wholesale.
-const EXPECTED_CONFORMERS = 9;
-const EXPECTED_VIOLATORS = 30;
+const EXPECTED_CONFORMERS = 10;
+const EXPECTED_VIOLATORS = 32;
 
 /** A violator entry as parsed from CERTIFICATIONS.md. */
 interface DocumentViolator {
@@ -265,7 +268,7 @@ function parseDocument(): readonly DocumentConformer[] {
   );
 }
 
-test("CERTIFICATIONS.md defines exactly 9 conformers and 30 violators (C-1 whole-document gate)", () => {
+test("CERTIFICATIONS.md defines exactly 10 conformers and 32 violators (C-1 whole-document gate)", () => {
   const document = parseDocument();
   expect(
     {
@@ -350,5 +353,38 @@ test("every manifest fixture executable exists (C-2 binding, invocable in CI wit
     missing,
     "every CERTIFICATIONS.md fixture executable must exist for certification " +
       "to run it",
+  ).toEqual([]);
+});
+
+test("every manifest fixture is bound with its executable and no package directory, as CERTIFICATIONS.md's preamble binds each fixture (C-2; no scope includes the defineConfig module)", () => {
+  expect(
+    fs.readFileSync(CERTIFICATIONS_PATH, "utf8"),
+    "CERTIFICATIONS.md's preamble binds each fixture with its executable and " +
+      "no package directory; a document binding one otherwise needs the " +
+      "manifest's bindings (certification-fixtures.ts) revisited",
+  ).toContain(
+    "so each fixture is bound with its executable and no package directory",
+  );
+  const carrying: string[] = [];
+  let checked = 0;
+  for (const entry of CERTIFICATION_FIXTURES) {
+    const bindings = [
+      entry.binding(),
+      ...entry.violators.map((viol) => viol.binding()),
+    ];
+    for (const binding of bindings) {
+      checked += 1;
+      if ("packageDir" in binding) {
+        carrying.push(`${binding.label}: ${String(binding.packageDir)}`);
+      }
+    }
+  }
+  // Every conformer's and violator's binding was looked at: the pinned
+  // counts above, so the check is never vacuous.
+  expect(checked).toBe(EXPECTED_CONFORMERS + EXPECTED_VIOLATORS);
+  expect(
+    carrying,
+    "a CERTIFICATIONS.md fixture's binding carries no package directory " +
+      "(C-2; CERTIFICATIONS.md's preamble)",
   ).toEqual([]);
 });

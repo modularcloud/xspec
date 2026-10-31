@@ -9,19 +9,22 @@
 // release-pin arms, language-level arms, and whitespace arm; T4-2's
 // relative-name and undeclared module declarations and its other
 // module-linking forms (their diagnostics are post-parse); T7-2's
-// modifier-bearing configuration imports (the declarative form of 7 decides
-// them); plain configuration files; a `.tsx` file holding JSX; and the
-// fixed vector set of the forms the §16 generators compose — every
+// modifier-bearing configuration imports, string-literal import names (the
+// escape-spelled twin's too), and export and import assignments (the
+// declarative form of 7 decides them); plain configuration files; a `.tsx`
+// file holding JSX; and the fixed vector set of the forms the §16
+// generators compose — every
 // property's configuration file, P-7's capture sources, P-13's `c0/U.ts`
 // and `c1/V.ts`, P-14's code sources, and the fuzz base code source (each
 // draw's own are judged
 // per draw by the property runner, helpers/property.ts `drawSources`).
 // Every one it declares unparseable is rejected both ways: `010`, `09`,
-// U+1C89 in an identifier, the T7-2 syntax error, and T14-12's staged code
-// arms. And the top-level `await` forms 14.20 names, accepted read one way
-// only, are a harness error whatever the declaration. Every non-ASCII or
-// control character this file's own vectors hold is built from its code
-// point.
+// U+1C89 in an identifier, the T7-2 syntax error, T7-9(b)'s four
+// scanner-rejected specifier escapes (each that release's scanning error,
+// located at its escape), and T14-12's staged code arms. And the top-level
+// `await` forms 14.20 names, accepted read one way only, are a harness error
+// whatever the declaration. Every non-ASCII or control character and every
+// backslash this file's own vectors hold is built from its code point.
 
 import { Buffer } from "node:buffer";
 import { describe, expect, test } from "vitest";
@@ -45,6 +48,9 @@ import { P13_TS_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
 import { P14_TS_FORM_VECTORS } from "../suite/registry/section-16-p14.js";
 import { P15_TS_FORM_VECTORS } from "../suite/registry/section-16-p15.js";
 import { P16_TS_FORM_VECTORS } from "../suite/registry/section-16-p16.js";
+import { P17_TS_FORM_VECTORS } from "../suite/registry/section-16-p17.js";
+import { P18_TS_FORM_VECTORS } from "../suite/registry/section-16-p18.js";
+import { P19_TS_FORM_VECTORS } from "../suite/registry/section-16-p19.js";
 import { P2_P3_TS_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import { P4_TS_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
 import { P5_P6_TS_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
@@ -64,18 +70,27 @@ const NEL = cp(0x0085);
 const BOM = cp(0xfeff);
 const CR = cp(0x000d);
 const LF = cp(0x000a);
+/** U+005C, so that no vector's escape is spelled in this file's source. */
+const BACKSLASH = cp(0x5c);
 
 /** Lines joined by U+000A, the last one terminated. */
 const lines = (...parts: readonly string[]): string => parts.join(LF) + LF;
 
 const CODE_IMPORT = 'import A from "../specs/A.xspec"';
 
-/** A configuration over one spec group, its import line and callee given. */
-const configWith = (importLine: string, callee = "defineConfig"): string =>
+/**
+ * A configuration over one spec group, its import line, callee, and export
+ * form given (`export default`, or T7-2's export assignment `export =`).
+ */
+const configWith = (
+  importLine: string,
+  callee = "defineConfig",
+  exportForm = "export default",
+): string =>
   lines(
     importLine,
     "",
-    `export default ${callee}({`,
+    `${exportForm} ${callee}({`,
     "  specs: {",
     '    main: ["specs/**/*.mdx"]',
     "  }",
@@ -287,8 +302,12 @@ const WELL_FORMED: readonly Vector[] = [
       "}",
     ),
   ],
-  // T7-2's modifier-bearing configuration imports: the declarative form of
-  // 7 refuses each (14.14), never a parse failure.
+  // T7-2's modifier-bearing configuration imports, string-literal import
+  // names, and export and import assignments, each named by S-9: the
+  // declarative form of 7 decides each, never a parse failure — refusing
+  // the modifier-bearing imports, the escape-spelled import name (read
+  // verbatim, 2.4, it spells no `defineConfig`), and both assignments
+  // (14.14), and loading `"defineConfig"` as that import, aliased.
   [
     'T7-2: `import type { defineConfig } from "xspec"`',
     "xspec.config.ts",
@@ -308,6 +327,33 @@ const WELL_FORMED: readonly Vector[] = [
     'T7-2: `import { defineConfig } from "xspec" with { type: "json" }`',
     "xspec.config.ts",
     configWith('import { defineConfig } from "xspec" with { type: "json" }'),
+  ],
+  [
+    'T7-2: a string-literal import name, `import { "defineConfig" as d } from "xspec"` with `export default d({…})`',
+    "xspec.config.ts",
+    configWith('import { "defineConfig" as d } from "xspec"', "d"),
+  ],
+  [
+    "T7-2: its escape-spelled twin, the import name `defineConfig` with its `C` written as a hexadecimal escape, with `export default d({…})`",
+    "xspec.config.ts",
+    configWith(
+      `import { "define${BACKSLASH}x43onfig" as d } from "xspec"`,
+      "d",
+    ),
+  ],
+  [
+    'T7-2: an export assignment, `export = defineConfig({…})` beside `import { defineConfig } from "xspec"`',
+    "xspec.config.ts",
+    configWith(
+      'import { defineConfig } from "xspec"',
+      "defineConfig",
+      "export =",
+    ),
+  ],
+  [
+    'T7-2: an import assignment, `import defineConfig = require("xspec")` beside `export default defineConfig({…})`',
+    "xspec.config.ts",
+    configWith('import defineConfig = require("xspec")'),
   ],
   // Plain configuration files.
   [
@@ -361,6 +407,43 @@ const WELL_FORMED: readonly Vector[] = [
   ["top-level `await x;`, accepted both ways", "src/app.ts", lines("await x;")],
 ];
 
+/**
+ * T7-9(b)'s scanner-rejected specifiers, each the double-quoted literal as
+ * TEST-SPEC spells it, its one backslash built from U+005C: with the
+ * scanning error TypeScript 5.9.3 reports for it under both readings — its
+ * code, and its start counted in code units from the backslash.
+ */
+const T7_9_B_SPECIFIERS: readonly (readonly [
+  name: string,
+  literal: string,
+  code: number,
+  fromBackslash: number,
+])[] = [
+  // "Hexadecimal digit expected.", where the escape's second digit is due.
+  [
+    "a hexadecimal escape with one hex digit (backslash, `x`, `4`)",
+    `"${BACKSLASH}x4"`,
+    1125,
+    3,
+  ],
+  // "An extended Unicode escape value must be between 0x0 and 0x10FFFF
+  // inclusive.", at the value's first digit.
+  [
+    "a braced Unicode escape of the code point 110000 hexadecimal (backslash, `u`, `{110000}`)",
+    `"${BACKSLASH}u{110000}"`,
+    1198,
+    3,
+  ],
+  // "Octal escape sequences are not allowed. …", at the backslash.
+  ["an octal escape (backslash, `0`, `1`)", `"${BACKSLASH}01"`, 1487, 0],
+  // "Escape sequence … is not allowed.", at the backslash.
+  ["a backslash before `8`", `"${BACKSLASH}8"`, 1488, 0],
+];
+
+/** A configuration importing `defineConfig` from `literal`, spelled as given. */
+const configImportingFrom = (literal: string): string =>
+  configWith(`import { defineConfig } from ${literal}`);
+
 const UNPARSEABLE: readonly Vector[] = [
   [
     "`010` in a `.ts` file — a legacy octal literal (T14-12)",
@@ -393,6 +476,13 @@ const UNPARSEABLE: readonly Vector[] = [
       '    main: ["specs/**/*.mdx"]',
     ),
   ],
+  // T7-9(b)'s specifier escapes, each a scanning error of the release under
+  // both readings (S-9), leaving the file not well-formed (14.20).
+  ...T7_9_B_SPECIFIERS.map(([name, literal]): Vector => [
+    `T7-9(b): a configuration whose specifier holds ${name}`,
+    "xspec.config.ts",
+    configImportingFrom(literal),
+  ]),
   // The grammar the name selects.
   [
     "JSX in a `.ts` file — the name selects plain TypeScript",
@@ -532,6 +622,36 @@ describe("S-9 (TypeScript): every declared-unparseable code source and configura
       });
     }
   });
+
+  test.each(T7_9_B_SPECIFIERS)(
+    "T7-9(b): a specifier holding %s draws one scanning error of the release, at its escape, in both readings",
+    (name, literal, code, fromBackslash) => {
+      // The vector holds the escape as spelled: one backslash, the
+      // literal's second code unit, and none elsewhere in the file.
+      expect(literal.split(BACKSLASH).length - 1).toBe(1);
+      expect(literal.indexOf(BACKSLASH)).toBe(1);
+      const source = configImportingFrom(literal);
+      expect(source.split(BACKSLASH).length - 1).toBe(1);
+      // The error lies inside the literal, its quotes included.
+      const start = source.indexOf(literal);
+      const at = source.indexOf(BACKSLASH) + fromBackslash;
+      expect(at).toBeGreaterThan(start);
+      expect(at).toBeLessThan(start + literal.length);
+      // An ASCII prefix, so the release's UTF-16 position is the byte offset.
+      const verdict = expectUnparseable(judged(source, "xspec.config.ts"));
+      for (const reading of TS_READINGS) {
+        expect(verdict.errors[reading], `${name}, read as ${reading}`).toEqual([
+          expect.objectContaining({
+            code,
+            index: at,
+            offset: at,
+            line: 1,
+            column: at + 1,
+          }),
+        ]);
+      }
+    },
+  );
 });
 
 describe("S-9 (TypeScript): T14-12's staged code arms are rejected both ways", () => {
@@ -596,9 +716,18 @@ describe("S-9 (TypeScript): every code source and configuration T14-12's positiv
 // included, is judged before any product exists; the §16 preamble: every
 // generated workspace is valid by construction, no draw declared
 // unparseable). The fixed vector set: every registered property's
-// configuration file (the coverage check below reads the registry) — P-7's
-// and P-13's composed per draw, the rest fixed records also judged
-// by test/self/s9-staged-sources.test.ts — P-7's capture sources, P-13's
+// configuration file (the coverage check below reads the registry) — P-7's,
+// P-13's, P-17's, P-18's, and P-19's composed per draw (P-17's three files
+// beside a name holding every character N may hold, as plain TypeScript and
+// as TSX, through the composition its draws are staged with; P-18's vector
+// draw — comments of both kinds in every gap, names of each class, keys of
+// both spellings — and its mutant, as plain TypeScript and as TSX, through
+// the composition and read-back its draws are staged with; P-19's twin a fixed
+// record, and its drawn specifiers' families — every shape text raw, every
+// escape of their characters, every inserted piece, in each quote style —
+// through the shared builder its draws are staged with), the rest fixed
+// records also judged by test/self/s9-staged-sources.test.ts — P-7's
+// capture sources, P-13's
 // `c0/U.ts` and `c1/V.ts`, P-14's code sources (top-level markers,
 // function units, `src/lib/` specifiers), P-16's code sources (imports of
 // every spec module with their `text` exports aliased, top-level markers and
@@ -628,6 +757,9 @@ const GENERATED_TS_FORM_VECTORS: Readonly<
   "P-14": P14_TS_FORM_VECTORS,
   "P-15": P15_TS_FORM_VECTORS,
   "P-16": P16_TS_FORM_VECTORS,
+  "P-17": P17_TS_FORM_VECTORS,
+  "P-18": P18_TS_FORM_VECTORS,
+  "P-19": P19_TS_FORM_VECTORS,
 };
 
 const GENERATED_TS_VECTORS = Object.entries(GENERATED_TS_FORM_VECTORS).flatMap(
@@ -651,7 +783,7 @@ describe("S-9 (TypeScript): every configuration file and code source the §16 ge
     for (const vectors of Object.values(GENERATED_TS_FORM_VECTORS)) {
       expect(vectors.some(([, path]) => path === "xspec.config.ts")).toBe(true);
     }
-    expect(GENERATED_TS_VECTORS.length).toBe(31);
+    expect(GENERATED_TS_VECTORS.length).toBe(48);
     expect(new Set(GENERATED_TS_VECTORS.map(([name]) => name)).size).toBe(
       GENERATED_TS_VECTORS.length,
     );

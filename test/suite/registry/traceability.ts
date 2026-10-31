@@ -530,13 +530,16 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.7-1": ["6.7", "14"],
   // T7-1: its name-casing probe the byte-wise, case-sensitive comparison of
   // the configuration entry's name (12.0: paths compare byte-wise and
-  // case-sensitively, no case folding).
-  "T7-1": ["7", "14", "12.6", "12.0"],
-  // T7-2: its `"XSPEC"` specifier arm the configuration import's module
-  // specifier compared without case folding (12.0: no case folding
-  // anywhere).
-  "T7-2": ["7", "2.4", "7.4", "11.6", "12.0", "14"],
-  "T7-3": ["7", "7.1", "7.2", "14"],
+  // case-sensitively, no case folding); its configuration-name arms
+  // `inventory`'s resolved `configuration` view under each name compared
+  // byte-identical to its twin's (11.6), as T7-2's twins are.
+  "T7-1": ["7", "11.6", "12.0", "12.6", "14"],
+  "T7-2": ["7", "2.4", "7.4", "11.6", "14"],
+  // T7-3: its empty-glob-list arms `inventory`'s resolved view — the empty
+  // group in its kind's list with `globs` exactly `[]`, as configured (11.6,
+  // 12.7's view form) — and its `sources`, each discovered file with its
+  // group memberships, none in the empty group (11.6).
+  "T7-3": ["7", "7.1", "7.2", "11.6", "12.7", "14"],
   "T7-4": ["7", "2.4", "11.6", "14"],
   "T7-5": ["7"],
   // T7-6: its single-casing arms the byte-wise, case-sensitive name tests
@@ -552,6 +555,102 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // refusal its discovery must not meet — 14.25's absence at the read
   // scope's boundary, rule (c); its twin compares and outcomes are 7's.
   "T7-8": ["7", "14"],
+  // T7-9: (a)'s twin compares are 7's reading of the specifier as a static
+  // string literal spelled as written (2.4), its single-casing arm read
+  // byte-wise with no case folding (12.0); (b)'s scanner-rejected escapes,
+  // the file not well-formed (14.20), each answered with the 12.7 error
+  // document carrying 14.14's stable code; (c)'s twin compares are 7's —
+  // the specifier never resolved, read, or loaded, whatever it designates
+  // — its sealed directory staging a refused read (14.25) the product must
+  // not meet, that condition's absence, rule (c); (d)'s installs are 7's
+  // (no command's outcome depends, through the import, on the module or on
+  // whether a project installed it) and 7.6's (no name is privileged: the
+  // trap and the FIFO manifest staged under `trap`, `xspec`, and the name
+  // the package's manifest gives, read as T7.6-4(a) reads it), its
+  // representative commands' outcomes T7-8's.
+  "T7-9": ["7", "2.4", "7.6", "12.0", "12.7", "14"],
+  // T7-10: (a)'s clean outcomes and (b)'s findings are 7's (the rules of 4
+  // and 14.15 reach the configuration only where a configured group — here
+  // a code group, 7.2 — discovers it, the configuration staying valid),
+  // 4's (a spec module import's binding and target, and a relative
+  // specifier designating a derived-file path: a `.xspec.` name or a path
+  // under `.xspec/`, 13.4, or the Markdown emit destination emission
+  // enables, 7.3), and 4.5's (the call, a value-level use it does not
+  // sanction, 14.18); each finding located byte-exactly (1.7) — by the
+  // import range of 11.4, or at the call — `path` null (12.7); `inventory`
+  // listing the configuration among its sources in that code group
+  // (11.6); the control's whole-file location answering `query edges
+  // --from` (11.1). (c)'s consequences of a discovered configuration's
+  // findings: the failing `build` modifying nothing (12.1); the gated reads
+  // reporting exactly its findings, exit 1, modifying nothing (13.3); the
+  // file move refused over the configuration's designation of the
+  // destination's would-be emit path (6.5's `refused-invalid-destination`)
+  // and, in the converse, refused as an invalid workspace (6.4's
+  // precondition, which 6.5 shares) while undiscovered its preview lists
+  // no edit in the configuration (6.6) and the move leaves it unrewritten
+  // (6.5); and a baseline whose discovered configuration fails validation
+  // failing `impact --base` and `review create --base` as the code-less
+  // usage error (6.3, 12.0), `review create` writing no session (10.7).
+  // (d)'s baselines: a baseline's configuration read as the current one's
+  // (7, 6.3) — `impact --base` over an undiscovered configuration
+  // importing from any specifier resolving, its impact information (9.3:
+  // categories with attributions, collapsed chains, deleted and added
+  // identities, impacted locations with witness edges and paths) the
+  // `"xspec"` twin's, the edited section `changed` (5.6); `review create
+  // --base` and `review status`, which reconstructs the recorded baseline,
+  // answering the twin's items (10.7); and a baseline whose configuration
+  // spells a scanner-rejected escape failing as the code-less usage error
+  // (6.3, 12.0). (e)'s configuration a spec group discovers, read as a spec
+  // source: 7.1's extension rule (14.19 concerning `xspec.config.ts`), 2.1's
+  // import rules (its named binding, its specifier designating no spec
+  // source: 14.15 at the import range) and 2.7's (its export statement:
+  // 14.16, the statement whole), each located byte-exactly (1.7), `path`
+  // null (12.7); `inventory`'s `derived` entry (13.1: a spec-group file
+  // without `.mdx` generating and emitting nothing, `module` and `markdown`
+  // null; `xspec.config.mdx` generating `xspec.config.xspec.ts`), the
+  // configuration named by `--config` on every invocation (12.0).
+  "T7-10": [
+    "7",
+    "1.7",
+    "2.1",
+    "2.7",
+    "4",
+    "4.5",
+    "5.6",
+    "6.3",
+    "6.4",
+    "6.5",
+    "6.6",
+    "7.1",
+    "7.2",
+    "7.3",
+    "9.3",
+    "10.7",
+    "11.1",
+    "11.4",
+    "11.6",
+    "12.0",
+    "12.1",
+    "12.7",
+    "13.1",
+    "13.3",
+    "13.4",
+    "14",
+  ],
+  // T7-11: the members of TypeScript's global `Object` interface and
+  // `__proto__` as configured names (7: a name is barred only when empty or
+  // containing U+FFFD) — (a)'s groups, each loading and reported by
+  // `inventory` under its name with its glob and its source (11.6, 12.7's
+  // view forms); (b)'s profile and rule named `toString`, reported with
+  // their complete definitions (11.6, 12.7: every default and inferred kind
+  // explicit), the profile run by `coverage <name>` (8.2), the rule's
+  // violation reported by `check` under its name (7.5, 14.12, its `path`
+  // null, 12.7); (c)'s profile target and boundary and rule selector group
+  // naming them, resolving where such a group is configured (7.4, 7.5) and
+  // otherwise an unknown group (14.14, its error document's code and path,
+  // 12.7); (d)'s unknown profile names at `coverage <name>`, the plain
+  // usage error (12.0, its error document's code and path null, 12.7).
+  "T7-11": ["7", "7.4", "7.5", "8.2", "11.6", "12.0", "12.7", "14"],
   // T7.1-1: its wrong-case extension arm the byte-wise, case-sensitive
   // extension test (12.0: no case folding), and `inventory`'s `derived`
   // entry for the file without `.mdx` (11.6), `module` and `markdown` null
@@ -574,6 +673,51 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T7.5-4": ["7.5", "7", "14"],
   "T7.5-5": ["7.5", "14"],
   "T7.5-6": ["7.5", "12.1", "14"],
+  // T7.6-1: 7.6's type contract for the module's declared exports, in
+  // every covered setup, read from TypeScript's listing for T7.6-2(d)'s
+  // file, a configuration staged valid under 7 (a premise of the staging,
+  // asserted of no product), so it carries 7.6 alone.
+  "T7.6-1": ["7.6"],
+  // T7.6-2: 7.6's type contract for valid configurations, in every
+  // covered setup; the files are 7's declarative form, staged valid
+  // under 7, 7.3, 7.4, and 7.5 (a premise of the staging, asserted of no
+  // product), so it carries 7.6 alone.
+  "T7.6-2": ["7.6"],
+  // T7.6-3: 7.6's type contract for shape violations, in every covered
+  // setup, each arm paired with T7.6-2(a)'s file type-checking; the arms
+  // are (a) with violations of 7.6's type-error class applied (breaches of
+  // 7's, 7.4's, and 7.5's rules, a premise of the staging, asserted of no
+  // product), so it carries 7.6 alone.
+  "T7.6-3": ["7.6"],
+  // T7.6-4: 7.6's installation rules and Reach — copy, symbolic-link, and
+  // aliased installs alike, N across 7.6's grammar, the holding directory
+  // read along the physical path, other packages installed — through runs
+  // of T7.6-1, T7.6-2(a) with T7.6-3's unknown-top-level-key arm, and
+  // T7.6-6's exports and identity under each placement; its files are 7's
+  // declarative form staged valid under 7 (a premise of the staging,
+  // asserted of no product), so it carries 7.6 alone.
+  "T7.6-4": ["7.6"],
+  // T7.6-5: 7.6's Reach — the cases its four conditions leave open: an
+  // ancestor manifest giving an unrelated name, ancestor manifests whose
+  // types differ from the nearest one's, and a nearest manifest typed
+  // "commonjs" — and its Covered setups' reading of a project's kind,
+  // through runs of T7.6-1, T7.6-2(a) with T7.6-3's unknown-top-level-key
+  // arm, and T7.6-6's exports and identity beside the canonical placement;
+  // its files are 7's declarative form staged valid under 7 (a premise of
+  // the staging, asserted of no product), so it carries 7.6 alone.
+  "T7.6-5": ["7.6"],
+  // T7.6-6: 7.6's runtime contract (Runtime, through Reach's routes) for
+  // the module's exports and defineConfig's return, on every release E-1
+  // provisions along each of Node.js's routes; it stages no configuration
+  // and asserts no other passage, so it carries 7.6 alone.
+  "T7.6-6": ["7.6"],
+  // T7.6-7: 7.6's runtime contract's effect clause (Runtime), in runs of
+  // T7.6-6's shape on every release E-1 provisions along each of Node.js's
+  // routes: the runs' output, writes, process state, and FIFOs, each
+  // absence paired with defineConfig returning its argument, its network
+  // clause the environment's (E-1); it stages no configuration and asserts
+  // no other passage, so it carries 7.6 alone.
+  "T7.6-7": ["7.6"],
   "T8-1": ["8"],
   "T8-2": ["8"],
   "T8-3": ["8"],
@@ -1331,4 +1475,25 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // node compared as a canonical identity and presented under its current
   // identity and presence (10.4).
   "P-16": ["5.6", "6.3", "9.2", "10.4", "10.5"],
+  // P-17: 7.6's installation rules and Reach over drawn names, placement
+  // forms, holding directories, covered setups, releases, and routes,
+  // through runs of T7.6-1, T7.6-2(a) with T7.6-3's unknown-top-level-key
+  // arm, and T7.6-6's exports and identity; its files are 7's declarative
+  // form staged valid under 7 (a premise of the staging, asserted of no
+  // product), so it carries 7.6 alone.
+  "P-17": ["7.6"],
+  // P-18: 7.6's type contract over drawn configurations — valid ones
+  // type-checking in a drawn covered setup, each paired with a mutant
+  // holding one drawn violation of 7.6's type-error class failing to
+  // type-check there; its draws are 7's declarative form staged valid under
+  // 7, 7.3, 7.4, and 7.5, and its mutants breaches of those rules (premises
+  // of the staging, asserted of no product), so it carries 7.6 alone.
+  "P-18": ["7.6"],
+  // P-19 asserts 7's reading of the configuration's import: its specifier
+  // any static string literal (2.4), read as spelled and never interpreted,
+  // resolved, or loaded, so that every answer and every generated file is
+  // its twin's. Its commands' clean outcomes (12.1, 12.2, 12.3, 11.6) are
+  // the twin's staging premises, home coverage at T12.1-*, T12.2-*, T12.3-*,
+  // and T11.6-*.
+  "P-19": ["2.4", "7"],
 };

@@ -7,7 +7,8 @@
 // ordering; and the runner's per-test-ID attribution, its H-8 outcome
 // taxonomy (diagnosed assertion failure vs harness error vs hang — a hang
 // being a product invocation's own hang guard tripped, TEST-SPEC S-3), its
-// completion guarantees with no guard of its own, and its per-fixture report
+// completion guarantees with no guard of its own, its handing each body the
+// binding it was given, unchanged (C-2), and its per-fixture report
 // rendering.
 //
 // Ground truth comes from known-behavior stand-in products written into a
@@ -481,6 +482,35 @@ test("renderFixtureReport is per-fixture, per-test-ID legible, one line per test
   // Multi-line diagnoses (here: the TypeError's stack) stay one rendered
   // line; the full text lives in the structured results.
   expect(report.results[1]!.diagnosis).toContain("\n");
+});
+
+test("the runner hands each body the very binding it was given — the same object, its package directory included, never rebuilt field by field (C-2: the executable and the package directory reach a body by one code path)", async () => {
+  // Nothing reads the binding's fields here: the bodies invoke nothing, so
+  // neither the command nor the package directory needs to exist.
+  const binding: ProductBinding = {
+    label: "binding-identity probe",
+    command: process.execPath,
+    packageDir: "/xspec-runner-binding-probe/package",
+  };
+  const received: ProductBinding[] = [];
+  const recorder = (id: string): ProductTestEntry =>
+    defineProductTest({
+      id,
+      title: "records the binding its body receives",
+      run: async (product) => {
+        received.push(product);
+      },
+    });
+  const report = await runProductTests(
+    binding,
+    [recorder("T99-10"), recorder("T99-11")],
+    { concurrency: 2 },
+  );
+  expect(report.counts).toEqual({ pass: 2, fail: 0, error: 0, hang: 0 });
+  expect(received).toHaveLength(2);
+  for (const product of received) {
+    expect(product).toBe(binding);
+  }
 });
 
 test("the product-test manifest loads as a well-formed registry (import-time canary for the assembled suite)", () => {

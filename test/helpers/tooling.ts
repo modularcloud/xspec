@@ -31,11 +31,12 @@
 //   `diffModuleSkeletons` compares two such skeletons (T1.1-2: the two tag
 //   names' generated modules expose the same skeleton).
 // - Compiled consumers run under plain Node (`runConsumer`) through the
-//   blackbox subprocess driver: `node <entry>` with the sanitized environment
-//   and `NODE_PATH` dropped, from a directory with no package named `xspec`
-//   within its reach (the isolation below), so nothing outside the
-//   program's compiled output can satisfy an import — SPEC.md 13.1's "no
-//   xspec runtime dependency", observed structurally.
+//   blackbox subprocess driver: `node <entry>` with the sanitized
+//   environment, `NODE_PATH` dropped and a fresh, empty `HOME` of the run's
+//   own, from a directory with nothing installed in or above it and nothing
+//   in Node.js's global module folders (the isolation below), so nothing
+//   outside the program's compiled output can satisfy an import — SPEC.md
+//   13.1's "no xspec runtime dependency", observed structurally.
 // - Failure paths are loud (H-8): a missing project root or root file, an
 //   unknown or ambiguous marker, and an unreadable definition target all
 //   throw diagnosed errors instead of yielding empty results a test could
@@ -90,17 +91,31 @@
 // output keeps the extensionless specifier, which Node.js's
 // ECMAScript-module loader never resolves: it is type-checked and served,
 // never executed.
-// - Isolation (H-2: no package named `xspec` installed or resolvable; `types`
-//   at its default): before a project is served, and before its runtime
-//   output is written, the harness verifies that no ancestor directory of the
-//   project root, or of the output directory — along its path as spelled and
-//   along its physical path — holds an entry named `node_modules`, and before
-//   each run that none of the global folders Node.js's resolver searches
-//   holds an entry named `xspec`; an isolation unmet or unverified is
-//   `HarnessStagingError` (mode `consumer-isolation`,
-//   helpers/permissions.ts), a harness error, never a verdict. A hand-written
-//   fixture project living in this repository is therefore compiled from a
-//   copy under the OS temporary directory, as a consumer workspace is.
+// - Isolation (TEST-SPEC H-1, H-2, T13.1-2: a consumer project with nothing
+//   installed in or above it, nothing resolvable from the consumer's
+//   location by package name — no copy of the product's package under any
+//   name least of all — and `types` at its default): H-1's verification of
+//   what TypeScript and Node.js read above a staging
+//   (`verifyStagingIsolation`, helpers/staging-isolation.ts, which the
+//   module channel's stagings share) is made before a project is served —
+//   TypeScript's current directory its root — that no ancestor directory of
+//   the root, along its path as spelled and along its physical path, holds
+//   an entry named `package.json` or `node_modules`, and the root itself
+//   none named `node_modules`; before its runtime output is written, the
+//   same of the output directory; and before each run, again of the output
+//   directory and, under exactly the environment the run gets — the
+//   sanitized environment with `NODE_PATH` dropped and a fresh, empty `HOME`
+//   (`USERPROFILE` too on Windows), a directory created for the run under
+//   the OS temporary directory, outside the workspace and the output
+//   directory, and removed once it ends — that none of Node.js's global
+//   module folders (the run's `NODE_PATH` entries, `.node_modules` and
+//   `.node_libraries` under its `HOME`, `lib/node` under the prefix of the
+//   Node.js running it) holds an entry of any name. An isolation unmet or
+//   unverified is `HarnessStagingError` (mode `consumer-isolation`,
+//   helpers/permissions.ts), a harness error, never a verdict. A
+//   hand-written fixture project living in this repository is therefore
+//   compiled from a copy under the OS temporary directory, as a consumer
+//   workspace is.
 // - No other configuration is reachable: `ConsumerProject.load` takes one of
 //   the two exactly and no compiler option of its own, refusing anything
 //   else (a plain `Error`: a harness misuse, never a verdict). So no
@@ -115,13 +130,13 @@
 // test/vitest.config.ts) — never the product's `typescript` dependency.
 
 import * as fs from "node:fs";
-import type { Stats } from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import ts from "typescript-5.9.3";
 import { fail, HarnessAssertionError } from "./assertions.js";
-import { HarnessStagingError } from "./permissions.js";
+import { verifyStagingIsolation } from "./staging-isolation.js";
+import type { StagedNodeRun } from "./staging-isolation.js";
 import { guardStep, guardSyncStep } from "./step-guards.js";
 import type { ProductBinding, RunResult } from "./subprocess.js";
 import { productEnvironment, runProduct } from "./subprocess.js";
@@ -393,7 +408,14 @@ export interface RuntimeEmit {
 export interface CompiledRunOptions {
   /** process.argv arguments after the entry path. */
   readonly argv?: readonly string[];
-  /** Merged last over the sanitized environment (see subprocess driver). */
+  /**
+   * Merged last over the run's environment — the sanitized environment
+   * (see subprocess driver), `NODE_PATH` dropped, the run's fresh `HOME` —
+   * `undefined` removing a variable; the isolation is verified under the
+   * environment so merged. No suite test sets one; S-4's isolation probes
+   * set `HOME` or `NODE_PATH` here to stage a global folder the
+   * verification must refuse.
+   */
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly timeoutMs?: number;
 }
@@ -416,9 +438,11 @@ export interface CompiledConsumer {
   outputOf(source: string): string;
   /**
    * Run the compiled output of `source` under plain Node, `dir` its working
-   * directory (`runConsumer`), once the global folders Node.js's resolver
-   * searches under the run's environment are verified to hold no package
-   * named `xspec` (module header: Isolation).
+   * directory (`runConsumer`), `NODE_PATH` dropped and a fresh, empty `HOME`
+   * created for the run and removed once it ends, once H-1's isolation is
+   * verified under exactly the run's environment: nothing installed in or
+   * above `dir`, and nothing in any of Node.js's global module folders
+   * (module header: Isolation).
    */
   run(source: string, options?: CompiledRunOptions): Promise<RunResult>;
 }
@@ -473,7 +497,8 @@ export class ConsumerProject {
    * A configuration other than H-2's two — none included — and any option
    * beside `rootDir`, `rootFiles`, and `configuration` are refused (a
    * harness misuse: H-2 fixes every option); the project's root must meet
-   * H-2's isolation (module header) — `HarnessStagingError` otherwise.
+   * H-1's isolation (module header: nothing installed in it or above it) —
+   * `HarnessStagingError` otherwise.
    */
   static async load(options: ConsumerProjectOptions): Promise<ConsumerProject> {
     const configuration: unknown = options.configuration;
@@ -529,11 +554,16 @@ export class ConsumerProject {
         );
       }
     }
-    await verifyConsumerIsolation(
-      options.rootDir,
-      "the consumer project root",
-      `a consumer project under ${configurationLabel(options.configuration)}`,
-    );
+    // TypeScript's current directory is the root (`getCurrentDirectory`),
+    // inside the staging, as H-1 verifies it.
+    await verifyStagingIsolation({
+      root: options.rootDir,
+      role: "the consumer project root",
+      context: `a consumer project under ${configurationLabel(options.configuration)}`,
+      mode: "consumer-isolation",
+      rule: ISOLATION_RULE,
+      nothingInstalledInRoot: true,
+    });
     return new ConsumerProject(options);
   }
 
@@ -1046,31 +1076,33 @@ export class ConsumerProject {
 interface RunConsumerOptions {
   /** Absolute output directory; the run's working directory. */
   readonly dir: string;
-  /** Compiled entry module, `dir`-relative (or absolute). */
-  readonly entry: string;
+  /** Compiled entry module, absolute. */
+  readonly entryAbs: string;
   /** process.argv arguments after the entry path. */
   readonly argv?: readonly string[];
-  /** Merged last over the sanitized environment (see subprocess driver). */
-  readonly env?: Readonly<Record<string, string | undefined>>;
+  /**
+   * The run's environment overrides, merged last over the sanitized
+   * environment (`consumerEnvironmentOverrides`): exactly those its
+   * isolation was verified under.
+   */
+  readonly env: Readonly<Record<string, string | undefined>>;
   readonly timeoutMs?: number;
 }
 
 /**
  * Run a compiled consumer program under plain Node (SPEC.md 13.1) via the
  * blackbox subprocess driver: exact exit code, separated stdout/stderr bytes,
- * hang guard. `NODE_PATH` is dropped so module resolution sees only the
- * files of `dir` and the directories above it — the compiled output's own
- * directory, outside the workspace and verified isolated. Reached only
- * through `CompiledConsumer.run` (`withCompiledConsumer`), H-2's runtime.
+ * hang guard. With `NODE_PATH` dropped and a fresh, empty `HOME`, module
+ * resolution sees only the files of `dir` and the directories above it —
+ * the compiled output's own directory, outside the workspace — and Node.js's
+ * global module folders, all verified isolated. Reached only through
+ * `CompiledConsumer.run` (`withCompiledConsumer`), H-2's runtime.
  */
 async function runConsumer(options: RunConsumerOptions): Promise<RunResult> {
-  const entryAbs = path.isAbsolute(options.entry)
-    ? options.entry
-    : path.resolve(options.dir, options.entry);
-  return await runProduct(consumerBinding(entryAbs), {
+  return await runProduct(consumerBinding(options.entryAbs), {
     cwd: options.dir,
     argv: options.argv ?? [],
-    env: consumerEnvironmentOverrides(options.env),
+    env: options.env,
     timeoutMs: options.timeoutMs,
   });
 }
@@ -1085,11 +1117,22 @@ function consumerBinding(entryAbs: string): ProductBinding {
   };
 }
 
-/** A consumer run's environment overrides: `NODE_PATH` dropped, then `env`. */
+/**
+ * A consumer run's environment overrides (TEST-SPEC H-1: Node.js run with no
+ * `NODE_PATH` and a fresh `HOME`): `NODE_PATH` dropped, `HOME` — and, on
+ * Windows, where Node.js reads the home directory from it, `USERPROFILE` —
+ * the run's fresh one, then the run's own `env`.
+ */
 function consumerEnvironmentOverrides(
+  home: string,
   env: Readonly<Record<string, string | undefined>> | undefined,
 ): Readonly<Record<string, string | undefined>> {
-  return { NODE_PATH: undefined, ...(env ?? {}) };
+  return {
+    NODE_PATH: undefined,
+    HOME: home,
+    ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
+    ...(env ?? {}),
+  };
 }
 
 /** One-line rendering of a diagnostic for failure diagnoses. */
@@ -1278,13 +1321,14 @@ export function assertTypeErrorsAt(
 /**
  * H-2's runtime (module header): compile `project` — served under H-2's
  * CommonJS configuration — to CommonJS JavaScript in a fresh directory under
- * the OS temporary directory, outside the workspace, its isolation verified
- * first, and run `body` over the output; the directory is removed once
- * `body` settles. The compile fails diagnosed when the compiler skips its
- * emit, reports an emit diagnostic, or produces output for a program file
- * outside the project root, which the output directory mirrors. Refused,
- * as a harness misuse, under the ES-module configuration, whose output is
- * type-checked and served, never executed.
+ * the OS temporary directory, outside the workspace, its isolation (H-1:
+ * nothing installed above it) verified first, and run `body` over the
+ * output; the directory is removed once `body` settles. The compile fails
+ * diagnosed when the compiler skips its emit, reports an emit diagnostic,
+ * or produces output for a program file outside the project root, which
+ * the output directory mirrors. Refused, as a harness misuse, under the
+ * ES-module configuration, whose output is type-checked and served, never
+ * executed.
  */
 export async function withCompiledConsumer<T>(
   project: ConsumerProject,
@@ -1306,7 +1350,13 @@ export async function withCompiledConsumer<T>(
     () => fsp.mkdtemp(path.join(os.tmpdir(), "xspec-consumer-out-")),
   );
   try {
-    await verifyConsumerIsolation(dir, "the runtime output directory", label);
+    await verifyStagingIsolation({
+      root: dir,
+      role: "the runtime output directory",
+      context: label,
+      mode: "consumer-isolation",
+      rule: ISOLATION_RULE,
+    });
     const emitted = project.emitTo(dir);
     if (
       emitted.emitSkipped ||
@@ -1367,18 +1417,44 @@ class CompiledOutput implements CompiledConsumer {
     options: CompiledRunOptions = {},
   ): Promise<RunResult> {
     const entry = this.outputOf(source);
-    await verifyNoGlobalPackage(
-      path.join(this.dir, entry),
-      options.env,
-      this.#label,
+    const entryAbs = path.join(this.dir, entry);
+    const context = `${this.#label}, running ${entry}`;
+    // The run's fresh, empty HOME (module header: Isolation): beside the
+    // output directory under the OS temporary directory, never inside it or
+    // the workspace, and removed once the run ends.
+    const home = await guardStep(
+      `creating the fresh HOME of ${context} (CompiledConsumer.run)`,
+      () => fsp.mkdtemp(path.join(os.tmpdir(), "xspec-consumer-home-")),
     );
-    return await runConsumer({
-      dir: this.dir,
-      entry,
-      argv: options.argv,
-      env: options.env,
-      timeoutMs: options.timeoutMs,
-    });
+    try {
+      const env = consumerEnvironmentOverrides(home, options.env);
+      const run: StagedNodeRun = {
+        environment: productEnvironment(consumerBinding(entryAbs), env),
+        cwd: this.dir,
+        executables: [process.execPath],
+      };
+      await verifyStagingIsolation({
+        root: this.dir,
+        role: "the runtime output directory",
+        context,
+        mode: "consumer-isolation",
+        rule: ISOLATION_RULE,
+        nothingInstalledInRoot: true,
+        run,
+      });
+      return await runConsumer({
+        dir: this.dir,
+        entryAbs,
+        argv: options.argv,
+        env,
+        timeoutMs: options.timeoutMs,
+      });
+    } finally {
+      await guardStep(
+        `removing the fresh HOME of ${context} (CompiledConsumer.run)`,
+        () => fsp.rm(home, { recursive: true, force: true, maxRetries: 2 }),
+      );
+    }
   }
 }
 
@@ -1405,203 +1481,24 @@ function describeExpected(expectation: ExpectedTypeError): string {
   );
 }
 
-/** The entry H-2's isolation keeps from every directory above a program. */
-const NODE_MODULES = "node_modules";
-
-/** The package name H-2 keeps from every consumer run's reach. */
-const XSPEC_PACKAGE_NAME = "xspec";
-
+/**
+ * The rule every refusal of a consumer program's isolation closes with
+ * (module header: Isolation; helpers/staging-isolation.ts): TEST-SPEC H-1's
+ * verification as it applies to H-2's consumer programs.
+ */
 const ISOLATION_RULE =
-  "a consumer program is compiled and run with no package named xspec " +
-  "installed or resolvable, its every option at the release's default — " +
-  "types included, which a node_modules directory above it would extend — " +
-  "an unmet isolation a harness error, never a verdict (TEST-SPEC H-2)";
-
-type IsolationUnmet = (detail: string) => HarnessStagingError;
-
-/**
- * H-2's isolation of `dir` — a consumer project's root, or a runtime
- * output directory (module header): no ancestor directory of it, along its
- * path as spelled and along its physical path, each once, holds an entry
- * named `node_modules` of any kind. `HarnessStagingError` (mode
- * `consumer-isolation`) otherwise, or when an examination leaves it
- * unverified (`examineEntry`).
- */
-async function verifyConsumerIsolation(
-  dir: string,
-  role: string,
-  context: string,
-): Promise<void> {
-  const unmet: IsolationUnmet = (detail) =>
-    new HarnessStagingError(
-      "consumer-isolation",
-      dir,
-      `${context}: H-2's isolation of ${role} is unmet — ${detail}; ` +
-        ISOLATION_RULE,
-    );
-  await guardStep(
-    `verifying H-2's isolation of ${role} ${dir} (${context})`,
-    async () => {
-      for (const ancestor of await isolationAncestors(dir, unmet)) {
-        const entry = path.join(ancestor, NODE_MODULES);
-        const stats = await examineEntry(entry, unmet);
-        if (stats !== undefined) {
-          throw unmet(
-            `the ancestor directory ${ancestor} holds an entry named ` +
-              `${NODE_MODULES} (${isolationEntryKind(stats)}, ${entry}), from ` +
-              `which TypeScript's module resolution and default types, and ` +
-              `Node.js's resolver, read packages`,
-          );
-        }
-      }
-    },
-  );
-}
-
-/**
- * Before a compiled consumer's run (`CompiledConsumer.run`): none of the
- * global folders Node.js's CommonJS resolver searches for a bare specifier
- * under the run's environment — its `NODE_PATH` entries (dropped unless
- * `env` sets them), `$HOME/.node_modules`, `$HOME/.node_libraries`, and
- * `$PREFIX/lib/node` of the Node.js running it — holds an entry named
- * `xspec`. `HarnessStagingError` (mode `consumer-isolation`) otherwise.
- */
-async function verifyNoGlobalPackage(
-  entryAbs: string,
-  env: Readonly<Record<string, string | undefined>> | undefined,
-  context: string,
-): Promise<void> {
-  const unmet: IsolationUnmet = (detail) =>
-    new HarnessStagingError(
-      "consumer-isolation",
-      entryAbs,
-      `${context}: H-2's isolation of the compiled consumer's run is unmet ` +
-        `— ${detail}; ${ISOLATION_RULE}`,
-    );
-  const environment = productEnvironment(
-    consumerBinding(entryAbs),
-    consumerEnvironmentOverrides(env),
-  );
-  await guardStep(
-    `verifying that no global folder holds ${XSPEC_PACKAGE_NAME} before ` +
-      `running ${entryAbs} (${context})`,
-    async () => {
-      for (const folder of nodeGlobalFolders(environment)) {
-        const entry = path.join(folder, XSPEC_PACKAGE_NAME);
-        const stats = await examineEntry(entry, unmet);
-        if (stats !== undefined) {
-          throw unmet(
-            `the global folder ${folder}, which Node.js's resolver searches ` +
-              `under the run's environment, holds an entry named ` +
-              `${XSPEC_PACKAGE_NAME} (${isolationEntryKind(stats)}, ${entry})`,
-          );
-        }
-      }
-    },
-  );
-}
-
-/**
- * The global folders Node.js's CommonJS resolver searches for a bare
- * specifier under `environment` (Node.js's documented GLOBAL_FOLDERS, after
- * `NODE_PATH`'s entries), for the Node.js executable running the harness —
- * the one a compiled consumer runs under.
- */
-function nodeGlobalFolders(
-  environment: Readonly<Record<string, string>>,
-): readonly string[] {
-  const windows = process.platform === "win32";
-  const home = windows ? environment["USERPROFILE"] : environment["HOME"];
-  const prefix = windows
-    ? path.resolve(process.execPath, "..")
-    : path.resolve(process.execPath, "..", "..");
-  const folders: string[] = [];
-  for (const entry of (environment["NODE_PATH"] ?? "").split(path.delimiter)) {
-    if (entry !== "") folders.push(path.resolve(entry));
-  }
-  if (home !== undefined && home !== "") {
-    folders.push(path.resolve(home, ".node_modules"));
-    folders.push(path.resolve(home, ".node_libraries"));
-  }
-  folders.push(path.resolve(prefix, "lib", "node"));
-  return folders;
-}
-
-/**
- * The directories above `dir`, nearest first: its parent up to the
- * filesystem root along `dir` as spelled, then along its physical path,
- * each directory once. A physical path that cannot be read leaves the
- * isolation unverified.
- */
-async function isolationAncestors(
-  dir: string,
-  unmet: IsolationUnmet,
-): Promise<readonly string[]> {
-  let physical: string;
-  try {
-    physical = await fsp.realpath(dir);
-  } catch (error) {
-    throw unmet(
-      `its physical path cannot be read (${isolationErrorText(error)}), so ` +
-        `the directories above it go unexamined`,
-    );
-  }
-  const ancestors: string[] = [];
-  const seen = new Set<string>();
-  for (const start of [path.resolve(dir), physical]) {
-    let current = start;
-    for (;;) {
-      const parent = path.dirname(current);
-      if (parent === current) break;
-      current = parent;
-      if (seen.has(current)) continue;
-      seen.add(current);
-      ancestors.push(current);
-    }
-  }
-  return ancestors;
-}
-
-/**
- * `lstat` of `entry`: its stats, or `undefined` when no process of the
- * harness's identity reaches it — absent (`ENOENT`, `ENOTDIR`) or behind a
- * refused search (`EACCES`, `EPERM`), which TypeScript's resolution in this
- * process and Node.js's in a run it starts meet alike. Any other failure
- * leaves the isolation unverified.
- */
-async function examineEntry(
-  entry: string,
-  unmet: IsolationUnmet,
-): Promise<Stats | undefined> {
-  try {
-    return await fsp.lstat(entry);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (
-      code === "ENOENT" ||
-      code === "ENOTDIR" ||
-      code === "EACCES" ||
-      code === "EPERM"
-    ) {
-      return undefined;
-    }
-    throw unmet(
-      `the examination of ${entry} failed (${isolationErrorText(error)}), ` +
-        `leaving it unverified`,
-    );
-  }
-}
-
-function isolationEntryKind(stats: Stats): string {
-  if (stats.isSymbolicLink()) return "a symbolic link";
-  if (stats.isDirectory()) return "a directory";
-  if (stats.isFile()) return "a plain file";
-  return "an entry of another kind";
-}
-
-function isolationErrorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+  "a consumer program is compiled and run only once the harness has " +
+  "verified, under the environment TypeScript and Node.js run in — " +
+  "TypeScript's current directory inside the staging, Node.js run with no " +
+  "NODE_PATH and a fresh HOME — that nothing is installed in the project " +
+  "or above it: no ancestor of its root or of its runtime output holds a " +
+  "package.json or a node_modules entry, its root holds no node_modules " +
+  "entry, and none of Node.js's global module folders holds a package, so " +
+  "that nothing is resolvable by package name — no copy of the product's " +
+  "package under any name least of all — and the program's every option, " +
+  "types included, stays at the release's default; an unmet isolation a " +
+  "harness error, never a pass, a product failure, or a skip (TEST-SPEC " +
+  "H-1, H-2, H-11, T13.1-2)";
 
 const SKELETON_STOP_NOTES: Readonly<
   Record<NonNullable<SkeletonMember["stopped"]>, string>

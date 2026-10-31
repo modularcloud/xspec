@@ -51,8 +51,12 @@ import { section66Tests } from "./section-6.6.js";
 import { section67Tests } from "./section-6.7.js";
 import { section7BasicsTests } from "./section-7-basics.js";
 import { section7DiscoveryTests } from "./section-7-discovery.js";
+import { section7ImportTests } from "./section-7-import.js";
+import { section7NamesTests } from "./section-7-names.js";
 import { section71to73Tests } from "./section-7.1-7.3.js";
 import { section74to75Tests } from "./section-7.4-7.5.js";
+import { section76Tests } from "./section-7.6.js";
+import { section76iiTests } from "./section-7.6-ii.js";
 import { section8Tests } from "./section-8.js";
 import { section9Tests } from "./section-9.js";
 import { section93Tests } from "./section-9.3.js";
@@ -107,6 +111,9 @@ import { section16P13Tests } from "./section-16-p13.js";
 import { section16P14Tests } from "./section-16-p14.js";
 import { section16P15Tests } from "./section-16-p15.js";
 import { section16P16Tests } from "./section-16-p16.js";
+import { section16P17Tests } from "./section-16-p17.js";
+import { section16P18Tests } from "./section-16-p18.js";
+import { section16P19Tests } from "./section-16-p19.js";
 
 export const productTestSuite = new ProductTestSuite([
   // Section registration modules are spread here as they are implemented.
@@ -146,8 +153,12 @@ export const productTestSuite = new ProductTestSuite([
   ...section67Tests,
   ...section7BasicsTests,
   ...section7DiscoveryTests,
+  ...section7ImportTests,
+  ...section7NamesTests,
   ...section71to73Tests,
   ...section74to75Tests,
+  ...section76Tests,
+  ...section76iiTests,
   ...section8Tests,
   ...section9Tests,
   ...section93Tests,
@@ -202,6 +213,9 @@ export const productTestSuite = new ProductTestSuite([
   ...section16P14Tests,
   ...section16P15Tests,
   ...section16P16Tests,
+  ...section16P17Tests,
+  ...section16P18Tests,
+  ...section16P19Tests,
 ]);
 
 // The staged-source ledger (helpers/staged-mdx.ts, and its TypeScript

@@ -26,7 +26,7 @@ Two limits to design around:
 $ xspec version
 {
   "interface": "1",
-  "product": "0.2.0"
+  "product": "0.3.0"
 }
 ```
 

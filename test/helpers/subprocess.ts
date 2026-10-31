@@ -3,11 +3,15 @@
 // in a subprocess). Harness machinery only: this module never imports product
 // code — a product is driven strictly as an executable.
 //
-// - A `ProductBinding` names the executable to drive. Product-facing tests
-//   default to the built product (`builtProductBinding()`); the certification
-//   runner substitutes a CERTIFICATIONS.md fixture executable through the
-//   same binding shape, so certifying and testing use one code path (C-2) and
-//   no test hard-codes the product path.
+// - A `ProductBinding` names the executable to drive and, where one is
+//   given, the package directory 7.6's `defineConfig` module is distributed
+//   as (C-2; H-2's module channel), which this driver itself never reads.
+//   Product-facing tests default to the built product
+//   (`builtProductBinding()`, its package directory the one
+//   `XSPEC_PACKAGE_DIR` names); the certification runner substitutes a
+//   CERTIFICATIONS.md fixture executable, with no package directory, through
+//   the same binding shape, so certifying and testing use one code path
+//   (C-2) and no test hard-codes the product path.
 // - Every invocation controls the working directory (required and absolute:
 //   each test runs the product inside its own workspace, H-1/H-2), argv
 //   (passed verbatim to the process, no shell interpretation; raw-byte
@@ -199,6 +203,7 @@ import {
   ProcessGroupLingerError,
   VoidedTrialsExhaustedError,
 } from "./kill-discipline.js";
+import { NodeReleaseError } from "./node-releases.js";
 import { noteProductInvocation } from "./product-invocations.js";
 import {
   guardStep,
@@ -233,8 +238,10 @@ export const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
 
 /**
  * How to invoke a product — the built `xspec` or a CERTIFICATIONS.md fixture
- * product. The binding is the only product-specific datum a test body sees
- * (C-2: an executable binding and nothing else).
+ * product — and, where one is given, the package directory its
+ * `defineConfig` module is distributed as. The binding is the only
+ * product-specific datum a test body sees (C-2: the executable and the
+ * package directory, with the workspace, and nothing else).
  */
 export interface ProductBinding {
   /** Human label used in failure diagnoses. */
@@ -269,6 +276,33 @@ export interface ProductBinding {
    * whole in-scope set would otherwise certify without ever running).
    */
   readonly missingFilesFailDiagnosed?: boolean;
+  /**
+   * The package directory 7.6's `defineConfig` module is distributed as,
+   * given beside the executable (TEST-SPEC C-2; H-2's module channel): an
+   * absolute path to a directory holding exactly what the package's
+   * distribution carries, never a development tree. Absent, no package
+   * directory is given, and H-8 holds every test of 7.6 to a diagnosed
+   * failure, the module channel counting as part of the product. The built
+   * product's binding takes it from the environment
+   * ({@link builtProductBinding}); {@link builtProductBindingAt}'s carries
+   * none, and neither does a CERTIFICATIONS.md fixture's (its preamble: no
+   * scope includes the module, so each fixture is bound with its executable
+   * and no package directory).
+   *
+   * The harness copies the directory into stagings and reads its manifest's
+   * `name` where a test says so (TEST-SPEC T7.6-4(a), T7-9(d)); it never
+   * writes into it, never loads or reads one of its files as a module, and
+   * never treats a file of it as a channel by its path (H-2: a subpath, or a
+   * file of the package named by its path, is never a channel). This
+   * driver never reads it. Whether the path is usable — absolute, naming a
+   * directory, holding a distribution rather than a development tree — is
+   * for the module channel to check where a test of 7.6 reaches for the
+   * module (helpers/module-channel.ts, `modulePackageDirectory`, which
+   * `ModuleStaging.create` runs before anything is staged), never when the
+   * binding is made, so that a test which never reaches the module never
+   * fails for it.
+   */
+  readonly packageDir?: string;
 }
 
 /**
@@ -364,9 +398,11 @@ export class HarnessEvaluationError extends Error {
  * evaluation of the answer failed ({@link HarnessEvaluationError}), a group
  * kill could not confirm its group gone (`ProcessGroupLingerError`), every
  * attempt of a voidable trial was voided (`VoidedTrialsExhaustedError`;
- * both helpers/kill-discipline.ts), or a harness step outlasted its own
- * guard (`HarnessStepTimeoutError`, helpers/step-guards.ts; TEST-SPEC S-3)
- * — and return otherwise. A helper that turns a rejected run — the
+ * both helpers/kill-discipline.ts), a harness step outlasted its own guard
+ * (`HarnessStepTimeoutError`, helpers/step-guards.ts; TEST-SPEC S-3), or a
+ * Node.js release E-1 lists is not provisioned for the run needing it, or
+ * its list is unreadable (`NodeReleaseError`, helpers/node-releases.ts;
+ * TEST-SPEC E-1) — and return otherwise. A helper that turns a rejected run — the
  * hang-guard kill, a premature exit, a spawn failure, a T6.5-22(a) breach,
  * a T12.7-1 near-marker — into a diagnosed failure (H-8) calls it first, so
  * a harness-side failure always surfaces as the harness error it is, never
@@ -378,7 +414,8 @@ export function rethrowHarnessError(error: unknown): void {
     error instanceof HarnessEvaluationError ||
     error instanceof ProcessGroupLingerError ||
     error instanceof VoidedTrialsExhaustedError ||
-    error instanceof HarnessStepTimeoutError
+    error instanceof HarnessStepTimeoutError ||
+    error instanceof NodeReleaseError
   ) {
     throw error;
   }
@@ -408,24 +445,46 @@ function describeCause(cause: unknown): string {
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 
 /**
+ * The environment variable naming the product's package directory, exactly
+ * as distributed (TEST-SPEC H-2's module channel, C-2): the directory
+ * `.github/scripts/pack-package.sh` prints, which CI's full-suite job sets
+ * after its build and its harness-self job leaves unset (AGENTS.md).
+ */
+export const PACKAGE_DIR_VARIABLE = "XSPEC_PACKAGE_DIR";
+
+/**
  * The default binding: the built product executable (`dist/cli/bin.js`, see
  * AGENTS.md), resolved relative to this module — never to the process cwd —
  * in the built product's binding shape ({@link builtProductBindingAt}), so
  * running a product-facing test before the product is built fails it
- * diagnosed (H-8).
+ * diagnosed (H-8); and beside it, as its {@link ProductBinding.packageDir},
+ * the package directory {@link PACKAGE_DIR_VARIABLE} names in `environment`
+ * (`process.env` unless given), read when the binding is made and carried
+ * exactly as spelled there, never resolved against the working directory.
+ * With the variable unset or empty, the binding carries none.
  */
-export function builtProductBinding(): ProductBinding {
-  return builtProductBindingAt(path.join(repoRoot, "dist", "cli", "bin.js"));
+export function builtProductBinding(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): ProductBinding {
+  const binding = builtProductBindingAt(
+    path.join(repoRoot, "dist", "cli", "bin.js"),
+  );
+  const packageDir = environment[PACKAGE_DIR_VARIABLE];
+  return packageDir === undefined || packageDir === ""
+    ? binding
+    : { ...binding, packageDir };
 }
 
 /**
- * The built product's binding shape at the artifact path `binJs`: Node runs
- * it, it is the one required file, and its absence is H-8's missing product
- * — every run failing diagnosed, declining shrinking
- * ({@link ProductBinding.missingFilesFailDiagnosed}). Product-facing tests
- * take {@link builtProductBinding}; the path parameter exists for checks of
- * the no-product run, which need the artifact absent whatever the
- * checkout's `dist/` holds (S-3's missing-artifact vector).
+ * The built product's binding shape at the artifact path `binJs`, with no
+ * package directory: Node runs it, it is the one required file, and its
+ * absence is H-8's missing product — every run failing diagnosed, declining
+ * shrinking ({@link ProductBinding.missingFilesFailDiagnosed}).
+ * Product-facing tests take {@link builtProductBinding}; the path parameter
+ * exists for checks of the no-product run, which need the artifact absent
+ * whatever the checkout's `dist/` holds (S-3's missing-artifact vector), and
+ * which give the module channel nothing either, whatever the environment
+ * names (H-8: the module channel counts as part of the product).
  */
 export function builtProductBindingAt(binJs: string): ProductBinding {
   return {

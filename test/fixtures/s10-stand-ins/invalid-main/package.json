@@ -1,0 +1,5 @@
+{
+  "name": "s10-invalid-main-standin",
+  "version": "1.0.0",
+  "main": "./missing.js"
+}

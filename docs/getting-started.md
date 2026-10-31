@@ -4,21 +4,23 @@ This walkthrough takes you from an empty directory to a validated project with c
 
 ## Install
 
-xspec requires **Node.js ≥ 22**. It's published on npm as `@modularcloud/xspec`. Install it into your project as a development dependency under the name `xspec`:
+xspec requires **Node.js ≥ 22**. It's published on npm as `@modularcloud/xspec`. Install it into your project as a development dependency:
 
 ```sh
-npm install --save-dev xspec@npm:@modularcloud/xspec
-npx xspec version
+npm install --save-dev @modularcloud/xspec
+npx @modularcloud/xspec version
 ```
 
-The alias does two things. It installs the package as `xspec`, the module name that `xspec.config.ts` imports `defineConfig` from (see below), so your editor gets type support. It also puts the `xspec` command in `node_modules/.bin`.
+The package gives your project two things. It puts the `xspec` command in `node_modules/.bin`. It also provides the `defineConfig` function that `xspec.config.ts` imports from `"@modularcloud/xspec"` (see below), so your editor and `tsc` type-check your configuration.
+
+Always give npm and npx the full scoped name, `@modularcloud/xspec`: the unscoped name belongs to an unrelated package.
 
 Two other ways to run it:
 
 - **Globally**: `npm install -g @modularcloud/xspec`.
 - **Once, without installing**: `npx @modularcloud/xspec <command>`.
 
-The rest of the documentation writes `xspec <command>`. With a local install, run it as `npx xspec <command>` or from an npm script.
+The rest of the documentation writes `xspec <command>`. With a local install, run it as `npx @modularcloud/xspec <command>` from your project, or as `xspec <command>` in an npm script.
 
 To work on xspec itself, build it from a checkout instead: clone `https://github.com/modularcloud/xspec`, then run `npm ci && npm run build && npm link`.
 
@@ -28,7 +30,7 @@ An xspec project is any directory with an `xspec.config.ts` at its root. The con
 
 ```ts
 // xspec.config.ts
-import { defineConfig } from "xspec"
+import { defineConfig } from "@modularcloud/xspec"
 
 export default defineConfig({
   specs: {
@@ -53,7 +55,7 @@ export default defineConfig({
 Two things to know about this file:
 
 - xspec **parses it statically and never executes it**, so it must be purely declarative (literals only). See [Configuration](configuration.md) for the full schema.
-- The `import { defineConfig } from "xspec"` exists for editor type support. xspec itself never resolves it, so the CLI works whether or not the import resolves. If your own `tsc` run includes `xspec.config.ts`, install the package under the `xspec` alias as above, or exclude the config file from your tsconfig.
+- The `import { defineConfig } from "@modularcloud/xspec"` exists for type checking: with the package installed, your editor and `tsc` flag mistakes in the file's shape, such as an unknown key or a missing required one, as you type. xspec itself never resolves the import, so the CLI works whether or not it resolves. If your `package.json` has no `"type": "module"` and your tsconfig turns on `verbatimModuleSyntax` (as `tsc --init` writes it), see [Type checking the configuration](configuration.md#type-checking-the-configuration).
 
 ## Write a first spec
 

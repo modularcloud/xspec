@@ -784,7 +784,7 @@ const T1_6_3 = defineProductTest({
       // whole program, the generated module and its companions included —
       // and runs under the CommonJS configuration alone: compiled to
       // CommonJS JavaScript written outside the workspace and run there
-      // under plain Node, no package named `xspec` resolvable (H-2).
+      // under plain Node, nothing resolvable by package name (H-2, H-1).
       await workspace.file("main.ts", EXPANSION_CONSUMER);
       const sources = { rootDir: workspace.root, rootFiles: ["main.ts"] };
       const consumerContext =

@@ -1,0 +1,11 @@
+{
+  "name": "s10-dual-standin",
+  "version": "1.0.0",
+  "exports": {
+    ".": {
+      "xspec-s10-user-condition": "./condition.cjs",
+      "import": "./index.mjs",
+      "require": "./index.cjs"
+    }
+  }
+}

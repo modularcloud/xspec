@@ -13,16 +13,20 @@
 // `--config <path>` option (a filesystem path resolved against the working
 // directory, 12.0); the configuration file's directory is the workspace
 // root. The configuration is declarative — exactly an import of
-// `defineConfig` from `"xspec"` (optionally aliased) and a default export of
-// one call to that binding with a statically literal argument; anything else
-// is a configuration error (14.14), reported by every command at
-// configuration load as a usage error (exit 2), before all source analysis.
+// `defineConfig` (optionally aliased) whose module specifier is any static
+// string literal, and a default export of one call to that binding with a
+// statically literal argument; anything else is a configuration error
+// (14.14), reported by every command at configuration load as a usage error
+// (exit 2), before all source analysis.
 // `specs` is required; `code`, `markdown`, `coverage`, and `policy` are
 // optional with defined omission semantics; empty `coverage`/`policy` lists
-// equal omission; unknown keys anywhere in the argument are 14.14, as is a
-// value of the wrong shape — 14.14's "otherwise invalid group shape" (7.1,
-// 7.2, 7.4, 7.5: `specs` and `code` are maps of named groups, each a list
-// of glob strings; `coverage` and `policy` are lists).
+// equal omission; an empty glob list is valid, its group discovering zero
+// sources (7 bars an empty list only for `targetTags`, `edgeKinds`, a
+// rule's `kinds`, and a selector's `tags`, 7.4, 7.5); unknown keys anywhere
+// in the argument are 14.14, as is a value of the wrong shape — 14.14's
+// "otherwise invalid group shape" (7.1, 7.2, 7.4, 7.5: `specs` and `code`
+// are maps of named groups, each a list of glob strings; `coverage` and
+// `policy` are lists).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — run
@@ -97,6 +101,27 @@
 //   the Windows leg reruns it (E-6, test/windows/e6-subset.test.ts), where
 //   no case-sensitive filesystem masks a product resolving the name through
 //   filesystem lookups.
+// - T7-1 configuration file names (SPEC 7: `--config` names any path, the
+//   file judged by the grammar its name selects, 14.20 — a name ending
+//   `.tsx` parses as TSX, any other as plain TypeScript): three arms in
+//   TEST-SPEC's order, `--config xspec.config.mts`, `--config
+//   xspec.config.cts`, and `--config xspec.config.tsx`, each run from the
+//   root of a fresh workspace holding that plain file — the canonical
+//   configuration's bytes — beside `specs/A.mdx` and no `xspec.config.ts`:
+//   `build` and then `check` exit 0, and `inventory`'s `configuration` is
+//   byte-identical to its twin's (compared as T7-2's comments arm
+//   compares, below), the twin the same bytes named `xspec.config.ts` in a
+//   workspace of its own, driven by the same three commands given
+//   `--config xspec.config.ts` — so each arm differs from the twin in the
+//   configuration file's name alone (`configurationViewOf`'s
+//   `configPath`). The `.mts` and `.cts` files stage `SPECS_ONLY_CONFIG`
+//   itself, plain TypeScript being the grammar their names select; the
+//   `.tsx` file stages its text as a TSX record (S-9 judges it under TSX),
+//   and a module-load self-check pins every arm's bytes to the twin's under
+//   the grammar its name selects. A product admitting a `.ts` name alone
+//   refuses an arm (exit 2 at `build`); one reading a name's file otherwise
+//   than its twin's fails the comparison. The arms run after the occupancy
+//   arms and before the name-casing probe, which stays last.
 // - T7-2 single-deviation staging: every invalid fixture is the valid
 //   canonical configuration with exactly one deviation, so the refusal is
 //   attributable to the arm's malformation and nothing else.
@@ -110,25 +135,105 @@
 //   declarative form's (14.14), never a parse failure's; a product reading
 //   the binding loosely loads each and builds (exit 0), failing the
 //   exit-code assertion.
-// - T7-2's further form arms (SPEC 7: the specifier `"xspec"`, a literal
-//   set of strings and the two booleans, non-computed identifier or
-//   string-literal keys, one call whose sole argument is statically
-//   literal): the import from `"XSPEC"`, a single-casing arm — no case
-//   folding anywhere (12.0); `markdown: { emit: true, outDir: null }` and a
-//   profile's `targetTags: null`, one arm each — `null` lies outside 7's
-//   literal set, though `inventory` reports unset members as `null` (12.7)
-//   — each fixture valid with the member omitted (the profile's target and
-//   boundary the unambiguous group `main`), so a product reading `null` as
-//   an omitted member loads it and builds (exit 0); `defineConfig()` and
-//   `defineConfig({…}, {})`, the second's first argument the canonical
-//   configuration, so a product reading the first argument alone loads it;
-//   and the numeric-literal key `specs: { 1: ["specs/*.mdx"] }`, spelled as
-//   TEST-SPEC spells it (its glob, like the canonical one, matches the
-//   staged `specs/A.mdx`), which TypeScript admits and a product reading
-//   keys loosely takes for a group named `1`. Every one is a text
+// - T7-2's import arms never vary the import's module specifier: SPEC 7
+//   accepts any static string literal there, so an import from a specifier
+//   other than `"xspec"` is valid — T7-9's subject (its single-casing
+//   `"XSPEC"` among T7-9(a)'s spellings), never a T7-2 refusal.
+// - T7-2's further form arms (SPEC 7: a literal set of strings and the two
+//   booleans, non-computed identifier or string-literal keys, one call
+//   whose sole argument is statically literal): `markdown: { emit: true,
+//   outDir: null }` and a profile's `targetTags: null`, one arm each —
+//   `null` lies outside 7's literal set, though `inventory` reports unset
+//   members as `null` (12.7) — each fixture valid with the member omitted
+//   (the profile's target and boundary the unambiguous group `main`), so a
+//   product reading `null` as an omitted member loads it and builds (exit
+//   0); `defineConfig()` and `defineConfig({…}, {})`, the second's first
+//   argument the canonical configuration, so a product reading the first
+//   argument alone loads it; and the numeric-literal key
+//   `specs: { 1: ["specs/*.mdx"] }`, spelled as TEST-SPEC spells it (its
+//   glob, like the canonical one, matches the staged `specs/A.mdx`), which
+//   TypeScript admits and a product reading keys loosely takes for a group
+//   named `1`. Every one is a text TypeScript 5.9.3 accepts both as module
+//   code and as script code, so each record is declared well-formed (S-9)
+//   and the refusal is the declarative form's (14.14), never a parse
+//   failure's.
+// - T7-2's wrapped forms and call variants (SPEC 7: the file consists of
+//   exactly the import and a default export of one call to that binding
+//   whose sole argument is statically literal — no other statement or
+//   expression form, comments alone permitted beside them): nine arms, one
+//   each, every one the canonical configuration with one deviation — the
+//   call wrapped (`export default defineConfig({…}) satisfies object`,
+//   `export default (defineConfig({…}))`, and `export default
+//   defineConfig({…})!`), the argument wrapped (`defineConfig({…} as
+//   const)`, `defineConfig(({…}))`), a value inside it wrapped (`markdown:
+//   { emit: true as boolean }`, the fixture valid with `emit: true`, and
+//   `specs: ({…})`), and the call spelled with syntax outside 7's list
+//   (`defineConfig<object>({…})`, carrying type arguments, and
+//   `defineConfig?.({…})`, an optional call). Every one is a text
 //   TypeScript 5.9.3 accepts both as module code and as script code, so
 //   each record is declared well-formed (S-9) and the refusal is the
-//   declarative form's (14.14), never a parse failure's.
+//   declarative form's (14.14), never a parse failure's; a product
+//   skipping TypeScript's outer expressions (parentheses, type assertions,
+//   `satisfies`, and non-null assertions) before reading the form, or
+//   reading a call by its callee and arguments alone, loads each and
+//   builds (exit 0), failing the exit-code assertion.
+// - T7-2's binding forms (SPEC 7: exactly an import of `defineConfig`,
+//   optionally aliased; 2.4: every configuration literal, an import name
+//   spelled as a string literal included, is read verbatim): the
+//   string-literal import name, `import { "defineConfig" as d } from
+//   "xspec"` with `export default d({…})` over the canonical argument, is
+//   that import, aliased — it loads, and `inventory`'s `configuration` is
+//   byte-identical to its identifier-named twin's, `import { defineConfig
+//   as d } from "xspec"`, the same file but for the name's quotes
+//   (compared as the comments arm compares, below; `bindingFormConfig`
+//   composes both). Refused, one arm each (14.14, exit 2): its
+//   escape-spelled twin, the same file with the name's `C` written as the
+//   hexadecimal escape of U+0043 (backslash, `x43`; the backslash built
+//   from `BACKSLASH`, and the spelling checked at module load), which,
+//   read verbatim, imports no `defineConfig`; and a default import
+//   (`import defineConfig from "xspec"`), a namespace import (`import * as
+//   X from "xspec"` with `export default X.defineConfig({…})`), an extra
+//   default binding (`import d, { defineConfig } from "xspec"`), and an
+//   extra named binding (`import { defineConfig, other } from "xspec"`),
+//   each the canonical configuration with only its import line — and, for
+//   the namespace import, the callee — changed. Every one of these texts
+//   is accepted by TypeScript 5.9.3 both as module code and as script code,
+//   so each record is declared well-formed (S-9) and a refusal is the
+//   declarative form's (14.14), never a parse failure's. A product reading
+//   identifier import names alone refuses the string-literal name and
+//   fails `build`'s exit code; one reading the binding loosely — decoding
+//   the name's escape, or taking any import that binds or reaches
+//   `defineConfig` for the import of it — loads a refused text and builds
+//   (exit 0), failing the exit-code assertion.
+// - T7-2's statement forms (SPEC 7: exactly an import of `defineConfig` and
+//   a default export of one call to that binding, no other statement form):
+//   TypeScript's two CommonJS-interop statements, one arm each, every one
+//   the canonical configuration with one deviation — an export assignment,
+//   `export = defineConfig({…})` beside `import { defineConfig } from
+//   "xspec"`, which is no default export, and an import assignment, `import
+//   defineConfig = require("xspec")` beside `export default
+//   defineConfig({…})`, which binds the module itself and, like the default
+//   and namespace imports, imports no `defineConfig`. Each is a text
+//   TypeScript 5.9.3 accepts both as module code and as script code, so
+//   each record is declared well-formed (S-9) and the refusal is the
+//   declarative form's (14.14), never a parse failure's; a product taking
+//   an export assignment for a default export, or an import assignment for
+//   an import of `defineConfig`, loads it and builds (exit 0), failing the
+//   exit-code assertion.
+// - T7-2's statement order (SPEC 7 fixes which statements the file holds,
+//   never their order; an import binds its name throughout its module, so
+//   a call spelled before it calls that binding): the canonical
+//   configuration's two statements exchanged, `export default
+//   defineConfig({…})` first and `import { defineConfig } from "xspec"`
+//   after it — a text TypeScript 5.9.3 accepts both as module code and as
+//   script code — loads: `build` and then `check` exit 0, and `inventory`'s
+//   `configuration` is byte-identical to its import-first twin's, the
+//   canonical file itself (compared as the comments arm compares, below).
+//   `twoStatementConfig` composes both orders from the same two statements,
+//   and a module-load self-check pins the import-first order to the
+//   canonical text, so the two files differ in the statements' order
+//   alone. A product requiring the import first refuses the file and fails
+//   `build`'s exit code.
 // - T7-2 string-literal keys arm: "both groups discover their globs' files"
 //   is observed as the spec group's exact `ids` listing plus whole-graph
 //   edge-set equality carrying the code file's marker edge (T7-3's
@@ -170,6 +275,24 @@
 //   (dropping or stringifying the element) discovers no source and builds
 //   anyway — a group matching no files is valid (7) — so exit 0 still
 //   discriminates it.
+// - T7-3 empty glob lists (SPEC 7: an empty list is barred only for
+//   `targetTags`, `edgeKinds`, a rule's `kinds`, and a selector's `tags`,
+//   7.4, 7.5, 14.14; a group whose globs match no files is valid): two arms
+//   in TEST-SPEC's order (`EMPTY_GLOB_LIST_ARMS`), each a fresh workspace
+//   holding exactly what TEST-SPEC names — the spec group `product: []` as
+//   the configuration's one group, the configuration staged alone; and the
+//   code group `app: []` beside the spec group `main` globbing
+//   `specs/*.mdx`, staged over `specs/A.mdx`. Each is driven by `build`,
+//   then `check`, then `inventory --json` (`expectEmptyGlobListLoads`):
+//   `build` and `check` exit 0 — the configuration loads — and the
+//   inventory's list of the empty group's kind is exactly that group with
+//   `globs` `[]` (12.7: `globs` as configured), its `sources` exactly what
+//   discovery yields — none in the first arm, `specs/A.mdx` a member of
+//   `main` alone in the second — so no source is a member of the empty
+//   group (11.6). A product refusing an empty glob list as an invalid group
+//   shape (14.14) fails `build`'s exit code; one dropping the group or
+//   reporting other globs fails the inventory's view; one whose empty group
+//   matches a file fails `build` or the inventory's `sources`.
 // - every `expectConfigRefused` arm (T7-2, T7-3): the finding's concerned
 //   path is exactly `xspec.config.ts` — the file the upward search found,
 //   in 11.6's anchoring form relative to the invocation working directory,
@@ -191,6 +314,39 @@
 //   boundary the same group, the target set is the group's one leaf,
 //   uncovered (8.1, 8.2); the `target: "product"` twin differs in that one
 //   value alone and is refused as an unknown group (7.4, 14.14).
+// - T7-2 keys and enumerated values read as spelled (SPEC 7, 2.4; the
+//   spellings 7.6's covered-file bar cites), an identifier key's alike:
+//   `specs` with its `s` written as the hexadecimal escape of U+0073 as a
+//   string-literal top-level key, and as the Unicode escape of U+0073 as an
+//   identifier one; `direct` with its `d` written as the hexadecimal escape
+//   of U+0064 as a profile's `mode`; `ab` with its `b` written as the
+//   hexadecimal (string literal) or Unicode (identifier) escape of U+0062
+//   as a group key beside `ab`; and the verbatim group name keyed as an
+//   identifier. Each spelling is built from `BACKSLASH` and pinned at
+//   module load (`checkedEscapeSpelling`: one backslash, then the escape's
+//   text, which designates the character it replaces, and the spelling
+//   with it decoded), and each composed file is checked to hold the
+//   backslashes its spellings bring and no other. The refused top-level-key
+//   and `mode` arms (`SPELLED_KEY_VIOLATIONS`, and the first row of
+//   `SPELLED_IDENTIFIER_KEY_VIOLATIONS`) are each the canonical
+//   configuration — for `mode`, the `targetTags: null` row's valid twin —
+//   with the one escape as its deviation, valid with it decoded
+//   (`canonicalWithSpecsKey`, pinned to the canonical text for the plain
+//   key), so a product decoding escapes loads each and builds (exit 0).
+//   The identifier-keyed group name is the group-name arm above with its
+//   key an identifier: refused under `target: "product"` (the table's
+//   second row; a product decoding every escape loads it, one decoding the
+//   identifier alone refuses its resolving twin) and resolving under the
+//   escape spelling, observed alike (`expectVerbatimGroupNameResolves`).
+//   "Two groups, no key repeated — it loads, `inventory` reporting both,
+//   each discovering its own glob's file" is observed after `build` exits
+//   0 as `inventory`'s `configuration.specs`, exactly `ab` (`a/*.mdx`) and
+//   the escape-spelled key's group (`b/*.mdx`) named as spelled, in
+//   configuration order, and its `sources`, exactly `a/A.mdx` a member of
+//   `ab` alone and `b/B.mdx` of the other alone, in byte order of path
+//   (11.6), over the minimal sources a and b (`expectTwoSpelledGroups`); a
+//   product decoding the escape reads the key `ab` twice and refuses the
+//   file (14.14), failing `build`'s exit code.
 // - T7-2 encoding: the non-UTF-8 fixture carries its one invalid byte
 //   (0xFF) inside a trailing line comment, so the decoded text is a valid
 //   configuration and the encoding is the sole defect; the BOM fixture is
@@ -201,10 +357,26 @@
 //   product reporting it through a compiler diagnostic and one detecting
 //   it itself pass alike, while one taking the last member loads and
 //   builds (exit 0).
-// - T7-2 comments: "inventory's `configuration` byte-identical to its
-//   comment-free twin's" is compared as the `configuration` member of each
-//   `inventory --json` document (form-decoded first), as values and as
-//   serializations — member order included.
+// - T7-2 comments (SPEC 7: comments are permitted anywhere and contribute
+//   nothing): one commented file holds line and block comments at every
+//   position TEST-SPEC lists — before the import, inside the import
+//   declaration between each two of its tokens (spelled as TEST-SPEC
+//   spells it, its line comment after `from` putting the module specifier
+//   on the next line), inside the argument between keys and inside the
+//   glob list, and after the export — and at others besides (after the
+//   import, after the glob list, after everything); its twin is the same
+//   file with every comment removed. The commented file is declared
+//   well-formed (S-9). A product reading the import declaration by its
+//   tokens' adjacency, or a line at a time, refuses the commented file and
+//   fails `build`'s exit code.
+// - T7-2 comments, the string-literal import name, and statement order:
+//   "inventory's `configuration` byte-identical to its comment-free twin's"
+//   (to its identifier-named twin's, to its import-first twin's) is
+//   compared as the `configuration` member of each `inventory --json`
+//   document (form-decoded first), as values and as serializations — member
+//   order included (`configurationViewOf`, after `build` loads the file and,
+//   for the statement-order arm, `check` exits 0, and
+//   `assertConfigurationViewsIdentical`).
 // - T7-3 U+FFFD names: the character is staged as the validly encoded code
 //   point EF BF BD between two letters — a spec group's and a code group's
 //   string-literal key, a profile name, a rule name — so 14.14's name rule,
@@ -279,13 +451,17 @@
 //   product invocation — `expectConfigRefused`'s one staging site (serving
 //   every arm of every refused-configuration table, the first included:
 //   `refusedConfigArms` makes one record per row at module load), T7-1's
-//   occupancy and name-casing workspaces, T7-2's and T7-3's later arms,
-//   T7-7's arm workspaces and arm (a)'s inside link target — is a ledger
-//   record carrying its S-9 declaration (T7-2's syntax-error and encoding
-//   arms and T7-1's `XSPEC.config.ts` holding `)` unparseable, 14.20;
-//   every other well-formed), judged by test/self/s9-staged-sources.test.ts
-//   before any product exists. The canonical `SPECS_ONLY_CONFIG` is one
-//   record wherever it is staged, `LOCATION_FILES` included; so is T7-7's
+//   occupancy, name-casing, and configuration-name workspaces (the last
+//   staging the canonical record at `xspec.config.mts`, `xspec.config.cts`,
+//   and the twin's `xspec.config.ts`, and its text at `xspec.config.tsx` as
+//   a TSX record, the grammar that name selects, 14.20), T7-2's and T7-3's
+//   later arms, T7-7's arm workspaces and arm (a)'s inside link target — is
+//   a ledger record carrying its S-9 declaration (T7-2's syntax-error and
+//   encoding arms and T7-1's `XSPEC.config.ts` holding `)` unparseable,
+//   14.20; every other well-formed), judged by
+//   test/self/s9-staged-sources.test.ts before any product exists. The
+//   canonical `SPECS_ONLY_CONFIG` is one record wherever it is staged,
+//   `LOCATION_FILES` and T7-1's `.mts` and `.cts` names included; so is T7-7's
 //   configuration (`T7_7_CONFIG`), at `xspec.config.ts` and at the inside
 //   link target, its text the bytes the outside target is written with
 //   beyond the root.
@@ -293,7 +469,11 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import type { GraphEdge } from "../../helpers/adapters/index.js";
+import type {
+  GraphEdge,
+  InventoryGroupDef,
+  InventorySourceEntry,
+} from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
   decodeEdgesReport,
@@ -318,7 +498,11 @@ import {
 } from "../../helpers/snapshot.js";
 import { assertSelfContainedRoot } from "../../helpers/self-contained-root.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
-import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
+import {
+  type StagedTs,
+  stagedTs,
+  tsGrammarOf,
+} from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -351,32 +535,37 @@ function mdxSection(id: string): string {
 
 // The minimal sources the §7 modules stage in workspaces created after a
 // body's first product invocation (module header): byte-identical wherever
-// they are staged — `mdxSection("a")` at `specs/A.mdx` here and in
-// section-7-discovery.ts, section-7.1-7.3.ts, section-7.4-7.5.ts (T7.4-1,
-// T7.5-1; T7.5-2 at `lo/BASE.mdx` alone; T7.5-5 also at `tgt/a.mdx`), and
-// section-12.6.ts (T12.6-1, T12.6-2: the version workspaces' minimal
-// source, the same bytes); `mdxSection("b")` at `specs/sub/B.mdx` (T7-3,
-// T7-6, T7.3-1) and
+// they are staged — `mdxSection("a")` at `specs/A.mdx` here (and at
+// `a/A.mdx`, T7-2's keys read as spelled) and in section-7-discovery.ts,
+// section-7.1-7.3.ts, section-7.4-7.5.ts (T7.4-1, T7.5-1; T7.5-2 at
+// `lo/BASE.mdx` alone; T7.5-5 also at `tgt/a.mdx`), and section-12.6.ts
+// (T12.6-1, T12.6-2: the version workspaces' minimal source, the same
+// bytes); `mdxSection("b")` at `specs/sub/B.mdx` (T7-3, T7-6, T7.3-1),
+// `b/B.mdx` (T7-2's keys read as spelled), and
 // `specs2/B.mdx` (T7-4) — so each is ONE staged-source record, named with
 // every staging test in ID order and every path; the other modules import
 // them (section-7.4-7.5.ts and section-12.6.ts the `a` alone).
 export const SECTION_A_SOURCE = stagedMdx(
-  "T7-1/T7-2/T7-3/T7-4/T7-6/T7-7/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-2/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7.5-2's lo/BASE.mdx; T7.5-5's tgt/a.mdx)",
+  "T7-1/T7-2/T7-3/T7-4/T7-6/T7-7/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-2/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx (the minimal section a; T7-2's a/A.mdx; T7.5-2's lo/BASE.mdx; T7.5-5's tgt/a.mdx)",
   mdxSection("a"),
 );
 export const SECTION_B_SOURCE = stagedMdx(
-  "T7-3/T7-4/T7-6/T7.3-1 the minimal section b (specs/sub/B.mdx; T7-4's specs2/B.mdx)",
+  "T7-2/T7-3/T7-4/T7-6/T7.3-1 the minimal section b (specs/sub/B.mdx; T7-2's b/B.mdx; T7-4's specs2/B.mdx)",
   mdxSection("b"),
 );
 
 // The canonical valid configuration (SPEC 7): exactly one spec group, no
 // optional keys. Every T7-2 violation below is this file with one deviation.
 // A staged-source record (module header): T7-1's occupancy and name-casing
-// workspaces and T7-3's omission arms stage it in workspaces created after
-// a product invocation; T7-1's first workspace passes the record too, and
-// T7-2's encoding arms compose their bytes from its text.
+// workspaces, T7-1's configuration-name workspaces (at `xspec.config.mts`
+// and `xspec.config.cts`, and the twin's `xspec.config.ts`), T7-2's
+// statement-order arm (the import-first twin), and T7-3's omission arms
+// stage it in workspaces created after a product invocation; T7-1's first
+// workspace passes the record too, T7-1's `xspec.config.tsx` stages its
+// text as a TSX record of its own (14.20), and T7-2's encoding arms compose
+// their bytes from its text.
 const SPECS_ONLY_CONFIG = stagedTs(
-  "T7-1/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys)",
+  "T7-1/T7-2/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys; T7-1's xspec.config.mts and xspec.config.cts)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -895,6 +1084,112 @@ export async function runT71ConfigNameCasingProbe(
   });
 }
 
+// --- T7-1 configuration file names (SPEC 7, 14.20) --------------------------
+
+// `--config` names any path, the file judged by the grammar its name selects
+// (SPEC 7, 14.20: a name ending `.tsx` parses as TSX, any other as plain
+// TypeScript; module header). The twin names the same bytes
+// `xspec.config.ts`; each arm's file is a plain file at the root holding
+// the canonical configuration's bytes, no `xspec.config.ts` beside it.
+const CONFIG_NAME_TWIN = "xspec.config.ts";
+// The canonical configuration's text as a TSX record: the `.tsx` name
+// selects TSX, so its record is judged under that grammar (S-9) — the
+// builder refuses to stage a plain-TypeScript record there. Staged after a
+// product invocation (S-9's timing clause).
+const TSX_SPECS_ONLY_CONFIG = stagedTs(
+  "T7-1 xspec.config.tsx (the canonical configuration's bytes, judged under TSX, the grammar the .tsx name selects)",
+  configText(SPECS_ONLY_CONFIG),
+  "well-formed",
+  "tsx",
+);
+// The three names, in TEST-SPEC's order: `.mts` and `.cts` select plain
+// TypeScript and stage the canonical record itself.
+const CONFIG_NAME_ARMS: readonly {
+  readonly name: string;
+  readonly config: StagedTs;
+}[] = [
+  { name: "xspec.config.mts", config: SPECS_ONLY_CONFIG },
+  { name: "xspec.config.cts", config: SPECS_ONLY_CONFIG },
+  { name: "xspec.config.tsx", config: TSX_SPECS_ONLY_CONFIG },
+];
+
+// The module-load self-check of the configuration-name arms: each file
+// holds the twin's bytes exactly, under the grammar its name selects — so
+// an arm differs from its twin in the file's name alone. A mismatch is a
+// harness error thrown at load, never a product verdict.
+for (const arm of CONFIG_NAME_ARMS) {
+  if (
+    configText(arm.config) !== configText(SPECS_ONLY_CONFIG) ||
+    arm.config.grammar !== tsGrammarOf(arm.name)
+  ) {
+    throw new Error(
+      `T7-1 fixture self-check: ${arm.name} must hold the bytes of its ` +
+        `twin ${CONFIG_NAME_TWIN} (the canonical configuration), judged ` +
+        `under the grammar its name selects (${tsGrammarOf(arm.name)}; ` +
+        `SPEC 14.20); its record ${JSON.stringify(arm.config.name)} is ` +
+        `judged under ${arm.config.grammar} and holds ` +
+        JSON.stringify(configText(arm.config)),
+    );
+  }
+}
+
+/**
+ * T7-1's configuration file names (SPEC 7: `--config` names any path, the
+ * file judged by the grammar its name selects, 14.20): `--config
+ * xspec.config.mts`, `--config xspec.config.cts`, and `--config
+ * xspec.config.tsx`, each run from the root of a fresh workspace holding
+ * that plain file — the canonical configuration's bytes — beside the
+ * minimal source and no `xspec.config.ts`, each load: `build` and then
+ * `check` exit 0, and `inventory`'s `configuration` is byte-identical to
+ * its twin's, the same bytes named `xspec.config.ts` in a workspace of its
+ * own, driven by the same commands given `--config xspec.config.ts`
+ * (module header). A product admitting a `.ts` name alone refuses an arm
+ * and fails `build`'s exit code; one reading a name's file otherwise than
+ * its twin's fails the comparison.
+ */
+async function runConfigurationNameArms(
+  product: ProductBinding,
+): Promise<void> {
+  const views: { readonly name: string; readonly view: unknown }[] = [];
+  for (const arm of CONFIG_NAME_ARMS) {
+    const grammar =
+      tsGrammarOf(arm.name) === "tsx" ? "TSX" : "plain TypeScript";
+    views.push({
+      name: arm.name,
+      view: await configurationViewOf(
+        product,
+        arm.config,
+        `T7-1 (configuration file names: --config ${arm.name}, a plain ` +
+          `file at the root holding a valid configuration's bytes, no ` +
+          `${CONFIG_NAME_TWIN} existing — --config names any path, the ` +
+          `file judged by the grammar its name selects, ${grammar} here ` +
+          `(SPEC 7, 14.20); a product admitting a .ts name alone refuses ` +
+          `it)`,
+        { check: true, configPath: arm.name },
+      ),
+    });
+  }
+  const twinView = await configurationViewOf(
+    product,
+    SPECS_ONLY_CONFIG,
+    `T7-1 (configuration file names: the twin, the same bytes named ` +
+      `${CONFIG_NAME_TWIN}, given by --config ${CONFIG_NAME_TWIN})`,
+    { check: true, configPath: CONFIG_NAME_TWIN },
+  );
+  for (const { name, view } of views) {
+    assertConfigurationViewsIdentical(
+      view,
+      twinView,
+      "T7-1 (configuration file names): `inventory`'s `configuration` " +
+        `member under --config ${name} is byte-identical to its twin's, ` +
+        `the same bytes named ${CONFIG_NAME_TWIN} and given by --config ` +
+        `${CONFIG_NAME_TWIN} — the file's name selects only the grammar it ` +
+        `is judged by, a choice no file in 7's declarative form observes ` +
+        `(SPEC 7, 14.20, 11.6)`,
+    );
+  }
+}
+
 const T7_1 = defineProductTest({
   id: "T7-1",
   title:
@@ -911,7 +1206,13 @@ const T7_1 = defineProductTest({
     "working directory beneath the valid root configuration is passed by " +
     "the search, which loads the root's configuration, `build` and then " +
     "`check` run from there exiting 0 (a single-casing probe, rerun on the " +
-    "Windows leg, E-6) (SPEC 7, 12.0, 12.6, 12.7, 14.14)",
+    "Windows leg, E-6); configuration file names — --config naming " +
+    "xspec.config.mts, xspec.config.cts, or xspec.config.tsx, a plain " +
+    "file at the root holding a valid configuration's bytes with no " +
+    "xspec.config.ts existing, loads, the file judged by the grammar its " +
+    "name selects: `build` and `check` exit 0, and inventory's " +
+    "configuration is byte-identical to its twin's, the same bytes named " +
+    "xspec.config.ts (SPEC 7, 11.6, 12.0, 12.6, 12.7, 14.14, 14.20)",
   run: async (product) => {
     await withWorkspace(
       { files: LOCATION_FILES, dirs: [SEARCH_CWD] },
@@ -1057,6 +1358,13 @@ const T7_1 = defineProductTest({
     // symbolic link (SPEC 7, 14.14; helpers above).
     await runOccupancyArms(product);
 
+    // Configuration file names: --config naming xspec.config.mts,
+    // xspec.config.cts, or xspec.config.tsx loads, its resolved view
+    // byte-identical to its twin's, the same bytes named xspec.config.ts
+    // (SPEC 7, 14.20; helpers above). Run before the name-casing probe,
+    // which stays last.
+    await runConfigurationNameArms(product);
+
     // Name casing: a plain file XSPEC.config.ts beneath the valid root
     // configuration is no entry named xspec.config.ts (SPEC 7, 12.0) — the
     // single-casing probe the Windows leg reruns (E-6; helpers above).
@@ -1068,17 +1376,75 @@ const T7_1 = defineProductTest({
 // T7-2 — declarative form
 // ---------------------------------------------------------------------------
 
+// Verbatim spellings (SPEC 7, 2.4: configuration literals are static string
+// literals read exactly as spelled). Every escape spelling this module
+// stages is built from the backslash's code point, so that its characters
+// reach the staged file exactly — a template literal would itself interpret
+// a backslash escape — and this source spells no escape (the header's
+// verbatim-literal note).
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+// Binding forms (SPEC 7: exactly an import of `defineConfig`, optionally
+// aliased; 2.4; module header): the canonical configuration imported under
+// the alias `d`, its import name spelled `importName` — the identifier
+// `defineConfig` (the identifier-named twin), the string literal
+// `"defineConfig"` (that import, aliased: it loads), or that string literal
+// with the name's `C` written as the hexadecimal escape of U+0043 (read
+// verbatim, it imports no `defineConfig`: refused, FORM_VIOLATIONS). The
+// three files differ in the import name's spelling alone.
+function bindingFormConfig(importName: string): string {
+  return `import { ${importName} as d } from "xspec"
+
+export default d({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`;
+}
+const STRING_IMPORT_NAME = '"defineConfig"';
+const ESCAPE_SPELLED_IMPORT_NAME = `"define${BACKSLASH}x43onfig"`;
+
+// The module-load self-check of the escape-spelled import name: it holds
+// exactly one backslash, followed by `x43`, and with that one escape decoded
+// (U+0043 is `C`) it is the string-literal import name — so the refused file
+// differs from the loading one in that escape alone, and no escape was
+// decoded or lost on its way to the staged text. A mismatch is a harness
+// error thrown at load, never a product verdict.
+if (
+  ESCAPE_SPELLED_IMPORT_NAME.split(BACKSLASH).length !== 2 ||
+  ESCAPE_SPELLED_IMPORT_NAME.indexOf(`${BACKSLASH}x43`) !== '"define'.length ||
+  ESCAPE_SPELLED_IMPORT_NAME.replace(
+    `${BACKSLASH}x43`,
+    String.fromCodePoint(0x43),
+  ) !== STRING_IMPORT_NAME ||
+  bindingFormConfig(ESCAPE_SPELLED_IMPORT_NAME).split(BACKSLASH).length !== 2
+) {
+  throw new Error(
+    "T7-2 fixture self-check: the escape-spelled import name must be the " +
+      'string literal "defineConfig" with its C written as the hexadecimal ' +
+      "escape of U+0043 — one backslash, then x43, after define — and its " +
+      "configuration must hold that backslash alone (module header); got " +
+      JSON.stringify(ESCAPE_SPELLED_IMPORT_NAME),
+  );
+}
+
 // Each fixture is SPECS_ONLY_CONFIG with exactly one deviation (module
 // header). SPEC 7: the file MUST consist of exactly an import of
-// `defineConfig` from `"xspec"` (optionally aliased) and a default export of
-// one call to that binding whose sole argument is statically literal —
-// object literals with non-computed identifier or string-literal keys, array
-// literals, static string literals, and the boolean literals; no other
-// statement or expression form, no spread, no computed value. The rows
-// follow TEST-SPEC's order: the import (its specifier `"XSPEC"` among the
-// misdirected ones), extra statements, each non-literal argument form, the
-// `null` literal, a non-call default export, a call without a sole
-// argument, a numeric-literal key, and the import's modifiers.
+// `defineConfig` (optionally aliased) whose module specifier is any static
+// string literal, and a default export of one call to that binding whose
+// sole argument is statically literal — object literals with non-computed
+// identifier or string-literal keys, array literals, static string
+// literals, and the boolean literals; no other statement or expression
+// form, no spread, no computed value. The rows follow TEST-SPEC's order: a
+// syntax error, the missing import, extra statements, each non-literal
+// argument form, the `null` literal, a non-call default export, a call
+// without a sole argument, a numeric-literal key, the wrapped forms and
+// call variants, the refused binding forms, the import's modifiers, and the
+// statement forms. The escape-spelled import name's valid twin is the
+// string-literal import name's file (`bindingFormConfig`, loaded by the
+// body), the escape its one deviation. No row varies the specifier: any
+// static string literal is valid there (SPEC 7), T7-9's subject.
 const FORM_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
@@ -1093,30 +1459,6 @@ export default defineConfig({
   {
     label: "missing defineConfig import",
     config: `export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  }
-})
-`,
-  },
-  {
-    label: 'import from a specifier other than "xspec"',
-    config: `import { defineConfig } from "not-xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  }
-})
-`,
-  },
-  {
-    label:
-      'import from the specifier "XSPEC": a single-casing arm, no case ' +
-      "folding anywhere (SPEC 12.0)",
-    config: `import { defineConfig } from "XSPEC"
-
-export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
@@ -1308,6 +1650,182 @@ export default defineConfig({
 })
 `,
   },
+  // Wrapped forms and call variants (SPEC 7: exactly the import and a
+  // default export of one call to that binding whose sole argument is
+  // statically literal — no other statement or expression form): the call
+  // wrapped, the argument wrapped, a value inside it wrapped, and the call
+  // spelled with syntax outside 7's list — nine well-formed texts, one arm
+  // each (module header).
+  {
+    label:
+      "the call wrapped: export default defineConfig({…}) satisfies object",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+}) satisfies object
+`,
+  },
+  {
+    label: "the call wrapped: export default (defineConfig({…}))",
+    config: `import { defineConfig } from "xspec"
+
+export default (defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+}))
+`,
+  },
+  {
+    label:
+      "the call wrapped: export default defineConfig({…})!, a non-null " +
+      "assertion",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})!
+`,
+  },
+  {
+    label: "the argument wrapped: defineConfig({…} as const)",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+} as const)
+`,
+  },
+  {
+    label: "the argument wrapped: defineConfig(({…}))",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig(({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+}))
+`,
+  },
+  {
+    label:
+      "a value inside the argument wrapped: markdown: { emit: true as " +
+      "boolean }",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true as boolean }
+})
+`,
+  },
+  {
+    label: "a value inside the argument wrapped: specs: ({…})",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: ({
+    main: ["specs/**/*.mdx"]
+  })
+})
+`,
+  },
+  {
+    label:
+      "the call spelled outside 7's list: export default " +
+      "defineConfig<object>({…}), carrying type arguments",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig<object>({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      "the call spelled outside 7's list: export default " +
+      "defineConfig?.({…}), an optional call",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig?.({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  // Binding forms (SPEC 7: exactly an import of `defineConfig`, optionally
+  // aliased; 2.4): the escape-spelled string-literal import name, read
+  // verbatim, imports no `defineConfig`; a default import, a namespace
+  // import, an extra default binding, and an extra named binding are no
+  // import of exactly `defineConfig` — five well-formed texts, one arm each
+  // (module header).
+  {
+    label:
+      "an escape-spelled string-literal import name: import { " +
+      '"defineConfig" as d } from "xspec" with the name' +
+      "'s C written as the hexadecimal escape of U+0043 — read verbatim, " +
+      "it imports no defineConfig (2.4)",
+    config: bindingFormConfig(ESCAPE_SPELLED_IMPORT_NAME),
+  },
+  {
+    label: 'a default import: import defineConfig from "xspec"',
+    config: `import defineConfig from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      'a namespace import: import * as X from "xspec" with export default ' +
+      "X.defineConfig({…})",
+    config: `import * as X from "xspec"
+
+export default X.defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: 'an extra default binding: import d, { defineConfig } from "xspec"',
+    config: `import d, { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      'an extra named binding: import { defineConfig, other } from "xspec"',
+    config: `import { defineConfig, other } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
   // The import carries no `type` or `defer` modifier and no import
   // attributes (SPEC 7): four well-formed texts (module header).
   {
@@ -1358,6 +1876,40 @@ export default defineConfig({
 })
 `,
   },
+  // Statement forms (SPEC 7: exactly an import of `defineConfig` and a
+  // default export of one call to that binding, no other statement form):
+  // TypeScript's two CommonJS-interop statements — an export assignment,
+  // which is no default export, and an import assignment, which binds the
+  // module itself and imports no `defineConfig` — two well-formed texts,
+  // one arm each (module header).
+  {
+    label:
+      "a statement form: an export assignment, export = " +
+      'defineConfig({…}) beside import { defineConfig } from "xspec" — no ' +
+      "default export",
+    config: `import { defineConfig } from "xspec"
+
+export = defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      "a statement form: an import assignment, import defineConfig = " +
+      'require("xspec") beside export default defineConfig({…}) — it ' +
+      "binds the module itself, importing no defineConfig",
+    config: `import defineConfig = require("xspec")
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
 ]);
 
 // The valid arm: an aliased defineConfig import (SPEC 7: optionally aliased).
@@ -1372,6 +1924,68 @@ export default makeConfig({
 })
 `,
 );
+
+// The valid binding form (SPEC 7, 2.4; module header): the string-literal
+// import name spelling `defineConfig` is that import, aliased, and loads
+// alike with its identifier-named twin, the same file but for the name's
+// quotes (`bindingFormConfig`). Records made at module load: T7-2 stages
+// both after a product invocation (S-9's timing clause).
+const STRING_IMPORT_NAME_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (binding forms: a string-literal import name, import { "defineConfig" as d } from "xspec")',
+  bindingFormConfig(STRING_IMPORT_NAME),
+);
+const IDENTIFIER_IMPORT_NAME_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (binding forms: the identifier-named twin, import { defineConfig as d } from "xspec")',
+  bindingFormConfig("defineConfig"),
+);
+
+// Statement order (SPEC 7 fixes which statements the file holds, never
+// their order; an import binds its name throughout its module, so a call
+// spelled before it calls that binding; module header): the canonical
+// configuration's two statements, the default export first and the import
+// after it. `twoStatementConfig` composes a file from the two statements in
+// the order given, one blank line between them; the import-first order is
+// the canonical text itself (`SPECS_ONLY_CONFIG`, the twin the body
+// compares against), so the two files differ in the statements' order
+// alone. A record made at module load: T7-2 stages it after a product
+// invocation (S-9's timing clause).
+const CANONICAL_IMPORT_STATEMENT = 'import { defineConfig } from "xspec"';
+const CANONICAL_EXPORT_STATEMENT = `export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})`;
+function twoStatementConfig(first: string, second: string): string {
+  return `${first}
+
+${second}
+`;
+}
+const STATEMENT_ORDER_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (statement order: export default defineConfig({…}) followed by import { defineConfig } from "xspec")',
+  twoStatementConfig(CANONICAL_EXPORT_STATEMENT, CANONICAL_IMPORT_STATEMENT),
+);
+
+// The module-load self-check of the statement-order pair: the import-first
+// composition is the canonical configuration byte for byte, and the
+// export-first file holds the same two statements in the other order — so
+// the arm's one deviation from its twin is the order. A mismatch is a
+// harness error thrown at load, never a product verdict.
+if (
+  twoStatementConfig(CANONICAL_IMPORT_STATEMENT, CANONICAL_EXPORT_STATEMENT) !==
+    configText(SPECS_ONLY_CONFIG) ||
+  configText(STATEMENT_ORDER_CONFIG).indexOf(CANONICAL_IMPORT_STATEMENT) <=
+    configText(STATEMENT_ORDER_CONFIG).indexOf(CANONICAL_EXPORT_STATEMENT)
+) {
+  throw new Error(
+    "T7-2 fixture self-check: the statement-order arm must be the canonical " +
+      "configuration's import and default export exchanged — the " +
+      "import-first composition equal to the canonical text, the " +
+      "export-first file holding the default export before the import " +
+      "(module header); got " +
+      JSON.stringify(configText(STATEMENT_ORDER_CONFIG)),
+  );
+}
 
 // The string-literal keys arm (SPEC 7: the statically literal argument's
 // object literals carry "non-computed identifier or string-literal keys"):
@@ -1456,10 +2070,10 @@ const QUOTED_KEYS_EDGES: readonly GraphEdge[] = [
 
 // Verbatim literals (SPEC 7, 2.4: configuration literals are static string
 // literals read exactly as spelled). The escape spellings below are built
-// from the backslash's code point so the six characters reach the staged
-// file exactly — a template literal would itself interpret a backslash-u
-// escape (the header's verbatim-literal note).
-const BACKSLASH = String.fromCodePoint(0x5c);
+// from the backslash's code point (`BACKSLASH`, defined with T7-2's binding
+// forms above) so the six characters reach the staged file exactly — a
+// template literal would itself interpret a backslash-u escape (the
+// header's verbatim-literal note).
 
 // A glob spelled with the six-character escape of `*` (backslash, `u002A`)
 // is read as those characters: it names only a file literally so called,
@@ -1485,13 +2099,17 @@ export default defineConfig({
 // `target: "product"` is then an unknown group (14.14, SPEC 7.4) while the
 // same escape spelling resolves. `boundary` carries the verbatim spelling
 // in both fixtures, so the profile's target is their only difference.
+// `groupKey` spells the group's key: the string literal here, and the
+// identifier `prod`, backslash, `u0075`, `ct` in the identifier-key arms
+// below (SPEC 7, 2.4: an identifier key is read as spelled too).
 const VERBATIM_GROUP_NAME = `prod${BACKSLASH}u0075ct`;
-function verbatimNameConfig(target: string): string {
+const VERBATIM_GROUP_STRING_KEY = `"${VERBATIM_GROUP_NAME}"`;
+function verbatimNameConfig(groupKey: string, target: string): string {
   return `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
-    "${VERBATIM_GROUP_NAME}": ["specs/**/*.mdx"]
+    ${groupKey}: ["specs/**/*.mdx"]
   },
   coverage: [
     {
@@ -1509,12 +2127,374 @@ export default defineConfig({
 // both after a product invocation (S-9's timing clause).
 const VERBATIM_NAME_UNKNOWN_TARGET_CONFIG = stagedTs(
   'T7-2 xspec.config.ts (verbatim group name: a profile\'s target "product")',
-  verbatimNameConfig("product"),
+  verbatimNameConfig(VERBATIM_GROUP_STRING_KEY, "product"),
 );
 const VERBATIM_NAME_CONFIG = stagedTs(
   "T7-2 xspec.config.ts (verbatim group name: the target spelled as the group's key)",
-  verbatimNameConfig(VERBATIM_GROUP_NAME),
+  verbatimNameConfig(VERBATIM_GROUP_STRING_KEY, VERBATIM_GROUP_NAME),
 );
+
+// Keys and enumerated values read as spelled (SPEC 7, 2.4; the spellings
+// 7.6's covered-file bar cites; module header): a key or an enumerated
+// value spelled with an escape is read as its characters, as every
+// configuration literal is, and an identifier key alike — its characters
+// as spelled, where TypeScript decodes an identifier's Unicode escapes.
+// Each spelling below holds one escape, built from `BACKSLASH` so that this
+// source spells none, and is pinned at module load.
+
+/**
+ * An escape spelling pinned at module load (T7-2; module header): `spelled`
+ * holds exactly one backslash, followed by `escapeText` — `x` and two
+ * hexadecimal digits, or `u` and four — which designates `character`, and
+ * with that one escape decoded the spelling is `decoded`. So a staged file
+ * differs from its decoded twin in that escape alone, and no escape was
+ * decoded or lost on its way to the staged text. A mismatch is a harness
+ * error thrown at load, never a product verdict.
+ */
+function checkedEscapeSpelling(
+  spelled: string,
+  escapeText: string,
+  character: string,
+  decoded: string,
+): string {
+  const sequence = `${BACKSLASH}${escapeText}`;
+  if (
+    !/^(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4})$/.test(escapeText) ||
+    String.fromCodePoint(Number.parseInt(escapeText.slice(1), 16)) !==
+      character ||
+    spelled.split(BACKSLASH).length !== 2 ||
+    !spelled.includes(sequence) ||
+    spelled.replace(sequence, character) !== decoded
+  ) {
+    throw new Error(
+      `T7-2 fixture self-check: ${JSON.stringify(spelled)} must hold ` +
+        `exactly one backslash, followed by ${escapeText} (an escape of ` +
+        `${JSON.stringify(character)}), and decode to ` +
+        `${JSON.stringify(decoded)} (module header)`,
+    );
+  }
+  return spelled;
+}
+
+// The string-literal spellings: the top-level key `"specs"` with its `s`
+// written as the hexadecimal escape of U+0073 (backslash, `x73`); the
+// `mode` value `"direct"` with its `d` written as that of U+0064
+// (backslash, `x64`); and the group key `"ab"` with its `b` written as that
+// of U+0062 (backslash, `x62`), distinct as spelled from `"ab"`.
+const ESCAPED_SPECS_STRING_KEY = checkedEscapeSpelling(
+  `"${BACKSLASH}x73pecs"`,
+  "x73",
+  "s",
+  '"specs"',
+);
+const ESCAPED_DIRECT_MODE = checkedEscapeSpelling(
+  `"${BACKSLASH}x64irect"`,
+  "x64",
+  "d",
+  '"direct"',
+);
+const ESCAPED_AB_STRING_KEY = checkedEscapeSpelling(
+  `"a${BACKSLASH}x62"`,
+  "x62",
+  "b",
+  '"ab"',
+);
+// The identifier twins: the keys `specs` and `ab` with their `s` and `b`
+// written as the Unicode escapes of U+0073 and U+0062 (backslash, `u0073`;
+// backslash, `u0062`), and the verbatim group name keyed as an identifier
+// (`prod`, backslash, `u0075`, `ct`).
+const ESCAPED_SPECS_IDENTIFIER = checkedEscapeSpelling(
+  `${BACKSLASH}u0073pecs`,
+  "u0073",
+  "s",
+  "specs",
+);
+const ESCAPED_AB_IDENTIFIER = checkedEscapeSpelling(
+  `a${BACKSLASH}u0062`,
+  "u0062",
+  "b",
+  "ab",
+);
+const VERBATIM_GROUP_IDENTIFIER_KEY = checkedEscapeSpelling(
+  VERBATIM_GROUP_NAME,
+  "u0075",
+  "u",
+  "product",
+);
+
+/** The canonical configuration with its top-level key spelled `key`. */
+function canonicalWithSpecsKey(key: string): string {
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  ${key}: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`;
+}
+
+// The refused string-literal arms (14.14, exit 2), one each, every file the
+// canonical configuration — for `mode`, the `targetTags: null` row's valid
+// twin, a profile over `main` — with one escape as its deviation, valid
+// with that escape decoded, so a product decoding escapes loads it and
+// builds (exit 0). Read as spelled, the top-level key is no `specs` (an
+// unknown key, `specs` then missing) and the `mode` value is no mode.
+const SPELLED_KEY_VIOLATIONS = refusedConfigArms("T7-2", [
+  {
+    label:
+      'keys read as spelled: a top-level string-literal key "specs" with ' +
+      "its s written as the hexadecimal escape of U+0073 — an unknown key, " +
+      "specs then missing",
+    config: canonicalWithSpecsKey(ESCAPED_SPECS_STRING_KEY),
+  },
+  {
+    label:
+      "enumerated values read as spelled: a coverage profile with mode " +
+      '"direct", its d written as the hexadecimal escape of U+0064 — no ' +
+      "mode",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p",
+      target: "main",
+      boundary: "main",
+      mode: ${ESCAPED_DIRECT_MODE}
+    }
+  ]
+})
+`,
+  },
+]);
+
+// The refused identifier twins (14.14, exit 2), one each: the canonical
+// configuration with its top-level identifier key `specs` written with the
+// escape of its `s` — read as spelled, an unknown key, `specs` then missing
+// — and the verbatim group name keyed as an identifier under a profile
+// whose `target: "product"` names no configured group, its resolving twin
+// (`IDENTIFIER_NAME_CONFIG`) differing in that target alone.
+const SPELLED_IDENTIFIER_KEY_VIOLATIONS = refusedConfigArms("T7-2", [
+  {
+    label:
+      "identifier keys read as spelled: a top-level identifier key specs " +
+      "with its s written as the Unicode escape of U+0073 — an unknown " +
+      "key, specs then missing",
+    config: canonicalWithSpecsKey(ESCAPED_SPECS_IDENTIFIER),
+  },
+  {
+    label:
+      "identifier keys read as spelled: a spec group keyed by the " +
+      "identifier product with its u written as the Unicode escape of " +
+      'U+0075 — a profile target "product" names no configured group',
+    config: verbatimNameConfig(VERBATIM_GROUP_IDENTIFIER_KEY, "product"),
+  },
+]);
+
+// The identifier-keyed group named by a target spelled as its key — a
+// record made at module load: T7-2 stages it after a product invocation
+// (S-9's timing clause).
+const IDENTIFIER_NAME_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (identifier keys read as spelled: a spec group keyed by the identifier product with its u written as the Unicode escape of U+0075, the target spelled as its key)",
+  verbatimNameConfig(VERBATIM_GROUP_IDENTIFIER_KEY, VERBATIM_GROUP_NAME),
+);
+
+// Keys distinct as spelled (SPEC 7, 2.4): the spec groups keyed `ab` and its
+// escape-spelled twin — string literals, or identifiers — are two groups,
+// no key repeated, each globbing its own directory over one minimal source
+// there (`expectTwoSpelledGroups`); a product decoding the escape reads the
+// key `ab` twice and refuses the file (14.14). Records made at module load:
+// T7-2 stages both after a product invocation (S-9's timing clause).
+function twoSpelledGroupsConfig(firstKey: string, secondKey: string): string {
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    ${firstKey}: ["a/*.mdx"],
+    ${secondKey}: ["b/*.mdx"]
+  }
+})
+`;
+}
+const STRING_KEYS_TWO_GROUPS_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (keys read as spelled: the string-literal group keys "ab" and "ab" with its b written as the hexadecimal escape of U+0062)',
+  twoSpelledGroupsConfig('"ab"', ESCAPED_AB_STRING_KEY),
+);
+const IDENTIFIER_KEYS_TWO_GROUPS_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (identifier keys read as spelled: the group keys ab and ab with its b written as the Unicode escape of U+0062)",
+  twoSpelledGroupsConfig("ab", ESCAPED_AB_IDENTIFIER),
+);
+
+// The module-load self-check of the composed files: the canonical
+// composition with the plain key is the canonical text byte for byte, so
+// each top-level-key arm differs from it in the key's spelling alone; and
+// each file holds the backslashes its spellings bring and no other — one in
+// each refused arm but the identifier-keyed group's, two there (its key
+// and its boundary), three in its resolving twin, and one in each
+// two-group file. A mismatch is a harness error thrown at load, never a
+// product verdict.
+const SPELLED_KEY_BACKSLASHES = [
+  ...SPELLED_KEY_VIOLATIONS.map((arm) => arm.config),
+  ...SPELLED_IDENTIFIER_KEY_VIOLATIONS.map((arm) => arm.config),
+  IDENTIFIER_NAME_CONFIG,
+  STRING_KEYS_TWO_GROUPS_CONFIG,
+  IDENTIFIER_KEYS_TWO_GROUPS_CONFIG,
+].map((config) => configText(config).split(BACKSLASH).length - 1);
+if (
+  canonicalWithSpecsKey("specs") !== configText(SPECS_ONLY_CONFIG) ||
+  JSON.stringify(SPELLED_KEY_BACKSLASHES) !==
+    JSON.stringify([1, 1, 1, 2, 3, 1, 1])
+) {
+  throw new Error(
+    "T7-2 fixture self-check: the canonical composition with the plain " +
+      "top-level key must be the canonical text, and the files of the keys " +
+      "read as spelled must hold 1, 1, 1, 2, 3, 1, and 1 backslashes " +
+      "(module header); got " +
+      JSON.stringify(SPELLED_KEY_BACKSLASHES),
+  );
+}
+
+/**
+ * A verbatim group name resolving (T7-2's group-name arms; module header):
+ * `config` — the spec group keyed `prod`, backslash, `u0075`, `ct`, as a
+ * string literal or as an identifier, its profile's target and boundary
+ * spelled as that key is — staged beside the minimal source; `build` loads
+ * it (exit 0), `inventory` names the group as spelled, and the profile's
+ * rows show its target resolved: with the boundary the same group, the
+ * target set is the group's one leaf, uncovered (8.1, 8.2).
+ */
+async function expectVerbatimGroupNameResolves(
+  product: ProductBinding,
+  config: StagedTs,
+  label: string,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": config,
+        "specs/A.mdx": SECTION_A_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${label}: ` +
+          "`build` — the profile's target and boundary, spelled as the " +
+          "group's key is, resolve (SPEC 7, 2.4, 7.4)",
+      );
+      const inventoryLabel = `${label} ` + "`inventory --json`";
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          inventoryLabel,
+        ),
+        inventoryLabel,
+      );
+      assertSameJson(
+        inventory.configuration.specs.map((group) => group.name),
+        [VERBATIM_GROUP_NAME],
+        `${inventoryLabel}: the group is named as spelled — eleven ` +
+          `characters, the six of the escape included — never the ` +
+          `interpreted "product" (SPEC 7, 2.4, 11.6)`,
+      );
+      const coverageLabel = `${label} ` + "`coverage --json`";
+      const coverage = decodeCoverageReport(
+        await runJson(
+          product,
+          workspace,
+          ["coverage", "--json"],
+          coverageLabel,
+        ),
+        coverageLabel,
+      );
+      assertSameJson(
+        coverage.profiles.map((row) => ({
+          name: row.name,
+          covered: row.covered.map((entry) => entry.identity),
+          uncovered: [...row.uncovered].sort(),
+        })),
+        [{ name: "verbatim", covered: [], uncovered: ["specs/A.mdx#a"] }],
+        `${coverageLabel}: the profile resolved its target — the ` +
+          `group's one leaf is its target set, uncovered under a ` +
+          `boundary sourcing no edge into it (SPEC 7, 2.4, 7.4, 8.1, 8.2)`,
+      );
+    },
+  );
+}
+
+/**
+ * Keys distinct as spelled (T7-2; module header): `config` — the spec
+ * groups keyed `ab` (`a/*.mdx`) and its escape-spelled twin (`b/*.mdx`),
+ * whose name as spelled is `secondName` — staged beside the minimal sources
+ * `a/A.mdx` and `b/B.mdx`; `build` loads it (exit 0), and `inventory --json`
+ * reports both groups in configuration order, the second named as spelled,
+ * and each source a member of its own glob's group alone, in byte order of
+ * path (11.6).
+ */
+async function expectTwoSpelledGroups(
+  product: ProductBinding,
+  config: StagedTs,
+  secondName: string,
+  label: string,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": config,
+        "a/A.mdx": SECTION_A_SOURCE,
+        "b/B.mdx": SECTION_B_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${label}: ` +
+          "`build` — two groups, no key repeated: the configuration loads " +
+          "(SPEC 7, 2.4)",
+      );
+      const inventoryLabel = `${label} ` + "`inventory --json`";
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          inventoryLabel,
+        ),
+        inventoryLabel,
+      );
+      assertSameJson(
+        inventory.configuration.specs,
+        [
+          { name: "ab", globs: ["a/*.mdx"] },
+          { name: secondName, globs: ["b/*.mdx"] },
+        ],
+        `${inventoryLabel}: both groups are reported in configuration ` +
+          `order, the escape-spelled key's group named as spelled — ` +
+          `${JSON.stringify(secondName)} as a JSON string, the escape's ` +
+          `characters included — never the decoded "ab" (SPEC 7, 2.4, 11.6)`,
+      );
+      assertSameJson(
+        inventory.sources,
+        [
+          { path: "a/A.mdx", groups: [{ name: "ab", kind: "spec" }] },
+          { path: "b/B.mdx", groups: [{ name: secondName, kind: "spec" }] },
+        ],
+        `${inventoryLabel}: each group discovers its own glob's file — ` +
+          `a/A.mdx a member of "ab" alone and b/B.mdx of the ` +
+          `escape-spelled key's group alone, in byte order of path ` +
+          `(SPEC 7, 7.1, 11.6)`,
+      );
+    },
+  );
+}
 
 // Encoding (SPEC 7: the file's bytes MUST be valid UTF-8 and MUST NOT begin
 // with a byte-order mark; either violation is 14.14). The non-UTF-8 fixture
@@ -1648,12 +2628,17 @@ export default defineConfig({
 ]);
 
 // Comments (SPEC 7: permitted anywhere, contributing nothing). The commented
-// fixture places line and block comments before the import, after it,
-// before the first key, between keys, inside the glob list (after a glob
-// and between two globs), after the list, after the export, and after
-// everything; its twin is the same configuration with every comment
-// removed. Two globs and a `markdown` key give the "between" positions
-// something to stand between (`docs/` matches nothing: valid, 7).
+// fixture places line and block comments before the import, inside the
+// import declaration between each two of its tokens, after it, before the
+// first key, between keys, inside the glob list (after a glob and between
+// two globs), after the list, after the export, and after everything; its
+// twin is the same configuration with every comment removed. The import
+// declaration is spelled as TEST-SPEC T7-2 spells it: `/* c */` between
+// `import` and `{`, `{` and `defineConfig`, `defineConfig` and `}`, and `}`
+// and `from`; `// c` after `from`, its line feed putting the module
+// specifier `"xspec"` on the next line; and `/* c */` after the specifier.
+// Two globs and a `markdown` key give the "between" positions something to
+// stand between (`docs/` matches nothing: valid, 7).
 const COMMENT_FREE_CONFIG = stagedTs(
   "T7-2 xspec.config.ts (comment-free twin)",
   `import { defineConfig } from "xspec"
@@ -1674,7 +2659,8 @@ const COMMENTED_CONFIG = stagedTs(
   `// a line comment before the import
 /* a block comment
    before the import */
-import { defineConfig } from "xspec" // after the import
+import /* c */ { /* c */ defineConfig /* c */ } /* c */ from // c
+"xspec" /* c */ // after the import
 
 export default defineConfig({
   // before the first key
@@ -1691,25 +2677,125 @@ export default defineConfig({
 `,
 );
 
+/**
+ * The resolved configuration view under `config` (T7-1's configuration
+ * file names; T7-2's comments, string-literal import name, and
+ * statement-order arms; module header): `config` staged beside the minimal
+ * source in a fresh workspace — as `xspec.config.ts`, found by the upward
+ * search, or, where `configPath` is given (T7-1), at that path under the
+ * root and nowhere else, every command naming it through `--config` —
+ * `build` required to load it (exit 0) — then, where `check` is asked for
+ * (T7-1's arms and twin, T7-2's statement-order arm), `check` required to
+ * exit 0 too — and the `configuration` member of `inventory --json`
+ * returned as reported, the document form-decoded first.
+ */
+async function configurationViewOf(
+  product: ProductBinding,
+  config: StagedTs,
+  label: string,
+  options: { readonly check?: true; readonly configPath?: string } = {},
+): Promise<unknown> {
+  const configArgv: readonly string[] =
+    options.configPath === undefined ? [] : ["--config", options.configPath];
+  const spelled = (...argv: readonly string[]): string =>
+    "`" + [...argv, ...configArgv].join(" ") + "`";
+  return await withWorkspace(
+    {
+      files: {
+        [options.configPath ?? "xspec.config.ts"]: config,
+        "specs/A.mdx": SECTION_A_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await expectExit(
+        product,
+        workspace,
+        ["build", ...configArgv],
+        0,
+        `${label}: ${spelled("build")} — the configuration loads (SPEC 7)`,
+      );
+      if (options.check === true) {
+        await expectExit(
+          product,
+          workspace,
+          ["check", ...configArgv],
+          0,
+          `${label}: ${spelled("check")} after the build — the ` +
+            "configuration loads, and the freshly built workspace yields " +
+            "no finding (SPEC 7, 12.0)",
+        );
+      }
+      const inventoryLabel = `${label} ${spelled("inventory", "--json")}`;
+      const raw = await runJson(
+        product,
+        workspace,
+        ["inventory", "--json", ...configArgv],
+        inventoryLabel,
+      );
+      decodeInventoryDocument(raw, inventoryLabel);
+      return (raw as { readonly configuration: unknown }).configuration;
+    },
+  );
+}
+
+/**
+ * Two resolved configuration views byte-identical (module header): equal
+ * as values and as serializations, member order included.
+ */
+function assertConfigurationViewsIdentical(
+  actual: unknown,
+  twin: unknown,
+  context: string,
+): void {
+  assertSameJson(actual, twin, context);
+  if (JSON.stringify(actual) !== JSON.stringify(twin)) {
+    fail(
+      `${context}; the members are equal as values but serialize ` +
+        `differently (member order): ${JSON.stringify(actual)} vs ` +
+        JSON.stringify(twin),
+    );
+  }
+}
+
 const T7_2 = defineProductTest({
   id: "T7-2",
   title:
-    "declarative form: a syntax error, a missing or misdirected " +
-    'defineConfig import (the specifier "XSPEC" among them: no case ' +
-    "folding, 12.0), a type or defer modifier or import attributes on " +
-    "that import, extra statements, each non-literal argument form, a " +
+    "declarative form: a syntax error, a missing defineConfig import, a " +
+    "type or defer modifier or import attributes on that import, extra " +
+    "statements, each non-literal argument form, a " +
     "null literal (markdown's outDir, a profile's targetTags), a non-call " +
     "default export, a call without a sole argument (defineConfig(), " +
-    "defineConfig({…}, {})), and a numeric-literal key are configuration " +
-    "errors (14.14, exit 2); an aliased defineConfig import is valid; " +
+    "defineConfig({…}, {})), a numeric-literal key, the call, its " +
+    "argument, or a value inside it wrapped (satisfies object, " +
+    "parentheses, a non-null assertion, as const, as boolean), the call " +
+    "spelled with type arguments or as an optional call, an escape-spelled " +
+    "string-literal import name, a default or namespace import, an extra " +
+    "default or named binding, an export assignment (export = " +
+    "defineConfig({…})), and an import assignment (import defineConfig = " +
+    'require("xspec")) are configuration errors (14.14, exit 2); an ' +
+    "aliased defineConfig import is valid, and so is a string-literal " +
+    "import name spelling defineConfig, read verbatim (2.4) — it loads, " +
+    "inventory's configuration byte-identical to its identifier-named " +
+    "twin's; the default export may precede the import — it loads, build " +
+    "and check exit 0, inventory's configuration byte-identical to its " +
+    "import-first twin's; " +
     "string-literal group-name keys are part of the accepted form — they " +
     "load, discover, and resolve in a coverage profile and a policy " +
     "selector (SPEC 7, 7.4, 7.5, 8); literals are read verbatim — an " +
     "escape-spelled glob matches nothing and an escape-spelled group name " +
-    "is named only by the same spelling (2.4); a non-UTF-8 file, a " +
+    "is named only by the same spelling (2.4); keys and enumerated values " +
+    "are read as spelled, an identifier key alike — an escape-spelled " +
+    "top-level key, a string literal or an identifier, is an unknown key " +
+    "(specs then missing) and an escape-spelled mode no mode, each a " +
+    "configuration error, while keys distinct only as spelled (ab and its " +
+    "escape-spelled twin, string literals or identifiers) load as two " +
+    "groups, each discovering its own glob's file, and an escape-spelled " +
+    "identifier group key is named only by the same spelling (2.4); a " +
+    "non-UTF-8 file, a " +
     "byte-order mark, a repeated key, and an empty spec group, code " +
     "group, profile, or rule name are configuration errors; comments " +
-    "anywhere contribute nothing (inventory's configuration " +
+    "anywhere, inside the import declaration between each two of its " +
+    "tokens included, contribute nothing (inventory's configuration " +
     "byte-identical to the comment-free twin's)",
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
@@ -1743,6 +2829,60 @@ const T7_2 = defineProductTest({
             `group drives discovery (SPEC 7)`,
         );
       },
+    );
+
+    // Binding forms (SPEC 7, 2.4): the string-literal import name spelling
+    // `defineConfig` is that import, aliased — it loads, and the inventory's
+    // resolved `configuration` view is byte-identical to its
+    // identifier-named twin's (compared as the comments arm compares). Its
+    // escape-spelled twin and the other binding forms are FORM_VIOLATIONS
+    // rows, refused above.
+    const stringImportNameView = await configurationViewOf(
+      product,
+      STRING_IMPORT_NAME_CONFIG,
+      'T7-2 (binding forms: the string-literal import name, import { "defineConfig" as d } from "xspec" — that import, aliased, read verbatim)',
+    );
+    const identifierImportNameView = await configurationViewOf(
+      product,
+      IDENTIFIER_IMPORT_NAME_CONFIG,
+      'T7-2 (binding forms: the identifier-named twin, import { defineConfig as d } from "xspec")',
+    );
+    assertConfigurationViewsIdentical(
+      stringImportNameView,
+      identifierImportNameView,
+      "T7-2 (binding forms): `inventory`'s `configuration` member under the " +
+        'string-literal import name, import { "defineConfig" as d } from ' +
+        '"xspec", is byte-identical to its identifier-named twin' +
+        "'s — the name, read verbatim, spells defineConfig, so the import " +
+        "is that import, aliased (SPEC 7, 2.4, 11.6)",
+    );
+
+    // Statement order (SPEC 7 fixes which statements the file holds, never
+    // their order): the default export spelled before the import loads —
+    // `build` and `check` exit 0 — and the inventory's resolved
+    // `configuration` view is byte-identical to its import-first twin's,
+    // the canonical file's (compared as the comments arm compares). The
+    // statement forms are FORM_VIOLATIONS rows, refused above.
+    const exportFirstView = await configurationViewOf(
+      product,
+      STATEMENT_ORDER_CONFIG,
+      'T7-2 (statement order: export default defineConfig({…}) followed by import { defineConfig } from "xspec")',
+      { check: true },
+    );
+    const importFirstView = await configurationViewOf(
+      product,
+      SPECS_ONLY_CONFIG,
+      "T7-2 (statement order: the import-first twin, the canonical " +
+        "configuration)",
+    );
+    assertConfigurationViewsIdentical(
+      exportFirstView,
+      importFirstView,
+      "T7-2 (statement order): `inventory`'s `configuration` member under " +
+        "the configuration whose default export precedes its import is " +
+        "byte-identical to its import-first twin's — an import binds its " +
+        "name throughout its module, and SPEC 7 fixes which statements the " +
+        "file holds, never their order (SPEC 7, 11.6)",
     );
 
     // String-literal group-name keys are part of the accepted form (SPEC 7):
@@ -1937,60 +3077,50 @@ const T7_2 = defineProductTest({
       'T7-2 (verbatim group name: a profile\'s target "product" names no ' +
         "configured group — the group's spelling contains a backslash)",
     );
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": VERBATIM_NAME_CONFIG,
-          "specs/A.mdx": SECTION_A_SOURCE,
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T7-2 (verbatim group name): `build` — the profile's target and " +
-            "boundary, spelled as the group's key is, resolve (SPEC 7, " +
-            "2.4, 7.4)",
-        );
-        const inventoryLabel = "T7-2 (verbatim group name) `inventory --json`";
-        const inventory = decodeInventoryDocument(
-          await runJson(
-            product,
-            workspace,
-            ["inventory", "--json"],
-            inventoryLabel,
-          ),
-          inventoryLabel,
-        );
-        assertSameJson(
-          inventory.configuration.specs.map((group) => group.name),
-          [VERBATIM_GROUP_NAME],
-          `${inventoryLabel}: the group is named as spelled — eleven ` +
-            `characters, the six of the escape included — never the ` +
-            `interpreted "product" (SPEC 7, 2.4, 11.6)`,
-        );
-        const coverageLabel = "T7-2 (verbatim group name) `coverage --json`";
-        const coverage = decodeCoverageReport(
-          await runJson(
-            product,
-            workspace,
-            ["coverage", "--json"],
-            coverageLabel,
-          ),
-          coverageLabel,
-        );
-        assertSameJson(
-          coverage.profiles.map((row) => ({
-            name: row.name,
-            covered: row.covered.map((entry) => entry.identity),
-            uncovered: [...row.uncovered].sort(),
-          })),
-          [{ name: "verbatim", covered: [], uncovered: ["specs/A.mdx#a"] }],
-          `${coverageLabel}: the profile resolved its target — the ` +
-            `group's one leaf is its target set, uncovered under a ` +
-            `boundary sourcing no edge into it (SPEC 7, 2.4, 7.4, 8.1, 8.2)`,
-        );
-      },
+    await expectVerbatimGroupNameResolves(
+      product,
+      VERBATIM_NAME_CONFIG,
+      "T7-2 (verbatim group name)",
+    );
+
+    // Keys and enumerated values are read as spelled too (SPEC 7, 2.4): a
+    // string-literal top-level key and a profile's `mode` spelled with an
+    // escape are refused (14.14) — no `specs`, and no mode — while the
+    // keys "ab" and its escape-spelled twin declare two groups that load,
+    // each discovering its own glob's file.
+    for (const arm of SPELLED_KEY_VIOLATIONS) {
+      await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
+    }
+    await expectTwoSpelledGroups(
+      product,
+      STRING_KEYS_TWO_GROUPS_CONFIG,
+      // The name as spelled: the characters between its delimiters (2.4).
+      ESCAPED_AB_STRING_KEY.slice(1, -1),
+      'T7-2 (keys read as spelled: the string-literal group keys "ab" and ' +
+        "its escape-spelled twin)",
+    );
+
+    // Identifier keys are read as spelled alike (SPEC 7, 2.4): the top-level
+    // identifier key `specs` with its `s` so escaped, and the verbatim group
+    // name keyed as an identifier under a profile targeting `product`, are
+    // refused (14.14); the identifier keys `ab` and its escape-spelled twin
+    // declare two groups that load; and the identifier-keyed group is named
+    // by a target spelled as its key.
+    for (const arm of SPELLED_IDENTIFIER_KEY_VIOLATIONS) {
+      await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
+    }
+    await expectTwoSpelledGroups(
+      product,
+      IDENTIFIER_KEYS_TWO_GROUPS_CONFIG,
+      ESCAPED_AB_IDENTIFIER,
+      "T7-2 (identifier keys read as spelled: the group keys ab and its " +
+        "escape-spelled twin)",
+    );
+    await expectVerbatimGroupNameResolves(
+      product,
+      IDENTIFIER_NAME_CONFIG,
+      "T7-2 (identifier keys read as spelled: the group keyed by the " +
+        "identifier spelling, the target spelled as its key)",
     );
 
     // Encoding (SPEC 7, 14.14): bytes that are not valid UTF-8; a
@@ -2013,60 +3143,32 @@ const T7_2 = defineProductTest({
       await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
     }
 
-    // Comments (SPEC 7): the commented configuration loads, and the
-    // inventory's resolved `configuration` view is byte-identical to its
-    // comment-free twin's — compared as the member's serialization, member
-    // order and spellings included.
-    const configurationViewOf = async (
-      config: StagedTs,
-      label: string,
-    ): Promise<unknown> =>
-      await withWorkspace(
-        {
-          files: {
-            "xspec.config.ts": config,
-            "specs/A.mdx": SECTION_A_SOURCE,
-          },
-        },
-        async (workspace) => {
-          await buildOk(
-            product,
-            workspace,
-            `${label}: \`build\` — the configuration loads (SPEC 7)`,
-          );
-          const inventoryLabel = `${label} \`inventory --json\``;
-          const raw = await runJson(
-            product,
-            workspace,
-            ["inventory", "--json"],
-            inventoryLabel,
-          );
-          decodeInventoryDocument(raw, inventoryLabel);
-          return (raw as { readonly configuration: unknown }).configuration;
-        },
-      );
+    // Comments (SPEC 7): the commented configuration — comments inside the
+    // import declaration between each two of its tokens included — loads,
+    // and the inventory's resolved `configuration` view is byte-identical to
+    // its comment-free twin's — compared as the member's serialization,
+    // member order and spellings included.
     const commented = await configurationViewOf(
+      product,
       COMMENTED_CONFIG,
       "T7-2 (comments)",
     );
     const commentFree = await configurationViewOf(
+      product,
       COMMENT_FREE_CONFIG,
       "T7-2 (comment-free twin)",
     );
-    const commentsContext =
+    assertConfigurationViewsIdentical(
+      commented,
+      commentFree,
       "T7-2 (comments): `inventory`'s `configuration` member under the " +
-      "commented configuration is byte-identical to the comment-free " +
-      "twin's — line and block comments before the import, after it, " +
-      "between keys, inside the glob list, and after the export " +
-      "contribute nothing (SPEC 7, 11.6)";
-    assertSameJson(commented, commentFree, commentsContext);
-    if (JSON.stringify(commented) !== JSON.stringify(commentFree)) {
-      fail(
-        `${commentsContext}; the members are equal as values but ` +
-          `serialize differently (member order): ` +
-          `${JSON.stringify(commented)} vs ${JSON.stringify(commentFree)}`,
-      );
-    }
+        "commented configuration is byte-identical to the comment-free " +
+        "twin's — line and block comments before the import, inside the " +
+        "import declaration between each two of its tokens (import /* c */ " +
+        "{ /* c */ defineConfig /* c */ } /* c */ from // c, a line feed, " +
+        '"xspec" /* c */), after it, between keys, inside the glob list, ' +
+        "and after the export contribute nothing (SPEC 7, 11.6)",
+    );
   },
 });
 
@@ -2408,6 +3510,141 @@ async function assertViolatingEdgePresent(
   );
 }
 
+// Empty glob lists (SPEC 7: an empty list is barred only for `targetTags`,
+// `edgeKinds`, a rule's `kinds`, and a selector's `tags`, 7.4, 7.5, 14.14;
+// a group whose globs match no files is valid) — TEST-SPEC T7-3's two arms,
+// each workspace holding exactly what TEST-SPEC names (module header): the
+// spec group `product: []` as the configuration's one group, staged alone,
+// and the code group `app: []` beside the spec group `main` globbing
+// `specs/*.mdx`, staged over the minimal `specs/A.mdx`. Each configuration
+// is a staged-source record (module header: staged after the body's first
+// product invocation).
+const EMPTY_SPEC_GLOBS_CONFIG = stagedTs(
+  "T7-3 xspec.config.ts (an empty spec glob list: the spec group product: [] alone)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    product: []
+  }
+})
+`,
+);
+
+const EMPTY_CODE_GLOBS_CONFIG = stagedTs(
+  "T7-3 xspec.config.ts (an empty code glob list: the code group app: [] beside the spec group main over specs/*.mdx)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: []
+  }
+})
+`,
+);
+
+/**
+ * An empty-glob-list arm (T7-3): its label, its workspace's files, the
+ * kind of its empty group, the inventory's expected list of groups of that
+ * kind, and the inventory's expected `sources`.
+ */
+interface EmptyGlobListArm {
+  readonly label: string;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  readonly kind: "spec" | "code";
+  readonly groups: readonly InventoryGroupDef[];
+  readonly sources: readonly InventorySourceEntry[];
+}
+
+const EMPTY_GLOB_LIST_ARMS: readonly EmptyGlobListArm[] = [
+  {
+    label: "an empty spec glob list: the spec group product: [] alone",
+    files: { "xspec.config.ts": EMPTY_SPEC_GLOBS_CONFIG },
+    kind: "spec",
+    groups: [{ name: "product", globs: [] }],
+    sources: [],
+  },
+  {
+    label:
+      "an empty code glob list: the code group app: [] beside the spec " +
+      "group main over specs/*.mdx",
+    files: {
+      "xspec.config.ts": EMPTY_CODE_GLOBS_CONFIG,
+      "specs/A.mdx": SECTION_A_SOURCE,
+    },
+    kind: "code",
+    groups: [{ name: "app", globs: [] }],
+    sources: [
+      { path: "specs/A.mdx", groups: [{ name: "main", kind: "spec" }] },
+    ],
+  },
+];
+
+/**
+ * An empty glob list loading (T7-3; module header): the arm's files staged
+ * in a fresh workspace; `build` and then `check` exit 0 — the configuration
+ * loads — and `inventory --json` reports the list of the empty group's kind
+ * exactly as the arm expects, the group with `globs` `[]` as configured
+ * (12.7), and `sources` exactly as discovery yields them, no source a
+ * member of the empty group (11.6).
+ */
+async function expectEmptyGlobListLoads(
+  product: ProductBinding,
+  arm: EmptyGlobListArm,
+): Promise<void> {
+  const label = `T7-3 (${arm.label})`;
+  await withWorkspace({ files: arm.files }, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${label}: ` +
+        "`build` — an empty glob list is valid, 7 barring an empty list " +
+        "only for targetTags, edgeKinds, a rule's kinds, and a selector's " +
+        "tags, and a group whose globs match no files is valid; a product " +
+        "refusing it as an invalid group shape (14.14) fails here (SPEC 7, " +
+        "7.4, 7.5)",
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${label}: ` +
+        "`check` after the build — the configuration loads, and the " +
+        "freshly built workspace yields no finding (SPEC 7, 12.0)",
+    );
+    const inventoryLabel = `${label} ` + "`inventory --json`";
+    const inventory = decodeInventoryDocument(
+      await runJson(
+        product,
+        workspace,
+        ["inventory", "--json"],
+        inventoryLabel,
+      ),
+      inventoryLabel,
+    );
+    assertSameJson(
+      arm.kind === "spec"
+        ? inventory.configuration.specs
+        : inventory.configuration.code,
+      arm.groups,
+      `${inventoryLabel}: the configuration's ${arm.kind} groups are ` +
+        `reported in configuration order, the empty group with globs ` +
+        `exactly [] — globs as configured (SPEC 7, 11.6, 12.7)`,
+    );
+    assertSameJson(
+      inventory.sources,
+      arm.sources,
+      `${inventoryLabel}: the discovered sources with their group ` +
+        `memberships — the empty group discovers zero sources, so no ` +
+        `source is a member of it (SPEC 7, 11.6)`,
+    );
+  });
+}
+
 // Names containing U+FFFD (SPEC 7, 14.14; 12.0: no argument value carries
 // the character, and configured names are named in arguments): a spec
 // group, a code group, a profile, and a rule, one arm each. The character
@@ -2490,12 +3727,15 @@ const T7_3 = defineProductTest({
   title:
     "keys: specs is required; omitted code/markdown/coverage/policy mean " +
     "no code groups, no emission, zero profiles, and no policy findings; " +
-    "empty coverage/policy lists equal omission; unknown keys at every " +
-    "position, values of the wrong shape (a group valued by a single " +
-    "string, a glob list holding true, coverage/policy given as objects, " +
-    "specs/code given as lists), and a spec group, a code group, a " +
-    "profile, or a rule named with U+FFFD are configuration errors (SPEC " +
-    "7, 7.1, 7.2, 14.14)",
+    "empty coverage/policy lists equal omission; an empty glob list is " +
+    "valid — the spec group product: [] alone, and the code group app: [] " +
+    "beside a spec group over specs/A.mdx, each load (`build` and `check` " +
+    "exit 0), inventory reporting the group with globs exactly [] and no " +
+    "source in it; unknown keys at every position, values of the wrong " +
+    "shape (a group valued by a single string, a glob list holding true, " +
+    "coverage/policy given as objects, specs/code given as lists), and a " +
+    "spec group, a code group, a profile, or a rule named with U+FFFD are " +
+    "configuration errors (SPEC 7, 7.1, 7.2, 11.6, 12.7, 14.14)",
   run: async (product) => {
     // (a) `specs` missing and the unknown-key matrix — each 14.14, exit 2.
     for (const arm of KEY_VIOLATIONS) {
@@ -2700,6 +3940,15 @@ const T7_3 = defineProductTest({
         );
       },
     );
+
+    // (g) empty glob lists — valid (SPEC 7): the spec group `product: []`
+    // alone, then the code group `app: []` beside the spec group `main`
+    // over `specs/A.mdx`; each loads — `build` and `check` exit 0 — and
+    // `inventory` reports the group with `globs` exactly [] and no source
+    // in it (SPEC 7, 11.6, 12.7).
+    for (const arm of EMPTY_GLOB_LIST_ARMS) {
+      await expectEmptyGlobListLoads(product, arm);
+    }
   },
 });
 

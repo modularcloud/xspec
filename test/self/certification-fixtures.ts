@@ -4,6 +4,10 @@
 // shape as the built product — an executable/workspace binding and nothing
 // else (C-2), so certifying and testing use one code path and fixtures are
 // invocable in CI without network or a build step (plain Node ESM programs).
+// No binding here carries a package directory: CERTIFICATIONS.md's preamble
+// binds each fixture with its executable and no package directory, since no
+// scope includes the `defineConfig` module (certification-document.test.ts
+// pins both).
 //
 // CERTIFICATION_FIXTURES lists every CERTIFICATIONS.md fixture in document
 // order: each conformer with its in-scope test IDs and each violator with the
@@ -543,6 +547,38 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // matches, the parse of a discovered source (14.20), the gate of 13.3,
       // and the import and empty-map rules are unchanged.
       violator("VIOL-DISC-DERIVED", "conf-disc/bin-derived.mjs", ["T7-6"]),
+    ],
+  ),
+  // CONF-IMPORT (§CONF-IMPORT): the configuration's import specifier —
+  // `build`, `check`, `ids`, and `inventory`, each under `--json`, over
+  // T7-9's workspace outside its install stagings as P-19 draws over it (one
+  // spec group of trivial single-section `.mdx` sources, Markdown emitted
+  // next to sources, no code group), the specifier any static string literal
+  // TypeScript 5.9.3's scanner accepts, in either quote style, read as
+  // spelled — escape sequences and line continuations included — and never
+  // interpreted, resolved, or loaded (SPEC 7, 2.4).
+  conformer(
+    "CONF-IMPORT",
+    "conf-import/bin.mjs",
+    ["P-19"],
+    [
+      // VIOL-IMPORT-BRACED: the braced form of the Unicode escape sequence
+      // is not recognized in the import's specifier where its code point is
+      // at or below U+FFFF (leading zeros and surrogates included): such a
+      // specifier is judged not well-formed TypeScript (14.20), a
+      // configuration error (14.14), every command exiting 2 with the 12.7
+      // configuration-error document. A braced escape begins only at a
+      // backslash that itself begins an escape sequence, so an escaped
+      // backslash before `u{…}` is read as the conformer reads it; braced
+      // escapes above U+FFFF, the four-digit form, every other escape, line
+      // continuations, and both quote styles are unchanged.
+      violator("VIOL-IMPORT-BRACED", "conf-import/bin-braced.mjs", ["P-19"]),
+      // VIOL-IMPORT-SINGLE: a single-quoted module specifier is refused — a
+      // configuration error (14.14), every command exiting 2 with the 12.7
+      // configuration-error document. Double-quoted specifiers, whatever
+      // their content, and every other literal of the configuration,
+      // single-quoted globs included, are unchanged.
+      violator("VIOL-IMPORT-SINGLE", "conf-import/bin-single.mjs", ["P-19"]),
     ],
   ),
   // CONF-AVAIL (§CONF-AVAIL): availability answers and JSON datum forms —
