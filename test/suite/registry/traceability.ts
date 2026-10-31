@@ -535,7 +535,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // byte-identical to its twin's (11.6), as T7-2's twins are.
   "T7-1": ["7", "11.6", "12.0", "12.6", "14"],
   "T7-2": ["7", "2.4", "7.4", "11.6", "14"],
-  "T7-3": ["7", "7.1", "7.2", "14"],
+  // T7-3: its empty-glob-list arms `inventory`'s resolved view — the empty
+  // group in its kind's list with `globs` exactly `[]`, as configured (11.6,
+  // 12.7's view form) — and its `sources`, each discovered file with its
+  // group memberships, none in the empty group (11.6).
+  "T7-3": ["7", "7.1", "7.2", "11.6", "12.7", "14"],
   "T7-4": ["7", "2.4", "11.6", "14"],
   "T7-5": ["7"],
   // T7-6: its single-casing arms the byte-wise, case-sensitive name tests

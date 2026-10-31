@@ -20,10 +20,13 @@
 // (exit 2), before all source analysis.
 // `specs` is required; `code`, `markdown`, `coverage`, and `policy` are
 // optional with defined omission semantics; empty `coverage`/`policy` lists
-// equal omission; unknown keys anywhere in the argument are 14.14, as is a
-// value of the wrong shape — 14.14's "otherwise invalid group shape" (7.1,
-// 7.2, 7.4, 7.5: `specs` and `code` are maps of named groups, each a list
-// of glob strings; `coverage` and `policy` are lists).
+// equal omission; an empty glob list is valid, its group discovering zero
+// sources (7 bars an empty list only for `targetTags`, `edgeKinds`, a
+// rule's `kinds`, and a selector's `tags`, 7.4, 7.5); unknown keys anywhere
+// in the argument are 14.14, as is a value of the wrong shape — 14.14's
+// "otherwise invalid group shape" (7.1, 7.2, 7.4, 7.5: `specs` and `code`
+// are maps of named groups, each a list of glob strings; `coverage` and
+// `policy` are lists).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — run
@@ -272,6 +275,24 @@
 //   (dropping or stringifying the element) discovers no source and builds
 //   anyway — a group matching no files is valid (7) — so exit 0 still
 //   discriminates it.
+// - T7-3 empty glob lists (SPEC 7: an empty list is barred only for
+//   `targetTags`, `edgeKinds`, a rule's `kinds`, and a selector's `tags`,
+//   7.4, 7.5, 14.14; a group whose globs match no files is valid): two arms
+//   in TEST-SPEC's order (`EMPTY_GLOB_LIST_ARMS`), each a fresh workspace
+//   holding exactly what TEST-SPEC names — the spec group `product: []` as
+//   the configuration's one group, the configuration staged alone; and the
+//   code group `app: []` beside the spec group `main` globbing
+//   `specs/*.mdx`, staged over `specs/A.mdx`. Each is driven by `build`,
+//   then `check`, then `inventory --json` (`expectEmptyGlobListLoads`):
+//   `build` and `check` exit 0 — the configuration loads — and the
+//   inventory's list of the empty group's kind is exactly that group with
+//   `globs` `[]` (12.7: `globs` as configured), its `sources` exactly what
+//   discovery yields — none in the first arm, `specs/A.mdx` a member of
+//   `main` alone in the second — so no source is a member of the empty
+//   group (11.6). A product refusing an empty glob list as an invalid group
+//   shape (14.14) fails `build`'s exit code; one dropping the group or
+//   reporting other globs fails the inventory's view; one whose empty group
+//   matches a file fails `build` or the inventory's `sources`.
 // - every `expectConfigRefused` arm (T7-2, T7-3): the finding's concerned
 //   path is exactly `xspec.config.ts` — the file the upward search found,
 //   in 11.6's anchoring form relative to the invocation working directory,
@@ -448,7 +469,11 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import type { GraphEdge } from "../../helpers/adapters/index.js";
+import type {
+  GraphEdge,
+  InventoryGroupDef,
+  InventorySourceEntry,
+} from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
   decodeEdgesReport,
@@ -3485,6 +3510,141 @@ async function assertViolatingEdgePresent(
   );
 }
 
+// Empty glob lists (SPEC 7: an empty list is barred only for `targetTags`,
+// `edgeKinds`, a rule's `kinds`, and a selector's `tags`, 7.4, 7.5, 14.14;
+// a group whose globs match no files is valid) — TEST-SPEC T7-3's two arms,
+// each workspace holding exactly what TEST-SPEC names (module header): the
+// spec group `product: []` as the configuration's one group, staged alone,
+// and the code group `app: []` beside the spec group `main` globbing
+// `specs/*.mdx`, staged over the minimal `specs/A.mdx`. Each configuration
+// is a staged-source record (module header: staged after the body's first
+// product invocation).
+const EMPTY_SPEC_GLOBS_CONFIG = stagedTs(
+  "T7-3 xspec.config.ts (an empty spec glob list: the spec group product: [] alone)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    product: []
+  }
+})
+`,
+);
+
+const EMPTY_CODE_GLOBS_CONFIG = stagedTs(
+  "T7-3 xspec.config.ts (an empty code glob list: the code group app: [] beside the spec group main over specs/*.mdx)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: []
+  }
+})
+`,
+);
+
+/**
+ * An empty-glob-list arm (T7-3): its label, its workspace's files, the
+ * kind of its empty group, the inventory's expected list of groups of that
+ * kind, and the inventory's expected `sources`.
+ */
+interface EmptyGlobListArm {
+  readonly label: string;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  readonly kind: "spec" | "code";
+  readonly groups: readonly InventoryGroupDef[];
+  readonly sources: readonly InventorySourceEntry[];
+}
+
+const EMPTY_GLOB_LIST_ARMS: readonly EmptyGlobListArm[] = [
+  {
+    label: "an empty spec glob list: the spec group product: [] alone",
+    files: { "xspec.config.ts": EMPTY_SPEC_GLOBS_CONFIG },
+    kind: "spec",
+    groups: [{ name: "product", globs: [] }],
+    sources: [],
+  },
+  {
+    label:
+      "an empty code glob list: the code group app: [] beside the spec " +
+      "group main over specs/*.mdx",
+    files: {
+      "xspec.config.ts": EMPTY_CODE_GLOBS_CONFIG,
+      "specs/A.mdx": SECTION_A_SOURCE,
+    },
+    kind: "code",
+    groups: [{ name: "app", globs: [] }],
+    sources: [
+      { path: "specs/A.mdx", groups: [{ name: "main", kind: "spec" }] },
+    ],
+  },
+];
+
+/**
+ * An empty glob list loading (T7-3; module header): the arm's files staged
+ * in a fresh workspace; `build` and then `check` exit 0 — the configuration
+ * loads — and `inventory --json` reports the list of the empty group's kind
+ * exactly as the arm expects, the group with `globs` `[]` as configured
+ * (12.7), and `sources` exactly as discovery yields them, no source a
+ * member of the empty group (11.6).
+ */
+async function expectEmptyGlobListLoads(
+  product: ProductBinding,
+  arm: EmptyGlobListArm,
+): Promise<void> {
+  const label = `T7-3 (${arm.label})`;
+  await withWorkspace({ files: arm.files }, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${label}: ` +
+        "`build` — an empty glob list is valid, 7 barring an empty list " +
+        "only for targetTags, edgeKinds, a rule's kinds, and a selector's " +
+        "tags, and a group whose globs match no files is valid; a product " +
+        "refusing it as an invalid group shape (14.14) fails here (SPEC 7, " +
+        "7.4, 7.5)",
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${label}: ` +
+        "`check` after the build — the configuration loads, and the " +
+        "freshly built workspace yields no finding (SPEC 7, 12.0)",
+    );
+    const inventoryLabel = `${label} ` + "`inventory --json`";
+    const inventory = decodeInventoryDocument(
+      await runJson(
+        product,
+        workspace,
+        ["inventory", "--json"],
+        inventoryLabel,
+      ),
+      inventoryLabel,
+    );
+    assertSameJson(
+      arm.kind === "spec"
+        ? inventory.configuration.specs
+        : inventory.configuration.code,
+      arm.groups,
+      `${inventoryLabel}: the configuration's ${arm.kind} groups are ` +
+        `reported in configuration order, the empty group with globs ` +
+        `exactly [] — globs as configured (SPEC 7, 11.6, 12.7)`,
+    );
+    assertSameJson(
+      inventory.sources,
+      arm.sources,
+      `${inventoryLabel}: the discovered sources with their group ` +
+        `memberships — the empty group discovers zero sources, so no ` +
+        `source is a member of it (SPEC 7, 11.6)`,
+    );
+  });
+}
+
 // Names containing U+FFFD (SPEC 7, 14.14; 12.0: no argument value carries
 // the character, and configured names are named in arguments): a spec
 // group, a code group, a profile, and a rule, one arm each. The character
@@ -3567,12 +3727,15 @@ const T7_3 = defineProductTest({
   title:
     "keys: specs is required; omitted code/markdown/coverage/policy mean " +
     "no code groups, no emission, zero profiles, and no policy findings; " +
-    "empty coverage/policy lists equal omission; unknown keys at every " +
-    "position, values of the wrong shape (a group valued by a single " +
-    "string, a glob list holding true, coverage/policy given as objects, " +
-    "specs/code given as lists), and a spec group, a code group, a " +
-    "profile, or a rule named with U+FFFD are configuration errors (SPEC " +
-    "7, 7.1, 7.2, 14.14)",
+    "empty coverage/policy lists equal omission; an empty glob list is " +
+    "valid — the spec group product: [] alone, and the code group app: [] " +
+    "beside a spec group over specs/A.mdx, each load (`build` and `check` " +
+    "exit 0), inventory reporting the group with globs exactly [] and no " +
+    "source in it; unknown keys at every position, values of the wrong " +
+    "shape (a group valued by a single string, a glob list holding true, " +
+    "coverage/policy given as objects, specs/code given as lists), and a " +
+    "spec group, a code group, a profile, or a rule named with U+FFFD are " +
+    "configuration errors (SPEC 7, 7.1, 7.2, 11.6, 12.7, 14.14)",
   run: async (product) => {
     // (a) `specs` missing and the unknown-key matrix — each 14.14, exit 2.
     for (const arm of KEY_VIOLATIONS) {
@@ -3777,6 +3940,15 @@ const T7_3 = defineProductTest({
         );
       },
     );
+
+    // (g) empty glob lists — valid (SPEC 7): the spec group `product: []`
+    // alone, then the code group `app: []` beside the spec group `main`
+    // over `specs/A.mdx`; each loads — `build` and `check` exit 0 — and
+    // `inventory` reports the group with `globs` exactly [] and no source
+    // in it (SPEC 7, 11.6, 12.7).
+    for (const arm of EMPTY_GLOB_LIST_ARMS) {
+      await expectEmptyGlobListLoads(product, arm);
+    }
   },
 });
 
