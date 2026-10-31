@@ -127,32 +127,8 @@ Each task's Status cell is filled by its landing's follow-up commit (Landing a t
 | 167 | A1, B1; VERIFY: T7-9, P-19, T7-10's 30 refused arms | `checkImport` takes any static string literal as the import's module specifier; its messages and comments name none as required | landed at `1ef5005`; CI run 1897: harness job and Windows leg green, full suite failing only T7-10 (its 8 arms awaiting Task 168), T7.6-1 to T7.6-7, P-17, and P-18 |
 | 168 | A2, B2; VERIFY: T7-10's 8 remaining arms | A spec module import's bindings of no permitted form are tracked, and each value-level use of one is 14.18 at its identifier | landed at `aba0d72`; CI run 1899: harness job and Windows leg green, full suite failing only T7.6-1 to T7.6-7, P-17, and P-18 |
 | 169 | B3, B5; the scaffold's note (rework `src/index.ts`); Measured at planning 1 | `src/index.ts` becomes `src/index.mts` (built to `dist/index.mjs`): one export, a non-generic exact configuration type over unexported aliases; `package.json`'s `import` route and top-level `types` follow | landed at `ad60726` (AGENTS.md at `76e8e57`); CI run 1901: harness job and Windows leg green, full suite failing only T7.6-1 to T7.6-7, P-17, and P-18, each now first at a setup or run resolving the `require` entry (TS2307, `MODULE_NOT_FOUND`), Task 170's |
-| 170 | B4; the scaffold's note (add `src/index.cts`) | `src/index.cts` (built to `dist/index.cjs`): `export =` of `{ defineConfig }`, the same type | pending |
+| 170 | B4; the scaffold's note (add `src/index.cts`) | `src/index.cts` (built to `dist/index.cjs`): `export =` of `{ defineConfig }`, the same type | landed at `809a932` (AGENTS.md at `cfc142e`); CI run 1903: harness job, full suite, and Windows leg all green, the full suite failing nothing (154 files, 7688 tests) |
 | 171 | — | Confirm local runs and CI green, record the state in AGENTS.md, delete this file | pending |
-
-## Task 170 — The `defineConfig` module's CommonJS entry, `src/index.cts` (SPEC 7.6 Reach, Runtime, Type contract; B4; the scaffold's note)
-
-After Task 169.
-
-**Requirement.**
-- SPEC 7.6 Reach (SPEC.md line 476): with the package installed under `N`, a specifier spelling exactly `N` designates the module along TypeScript's one route in every covered setup, "whatever module format TypeScript applies to that file", and along Node.js's routes on every release the runtime contract covers — `require` in a CommonJS module among them.
-- Runtime (line 513): on every release of the 22 line, 22.0 to 22.11 included — where `require` cannot load an ES module without a flag (TEST-SPEC T7.6-6) — and of every later line, with no option, environment variable, or hook: a `require` result has exactly one own enumerable property, `defineConfig`, symbol-keyed ones counted (an enumerable `__esModule` fails T7.6-6(a)); `defineConfig` returns its first argument itself and does nothing else; loading the module and calling it have no effect — no read outside the package, no write, no network access, no output on either stream, and no change to the global object or any other process state (T7.6-7).
-- Type contract, in the setups that resolve the `require` entry (a file TypeScript compiles as CommonJS under `node16` or `nodenext`): the same single export and the same type-error class as Task 169's entry. T7.6-1 reads an export assignment's assigned value's members, so `export =` of a value carrying `defineConfig` alone declares that one export.
-- The Liaison's ruling: the CommonJS entry is the means 7.6 requires beside IMPLEMENTATION.md's "ES modules throughout"; name the choice in your final report.
-
-**Observed** (B4, at `b63b527`). `package.json`'s `exports["."].require` names `./dist/index.cjs`, typed by `./dist/index.d.cts`, but no source builds either, so the packed package holds neither. `require` of the package throws `MODULE_NOT_FOUND` on every release (T7.6-6 and T7.6-7 stop at run 4, 22.0.0's `require`; reviewer B saw the same on 22.22.0); TypeScript reports TS2307 for every covered file it compiles as CommonJS under `node16` or `nodenext`, valid files included (T7.6-2 at the ES-module project's `.cts` under `node16`; P-18 at its trial 1; the later setups and runs of T7.6-4, T7.6-5, and P-17).
-
-**Change.**
-- Add `src/index.cts`: Task 169's type aliases byte for byte (a comment in each entry naming its twin, since the two must not drift), a plain `function defineConfig(config: Config): Config { return config; }`, and `export = { defineConfig };`. Under `tsconfig.base.json`'s `verbatimModuleSyntax` a CommonJS-format file must use `export =` (a top-level `export` modifier on a value is TS1287); `src/tsconfig.json` already compiles `.cts` sources. `tsc` emits `dist/index.cjs` — `"use strict";`, the function, and `module.exports = { defineConfig };`, with no `__esModule` marker — and `dist/index.d.cts`, `export =` of `_default: { defineConfig: typeof defineConfig }` (Measured at planning 2). Hand-write neither output and add no build step.
-- `package.json`: no change (the scaffold's `require` route already names both files).
-- `src/index.cts`'s header comment: SPEC 7.6 (Reach's `require` route; the runtime contract on 22.0 to 22.11; why `export =`; why no `__esModule`) and IMPLEMENTATION.md's "ES modules throughout" yielding to 7.6 (the Liaison's ruling of 2026-10-29); update `src/tsconfig.json`'s comment wherever it still says the source is to come.
-- AGENTS.md: the bullet beginning "Build the product" (drop "Until the product supplies `src/index.cts` …"), and the verdicts against the built product in the bullets beginning "T7.6-2, valid configurations", "T7.6-6, runtime exports and identity", "T7.6-7, runtime: no effect", and "P-18, type contract", and in any 7.6 bullet Task 169 left naming a missing `dist/index.d.cts` or `dist/index.cjs`.
-
-**Verification.**
-1. Build and pack pristinely (Task 169's step 2): the package holds `dist/index.cjs` and `dist/index.d.cts` as above. On each of E-1's six releases, a `.cjs` file beside a placed copy (`node_modules/<N>`, `NODE_OPTIONS` and `NODE_PATH` unset) gets from `require` a value whose `Reflect.ownKeys` are exactly `defineConfig`, the function returning its argument itself.
-2. With that package and the releases: `section-7.6` (T7.6-1 to T7.6-3, about 5 minutes), `section-7.6-ii` (T7.6-4 to T7.6-7, about 2), `section-16-p17`, and `section-16-p18` all pass, and `section-7-import` (T7-9's (d) reads the manifest's `name`) still passes.
-3. Measured at planning 1's `r.cjs` route against the pristine package placed as `node_modules/node_modules`, on 22.0.0: `require` and the dynamic `import()` both load it.
-4. `npm run typecheck` and `npm run format:check`.
 
 ## Task 171 — Confirm the full suite and CI green, record the state, and delete this file
 
