@@ -1502,7 +1502,10 @@ class CodeAnalyzer {
     // and a removal deletes the declaration whole (6.5). Attributes are a
     // condition elsewhere only — in a spec source a parse failure, the MDX
     // edition lacking their syntax (14.20), and on the configuration's
-    // `xspec` import a configuration error (7, `checkImport` in config.ts).
+    // `defineConfig` import, read as configuration, a configuration error
+    // (7, `checkImport` in config.ts). A configuration file a code group
+    // discovers is also analyzed here as any source (7), its import judged
+    // by these rules alone.
 
     // Bindings (SPEC 4): the default export and the named `text` export,
     // each optionally aliased, optionally type-only. A side-effect-only

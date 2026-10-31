@@ -1,22 +1,28 @@
 // Project configuration: static parse and schema validation (SPEC 7).
 //
 // SPEC 7: `xspec.config.ts` is declarative — data, not executed code. The
-// file MUST consist of exactly an import of `defineConfig` from the module
-// specifier "xspec" (optionally aliased; no `type` or `defer` modifier and
-// no import attributes) and a default export of one call
-// to that binding, whose sole argument is statically literal: object
-// literals with non-computed identifier or string-literal keys, array
-// literals, static string literals (2.4), and the boolean literals `true`
-// and `false` — no other statement or expression form, no spread, no
-// computed value. Every string literal it holds, and every key, is read as
+// file MUST consist of exactly an import of `defineConfig` (optionally
+// aliased; no `type` or `defer` modifier and no import attributes) whose
+// module specifier is any static string literal (2.4), and a default
+// export of one call to that binding, whose sole argument is statically
+// literal: object literals with non-computed identifier or string-literal
+// keys, array literals, static string literals (2.4), and the boolean
+// literals `true` and `false` — no other statement or expression form, no
+// spread, no computed value. Every string literal read here — the
+// argument's, and a string-literal import name — and every key is read as
 // spelled (SPEC 2.4: "every configuration literal (7)"; SPEC 7: a key is
 // repeated when two keys spell the same name) — no escape sequence is
-// interpreted. IMPLEMENTATION (Key libraries): the file is parsed with
-// the TypeScript compiler API as an AST reduced to data, never executed or
-// imported. A file that is not well-formed TypeScript or does not conform,
-// and every schema violation of SPEC 7.1–7.5, is a configuration error
-// (14.14) — reported by every command at configuration load as a usage
-// error (12.0, exit 2), preceding all source analysis.
+// interpreted. The import's specifier is never read at all: wherever xspec
+// reads a configuration, a baseline's (6.3) included, it never interprets,
+// resolves, or loads the specifier, so the configuration's validity, and
+// everything derived from it, are independent of what the specifier
+// designates and of its spelling (SPEC 7). IMPLEMENTATION (Key
+// libraries): the file is parsed with the TypeScript compiler API as an
+// AST reduced to data, never executed or imported. A file that is not
+// well-formed TypeScript or does not conform, and every schema violation
+// of SPEC 7.1–7.5, is a configuration error (14.14) — reported by every
+// command at configuration load as a usage error (12.0, exit 2), preceding
+// all source analysis.
 //
 // This module is pure: it maps configuration text to a validated
 // `Configuration` or to condition-14 findings. Locating and reading the
@@ -275,8 +281,8 @@ function checkSyntax(
 
 const FORM_EXPECTATION =
   `the configuration must consist of exactly an import of defineConfig ` +
-  `from "xspec" (optionally aliased) and a default export of one call to ` +
-  `that binding (SPEC 7)`;
+  `(optionally aliased) whose module specifier is any static string ` +
+  `literal, and a default export of one call to that binding (SPEC 7)`;
 
 /**
  * SPEC 7: the file MUST consist of exactly the `defineConfig` import and
@@ -322,8 +328,9 @@ function checkForm(
 }
 
 /**
- * SPEC 7: exactly an import of `defineConfig` from the module specifier
- * "xspec", optionally aliased. Returns the local binding name, or null.
+ * SPEC 7: exactly an import of `defineConfig`, optionally aliased, whose
+ * module specifier is any static string literal (2.4) — never interpreted,
+ * resolved, or loaded. Returns the local binding name, or null.
  */
 function checkImport(
   decl: tst.ImportDeclaration,
@@ -332,16 +339,27 @@ function checkImport(
 ): string | null {
   let ok = true;
   const specifier = decl.moduleSpecifier;
-  // SPEC 2.4: the specifier is a configuration literal, its value the
-  // characters between its delimiters as spelled — an escape-spelled
-  // "xspec" is some other specifier.
-  if (
-    !ts.isStringLiteral(specifier) ||
-    stringLiteralValue(specifier, sourceFile) !== "xspec"
-  ) {
+  // SPEC 7: the module specifier is any static string literal (2.4: a
+  // plain single- or double-quoted string; a template literal is not
+  // static), whatever it spells and whatever, if anything, it designates —
+  // a bare or scoped package name, a relative or absolute path, a URL, or
+  // the empty string, in either quote style, with escape sequences, line
+  // continuations, or U+FFFD alike. Wherever xspec reads a configuration, a
+  // baseline's (6.3) included, the specifier is never interpreted,
+  // resolved, or loaded, so its value is never read: only its node kind is
+  // examined here. A spelling TypeScript's scanner rejects — an escape it
+  // refuses — leaves the file not well-formed (14.20), which `checkSyntax`
+  // reports before the form is read. TypeScript's parser takes any
+  // expression in the specifier's place, its checker alone requiring a
+  // string literal, so an identifier, a template literal, or a
+  // parenthesized string parses with no syntax diagnostic: such a file
+  // does not conform, refused here by 7's form (14.14).
+  if (!ts.isStringLiteral(specifier)) {
     findings.add(
-      `the import must be from the module specifier "xspec", read as ` +
-        `spelled with no escape sequence interpreted (SPEC 7, 2.4)`,
+      `the import's module specifier must be a static string literal — a ` +
+        `plain single- or double-quoted string, whatever it spells; a ` +
+        `template literal or any other expression is not static (SPEC 7, ` +
+        `2.4)`,
       lineOf(specifier, sourceFile),
     );
     ok = false;
@@ -374,7 +392,7 @@ function checkImport(
     ok = false;
   }
   // SPEC 7: "no `type` or `defer` modifier". TypeScript 5.9 parses
-  // `import defer { defineConfig } from "xspec"` with no syntax diagnostic
+  // `import defer { defineConfig } from "…"` with no syntax diagnostic
   // (a deferred import's namespace-only rule is a checker rule, which
   // configuration loading never runs), so the clause's phase modifier is
   // read here; the clause starts at the `defer` keyword.
@@ -397,9 +415,9 @@ function checkImport(
   const named = clause.namedBindings;
   if (named === undefined || !ts.isNamedImports(named)) {
     findings.add(
-      `the import must be a named import of defineConfig ` +
-        `(\`import { defineConfig } from "xspec"\`, optionally aliased) ` +
-        `(SPEC 7)`,
+      `the import must be a named import of defineConfig — ` +
+        `import { defineConfig } from "…", optionally aliased, its ` +
+        `module specifier any static string literal (SPEC 7)`,
       lineOf(decl, sourceFile),
     );
     return null;
