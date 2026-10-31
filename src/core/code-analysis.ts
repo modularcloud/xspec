@@ -27,21 +27,27 @@
 // module import's default and `text` bindings root chains and `text`
 // calls exactly as a valid import's do whatever other defect the
 // declaration carries (SPEC 4: the other binding is the invalid one; 11.2,
-// 14: its 14.15 makes nothing about their uses undetectable); an invalid
-// binding (a named binding other than `text`, a namespace binding) is no
-// spec module reference, and a chain rooted at the binding of an `.xspec`
-// require form — no spec module import (4) — is masked by that
-// declaration's 14.15. A chain rooted at a shadowing local declaration or
-// a type-only binding records no edge and falls under no condition (SPEC
-// 4.5); its value-level misuse is the consumer's TypeScript error, outside
-// xspec's validations. An identifier a spec module import binds that another
-// import of the same scope, or a value-level declaration of that scope,
-// also binds roots no resolving chain (SPEC 2.4, 4.5), whether or not
-// either import is type-only: beside the collision's 14.15, its chains
-// report as unresolved (14.7) and a call through it as `text` is a plain
-// call. Imports binding one identifier in different scopes of the file
-// collide all the same (14.15), each scope's own binding rooting its
-// chains there.
+// 14: its 14.15 makes nothing about their uses undetectable). A
+// value-level binding of no permitted form (SPEC 4 → 14.15: a named
+// binding of an export other than the default and `text`, a namespace
+// binding) is neither a node nor a `text` binding, so 4.5 sanctions none
+// of its value-level uses: each is 14.18 at the binding's identifier
+// alone, beside the import's 14.15, which makes none of them undetectable
+// (SPEC 14), whatever the specifier designates — a configuration file a
+// code group discovers included (7: `defineConfig` of `import {
+// defineConfig } from "./specs/A.xspec"`). A chain rooted at the binding
+// of an `.xspec` require form — no spec module import (4) — is masked by
+// that declaration's 14.15. A chain rooted at a shadowing local
+// declaration or a type-only binding, of a permitted form or not, records
+// no edge and falls under no condition (SPEC 4.5); its value-level misuse
+// is the consumer's TypeScript error, outside xspec's validations. An
+// identifier a spec module import binds that another import of the same
+// scope, or a value-level declaration of that scope, also binds roots no
+// resolving chain (SPEC 2.4, 4.5), whether or not either import is
+// type-only: beside the collision's 14.15, its chains report as
+// unresolved (14.7) and a call through it as `text` is a plain call.
+// Imports binding one identifier in different scopes of the file collide
+// all the same (14.15), each scope's own binding rooting its chains there.
 //
 // An import declaration is a spec module import by its specifier alone
 // (SPEC 4), wherever it stands: TypeScript parses one in any statement
@@ -736,7 +742,10 @@ const UNDEFINED_TARGET_REASON =
  * binding, its uses judged as any other's (4.5, 14.18), but a chain
  * rooted at it — and a `text` call through it — names no target: no edge,
  * no occurrence (5.7, 11.2), unresolved (14.7) beside the import's 14.15,
- * which makes nothing about the use undetectable (SPEC 14).
+ * which makes nothing about the use undetectable (SPEC 14). The invalid
+ * binding itself — of no permitted form — is `unpermitted` where it is
+ * value-level and `type-level` where introduced type-only, whatever the
+ * specifier designates.
  */
 type TrackedBinding =
   | {
@@ -759,6 +768,7 @@ type TrackedBinding =
       /** SPEC 4: a binding introduced type-only is a type-level name. */
       readonly kind: "type-level";
     }
+  | UnpermittedBinding
   | {
       /**
        * The binding of an `import X = require(…)` declaration whose
@@ -771,6 +781,51 @@ type TrackedBinding =
       readonly kind: "poisoned";
     }
   | CollidingBinding;
+
+/**
+ * SPEC 4, 4.5 → 14.18: a value-level binding of a spec module import that
+ * no permitted form gives — a named binding of an export other than the
+ * default and `text` (the export read as 2.4 reads it), or a namespace
+ * binding — whose import's 14.15 reports the binding itself. It is
+ * neither a node (a default-export binding or a chain of child property
+ * accesses from it) nor a `text` binding, so 4.5 sanctions none of its
+ * value-level uses: every one is 14.18 (14, condition 18), which the
+ * import's 14.15 leaves detectable (SPEC 14) — wherever the specifier
+ * points, a `.xspec` specifier designating nothing included, and in a
+ * configuration file a code group discovers too (SPEC 7: `defineConfig`
+ * of `import { defineConfig } from "./specs/A.xspec"`, its call in the
+ * default export a value-level use). As a `text` binding outside callee
+ * position (`visitTextBindingUse`), it roots no chain and names no node:
+ * SPEC 14 locates each use's 14.18 at the binding's identifier alone — a
+ * property chain extends a node binding's spelling only — and no use
+ * records an edge or an occurrence (5.7).
+ */
+interface UnpermittedBinding {
+  readonly kind: "unpermitted";
+  /** The export a named binding names, as spelled; null for a namespace. */
+  readonly imported: string | null;
+}
+
+/**
+ * The 14.18 message for a use of `name`, a binding of no permitted form
+ * (SPEC 14: an actionable error stating the correction).
+ */
+function unpermittedUseMessage(
+  name: string,
+  binding: UnpermittedBinding,
+): string {
+  const binds =
+    binding.imported === null
+      ? `is a namespace binding of a spec module`
+      : `binds the spec module's export ${JSON.stringify(binding.imported)}`;
+  return (
+    `unsupported node usage: ${JSON.stringify(name)} ${binds}, a binding ` +
+    `no value-level use may take — bind the default export and the "text" ` +
+    `export instead, and use the default export's nodes as dependency ` +
+    `markers or "text" arguments and the "text" export as a callee ` +
+    `(SPEC 4, 4.5, 14.18)`
+  );
+}
 
 /**
  * A `text` binding of a spec module import (SPEC 4, 4.5), the declaration
@@ -1519,6 +1574,15 @@ class CodeAnalyzer {
       binding: CodeImportBinding;
       role: "node" | "text";
     }[] = [];
+    /**
+     * The bindings of no permitted form (SPEC 4 → 14.15): declaration →
+     * the export a named binding names (null for a namespace binding).
+     */
+    const unpermitted: {
+      declaration: tst.Node;
+      typeOnly: boolean;
+      imported: string | null;
+    }[] = [];
     if (clause !== undefined) {
       if (clause.name !== undefined) {
         const binding: CodeImportBinding = {
@@ -1535,6 +1599,11 @@ class CodeAnalyzer {
             `it uses a namespace-import binding — the permitted bindings ` +
               `are the default export and the named "text" export`,
           );
+          unpermitted.push({
+            declaration: named,
+            typeOnly: clauseTypeOnly,
+            imported: null,
+          });
         } else {
           for (const element of named.elements) {
             const imported = this.importedName(element);
@@ -1555,6 +1624,11 @@ class CodeAnalyzer {
                   `the permitted bindings are the default export and the ` +
                   `named "text" export`,
               );
+              unpermitted.push({
+                declaration: element,
+                typeOnly: binding.typeOnly,
+                imported,
+              });
             }
           }
         }
@@ -1587,14 +1661,26 @@ class CodeAnalyzer {
       // (`target` set) their chains and calls resolve or report 14.7 as a
       // valid import's do; through a specifier designating nothing
       // (`target` null) they are unresolved (SPEC 2.1, 4, 11.2 → 14.7).
-      // An invalid binding (a named binding other than `text`, a
-      // namespace binding) is no role's: it is never tracked here, its
-      // uses no spec module reference.
       this.declarations.set(
         declaration,
         binding.typeOnly
           ? { kind: "type-level" }
           : { kind: role, target, specifier, importIndex },
+      );
+    }
+    // SPEC 4, 4.5, 14: an invalid binding (a named binding of an export
+    // other than the default and `text`, a namespace binding) is no role's
+    // and roots no chain, but it is still this spec module import's
+    // binding: value-level, every use of it is unsanctioned (14.18, beside
+    // this declaration's 14.15, which makes no use undetectable), whatever
+    // the specifier designates; introduced type-only, a type-level name
+    // whose uses fall under no condition (4.5). Never in `importBindings`:
+    // no recorded chain is rooted at it (SPEC 6.5). A collision of its
+    // identifier (SPEC 2.4) replaces this entry in `scanModuleLinks`.
+    for (const { declaration, typeOnly, imported } of unpermitted) {
+      this.declarations.set(
+        declaration,
+        typeOnly ? { kind: "type-level" } : { kind: "unpermitted", imported },
       );
     }
 
@@ -2181,10 +2267,12 @@ class CodeAnalyzer {
       this.addFinding(
         18,
         localName,
-        `unsupported node usage: ${JSON.stringify(local)} re-exports a ` +
-          `spec module binding — re-export is not a sanctioned value-level ` +
-          `use; consume nodes as dependency markers or "text" arguments in ` +
-          `this file instead (SPEC 4.5, 14.18)`,
+        binding.kind === "unpermitted"
+          ? unpermittedUseMessage(local, binding)
+          : `unsupported node usage: ${JSON.stringify(local)} re-exports a ` +
+              `spec module binding — re-export is not a sanctioned ` +
+              `value-level use; consume nodes as dependency markers or ` +
+              `"text" arguments in this file instead (SPEC 4.5, 14.18)`,
       );
     }
   }
@@ -2197,8 +2285,9 @@ class CodeAnalyzer {
    * name's leftmost identifier, extended for a node binding by the
    * longest static property chain (2.4) it roots there, the qualified
    * name's segments being non-computed accesses (`SPEC.a.b` of
-   * `export import X = SPEC.a.b;`), and for a `text` binding by nothing
-   * (`text` of `import t2 = text;`) — never the whole declaration.
+   * `export import X = SPEC.a.b;`), and for a `text` binding, or one of no
+   * permitted form, by nothing (`text` of `import t2 = text;`, `foo` of
+   * `import X = foo.a;`) — never the whole declaration.
    */
   private visitImportEqualsUse(declaration: tst.ImportEqualsDeclaration): void {
     const reference = declaration.moduleReference;
@@ -2218,6 +2307,11 @@ class CodeAnalyzer {
     ) {
       return;
     }
+    if (binding.kind === "unpermitted") {
+      // SPEC 4, 4.5, 14: no node binding, so no chain extends its spelling.
+      this.addFinding(18, name, unpermittedUseMessage(name.text, binding));
+      return;
+    }
     // A colliding identifier's use here is a `text` binding's exactly
     // where its imports bind the `text` export and not the default one,
     // as visitIdentifier routes a use outside callee position (SPEC 2.4,
@@ -2233,7 +2327,12 @@ class CodeAnalyzer {
     );
   }
 
-  /** One identifier: a spec binding use, or nothing (SPEC 4.5). */
+  /**
+   * One identifier: a spec module binding's value-level use, or nothing
+   * (SPEC 4.5) — an identifier TypeScript scoping resolves to no spec
+   * module import's binding (a shadowing local, a non-spec import, an
+   * undeclared name) is no spec module reference.
+   */
   private visitIdentifier(identifier: tst.Identifier): void {
     if (!isValueUseSite(identifier)) return;
     const binding = this.bindingOfIdentifier(identifier);
@@ -2243,6 +2342,13 @@ class CodeAnalyzer {
       // and is no condition; a poisoned root — an `.xspec` require form's
       // binding, no spec module import (4) — is masked by its 14.15
       // (SPEC 14).
+      return;
+    }
+    if (binding.kind === "unpermitted") {
+      // SPEC 4, 4.5 → 14.18: a binding of no permitted form has no
+      // sanctioned value-level use — every use the walk reaches is
+      // unsanctioned, located at the identifier alone (SPEC 14).
+      this.visitUnpermittedBindingUse(identifier, binding);
       return;
     }
     if (binding.kind === "colliding") {
@@ -2266,6 +2372,33 @@ class CodeAnalyzer {
       return;
     }
     this.visitNodeBindingUse(identifier, binding);
+  }
+
+  /**
+   * SPEC 4, 4.5 → 14.18: one value-level use of a spec module import's
+   * binding of no permitted form (`UnpermittedBinding`) — as a callee
+   * (`foo(…)`, the configuration's `defineConfig({…})`, SPEC 7), an
+   * argument (of a `text` call too: `analyzeTextCall` records nothing for
+   * an argument rooted here), an initializer, a bare expression statement,
+   * a property access's or element access's root (`foo.a.b;`: never a
+   * marker, its chain no reference — no edge, no occurrence, no 14.7 or
+   * 14.8), a shorthand property, a class's `extends` expression, or an
+   * instantiation expression's expression. 4.5 sanctions none of them, so
+   * each is 14.18, located — as a `text` binding's outside callee position
+   * (`visitTextBindingUse`) — at the binding's identifier alone: SPEC 14
+   * extends the spelling by a static property chain for a node binding
+   * only. Each use is reported once, here; a re-export and an import alias
+   * are reported by `visitExportSpecifiers` and `visitImportEqualsUse`.
+   */
+  private visitUnpermittedBindingUse(
+    identifier: tst.Identifier,
+    binding: UnpermittedBinding,
+  ): void {
+    this.addFinding(
+      18,
+      identifier,
+      unpermittedUseMessage(identifier.text, binding),
+    );
   }
 
   /**
@@ -2407,7 +2540,10 @@ class CodeAnalyzer {
     // 14.15 already accounts for the whole call (SPEC 14). A spec module
     // import's `text` binding is a `text` callee whatever other defect its
     // declaration carries (SPEC 4, 11.2, 14). A colliding callee's call is
-    // no `text` call (SPEC 4.5): its arguments are ordinary uses.
+    // no `text` call (SPEC 4.5), nor is a call through a binding of no
+    // permitted form (`foo(A.a)`, even one aliased `text`: `import { foo
+    // as text }`), its callee 14.18 itself: their arguments are ordinary
+    // uses.
     return binding?.kind === "text" || binding?.kind === "poisoned";
   }
 
@@ -2536,16 +2672,19 @@ class CodeAnalyzer {
     }
     if (
       rootBinding.kind === "text" ||
+      rootBinding.kind === "unpermitted" ||
       (rootBinding.kind === "colliding" && !rootBinding.node)
     ) {
       // SPEC 4.5: a `text` binding appears only as a `text` call's callee,
-      // so an argument rooted at one — directly, or through the accesses
-      // and wrappers `leftmostIdentifier` climbs — names no node and the
-      // call records nothing. Its use is 14.18, reported once, by the walk
-      // (visitIdentifier → visitTextBindingUse), which reaches every such
-      // root: SPEC 14 locates it at the binding's identifier alone — no
-      // property chain extends a `text` binding's spelling — never at the
-      // whole argument, and never twice.
+      // and a binding of no permitted form (SPEC 4 → 14.15) nowhere, so an
+      // argument rooted at either — directly, or through the accesses and
+      // wrappers `leftmostIdentifier` climbs — names no node and the call
+      // records nothing: no edge, no occurrence, no 14.7, 14.8, or 14.11.
+      // Its use is 14.18, reported once, by the walk (visitIdentifier →
+      // visitTextBindingUse, visitUnpermittedBindingUse), which reaches
+      // every such root: SPEC 14 locates it at the binding's identifier
+      // alone — no property chain extends either binding's spelling —
+      // never at the whole argument, and never twice.
       return;
     }
     const classified = classifyReference(argument, this.sourceFile);
