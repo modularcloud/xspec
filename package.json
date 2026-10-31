@@ -30,12 +30,12 @@
   "bin": {
     "xspec": "dist/cli/bin.js"
   },
-  "types": "./dist/index.d.ts",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/index.d.ts",
-        "default": "./dist/index.js"
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
       },
       "require": {
         "types": "./dist/index.d.cts",
