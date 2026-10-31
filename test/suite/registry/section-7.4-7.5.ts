@@ -17,8 +17,9 @@
 // optional `edgeKinds` (non-empty subset of the three dependency kinds,
 // defaulting to all three). SPEC 7.5: policy rules carry `name` (unique),
 // `type` ("forbidden" | "allowedOnly"), `from`/`to` selectors (exactly one of
-// group/files/tags; group optionally kind-qualified like boundaryKind), and
-// optional `kinds`; `files` selectors support capture wildcards `$1`…`$9`
+// group/files/tags; group optionally kind-qualified like boundaryKind, `kind`
+// belonging to the group form alone), and optional `kinds`; `files`
+// selectors support capture wildcards `$1`…`$9`
 // (each at most once in `from`; a `to` capture must exist in `from`; a
 // capture takes one or more bytes within a single segment, shortest-match
 // left to right) and follow 7's glob rules — a `files` glob, capture-bearing
@@ -93,6 +94,15 @@
 //   edges` so its clean `check --json` (exit 0, findings []) is not vacuous,
 //   and the twin reports the edge (exit 1) — a product normalizing a
 //   selector glob's spelling before matching flags it under both.
+// - A selector carrying `kind` without `group` (T7.5-1; SPEC 7.5: `kind`
+//   belongs to the group form alone): `{ files: "src/*.ts", kind: "code" }`,
+//   `{ tags: ["a"], kind: "spec" }`, and `{ kind: "spec" }`, one matrix row
+//   each, in `from`. The first two selectors are valid without their `kind`
+//   and each rule otherwise valid, so a product vetting `kind` only beside
+//   `group` accepts the configuration and builds (exit 0) where 14.14
+//   requires exit 2; the third, holding none of the three forms besides,
+//   discriminates a product that reads a bare `kind` as a selector of every
+//   node of that kind.
 // - Every `check` run is preceded by a successful `build` in the same
 //   workspace, so generated output is fresh and the policy findings are the
 //   run's only findings (no 14.10 staleness contamination) — the exact
@@ -1736,6 +1746,55 @@ const RULE_MATRIX: readonly {
       ],
     ],
   },
+  // A selector carrying `kind` without `group` (7.5: `kind` belongs to the
+  // group form alone; 7.6 names the violation), one arm per selector TEST-SPEC
+  // spells, each in `from` beside the valid `to: { group: "aux" }`. The first
+  // two selectors are valid without their `kind` — `src/*.ts` reaches the code
+  // group app's src/impl.ts, `tags: ["a"]` is non-empty — so a product that
+  // vets `kind` only beside `group` accepts the configuration and builds (exit
+  // 0 — `build` never evaluates policy, 12.1) where 14.14 requires exit 2.
+  {
+    label:
+      'selector `{ files: "src/*.ts", kind: "code" }` — `kind` beside ' +
+      "`files`, the selector valid without it, discriminating a product " +
+      "that vets `kind` only beside `group`",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { files: "src/*.ts", kind: "code" }',
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      'selector `{ tags: ["a"], kind: "spec" }` — `kind` beside `tags`, ' +
+      "the selector valid without it, discriminating a product that vets " +
+      "`kind` only beside `group`",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { tags: ["a"], kind: "spec" }',
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      'selector `{ kind: "spec" }` — `kind` alone, with none of ' +
+      "group/files/tags, discriminating a product that reads a bare `kind` " +
+      "as a selector of every node of that kind",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { kind: "spec" }',
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
   {
     label: "unknown group name in a selector",
     rules: [
@@ -1888,7 +1947,10 @@ const T7_5_1 = defineProductTest({
     "invalid type, empty kinds/tags lists, `kinds` not a subset of the " +
     "dependency edge kinds (a `contains` member, an unknown token, a " +
     "non-string element), a non-string selector `tags` element, selectors " +
-    "with zero or two of group/files/tags, unknown, wrong-kind, and " +
+    "with zero or two of group/files/tags, a selector carrying `kind` " +
+    'without `group` — `{ files: "src/*.ts", kind: "code" }`, `{ tags: ' +
+    '["a"], kind: "spec" }`, and `{ kind: "spec" }`, one arm each (`kind` ' +
+    "belonging to the group form alone), unknown, wrong-kind, and " +
     "ambiguous group references, a capture used twice in `from`, a `to` " +
     "referencing an absent capture, and a selector `files` glob outside " +
     "the workspace root by its spelling alone — `../x/*.ts` and the " +
