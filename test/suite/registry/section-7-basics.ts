@@ -315,6 +315,18 @@
 //   product reporting it through a compiler diagnostic and one detecting
 //   it itself pass alike, while one taking the last member loads and
 //   builds (exit 0).
+// - T7-2 comments (SPEC 7: comments are permitted anywhere and contribute
+//   nothing): one commented file holds line and block comments at every
+//   position TEST-SPEC lists — before the import, inside the import
+//   declaration between each two of its tokens (spelled as TEST-SPEC
+//   spells it, its line comment after `from` putting the module specifier
+//   on the next line), inside the argument between keys and inside the
+//   glob list, and after the export — and at others besides (after the
+//   import, after the glob list, after everything); its twin is the same
+//   file with every comment removed. The commented file is declared
+//   well-formed (S-9). A product reading the import declaration by its
+//   tokens' adjacency, or a line at a time, refuses the commented file and
+//   fails `build`'s exit code.
 // - T7-2 comments, the string-literal import name, and statement order:
 //   "inventory's `configuration` byte-identical to its comment-free twin's"
 //   (to its identifier-named twin's, to its import-first twin's) is
@@ -2440,12 +2452,17 @@ export default defineConfig({
 ]);
 
 // Comments (SPEC 7: permitted anywhere, contributing nothing). The commented
-// fixture places line and block comments before the import, after it,
-// before the first key, between keys, inside the glob list (after a glob
-// and between two globs), after the list, after the export, and after
-// everything; its twin is the same configuration with every comment
-// removed. Two globs and a `markdown` key give the "between" positions
-// something to stand between (`docs/` matches nothing: valid, 7).
+// fixture places line and block comments before the import, inside the
+// import declaration between each two of its tokens, after it, before the
+// first key, between keys, inside the glob list (after a glob and between
+// two globs), after the list, after the export, and after everything; its
+// twin is the same configuration with every comment removed. The import
+// declaration is spelled as TEST-SPEC T7-2 spells it: `/* c */` between
+// `import` and `{`, `{` and `defineConfig`, `defineConfig` and `}`, and `}`
+// and `from`; `// c` after `from`, its line feed putting the module
+// specifier `"xspec"` on the next line; and `/* c */` after the specifier.
+// Two globs and a `markdown` key give the "between" positions something to
+// stand between (`docs/` matches nothing: valid, 7).
 const COMMENT_FREE_CONFIG = stagedTs(
   "T7-2 xspec.config.ts (comment-free twin)",
   `import { defineConfig } from "xspec"
@@ -2466,7 +2483,8 @@ const COMMENTED_CONFIG = stagedTs(
   `// a line comment before the import
 /* a block comment
    before the import */
-import { defineConfig } from "xspec" // after the import
+import /* c */ { /* c */ defineConfig /* c */ } /* c */ from // c
+"xspec" /* c */ // after the import
 
 export default defineConfig({
   // before the first key
@@ -2591,7 +2609,8 @@ const T7_2 = defineProductTest({
     "non-UTF-8 file, a " +
     "byte-order mark, a repeated key, and an empty spec group, code " +
     "group, profile, or rule name are configuration errors; comments " +
-    "anywhere contribute nothing (inventory's configuration " +
+    "anywhere, inside the import declaration between each two of its " +
+    "tokens included, contribute nothing (inventory's configuration " +
     "byte-identical to the comment-free twin's)",
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
@@ -2939,10 +2958,11 @@ const T7_2 = defineProductTest({
       await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
     }
 
-    // Comments (SPEC 7): the commented configuration loads, and the
-    // inventory's resolved `configuration` view is byte-identical to its
-    // comment-free twin's — compared as the member's serialization, member
-    // order and spellings included.
+    // Comments (SPEC 7): the commented configuration — comments inside the
+    // import declaration between each two of its tokens included — loads,
+    // and the inventory's resolved `configuration` view is byte-identical to
+    // its comment-free twin's — compared as the member's serialization,
+    // member order and spellings included.
     const commented = await configurationViewOf(
       product,
       COMMENTED_CONFIG,
@@ -2958,9 +2978,11 @@ const T7_2 = defineProductTest({
       commentFree,
       "T7-2 (comments): `inventory`'s `configuration` member under the " +
         "commented configuration is byte-identical to the comment-free " +
-        "twin's — line and block comments before the import, after it, " +
-        "between keys, inside the glob list, and after the export " +
-        "contribute nothing (SPEC 7, 11.6)",
+        "twin's — line and block comments before the import, inside the " +
+        "import declaration between each two of its tokens (import /* c */ " +
+        "{ /* c */ defineConfig /* c */ } /* c */ from // c, a line feed, " +
+        '"xspec" /* c */), after it, between keys, inside the glob list, ' +
+        "and after the export contribute nothing (SPEC 7, 11.6)",
     );
   },
 });
