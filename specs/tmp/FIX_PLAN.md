@@ -30,12 +30,12 @@ Written in Phase 10 on 2026-10-31 at head `b63b527` (branch `claude/relaxed-alba
   1. T7-9 (`test/suite/section-7-import.test.ts`): 21 of 28 arms — every (a) arm but the single-quoted `'xspec'`, all seven (c) arms, and (d)'s `trap` and `@modularcloud/xspec` arms — exit 2 with the configuration error requiring the specifier `"xspec"` → Task 167.
   2. T7-10 (same file): 30 of 41 arms exit 2 with that configuration error → Task 167; once it is fixed, 8 arms lack 14.18 → Task 168.
   3. P-19 (`section-16-p19.test.ts`): falsified at seed 271828183 trial 1, shrunk to the double-quoted `@acme/config` → Task 167.
-  4. T7.6-1 (`section-7.6.test.ts`): at its first setup (ES-module project, `.ts`, `node10`), `dist/index.d.ts` declares `XspecConfig`, `XspecCoverageProfile`, `XspecMarkdownConfig`, `XspecPolicyRule`, and `XspecPolicySelector` beside `defineConfig` → Task 169.
+  4. T7.6-1 (`section-7.6.test.ts`): at its first setup (ES-module project, `.ts`, `node10`), `dist/index.d.ts` declares `XspecConfig`, `XspecCoverageProfile`, `XspecMarkdownConfig`, `XspecPolicyRule`, and `XspecPolicySelector` beside `defineConfig` → Task 169. Since `ad60726` (Task 169 landed; CI run 1901) it holds the ES-module project's first 6 setups and fails first at its 7th (`.cts`, `moduleResolution` `node16`, `module` `node16`, the first setup resolving the `require` entry): TS2307, no `dist/index.d.cts` → Task 170.
   5. T7.6-2 (same file): at the ES-module project's 7th setup (`.cts`, `moduleResolution` `node16`, `module` `node16`), TS2307: the packed package has no `dist/index.d.cts` → Task 170.
-  6. T7.6-3 (same file): at its first setup, 58 of 430 arms type-check (13 unknown-key, 36 selector-form, 9 empty-list arms) → Task 169.
-  7. T7.6-4 and T7.6-5 (`section-7.6-ii.test.ts`): at the first setup (ES-module project, `.ts`, `node10`) of their first placement or staging — T7.6-4's (a), the manifest's name `@modularcloud/xspec`; T7.6-5's (a) 1, the canonical name — T7.6-1's listing and T7.6-3's arm → Task 169; their later setups and runs → Task 170.
+  6. T7.6-3 (same file): at its first setup, 58 of 430 arms type-check (13 unknown-key, 36 selector-form, 9 empty-list arms) → Task 169. Since `ad60726` every arm fails in the ES-module project's first 6 setups, and the body stops at its 7th (`.cts`, `node16`/`node16`), where the twin fails with TS2307 → Task 170.
+  7. T7.6-4 and T7.6-5 (`section-7.6-ii.test.ts`): at the first setup (ES-module project, `.ts`, `node10`) of their first placement or staging — T7.6-4's (a), the manifest's name `@modularcloud/xspec`; T7.6-5's (a) 1, the canonical name — T7.6-1's listing and T7.6-3's arm → Task 169; their later setups and runs → Task 170. Since `ad60726` both fail first at the 7th setup of that placement or staging (`.cts`, `node16`/`node16`), their three runs having held in the 6 before: TS2307 → Task 170.
   8. T7.6-6 and T7.6-7 (same file): at run 4 of 24, 22.0.0's `require`, `MODULE_NOT_FOUND` for `dist/index.cjs` (the three import runs before it holding) → Task 170.
-  9. P-17 (`section-16-p17.test.ts`): at seed 271828183 trial 1 — T7.6-1's listing and T7.6-3's arm → Tasks 169 and 170.
+  9. P-17 (`section-16-p17.test.ts`): at seed 271828183 trial 1 — T7.6-1's listing and T7.6-3's arm → Tasks 169 and 170. Since `ad60726`, falsified at trial 4, trials 1–3 holding: a `.cts` file in the CommonJS project with no `package.json` under `bundler`/`es2020`, the three type-checking runs failing with TS2307, the runtime run holding → Task 170.
   10. P-18 (`section-16-p18.test.ts`): at seed 271828183 trial 1 — a `.cts` file under `nodenext`/`node16`, TS2307 → Tasks 169 and 170.
 - VERIFY's local runs at `b63b527` (fresh clones; the admin self-tests, T13.5-9's `section-13.5-v`, and T13.5-10's `section-13.5-ii` left out): the suite and self projects as `npm test` runs them, with `XSPEC_PACKAGE_DIR`, `XSPEC_NODE_RELEASES_DIR`, and `XSPEC_E6_EXCHANGE_DIR` set — 150 files, 7676 tests, the same 12 failing, 2559.94 s; the self project with no product installed — 52 files, 7285 tests, all passing, 495.89 s; certification 172 / 50 / 0 / 0, pair for pair CI's; the E-6 writer test passing (74 files, 86,272 bytes); the Windows subset on Linux — 3 files, 10 tests, 9 passing, the drive-mismatch arm failing by design (no `subst` off Windows); `npm run test:local` — no test files, exit 0.
 
@@ -126,78 +126,9 @@ Each task's Status cell is filled by its landing's follow-up commit (Landing a t
 |---|---|---|---|
 | 167 | A1, B1; VERIFY: T7-9, P-19, T7-10's 30 refused arms | `checkImport` takes any static string literal as the import's module specifier; its messages and comments name none as required | landed at `1ef5005`; CI run 1897: harness job and Windows leg green, full suite failing only T7-10 (its 8 arms awaiting Task 168), T7.6-1 to T7.6-7, P-17, and P-18 |
 | 168 | A2, B2; VERIFY: T7-10's 8 remaining arms | A spec module import's bindings of no permitted form are tracked, and each value-level use of one is 14.18 at its identifier | landed at `aba0d72`; CI run 1899: harness job and Windows leg green, full suite failing only T7.6-1 to T7.6-7, P-17, and P-18 |
-| 169 | B3, B5; the scaffold's note (rework `src/index.ts`); Measured at planning 1 | `src/index.ts` becomes `src/index.mts` (built to `dist/index.mjs`): one export, a non-generic exact configuration type over unexported aliases; `package.json`'s `import` route and top-level `types` follow | pending |
+| 169 | B3, B5; the scaffold's note (rework `src/index.ts`); Measured at planning 1 | `src/index.ts` becomes `src/index.mts` (built to `dist/index.mjs`): one export, a non-generic exact configuration type over unexported aliases; `package.json`'s `import` route and top-level `types` follow | landed at `ad60726` (AGENTS.md at `76e8e57`); CI run 1901: harness job and Windows leg green, full suite failing only T7.6-1 to T7.6-7, P-17, and P-18, each now first at a setup or run resolving the `require` entry (TS2307, `MODULE_NOT_FOUND`), Task 170's |
 | 170 | B4; the scaffold's note (add `src/index.cts`) | `src/index.cts` (built to `dist/index.cjs`): `export =` of `{ defineConfig }`, the same type | pending |
 | 171 | — | Confirm local runs and CI green, record the state in AGENTS.md, delete this file | pending |
-
-## Task 169 — The `defineConfig` module's ES-module entry: exactly `defineConfig`, an exact configuration type, and an `.mjs` file (SPEC 7.6, 7–7.5; B3, B5; the scaffold's note; Measured at planning 1–3)
-
-**Requirement.**
-- SPEC 7.6 (SPEC.md line 468): the module "exports exactly one binding, `defineConfig` — no other value and no type". Its type contract (line 496 on) holds in every covered setup (TEST-SPEC §7.6: 173 per type-checking arm — three projects, four extensions, the fourteen strict-default option sets, and the initialized-project set for each file TypeScript compiles as an ES module):
-  - Exports: the module, as TypeScript resolves the covered file's import, declares exactly one export, `defineConfig`, a value with no type or namespace meaning, and no other export, type-only or not. T7.6-1 reads TypeScript's own listing, so an interface never marked `export`, in a declaration module holding no `export {}`, counts as an export.
-  - Valid configurations: every covered file valid under 7 type-checks — under the initialized-project options too, whose `declaration` is on: a `defineConfig` returning a type the package does not export, and which the consumer's declaration emit cannot inline, fails a valid file's default export through a declaration diagnostic alone (TS4082; TEST-SPEC §7.6's Verdict rule; AGENTS.md's bullet beginning "S-4's detections of 7.6's covered setups"). T7.6-2 lists what the type must admit: every key, field, and value 7 defines; an aliased binding, string-literal keys, and comments; group names spelling the members of TypeScript's global `Object` interface and `__proto__`; `code: {}`, `coverage: []`, `policy: []`, and `markdown: { emit: false }`; every optional field omitted; empty glob lists; and repeated elements in the four lists 7.4 and 7.5 read as sets.
-  - Shape violations: a covered file holding any member of the type-error class (line 502 on) fails to type-check: an unknown key at any level; a missing required key (`specs`, `markdown`'s `emit`, a profile's `name`, `target`, `boundary`, and `mode`, a rule's `name`, `type`, `from`, and `to`); a value of a kind 7 does not admit, a list's element included; a string outside 7's enumerations (near misses and `"contains"` among them); a selector not in exactly one of its forms (two or three of `group`, `files`, and `tags`, none of them, or `kind` without `group`); and an empty `targetTags`, `edgeKinds`, rule `kinds`, or selector `tags`.
-- Runtime (line 513), along `import` as Reach (line 476) describes it: on every release of the 22 line and later, the namespace holds exactly `defineConfig`, which returns its first argument itself and does nothing else, and loading the module has no effect — for every installation name `N` of 7.6's grammar, `node_modules` included (Measured at planning 1).
-- The Liaison's rulings (Standing constraints): IMPLEMENTATION.md's "ES modules throughout" yields to 7.6; `name` stays `@modularcloud/xspec`.
-
-**Observed** (B3, B5, at `b63b527`).
-- `src/index.ts` exports the interfaces `XspecMarkdownConfig`, `XspecCoverageProfile`, `XspecPolicyRule`, and `XspecConfig`, and the type alias `XspecPolicySelector`, beside `defineConfig`: T7.6-1 fails at its first setup, as do the T7.6-1 runs of T7.6-4, T7.6-5, and P-17.
-- Its `defineConfig<T extends XspecConfig>(config: T): T` is generic, and inference into `T` makes no excess-property check: unknown keys type-check at every level; its selector union admits two forms together and `kind` beside `files` or `tags`; its `readonly string[]` lists admit `[]`. T7.6-3's first setup (ES-module project, `.ts`, `node10`) finds 58 of 430 arms type-checking — 13 unknown-key, 36 selector-form, and 9 empty-list arms — failing the T7.6-3 runs of T7.6-4, T7.6-5, and P-17 too.
-- The import entry `dist/index.js` is an ES module only through `package.json`'s `"type": "module"`, which Node.js never reads for a package installed as `node_modules/node_modules`: on 22.0.0 both `import` routes fail there (Measured at planning 1).
-
-**Change** — the design measured at planning (items 2 and 3). Prefer it as it is; re-measure any deviation in the type or the layout against T7.6-1, T7.6-2, and T7.6-3 in all 173 setups before landing.
-- `git mv src/index.ts src/index.mts`, then rewrite it: an ES module, built to `dist/index.mjs` and typed by `dist/index.d.mts`, whose one export is `export function defineConfig(config: Config): Config { return config; }`. Not generic: the configuration literal is then checked against `Config` itself, with TypeScript's excess-property check at every level. Identity at run time (7.6: the very value passed, never examined, copied, or modified; `undefined` when called with none; further arguments ignored).
-- Its configuration type is exactly these unexported type aliases — no interface, since the consumer's declaration emit inlines an unexported alias where an unexported interface is TS4082 — each field free to carry a doc comment citing its 7.x section (no `@ts-` directive and no backslash in it):
-
-  ```ts
-  type NonEmpty<T> = [T, ...T[]];
-  type EdgeKind = "depends" | "embeds" | "references";
-  type GroupKind = "spec" | "code";
-  type Groups = { [name: string]: string[] };
-  type Markdown = { emit: boolean; outDir?: string };
-  type Profile = {
-    name: string;
-    target: string;
-    targetTags?: NonEmpty<string>;
-    targets?: "leaves" | "all";
-    boundary: string;
-    boundaryKind?: GroupKind;
-    mode: "direct" | "transitive";
-    edgeKinds?: NonEmpty<EdgeKind>;
-  };
-  type GroupSelector = { group: string; kind?: GroupKind; files?: never; tags?: never };
-  type FilesSelector = { files: string; group?: never; kind?: never; tags?: never };
-  type TagsSelector = { tags: NonEmpty<string>; group?: never; kind?: never; files?: never };
-  type Selector = GroupSelector | FilesSelector | TagsSelector;
-  type Rule = {
-    name: string;
-    type: "forbidden" | "allowedOnly";
-    from: Selector;
-    to: Selector;
-    kinds?: NonEmpty<EdgeKind>;
-  };
-  type Config = {
-    specs: Groups;
-    code?: Groups;
-    markdown?: Markdown;
-    coverage?: Profile[];
-    policy?: Rule[];
-  };
-  ```
-
-  Why each choice (say so in the comments): glob lists are plain `string[]`, never a tuple — TypeScript 5.9.3 types an object-literal key naming an `Object` member (`constructor`, …) by that member, losing tuple contextual typing, so tuple glob lists fail T7.6-2(e) (AGENTS.md's bullet beginning "T7.6-2, valid configurations"); `NonEmpty` bars the four empty lists 7.4 and 7.5 forbid while admitting repeats; each selector form declares the other forms' keys `?: never`, so a selector holding two forms, none, or `kind` without `group` matches no member, while an unknown key is excess in every member; the enumerations leave out `"contains"`, the edge kind 5.2 defines and 7.4 and 7.5 do not admit.
-- `package.json`: `exports["."].import` becomes `{ "types": "./dist/index.d.mts", "default": "./dist/index.mjs" }`, and the top-level `types` (read by TypeScript's `node10` resolution, which reads no `exports`) becomes `"./dist/index.d.mts"`. Leave `exports["."].require` as the scaffold wrote it (`./dist/index.d.cts`, `./dist/index.cjs`): Task 170 supplies its source. No other field changes.
-- `src/tsconfig.json`: `include` gains `"./**/*.mts"`; rewrite its comment's layout lines for the new entry, saying why it is an `.mjs` file (7.6: Node.js reads no `"type"` for a package installed as `node_modules/node_modules`, and 22.0.0 predates module-syntax detection).
-- `src/index.mts`'s header comment: SPEC 7.6 (one export and no type; the type contract; the runtime), 7 to 7.5 for the type, the reasons above, and that `src/index.cts` (Task 170) carries the same type for the `require` route.
-- AGENTS.md: rewrite the bullets beginning "Build the product" and "7.6's covered setups" for the new layout (naming the stale `dist/index.js` and `dist/index.d.ts` a long-lived checkout keeps, inert), and the verdicts against the built product in the bullets beginning "T7.6-1, declared exports", "T7.6-3, shape violations", "T7.6-4, placements", "T7.6-5, Reach's open cases", and "P-17, installation names".
-
-**Verification.**
-1. `npm run build`: `dist/index.mjs` holds the identity function alone; `dist/index.d.mts` holds the aliases unexported, then `export declare function defineConfig(config: Config): Config;` and `export {};`.
-2. Commit locally, build a pristine tree in a fresh clone of the committed branch (Run mechanics, *Build*), and pack it: the package holds `dist/index.mjs` and `dist/index.d.mts`, and no `dist/index.js` or `dist/index.d.ts`. With that package as `XSPEC_PACKAGE_DIR`:
-   - in `section-7.6`, T7.6-1, T7.6-2, and T7.6-3 each pass every setup in which TypeScript resolves the `import` entry or the top-level `types`, and fail first, diagnosed, at a setup resolving the `require` entry (TS2307: no `dist/index.d.cts` until Task 170; at `b63b527`, T7.6-2's first such failure was the ES-module project's 7th setup) — read each failure's setup in its message, and confirm that none names an export beside `defineConfig` or an arm that type-checks;
-   - in `section-7.6-ii`, T7.6-6's three import runs on 22.0.0 hold (a), (b), and (c), the body stopping at run 4, 22.0.0's `require` (`MODULE_NOT_FOUND`), as at `b63b527`.
-3. Measured at planning 1's `s.mjs` route against the pristine package: a copy of the package directory at `<probe>/node_modules/node_modules`, and `<probe>/s.mjs` importing `"node_modules"` statically and dynamically, run on 22.0.0 and 26.13.0 with `NODE_OPTIONS` and `NODE_PATH` unset — both load it and print `defineConfig`.
-4. `npm run typecheck` and `npm run format:check`; `section-7-basics` passes (a smoke check that the executable still builds and runs).
 
 ## Task 170 — The `defineConfig` module's CommonJS entry, `src/index.cts` (SPEC 7.6 Reach, Runtime, Type contract; B4; the scaffold's note)
 
