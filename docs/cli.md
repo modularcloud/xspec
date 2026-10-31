@@ -260,7 +260,7 @@ An operand containing `#` is a `file#id` pair, and one without is a file. Mixing
 $ xspec version
 {
   "interface": "1",
-  "product": "0.2.0"
+  "product": "0.3.0"
 }
 ```
 

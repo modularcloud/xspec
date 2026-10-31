@@ -53,14 +53,14 @@ xspec rename specs/AUTH.mdx auth.login auth.signIn --preview   # see a refactori
 
 ## Getting started
 
-Requires **Node.js ≥ 22**. Install it from npm as a development dependency, under the name `xspec`:
+Requires **Node.js ≥ 22**. Install it from npm as a development dependency:
 
 ```sh
-npm install --save-dev xspec@npm:@modularcloud/xspec
-npx xspec version
+npm install --save-dev @modularcloud/xspec
+npx @modularcloud/xspec version
 ```
 
-The alias makes `import { defineConfig } from "xspec"` in your `xspec.config.ts` resolve, which gives your editor type support. You can also install it globally with `npm install -g @modularcloud/xspec`, or try it without installing via `npx @modularcloud/xspec <command>`.
+The package provides the `xspec` command and the `defineConfig` function that your `xspec.config.ts` imports with `import { defineConfig } from "@modularcloud/xspec"`, so your editor and `tsc` type-check your configuration. You can also install it globally with `npm install -g @modularcloud/xspec`, or try it without installing via `npx @modularcloud/xspec <command>`. Always give npm and npx the full scoped name: the unscoped name belongs to an unrelated package.
 
 Then follow **[docs/getting-started.md](docs/getting-started.md)** to set up a project in minutes.
 
@@ -72,7 +72,7 @@ Usage guides live in [`docs/`](docs/README.md):
 |---|---|
 | [Getting started](docs/getting-started.md) | Install → first project → first coverage report |
 | [Writing specs](docs/writing-specs.md) | The `.mdx` syntax: sections, IDs, `d`, `text()`, tags |
-| [Configuration](docs/configuration.md) | `xspec.config.ts`: groups, Markdown, coverage profiles, policy |
+| [Configuration](docs/configuration.md) | `xspec.config.ts`: groups, Markdown, coverage profiles, policy, type checking |
 | [TypeScript integration](docs/typescript.md) | Generated modules, markers, `text()`, compiler setup |
 | [CLI reference](docs/cli.md) | Every command, flag, exit code, finding code, and convention |
 | [Coverage](docs/coverage.md) | Profiles, boundaries, modes, CI gating |

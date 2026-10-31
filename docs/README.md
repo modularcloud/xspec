@@ -42,7 +42,7 @@ Read in order if you are new:
 
 1. **[Getting started](getting-started.md)**: install, create a project, first build, first coverage report.
 2. **[Writing specs](writing-specs.md)**: the `.mdx` source syntax, covering sections, IDs, dependencies, embedding, tags, and Markdown output.
-3. **[Configuration](configuration.md)**: `xspec.config.ts`, covering spec and code groups, Markdown emission, coverage profiles, and policy rules.
+3. **[Configuration](configuration.md)**: `xspec.config.ts`, covering spec and code groups, Markdown emission, coverage profiles, policy rules, and type checking the file.
 4. **[Using specs from TypeScript](typescript.md)**: generated modules, `text()`, dependency markers, and compiler setup.
 
 Reference and workflows:
